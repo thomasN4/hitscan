@@ -151,12 +151,17 @@ function animate() {
 
   if (game.locked && game.started) {
     // Stage order is load-bearing, which is why it lives here rather than
-    // nested inside updateMovement. updateWeapon decays game.recoil and
-    // recomputes game.spread from the blends updateMovement just wrote;
-    // updateCamera and updateViewmodel then read that post-decay recoil, so
-    // the camera, the viewmodel kick and the bullets all agree within a
-    // frame. Moving updateWeapon after updateCamera aims the camera one
-    // frame ahead of the shots (see `5e004a5`).
+    // nested inside updateMovement. It is pinned from both sides:
+    //   - updateMovement writes camera.position, and shoot() (called from
+    //     inside updateWeapon) rays from camera.getWorldPosition() — so the
+    //     position must be written BEFORE updateWeapon, or every shot leaves
+    //     from last frame's eye.
+    //   - updateWeapon decays game.recoil and recomputes game.spread from the
+    //     blends updateMovement just wrote; updateCamera and updateViewmodel
+    //     then read that post-decay recoil, so they must run AFTER it and the
+    //     camera, the viewmodel kick and the bullets all agree within a frame.
+    // Moving updateWeapon after updateCamera aims the camera one frame ahead
+    // of the shots (see `5e004a5`).
     updateMovement(dt);
     updateWeapon(dt);
     updateCamera();

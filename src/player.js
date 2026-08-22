@@ -7,9 +7,11 @@
 //
 // The three exports here are ORDERED stages of one frame, sequenced by
 // main.js: updateMovement -> (updateWeapon) -> updateCamera -> updateViewmodel.
-// updateCamera and updateViewmodel both read post-decay recoil, so they must
-// run after updateWeapon. Speed tiers and the moveLerp math live in
-// sim/movement.js; the blends use sim/smoothing.js.
+// The order is load-bearing in both directions: updateMovement writes
+// camera.position, which shoot() rays from, so it must run BEFORE updateWeapon;
+// updateCamera and updateViewmodel read post-decay recoil, so they must run
+// AFTER it. Speed tiers and the moveLerp math live in sim/movement.js; the
+// blends use sim/smoothing.js.
 import * as THREE from 'three';
 import { camera, clock } from './core/engine.js';
 import { player, game, keys } from './core/state.js';
@@ -31,11 +33,17 @@ const SPRINT_RAMP = 0.2;
 const CROUCH_DROP = 0.7;
 
 /**
- * Stage 1 — movement, stance, footsteps.
+ * Stage 1 — movement, stance, footsteps, camera position.
  *
  * Writes player.pos/vel and the blends the accuracy model reads
  * (moveLerp, crouchLerp, runLerp, bobAmt). Must run BEFORE updateWeapon,
  * which consumes those blends to compute spread.
+ *
+ * Also writes camera.position (with the crouch drop), and that too must
+ * land before updateWeapon: shoot() builds its ray from
+ * camera.getWorldPosition(), so a position written later in the frame would
+ * fire every shot from the PREVIOUS frame's eye — metres behind you at
+ * sprint speed, and at the old spot on the first frame after respawn().
  */
 export function updateMovement(dt) {
   if (!player.alive) return;
@@ -92,6 +100,8 @@ export function updateMovement(dt) {
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
   game.crouchLerp = approach(game.crouchLerp, crouching ? 1 : 0, dt, BLEND_RATE);
+  camera.position.copy(player.pos);
+  camera.position.y -= CROUCH_DROP * game.crouchLerp;
 
   // Footsteps: timed by distance-run (stepTimer), silent while crouching or
   // airborne. Timer is pre-charged when stopping so the first step after a
@@ -108,7 +118,8 @@ export function updateMovement(dt) {
 }
 
 /**
- * Stage 3 — camera transform.
+ * Stage 3 — camera orientation. (Position is written in updateMovement, which
+ * must run before updateWeapon; see that stage's note.)
  *
  * MUST run after updateWeapon: pitch comes from currentAimPitch(), the same
  * expression shoot() uses for bullet direction, so the crosshair (screen
@@ -117,8 +128,6 @@ export function updateMovement(dt) {
  */
 export function updateCamera() {
   if (!player.alive) return;
-  camera.position.copy(player.pos);
-  camera.position.y -= CROUCH_DROP * game.crouchLerp;
   camera.rotation.set(currentAimPitch(), game.yaw, 0, 'YXZ');
 }
 

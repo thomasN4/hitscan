@@ -42,6 +42,8 @@ export const colliders = [];
 export const bots = [];
 /** Short-lived bullet impact puffs (see effects.js). */
 export const impacts = [];
+/** Persistent wall decals (see effects.js); FIFO-capped, oldest recycled. */
+export const bulletHoles = [];
 
 // ---------- Shared mutable game state ----------
 /**

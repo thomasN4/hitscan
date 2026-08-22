@@ -9,7 +9,7 @@ import { scene, camera, clock, solids, bots, weapon, game, player } from './core
 import { sfxShoot, sfxReload } from './audio.js';
 import { showHitmarker } from './hud.js';
 import { damageBot } from './combat.js';
-import { spawnImpact } from './effects.js';
+import { spawnImpact, spawnBulletHole } from './effects.js';
 
 // ---------- Viewmodel ----------
 // First-person gun rendered as a child of the camera so it inherits the
@@ -66,8 +66,10 @@ export function shoot() {
   const dir = new THREE.Vector3(
     (Math.random() - 0.5) * game.spread * adsFactor,
     (Math.random() - 0.5) * game.spread * adsFactor,
+    // 'YXZ' must match the camera's rotation order (player.js) or the shot
+    // direction diverges from the view direction as pitch/yaw grow.
     -1
-  ).normalize().applyEuler(new THREE.Euler(game.pitch, game.yaw, 0));
+  ).normalize().applyEuler(new THREE.Euler(game.pitch, game.yaw, 0, 'YXZ'));
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;
@@ -90,6 +92,10 @@ export function shoot() {
       damageBot(bot, dmg, part);
     } else {
       spawnImpact(hit.point);
+      // Decal needs the surface normal in world space; face.normal is
+      // object-space and level geometry is rotated (ground plane, etc.)
+      const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      spawnBulletHole(hit.point, worldNormal);
     }
   }
 }

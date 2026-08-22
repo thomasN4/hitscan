@@ -44,6 +44,22 @@ try {
       reserve: window.__cs.weapon.reserve,
     }));
     console.log('after reload window:', JSON.stringify(done));
+
+    // Fire a burst at the ground and verify bullet-hole decals spawn.
+    await page.evaluate(() => {
+      const cs = window.__cs;
+      cs.player.pos.set(0, 1.7, 48);   // open ground near spawn
+      cs.game.pitch = -1.4;            // aim almost straight down
+      cs.game.shooting = true;
+    });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => { window.__cs.game.shooting = false; });
+    const fired = await page.evaluate(() => ({
+      holes: window.__cs.bulletHoles.length,
+      mag: window.__cs.weapon.mag,
+    }));
+    console.log('after firing burst:', JSON.stringify(fired));
+    if (fired.holes === 0) throw new Error('expected bullet holes after firing, got 0');
   }
 } catch (e) {
   console.log('test exception:', e.message);

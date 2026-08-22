@@ -37,10 +37,14 @@ The smoke test drives the user's Brave browser via puppeteer-core; its executabl
 - **Missing imports are NOT build errors here.** Vite/rollup won't flag an identifier used inside a function body if it happens to resolve as a global at runtime — it becomes a silent `ReferenceError` when that code path first runs (this is how reload broke once). After refactors or moving code between modules, run the smoke test, not just `npm run build`.
 - Pointer lock has a browser-enforced cooldown after `exitPointerLock()`; re-locking too soon silently fails. The canvas click handler recovers, keep that behavior when touching menus.
 - The game loop only simulates while pointer lock is held (`game.locked && game.started`) but always renders. Anything added to the loop should respect that split.
-- `window.__cs` in main.js is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player }`.
+- `window.__cs` in main.js is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player, bulletHoles }`.
 
 ## Conventions
 
 - JSDoc on exported functions; "why" comments for non-obvious logic; tuning notes inline on gameplay constants (e.g., `fireRate: 0.105 // ≈ 9.5 rounds/sec`).
 - No comments that merely restate code. Keep existing `// ---------- Section ----------` headers.
 - No asset files: all audio is WebAudio-synthesized, all visuals are procedural geometry.
+
+## Roadmap / deferred ideas
+
+- Unify Bot and the player under a shared entity/combatant base class (both currently duplicate movement/collision/shooting logic in different forms). Deferred — revisit when adding a second entity type or weapon.

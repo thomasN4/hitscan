@@ -46,12 +46,20 @@ export function updatePlayer(dt) {
   // Horizontal movement with slide-along-walls: test each axis separately,
   // so moving into a wall while pressing along it keeps you sliding instead
   // of sticking.
+  const preX = player.pos.x, preZ = player.pos.z;
   const nx = player.pos.x + move.x;
   const testX = new THREE.Vector3(nx, player.eyeHeight, player.pos.z);
   if (!collidesAt(testX, player.radius)) player.pos.x = nx;
   const nz = player.pos.z + move.z;
   const testZ = new THREE.Vector3(player.pos.x, player.eyeHeight, nz);
   if (!collidesAt(testZ, player.radius)) player.pos.z = nz;
+
+  // Movement-accuracy input: MEASURED planar speed (not intended speed), so
+  // being blocked by a wall doesn't count as moving. Normalized so walk = 1,
+  // sprint = 1.5; smoothed ~100 ms for gradual crosshair/spread transitions.
+  const hSpeed = Math.hypot(player.pos.x - preX, player.pos.z - preZ) / dt;
+  game.moveLerp += (Math.min(hSpeed / 6.5, 1.5) - game.moveLerp) * Math.min(1, dt * 10);
+  if (game.moveLerp < 0.001) game.moveLerp = 0;
 
   // Jump / gravity
   if (keys['Space'] && player.onGround) { player.vel.y = JUMP_VEL; player.onGround = false; }
@@ -97,7 +105,8 @@ export function updatePlayer(dt) {
   gunGroup.position.z = game.recoil * 0.03 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
   gunGroup.rotation.x = game.recoil * 0.05;
 
-  // Crosshair tightens/fades when aiming (sight picture takes over)
-  crosshair.style.transform = `translate(-50%,-50%) scale(${1 - 0.35 * game.adsLerp})`;
+  // Crosshair tightens/fades when aiming (sight picture takes over);
+  // arm gap itself is driven by the accuracy model in weapons.js
+  crosshair.style.transform = `scale(${1 - 0.35 * game.adsLerp})`;
   crosshair.style.opacity = 1 - 0.4 * game.adsLerp;
 }

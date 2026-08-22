@@ -75,6 +75,15 @@ export function setTimer(seconds) {
  * Full refresh of HP + ammo widgets. Called every frame while playing —
  * cheap enough, and spares callers from tracking which value changed.
  */
+/**
+ * Push the crosshair arms out from center. `px` should derive from the
+ * same totalSpread the bullets use (see weapons.js) so the reticle honestly
+ * reflects where shots will land.
+ */
+export function setCrosshairGap(px) {
+  crosshair.style.setProperty('--gap', px.toFixed(1) + 'px');
+}
+
 export function updateHUD() {
   hpText.textContent = Math.max(0, Math.round(player.hp));
   healthFill.style.width = Math.max(0, player.hp) + '%';

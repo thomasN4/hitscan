@@ -90,7 +90,12 @@ export const game = {
   runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
   yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
   pitch: 0,
-  spread: 0.001,   // radians of cone half-angle-ish bloom; grows per shot
+  spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
+                   // in weapons.js from stance + movement + bloom. Do not add
+                   // to it directly — kick `bloom` instead.
+  bloom: 0,        // recoil spread kick: +0.02 per shot, decays ~0.06/s
+  moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
+                   // drives the movement accuracy penalty
   recoil: 0,       // drives viewmodel kick, decays fast
   crouchLerp: 0,
   adsLerp: 0,

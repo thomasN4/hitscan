@@ -84,6 +84,31 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       if (sprint.dist < 7.5) throw new Error(`sprint distance too low: ${sprint.dist.toFixed(2)} m`);
     }
 
+    // 4) Accuracy model: spread must reflect stance and movement
+    if (sprintCheck) {
+      const spreads = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        cs.game.pitch = 0;
+        cs.player.pos.set(0, 1.7, 8);
+        await wait(400); // let bloom from earlier phases decay
+        const standing = cs.game.spread;
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+        await wait(400); // crouchLerp -> 1
+        const crouched = cs.game.spread;
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
+        await wait(400);
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        await wait(600); // walk long enough for moveLerp to settle near 1
+        const walking = cs.game.spread;
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        return { standing, crouched, walking };
+      });
+      if (spreads.crouched >= spreads.standing) throw new Error(`crouch should tighten spread: ${JSON.stringify(spreads)}`);
+      if (spreads.walking < spreads.standing * 3) throw new Error(`walking should open spread 3x+: ${JSON.stringify(spreads)}`);
+      console.log(`[accuracy] OK`, JSON.stringify(spreads));
+    }
+
     console.log(`[${name}] OK`, JSON.stringify({ reload: 'ok', holes: fired.holes, magAfterBurst: fired.mag, reserve: fired.reserve, ...(sprint && { sprintDist: +sprint.dist.toFixed(2) }) }));
   } catch (e) {
     failures++;

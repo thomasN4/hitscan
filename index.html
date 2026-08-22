@@ -10,11 +10,16 @@
   canvas { display: block; }
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
 
-  /* Crosshair */
-  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 24px; height: 24px; }
+  /* Crosshair: arms pushed out from center by --gap (set per frame from
+     the weapon accuracy model in weapons.js) */
+  #crosshair { --gap: 5px; position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
   #crosshair div { position: absolute; background: #00ff41; box-shadow: 0 0 2px #000; }
-  .ch-v { width: 2px; height: 7px; left: 11px; }
-  .ch-h { height: 2px; width: 7px; top: 11px; }
+  .ch-v { width: 2px; height: 7px; left: -1px; }
+  .ch-t { bottom: var(--gap); }
+  .ch-b { top: var(--gap); }
+  .ch-h { height: 2px; width: 7px; top: -1px; }
+  .ch-l { right: var(--gap); }
+  .ch-r { left: var(--gap); }
 
   /* Bottom bar */
   #bottom { position: absolute; bottom: 20px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 30px; align-items: flex-end; }
@@ -56,8 +61,8 @@
 
 <div id="hud" style="display:none">
   <div id="crosshair">
-    <div class="ch-v" style="top:0"></div><div class="ch-v" style="bottom:0"></div>
-    <div class="ch-h" style="left:0"></div><div class="ch-h" style="right:0"></div>
+    <div class="ch-v ch-t"></div><div class="ch-v ch-b"></div>
+    <div class="ch-h ch-l"></div><div class="ch-h ch-r"></div>
   </div>
   <div id="hitmarker">
     <div style="left:0;top:0"></div><div style="right:0;top:0"></div>

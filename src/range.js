@@ -7,19 +7,23 @@
 // All target parts are registered as `solids` so bullet-hole decals work
 // on them; nothing here shoots back.
 import * as THREE from 'three';
-import { scene, solids } from './core.js';
+import { scene, solids, colliders } from './core.js';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });
 const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
 const matPost   = new THREE.MeshLambertMaterial({ color: 0x6b5a3e });
 
+// Must register BOTH collections, same as map.js:addBox — solids block
+// bullets/sight, colliders block movement. Skipping colliders here is how
+// the range map ended up fully no-clip.
 function addBox(x, y, z, w, h, d, mat) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y + h / 2, z);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
   solids.push(m);
+  colliders.push(new THREE.Box3().setFromObject(m));
   return m;
 }
 
@@ -109,9 +113,15 @@ function addTarget(x, z, { height = 0, yaw = 0 } = {}) { // yaw 0 = facing firin
   g.rotation.y = yaw;
   scene.add(g);
 
-  // Register parts as raycast targets so decals stick (no colliders needed —
-  // the player can't reach the targets anyway)
+  // Register parts as raycast targets so decals stick...
   solids.push(head, torso, legs);
+  // ...and as movement colliders so the player can't walk through targets.
+  // Box3.setFromObject resolves each part's WORLD AABB (group transform
+  // included). Raised targets' floating leg boxes also block walking under
+  // them — accepted as realistic.
+  for (const p of [post, head, torso, legs]) {
+    colliders.push(new THREE.Box3().setFromObject(p));
+  }
   return g;
 }
 

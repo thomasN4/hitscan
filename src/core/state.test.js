@@ -1,16 +1,16 @@
 // Proves core/state.js is importable WITHOUT a browser — no renderer, no
-// DOM. If this file starts failing to import, something browser-only leaked
-// back into the pure state module and the whole unit-test layer is lost.
+// DOM. The bare `import` below IS that assertion: this suite runs in plain
+// Node, so anything browser-only leaking back into state.js at module scope
+// makes every test here fail to even load, and the unit-test layer is lost.
+// (Browser globals inside a state.js *function* body are not caught here —
+// they are caught by review and by scripts/smoke-test.mjs.)
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, resetAmmo, game, player } from './state.js';
 
 describe('state module purity', () => {
-  test('imports in Node with no DOM globals present', () => {
-    expect(typeof document).toBe('undefined');
-    expect(typeof window).toBe('undefined');
-  });
-
-  test('defaults to the arena map when there is no ?map= param', () => {
+  // main.js overwrites game.map from ?map= at startup; the pure default the
+  // module ships with must be the arena.
+  test('defaults to the arena map', () => {
     expect(game.map).toBe('arena');
   });
 });

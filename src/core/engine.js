@@ -13,6 +13,7 @@
 // modules expose their own init* functions rather than wiring things up on
 // import. See main.js for the required init order.
 import * as THREE from 'three';
+import { BASE_FOV } from './state.js';
 
 /** @type {THREE.WebGLRenderer} */ export let renderer;
 /** @type {THREE.Scene} */        export let scene;
@@ -24,12 +25,11 @@ let initialized = false;
 /**
  * Build the renderer/scene/camera/lights and attach the canvas to the page.
  * Must be called exactly once, before any other init* function or any code
- * that touches `scene`/`camera`. Idempotent guard included because a double
- * call would silently orphan the first canvas.
+ * that touches `scene`/`camera`. A second call THROWS rather than no-opping:
+ * it would orphan the first canvas, so the loud failure is the point.
  */
 export function initEngine() {
   if (initialized) throw new Error('initEngine() called twice');
-  initialized = true;
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
@@ -42,9 +42,9 @@ export function initEngine() {
   scene.background = new THREE.Color(0xbfae8f); // dusty haze
   scene.fog = new THREE.Fog(0xbfae8f, 40, 140);
 
-  // FOV is animated by weapons.js when aiming (75 hip-fire -> per-weapon
+  // FOV is animated by weapons.js when aiming (BASE_FOV hip-fire -> per-weapon
   // zoom targets, down to ~6° at full sniper zoom).
-  camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 300);
+  camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.1, 300);
 
   scene.add(new THREE.HemisphereLight(0xfff3e0, 0x8a7a5c, 0.85));
   const sun = new THREE.DirectionalLight(0xffeecc, 1.4);
@@ -56,4 +56,8 @@ export function initEngine() {
   scene.add(sun);
 
   clock = new THREE.Clock();
+
+  // Set last, not first: if the WebGLRenderer constructor throws (no WebGL
+  // context), a retry should report THAT, not a bogus "called twice".
+  initialized = true;
 }

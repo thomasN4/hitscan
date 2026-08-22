@@ -7,7 +7,8 @@
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
 import { scene, camera, clock } from './core/engine.js';
-import { solids, bots, weapon, game, player, WEAPONS, ammoStore } from './core/state.js';
+import { solids, bots, weapon, game, player, WEAPONS, ammoStore,
+         RECOIL_CAP, BLOOM_CAP, BASE_FOV } from './core/state.js';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';
 import { damageBot } from './combat.js';
@@ -190,8 +191,8 @@ export function shoot() {
   // Recoil/bloom kicks are applied only AFTER this shot's ray is built:
   // a bullet leaves from the pre-kick aim point (first round is dead-on),
   // and its own kick steers the FOLLOWING shots.
-  game.recoil = Math.min(game.recoil + def.recoilKick, 6);
-  game.bloom = Math.min(game.bloom + def.bloomKick, 0.25);
+  game.recoil = Math.min(game.recoil + def.recoilKick, RECOIL_CAP);
+  game.bloom = Math.min(game.bloom + def.bloomKick, BLOOM_CAP);
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;
@@ -245,8 +246,8 @@ export function updateWeapon(dt) {
   game.adsLerp += ((game.aiming ? 1 : 0) - game.adsLerp) * Math.min(1, dt * 12);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
   // usable; main.js multiplies mouse deltas by this.
-  game.zoomScale = 1 - (1 - aimFov / 75) * game.adsLerp;
-  const targetFov = 75 + 5 * game.runLerp - (75 - aimFov) * game.adsLerp;
+  game.zoomScale = 1 - (1 - aimFov / BASE_FOV) * game.adsLerp;
+  const targetFov = BASE_FOV + 5 * game.runLerp - (BASE_FOV - aimFov) * game.adsLerp;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12);
     camera.updateProjectionMatrix();

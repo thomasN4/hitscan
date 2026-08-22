@@ -48,7 +48,7 @@ Two test layers, deliberately split:
 ## Architecture rules
 
 - **All shared mutable state lives in `src/core/state.js`** (`player`, `weapon`, `game`, `keys`, collections). Do not create new cross-module mutable globals elsewhere.
-- **`core/state.js` must stay importable in plain Node.** It may use THREE's math classes (`Vector3`, `Box3`), but never `document`, `window`, `location`, or a `WebGLRenderer`. This is what makes the simulation unit-testable — `src/core/state.test.js` asserts it directly. Anything browser-only belongs in `core/engine.js` or behind an `init*()` function.
+- **`core/state.js` must stay importable in plain Node.** It may use THREE's math classes (`Vector3`, `Box3`), but never `document`, `window`, `location`, or a `WebGLRenderer`. This is what makes the simulation unit-testable: `src/core/state.test.js` runs in plain Node, so a browser global at module scope breaks every test in it on import. Browser-derived values are written IN by `main.js` at startup (see `game.map`) rather than read here. Anything browser-only belongs in `core/engine.js` or behind an `init*()` function.
 - **Engine singletons (`renderer`, `scene`, `camera`, `clock`) live in `src/core/engine.js`** and are created by `initEngine()`, not at module scope. They are `export let` live bindings: reading them at module scope (before init) yields `undefined`.
 - **No module-scope side effects that touch the engine or the DOM.** A module needing either exposes an `init*()` function that `main.js` calls in order. Current order, which `main.js` documents inline:
 
@@ -58,7 +58,7 @@ Two test layers, deliberately split:
 
 - **Dependency direction:** everything may import from `core/state.js`; browser-side modules also import `core/engine.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → core.
 - **Level geometry must go through `map.js:addBox`**, which registers both the movement AABB (`colliders`) and the raycast target (`solids`). Adding meshes directly to the scene creates walk-through/shoot-through bugs.
-- **Map switching is a full page reload** driven by the `?map=` URL param (read once into `game.map` in core.js). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
+- **Map switching is a full page reload** driven by the `?map=` URL param (read once by `main.js` at startup into `game.map`). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
 - **Damage flows through `combat.js`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
 - DOM writes only in `hud.js`. Sound synthesis only in `audio.js`.
 
@@ -67,7 +67,7 @@ Two test layers, deliberately split:
 - **Missing imports are NOT build errors here.** Vite/rollup won't flag an identifier used inside a function body if it happens to resolve as a global at runtime — it becomes a silent `ReferenceError` when that code path first runs (this is how reload broke once). After refactors or moving code between modules, run the smoke test, not just `npm run build`. `npm test` does not catch this either for browser-side modules — only the smoke test exercises them.
 - Pointer lock has a browser-enforced cooldown after `exitPointerLock()`; re-locking too soon silently fails. The canvas click handler recovers, keep that behavior when touching menus.
 - The game loop only simulates while pointer lock is held (`game.locked && game.started`) but always renders. Anything added to the loop should respect that split.
-- **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k <port>/tcp`, start the server with `--port <n> --strictPort`, and confirm the port from its log. With parallel worktrees, parallel dev servers are expected — pick a distinct port per worktree; note `scripts/smoke-test.mjs` currently assumes 5173.
+- **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k <port>/tcp`, start the server with `--port <n> --strictPort`, and confirm the port from its log. With parallel worktrees, parallel dev servers are expected — pick a distinct port per worktree and point the smoke test at it with `CS_SMOKE_BASE` (it defaults to 5173).
 - `window.__cs` in main.js is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player, bulletHoles, colliders }`.
 - **Euler rotation orders matter**: the camera and shot-direction math must both use `'YXZ'`. Default `'XYZ'` silently aims shots somewhere else (this caused bullets flying skyward once).
 

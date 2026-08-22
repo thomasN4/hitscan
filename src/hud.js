@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core.js state directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, game, WEAPONS } from './core/state.js';
+import { player, weapon, game, WEAPONS, BASE_FOV } from './core/state.js';
 
 // Element refs are resolved by initHUD() rather than at module scope, so
 // importing this module does not require a DOM. main.js calls initHUD()
@@ -132,7 +132,7 @@ export function updateHUD() {
     weaponName.textContent = weapon.name;
   }
   const zoomLabel = game.aiming && game.slot === 1
-    ? Math.round(75 / WEAPONS[game.slot].zoomFovs[game.zoomLevel]) + 'x'
+    ? Math.round(BASE_FOV / WEAPONS[game.slot].zoomFovs[game.zoomLevel]) + 'x'
     : '';
   if (zoomLabel !== lastZoomLabel) {
     lastZoomLabel = zoomLabel;

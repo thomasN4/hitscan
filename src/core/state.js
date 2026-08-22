@@ -2,8 +2,10 @@
 //
 // This module must stay importable in plain Node (that is what makes the
 // simulation unit-testable): it may use THREE's math classes (Vector3,
-// Box3...) but must never touch `document`, `window`, or construct a
-// WebGLRenderer. Engine singletons live in core/engine.js instead.
+// Box3...) but must never touch `document`, `window`, `location`, or
+// construct a WebGLRenderer. Engine singletons live in core/engine.js
+// instead — and browser-derived values (the ?map= param) are written in by
+// main.js at startup rather than read here.
 //
 // All mutable cross-module game state lives here: if you need to share new
 // state between systems (player, bots, weapons, HUD...), add it here rather
@@ -38,9 +40,14 @@ export const player = {
   eyeHeight: 1.7,
 };
 
-/** Hard cap on accumulated recoil units; shared by decay, scope gating and view punch. */
+/**
+ * Ceiling on accumulated recoil units, applied in `weapons.js:shoot()` when a
+ * shot adds its kick. Decay rate (`recoilRecover`) and scope gating
+ * (`scopeGate`) are per-weapon and independent of this — the cap only bounds
+ * the climb. Each weapon's `punchRad` comment quotes its max angle at this cap.
+ */
 export const RECOIL_CAP = 6;
-/** Hard cap on accumulated spread bloom (radians). */
+/** Ceiling on accumulated spread bloom (radians), applied alongside RECOIL_CAP. */
 export const BLOOM_CAP = 0.25;
 /** Base (hip-fire) vertical FOV in degrees; every zoom target sits below this. */
 export const BASE_FOV = 75;
@@ -71,7 +78,7 @@ export const WEAPONS = [
                         // outpaces accumulation and sprays never bloom at all.
                         // 0.13 clears full bloom ~2 s after stopping (was 0.06 → ~4 s)
     punchRad: 0.012,   // radians of aim climb per recoil unit — sustained spray
-                       // climbs toward ~4° (cap 6), pull down to compensate
+                       // climbs toward ~4° at RECOIL_CAP, pull down to compensate
     scopedOverlay: false,
   },
   {
@@ -81,7 +88,7 @@ export const WEAPONS = [
     reloadTime: 3.2,
     damage: 60,      // two torso shots to kill; head x4 = one-tap, legs x0.75
     headshotMult: 4,
-    zoomFovs: [25, 12.5, 6.25], // ≈ 3x / 6x / 12x on the 75° base FOV
+    zoomFovs: [25, 12.5, 6.25], // ≈ 3x / 6x / 12x on the 75° BASE_FOV
     spreadMul: 0.05, // near-laser when scoped and still
     bloomKick: 0.09, recoilKick: 4,
     recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
@@ -127,15 +134,6 @@ export function resetAmmo() {
 }
 
 /**
- * Map name from the ?map= URL param. Falls back to 'arena' under Node
- * (unit tests), where there is no `location`.
- */
-function initialMap() {
-  if (typeof location === 'undefined') return 'arena';
-  return new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
-}
-
-/**
  * Misc per-frame / transient flags. Grouped here because they are touched
  * by several systems (input in main.js, consumed in player.js/weapons.js).
  *
@@ -145,7 +143,9 @@ function initialMap() {
 export const game = {
   // Map is chosen at page load via ?map=range (start-menu buttons trigger a
   // full reload); there is deliberately no hot-swapping of scenes at runtime.
-  map: initialMap(),
+  // main.js overwrites this from the URL at startup — reading `location` here
+  // would break this module's importability in Node.
+  map: 'arena',
   locked: false,   // pointer lock active (Esc/menu releases it)
   started: false,  // first Play click happened; distinguishes pause from pre-game
   shooting: false, // LMB held

@@ -8,11 +8,22 @@ Browser FPS demo: Three.js + Vite, plain ES modules, no framework. All game code
 
 ## Workflow
 
-Work in **plan → implement → commit** increments. Commit only when explicitly requested (or when the agreed plan ends with a commit step). Use pull requests once the project grows beyond simple single-branch work. Commit messages: short imperative summary, optionally `;`-joined clauses, e.g.
+Default loop for every non-trivial change: **plan → implement → open draft PR**.
 
-```
-Fix missing player import breaking reload; add smoke test and debug hook
-```
+1. **Plan** — agree scope and approach with the user before touching code.
+2. **Implement** — on a feature branch cut from `main`:
+   - `feat/<short-slug>` for features, `fix/<short-slug>` for bug fixes
+   - As many WIP commits as sensible while working; commit messages: short imperative summary, optionally `;`-joined clauses, e.g.
+
+   ```
+   Fix missing player import breaking reload; add smoke test and debug hook
+   ```
+3. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
+   - `gh pr create --draft --title "<imperative summary>" --body "..."`
+   - PR body: what changed, why, and verification results.
+4. **Review** — the user merges personally in the GitHub UI. Do NOT run `gh pr merge` or `gh pr ready` unless explicitly instructed for that specific PR.
+
+Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 
 ## Commands
 

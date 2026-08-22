@@ -2,12 +2,14 @@
 //
 // Usage: start `npm run dev` in another terminal, then:
 //   node scripts/smoke-test.mjs
+// Override the server with SMOKE_BASE=http://localhost:<port> (worktrees run
+// their own dev servers on non-default ports).
 //
 // Requires Brave (Flatpak path below is machine-specific).
 import puppeteer from 'puppeteer-core';
 
 const BRAVE = '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave';
-const BASE = 'http://localhost:5173';
+const BASE = process.env.SMOKE_BASE ?? 'http://localhost:5173';
 
 const browser = await puppeteer.launch({
   executablePath: BRAVE,
@@ -105,18 +107,18 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         cs.game.pitch = 0;
         cs.player.pos.set(0, 1.7, 8);
         await wait(400); // let moveLerp/crouchLerp settle
-        cs.game.bloom = 0; // isolate stance/movement layers from prior phases
-        await wait(150);   // let the frame loop recompute spread from bloom=0
+        cs.game.spray = 1; // isolate stance/movement layers from prior phases
+        await wait(150);   // let the frame loop recompute spread from spray=1
         const standing = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
         await wait(400); // crouchLerp -> 1
-        cs.game.bloom = 0;
+        cs.game.spray = 1;
         const crouched = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
         await wait(400);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         await wait(600); // walk long enough for moveLerp to settle near 1
-        cs.game.bloom = 0;
+        cs.game.spray = 1;
         const walking = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         return { standing, crouched, walking };
@@ -217,7 +219,7 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       if (sniper.shot.aimingAfter !== false) throw new Error(`shot should exit the scope: ${JSON.stringify(sniper.shot)}`);
       if (sniper.gated.aiming !== false || sniper.gated.overlay !== 'none') throw new Error(`re-scope during recoil settle must stay blocked: ${JSON.stringify(sniper.gated)}`);
       if (sniper.rescope.aiming !== true || sniper.rescope.overlay !== 'block') throw new Error(`re-scope after settle failed: ${JSON.stringify(sniper.rescope)}`);
-      if (sniper.backTo !== 0) throw new Error(`switch back to rifle failed: slot ${sniper.backTo}`);
+      if (sniper.backTo !== 0) throw new Error(`switch back to smg failed: slot ${sniper.backTo}`);
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }
 

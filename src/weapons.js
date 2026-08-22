@@ -14,7 +14,7 @@ import { spawnImpact, spawnBulletHole } from './effects.js';
 
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the
-// view transform. One group per slot (rifle / sniper); visibility follows
+// view transform. One group per slot (smg / sniper); visibility follows
 // game.slot every frame. Position is animated each frame in
 // updateWeapon/updatePlayer: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.js).
@@ -22,18 +22,18 @@ export const gunGroup = new THREE.Group();
 camera.add(gunGroup);
 scene.add(camera);
 
-const rifleGroup = new THREE.Group();
-let rifleMag; // kept for the reload animation (mag drop/reseat)
+const smgGroup = new THREE.Group();
+let smgMag; // kept for the reload animation (mag drop/reseat)
 {
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b2b2b });
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.5), dark);
   body.position.set(0.25, -0.22, -0.45); // lower-right of the view
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
   barrel.position.set(0.25, -0.19, -0.82);
-  rifleMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
-  rifleMag.position.set(0.25, -0.31, -0.42);
-  rifleMag.userData.baseY = -0.31;
-  rifleGroup.add(body, barrel, rifleMag);
+  smgMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
+  smgMag.position.set(0.25, -0.31, -0.42);
+  smgMag.userData.baseY = -0.31;
+  smgGroup.add(body, barrel, smgMag);
 }
 
 const sniperGroup = new THREE.Group();
@@ -58,7 +58,7 @@ let sniperMag; // kept for the reload animation (mag drop/reseat)
   sniperGroup.add(body, barrel, stock, scope, mag);
 }
 
-gunGroup.add(rifleGroup, sniperGroup);
+gunGroup.add(smgGroup, sniperGroup);
 
 const raycaster = new THREE.Raycaster();
 const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
@@ -114,7 +114,7 @@ export function tryReload() {
 }
 
 /**
- * Switch to slot `slot` (0 rifle, 1 sniper). Saves the current mag/reserve
+ * Switch to slot `slot` (0 smg, 1 sniper). Saves the current mag/reserve
  * back into ammoStore so mugs don't refill on swap, copies the new slot's
  * stats into the live `weapon` object, and resets scope zoom. Blocked while
  * reloading to avoid mid-mag-swap state corruption.
@@ -141,7 +141,7 @@ export function switchWeapon(slot) {
 }
 
 /**
- * Fire one shot: consume ammo, apply recoil/spread bloom, then hitscan.
+ * Fire one shot: consume ammo, apply recoil/spray, then hitscan.
  * The spread cone widens with consecutive fire (`game.spread`) and shrinks
  * to the weapon's spreadMul while aiming. Nearest hit across solids + live
  * bot parts decides the outcome — bot hit -> damage by zone, wall hit ->
@@ -175,11 +175,11 @@ export function shoot() {
     -1
   ).normalize().applyEuler(new THREE.Euler(aimPitch(), game.yaw, 0, 'YXZ'));
 
-  // Recoil/bloom kicks are applied only AFTER this shot's ray is built:
+  // Recoil/spray kicks are applied only AFTER this shot's ray is built:
   // a bullet leaves from the pre-kick aim point (first round is dead-on),
   // and its own kick steers the FOLLOWING shots.
   game.recoil = Math.min(game.recoil + def.recoilKick, 6);
-  game.bloom = Math.min(game.bloom + def.bloomKick, 0.25);
+  game.spray = Math.min(game.spray + def.sprayKick, def.sprayCap);
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;
@@ -220,12 +220,12 @@ let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on re
 export function updateWeapon(dt) {
   const def = WEAPONS[game.slot];
 
-  // Recoil kick decay — rate is per-weapon (rifle resets fast for full-auto,
+  // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
   // the sniper settles slowly for bolt-action feel; see core.WEAPONS)
   game.recoil = Math.max(0, game.recoil - dt * weapon.recoilRecover);
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
-  // rifle has a single iron-sights step; the sniper cycles its wheel-chosen
+  // the smg has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules).
   if (!game.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
@@ -242,7 +242,7 @@ export function updateWeapon(dt) {
 
   // Viewmodel visibility: per-slot group swap; the sniper disappears
   // entirely once the full-screen scope reticle takes over.
-  rifleGroup.visible = game.slot === 0;
+  smgGroup.visible = game.slot === 0;
   sniperGroup.visible = game.slot === 1;
   gunGroup.visible = !(def.scopedOverlay && game.adsLerp > 0.85);
 
@@ -255,7 +255,7 @@ export function updateWeapon(dt) {
   const reloadT = weapon.reloading
     ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - nowS) / weapon.reloadTime, 0, 1)
     : 0;
-  if (game.slot === 0) poseReload(rifleGroup, rifleMag, reloadT);
+  if (game.slot === 0) poseReload(smgGroup, smgMag, reloadT);
   else poseReload(sniperGroup, sniperMag, reloadT);
 
   // Reload finish: top the mag back up from reserve (partial reloads allowed).
@@ -269,7 +269,7 @@ export function updateWeapon(dt) {
     weapon.reloading = false;
   }
 
-  // Trigger: rifle is full-auto while LMB held; semi-autos (sniper) fire
+  // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire
   // once per press — the latch blocks repeats until the button is released.
   if (!game.shooting) triggerLatch = false;
   else if (!def.semiAuto || !triggerLatch) {
@@ -280,20 +280,26 @@ export function updateWeapon(dt) {
   }
 
   // ---- Accuracy model -------------------------------------------------
-  // totalSpread = (stance base + movement penalty + recoil bloom) × ADS
-  //   stance base: crouching cuts it ~72% AND halves the movement penalty,
-  //                making crouch-walk the most accurate mobile stance
+  // totalSpread = ((stance base + movement penalty) × spray + inherent) × ADS
+  //   stance base: 0.0003 rad crouched, +0.0009 standing (CS2: crouch ≈ 0.77×
+  //                stand, so standing ≈ 1.3–4× the stance term); crouching also
+  //                halves the movement penalty, keeping crouch-walk the most
+  //                accurate mobile stance
   //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js)
-  //   ADS:         weapon's spreadMul — 30% for the rifle's iron sights,
-  //                5% for a scoped sniper shot
+  //   spray:       cone multiplier, 1 rested; grows per shot (sprayKick up to
+  //                sprayCap), recovers toward 1 at sprayRecover/s
+  //   inherent:    per-weapon rest cone — dominates hip-fire so both weapons
+  //                are ~similarly bad from the hip
+  //   ADS:         weapon's spreadMul — 30% for the smg's iron sights
+  //                (~2" @ 50 m crouched), 3% for a scoped sniper shot
   // game.spread is consumed by shoot(); the crosshair gap in hud.js maps
   // from the same value, keeping what you see in sync with where bullets go.
   const adsMul = game.aiming ? def.spreadMul : 1;
-  const stanceBase = 0.0025 - 0.0018 * game.crouchLerp;
-  const movePenalty = 0.010 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
-  game.spread = Math.max(0.0005,
-    (stanceBase + movePenalty + game.bloom) * adsMul);
-  game.bloom = Math.max(0, game.bloom - dt * def.bloomRecover);
+  const stanceBase = 0.0003 + 0.0009 * (1 - game.crouchLerp);
+  const movePenalty = 0.012 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
+  game.spread = Math.max(0.00005,
+    ((stanceBase + movePenalty) * game.spray + def.inherent) * adsMul);
+  game.spray = Math.max(1, game.spray - dt * def.sprayRecover);
 
   // Crosshair arms sit at the EDGE of the actual scatter cone, projected to
   // screen space with the live FOV (per-axis half-angle ≈ spread/2) — so the

@@ -56,7 +56,7 @@ src/
 ├── map.js        # arena geometry (walls, buildings, crates)
 ├── collision.js  # AABB movement collision + line-of-sight raycast
 ├── player.js     # FPS controller: move/crouch/footsteps/camera
-├── weapons.js    # rifle viewmodel, firing, reload, ADS/recoil/spread
+├── weapons.js    # smg viewmodel, firing, reload, ADS/recoil/spray
 ├── bots.js       # Bot class and AI decision loop
 ├── combat.js     # damage resolution, respawn, round end
 ├── effects.js    # transient visuals (bullet impacts)

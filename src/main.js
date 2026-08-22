@@ -82,7 +82,7 @@ addEventListener('mousedown', e => {
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
   if (e.button === 2 && game.locked && player.alive) {
-    const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (rifle)
+    const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (smg)
     if (gate === undefined || game.recoil < gate) game.aiming = true;
   }
 });

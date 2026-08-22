@@ -65,20 +65,27 @@ export const player = {
 /**
  * Weapon definitions (slot order = switch order via keys 1/2). Static stats
  * only — the live mutable copy is `weapon` below. zoomFovs are the scoped
- * FOV targets cycled with the mouse wheel while aiming (rifle has one
- * "iron sights" step); spreadMul is the ADS cone multiplier.
+ * FOV targets cycled with the mouse wheel while aiming (the smg has one
+ * "iron sights" step); spreadMul is the ADS cone multiplier; inherent is the
+ * weapon's resting shot cone in radians before any stance/movement/spray.
  */
 export const WEAPONS = [
   {
-    name: 'RIFLE',
+    name: 'SMG',
     magSize: 30, reserveMax: 90,
-    fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, rifle-like)
+    fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, smg-like)
     reloadTime: 2.2,
     damage: 26,      // per body shot; legs x0.75, head x4 -> one-tap kill
     headshotMult: 4,
     zoomFovs: [55],  // iron sights
     spreadMul: 0.3,
-    bloomKick: 0.02, recoilKick: 1,
+    inherent: 0.0031, // rest-cone rad — ADS crouched ≈ 2" @ 50 m; hip ≈ 6.7"
+    sprayKick: 0.06, recoilKick: 1,
+    sprayCap: 4,       // max spray multiplier (rested = 1) after a long burst
+    sprayRecover: 0.45, // multiplier units/s — MUST stay below sustained-fire input
+                        // (~9.5 shots/s × sprayKick = 0.57/s), or the drain outpaces
+                        // accumulation and sprays never bloom at all.
+                        // 0.45 clears a full-mag spray (30×0.06 = 1.8) in ~4 s
     recoilRecover: 6, // recoil units/s — MUST stay below the sustained-fire input
                       // (~9.5 shots/s × recoilKick = 9.5/s), or the drain outpaces
                       // accumulation and spray never climbs (it just vibrates).
@@ -99,12 +106,14 @@ export const WEAPONS = [
     damage: 60,      // two torso shots to kill; head x4 = one-tap, legs x0.75
     headshotMult: 4,
     zoomFovs: [25, 12.5, 6.25], // ≈ 3x / 6x / 12x on the 75° base FOV
-    spreadMul: 0.05, // near-laser when scoped and still
-    bloomKick: 0.09, recoilKick: 4,
+    spreadMul: 0.03, // near-laser when scoped and still (~0.19" @ 50 m crouched)
+    inherent: 0.0029, // rest-cone rad — hip-fire ≈ 6.3" @ 50 m, like the smg's
+    sprayKick: 0.25, recoilKick: 4,
+    sprayCap: 3,
     recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
     punchRad: 0.02,    // radians of aim climb per recoil unit — one meaty ~4.6°
                        // kick per shot that settles slowly with the recoil
-    bloomRecover: 0.06, // spread bloom units/s — slow settle matches the bolt-action feel
+    sprayRecover: 0.08, // slow settle matches the bolt-action feel (input ≈ 0.9 shots/s × 0.25)
     scopeGate: 0.5,    // RMB re-scope is blocked until recoil decays below this
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
     semiAuto: true,      // one shot per LMB press; holding does nothing
@@ -163,9 +172,10 @@ export const game = {
   yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
   pitch: 0,
   spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
-                   // in weapons.js from stance + movement + bloom. Do not add
-                   // to it directly — kick `bloom` instead.
-  bloom: 0,        // recoil spread kick: +0.02 per shot, decays ~0.06/s
+                   // in weapons.js from (stance + movement) × spray + inherent,
+                   // all × ADS. Do not add to it directly — kick `spray` instead.
+  spray: 1,        // spray cone multiplier, 1 at rest: +sprayKick per shot up
+                   // to sprayCap, decays toward 1 at weapon.sprayRecover/s
   moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
                    // drives the movement accuracy penalty
   recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
@@ -173,7 +183,7 @@ export const game = {
                    // can't enter the scope (main.js)
    crouchLerp: 0,
    adsLerp: 0,
-   slot: 0,         // active weapon index into WEAPONS (0 rifle, 1 sniper)
+   slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
    zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
    zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                     // doesn't get twitchy at 12x (computed in weapons.js)

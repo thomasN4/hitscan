@@ -217,6 +217,11 @@ export function shoot() {
  */
 let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on release
 
+// Crosshair projection gain. 1 = literal cone edge on screen (too subtle to
+// read at hip-fire spreads); ~6 exaggerates uniformly so stance/spray
+// differences are visible while preserving their ratios.
+const CROSSHAIR_GAIN = 6;
+
 export function updateWeapon(dt) {
   const def = WEAPONS[game.slot];
 
@@ -303,9 +308,12 @@ export function updateWeapon(dt) {
   game.spray = Math.max(1, game.spray - dt * def.sprayRecover);
 
   // Crosshair arms sit at the EDGE of the actual scatter cone, projected to
-  // screen space with the live FOV (per-axis half-angle ≈ spread/2) — so the
-  // gap always matches where bullets can land, hip-fire or ADS. The mean
-  // impact point is screen center itself via aimPitch().
+  // screen space with the live FOV (per-axis half-angle ≈ spread/2) and a
+  // gain factor. Purely proportional mapping — no constant floor — so stance
+  // changes stay visible: `inherent` dominates hip-fire spread, and an
+  // additive floor would bury its stance-dependent share under ~4 px of
+  // stance-independent width (sub-pixel, imperceptible). The mean impact
+  // point is screen center itself via aimPitch().
   const pxPerTan = window.innerHeight / 2 / Math.tan(camera.fov * Math.PI / 360);
-  setCrosshairGap(Math.min(3 + Math.tan(game.spread / 2) * pxPerTan, 60));
+  setCrosshairGap(Math.min(Math.tan(game.spread / 2) * pxPerTan * CROSSHAIR_GAIN, 60));
 }

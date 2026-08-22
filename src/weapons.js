@@ -306,7 +306,9 @@ export function updateWeapon(dt) {
   //   stance base: 0.0006 rad crouched, +0.0018 standing; crouching also
   //                halves the movement penalty, keeping crouch-walk the most
   //                accurate mobile stance
-  //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js)
+  //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js), scaled
+  //                superlinearly (^2.5) so sprinting diverges sharply from
+  //                walking: walk ≈ 50" @ 50 m, sprint ≈ 119"
   //   spray:       cone multiplier, 1 rested; grows per shot (sprayKick up to
   //                sprayCap), recovers toward 1 at sprayRecover/s. It scales
   //                the (stance + movement) group, so situational spread opens
@@ -319,7 +321,7 @@ export function updateWeapon(dt) {
   // from the same value, keeping what you see in sync with where bullets go.
   const adsMul = game.aiming ? def.spreadMul : 1;
   const stanceBase = 0.0006 + 0.0018 * (1 - game.crouchLerp);
-  const movePenalty = 0.024 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
+  const movePenalty = 0.02 * Math.pow(game.moveLerp, 2.5) * (1 - 0.5 * game.crouchLerp);
   game.spread = Math.max(0.00005,
     ((stanceBase + movePenalty) * game.spray + def.inherent) * adsMul);
   game.spray = Math.max(1, game.spray - dt * def.sprayRecover);

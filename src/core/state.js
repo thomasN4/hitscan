@@ -1,38 +1,14 @@
-// core.js — single source of truth for shared state and engine singletons.
+// core/state.js — pure shared game state. NO browser APIs, NO renderer.
 //
-// Every other module imports from here; nothing imports back into the
-// modules that use it (no dependency cycles). All mutable cross-module
-// game state lives in this file: if you need to share new state between
-// systems (player, bots, weapons, HUD...), add it here rather than
-// reaching across modules.
+// This module must stay importable in plain Node (that is what makes the
+// simulation unit-testable): it may use THREE's math classes (Vector3,
+// Box3...) but must never touch `document`, `window`, or construct a
+// WebGLRenderer. Engine singletons live in core/engine.js instead.
+//
+// All mutable cross-module game state lives here: if you need to share new
+// state between systems (player, bots, weapons, HUD...), add it here rather
+// than reaching across modules.
 import * as THREE from 'three';
-
-// ---------- Renderer / scene / camera ----------
-export const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-document.body.appendChild(renderer.domElement);
-
-export const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xbfae8f); // dusty haze
-scene.fog = new THREE.Fog(0xbfae8f, 40, 140);
-
-export const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 300);
-// FOV is animated by weapons.js when aiming (75 hip-fire -> per-weapon
-// zoom targets, down to ~6° at full sniper zoom).
-
-scene.add(new THREE.HemisphereLight(0xfff3e0, 0x8a7a5c, 0.85));
-const sun = new THREE.DirectionalLight(0xffeecc, 1.4);
-sun.position.set(40, 60, 25);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
-sun.shadow.camera.top = 80; sun.shadow.camera.bottom = -80;
-scene.add(sun);
-
-export const clock = new THREE.Clock();
 
 // ---------- Shared collections ----------
 /** Meshes (walls, crates, ground) that block bullets AND bot line-of-sight. */
@@ -61,6 +37,13 @@ export const player = {
   radius: 0.45,
   eyeHeight: 1.7,
 };
+
+/** Hard cap on accumulated recoil units; shared by decay, scope gating and view punch. */
+export const RECOIL_CAP = 6;
+/** Hard cap on accumulated spread bloom (radians). */
+export const BLOOM_CAP = 0.25;
+/** Base (hip-fire) vertical FOV in degrees; every zoom target sits below this. */
+export const BASE_FOV = 75;
 
 /**
  * Weapon definitions (slot order = switch order via keys 1/2). Static stats
@@ -144,6 +127,15 @@ export function resetAmmo() {
 }
 
 /**
+ * Map name from the ?map= URL param. Falls back to 'arena' under Node
+ * (unit tests), where there is no `location`.
+ */
+function initialMap() {
+  if (typeof location === 'undefined') return 'arena';
+  return new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
+}
+
+/**
  * Misc per-frame / transient flags. Grouped here because they are touched
  * by several systems (input in main.js, consumed in player.js/weapons.js).
  *
@@ -153,7 +145,7 @@ export function resetAmmo() {
 export const game = {
   // Map is chosen at page load via ?map=range (start-menu buttons trigger a
   // full reload); there is deliberately no hot-swapping of scenes at runtime.
-  map: new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena',
+  map: initialMap(),
   locked: false,   // pointer lock active (Esc/menu releases it)
   started: false,  // first Play click happened; distinguishes pause from pre-game
   shooting: false, // LMB held
@@ -171,13 +163,13 @@ export const game = {
   recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
                    // While above WEAPONS[slot].scopeGate, a new RMB press
                    // can't enter the scope (main.js)
-   crouchLerp: 0,
-   adsLerp: 0,
-   slot: 0,         // active weapon index into WEAPONS (0 rifle, 1 sniper)
-   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
-   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
-                    // doesn't get twitchy at 12x (computed in weapons.js)
-   stepTimer: 0.2,  // countdown to next footstep sound
+  crouchLerp: 0,
+  adsLerp: 0,
+  slot: 0,         // active weapon index into WEAPONS (0 rifle, 1 sniper)
+  zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
+  zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
+                   // doesn't get twitchy at 12x (computed in weapons.js)
+  stepTimer: 0.2,  // countdown to next footstep sound
   bobAmt: 0,       // current view-bob amplitude, computed in player.js
   scoreKills: 0,   // shown as "CT" score
   scoreDeaths: 0,  // shown as "T" score

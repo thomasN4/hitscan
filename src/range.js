@@ -7,7 +7,8 @@
 // All target parts are registered as `solids` so bullet-hole decals work
 // on them; nothing here shoots back.
 import * as THREE from 'three';
-import { scene, solids, colliders } from './core.js';
+import { scene } from './core/engine.js';
+import { solids, colliders } from './core/state.js';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });

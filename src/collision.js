@@ -4,7 +4,7 @@
 //   collidesAt      -> AABB overlap test against core.colliders (cheap, per-frame)
 //   hasLineOfSight  -> raycast against core.solids (used by bots before firing)
 import * as THREE from 'three';
-import { colliders } from './core.js';
+import { colliders } from './core/state.js';
 
 /**
  * Test whether an entity capsule (approximated as a box) at `pos` would

@@ -4,19 +4,28 @@
 // spawnBots -> register input/pointer-lock handlers -> start the render loop.
 // The loop only simulates (player, bots, timer) while pointer lock is held;
 // rendering and effect updates run always so pause screens stay visible.
-import { renderer, scene, camera, clock, game, keys, player, weapon, bulletHoles, colliders, WEAPONS } from './core.js';
+import { initEngine, renderer, scene, camera, clock } from './core/engine.js';
+import { game, keys, player, weapon, bulletHoles, colliders, WEAPONS } from './core/state.js';
 import { buildMap } from './map.js';
 import { buildRange } from './range.js';
 import { updatePlayer } from './player.js';
 import { spawnBots, updateBots } from './bots.js';
-import { tryReload, switchWeapon } from './weapons.js';
+import { tryReload, switchWeapon, initWeaponViewmodels } from './weapons.js';
 import { updateEffects } from './effects.js';
 import { respawn } from './combat.js';
-import { updateHUD, setTimer, hudEl, setScopeOverlay } from './hud.js';
+import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud.js';
 import { sfxZoom } from './audio.js';
 
-// ---------- World ----------
+// ---------- Startup ----------
+// Order matters and is deliberately explicit: initEngine() creates the
+// renderer/scene/camera that everything below reaches for, so nothing may
+// touch those singletons at module scope. Each init* function is safe to
+// call exactly once, here.
 const RANGE = game.map === 'range';
+
+initEngine();
+initHUD();
+initWeaponViewmodels();  // needs camera/scene
 if (RANGE) {
   buildRange();
 } else {

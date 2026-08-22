@@ -7,24 +7,36 @@
 //
 // NOTE: functions here read core.js state directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, game, WEAPONS } from './core.js';
+import { player, weapon, game, WEAPONS } from './core/state.js';
 
+// Element refs are resolved by initHUD() rather than at module scope, so
+// importing this module does not require a DOM. main.js calls initHUD()
+// once, before the game loop starts; every function below assumes it ran.
 const el = id => document.getElementById(id);
-const hudEl = el('hud');
-const crosshair = el('crosshair');
-const hitmarkerEl = el('hitmarker');
-const vignette = el('vignette');
-const killfeedEl = el('killfeed');
-const hpText = el('hpText');
-const healthFill = el('healthFill');
-const magText = el('magText');
-const ammoReserve = el('ammoReserve');
-const reloadHint = el('reloadHint');
-const scopeOverlay = el('scopeOverlay');
-const zoomText = el('zoomText');
-const weaponName = el('weaponName');
 
-export { hudEl, crosshair, vignette };
+let hitmarkerEl, killfeedEl, hpText, healthFill, magText,
+  ammoReserve, reloadHint, scopeOverlay, zoomText, weaponName;
+
+/** @type {HTMLElement} */ export let hudEl;
+/** @type {HTMLElement} */ export let crosshair;
+/** @type {HTMLElement} */ export let vignette;
+
+/** Resolve every HUD element reference. Call once, after the DOM is ready. */
+export function initHUD() {
+  hudEl = el('hud');
+  crosshair = el('crosshair');
+  hitmarkerEl = el('hitmarker');
+  vignette = el('vignette');
+  killfeedEl = el('killfeed');
+  hpText = el('hpText');
+  healthFill = el('healthFill');
+  magText = el('magText');
+  ammoReserve = el('ammoReserve');
+  reloadHint = el('reloadHint');
+  scopeOverlay = el('scopeOverlay');
+  zoomText = el('zoomText');
+  weaponName = el('weaponName');
+}
 
 let hitmarkerTimer = null;
 

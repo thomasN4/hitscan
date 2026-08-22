@@ -6,7 +6,8 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
-import { scene, camera, clock, solids, bots, weapon, game, player, WEAPONS, ammoStore } from './core.js';
+import { scene, camera, clock } from './core/engine.js';
+import { solids, bots, weapon, game, player, WEAPONS, ammoStore } from './core/state.js';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';
 import { damageBot } from './combat.js';
@@ -18,9 +19,10 @@ import { spawnImpact, spawnBulletHole } from './effects.js';
 // game.slot every frame. Position is animated each frame in
 // updateWeapon/updatePlayer: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.js).
+// The viewmodel meshes below are pure THREE objects, so they are built at
+// module scope; only ATTACHING them to the engine's camera/scene needs
+// initEngine() to have run first — see initWeaponViewmodels().
 export const gunGroup = new THREE.Group();
-camera.add(gunGroup);
-scene.add(camera);
 
 const rifleGroup = new THREE.Group();
 let rifleMag; // kept for the reload animation (mag drop/reseat)
@@ -62,7 +64,17 @@ gunGroup.add(rifleGroup, sniperGroup);
 
 const raycaster = new THREE.Raycaster();
 const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
-scene.add(muzzleFlashLight);
+
+/**
+ * Attach the viewmodel to the camera and the muzzle flash to the scene.
+ * Requires initEngine() to have run; call once from main.js before the loop.
+ * `scene.add(camera)` is what makes the camera-parented gun render at all.
+ */
+export function initWeaponViewmodels() {
+  camera.add(gunGroup);
+  scene.add(camera);
+  scene.add(muzzleFlashLight);
+}
 
 /**
  * Vertical aim angle including recoil view punch. The camera (player.js)

@@ -36,15 +36,27 @@ Direct pushes to `main` are the exception, only when the user asks (e.g., hotfix
 ```sh
 npm run dev                    # dev server (http://localhost:5173)
 npm run build                  # production build -> dist/
+npm test                       # Vitest unit tests (no browser, ~200 ms)
 node scripts/smoke-test.mjs    # headless E2E check (requires dev server running)
 ```
 
-The smoke test drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines.
+Two test layers, deliberately split:
+
+- **`npm test`** — pure simulation logic (state, and from PR 2 on: accuracy, recoil, ballistics). Runs in plain Node, no browser, no dev server. Fast enough to run on every edit.
+- **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, both maps. This is the layer that catches missing imports and wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`.
 
 ## Architecture rules
 
-- **All shared mutable state lives in `src/core.js`** (`player`, `weapon`, `game`, `keys`, collections). Do not create new cross-module mutable globals elsewhere.
-- **Dependency direction:** everything may import from `core.js`; modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → core.
+- **All shared mutable state lives in `src/core/state.js`** (`player`, `weapon`, `game`, `keys`, collections). Do not create new cross-module mutable globals elsewhere.
+- **`core/state.js` must stay importable in plain Node.** It may use THREE's math classes (`Vector3`, `Box3`), but never `document`, `window`, `location`, or a `WebGLRenderer`. This is what makes the simulation unit-testable — `src/core/state.test.js` asserts it directly. Anything browser-only belongs in `core/engine.js` or behind an `init*()` function.
+- **Engine singletons (`renderer`, `scene`, `camera`, `clock`) live in `src/core/engine.js`** and are created by `initEngine()`, not at module scope. They are `export let` live bindings: reading them at module scope (before init) yields `undefined`.
+- **No module-scope side effects that touch the engine or the DOM.** A module needing either exposes an `init*()` function that `main.js` calls in order. Current order, which `main.js` documents inline:
+
+  ```
+  initEngine() → initHUD() → initWeaponViewmodels() → buildMap()/buildRange() → respawn() → loop
+  ```
+
+- **Dependency direction:** everything may import from `core/state.js`; browser-side modules also import `core/engine.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → core.
 - **Level geometry must go through `map.js:addBox`**, which registers both the movement AABB (`colliders`) and the raycast target (`solids`). Adding meshes directly to the scene creates walk-through/shoot-through bugs.
 - **Map switching is a full page reload** driven by the `?map=` URL param (read once into `game.map` in core.js). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
 - **Damage flows through `combat.js`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
@@ -52,7 +64,7 @@ The smoke test drives the user's Brave browser via puppeteer-core; its executabl
 
 ## Gotchas learned the hard way
 
-- **Missing imports are NOT build errors here.** Vite/rollup won't flag an identifier used inside a function body if it happens to resolve as a global at runtime — it becomes a silent `ReferenceError` when that code path first runs (this is how reload broke once). After refactors or moving code between modules, run the smoke test, not just `npm run build`.
+- **Missing imports are NOT build errors here.** Vite/rollup won't flag an identifier used inside a function body if it happens to resolve as a global at runtime — it becomes a silent `ReferenceError` when that code path first runs (this is how reload broke once). After refactors or moving code between modules, run the smoke test, not just `npm run build`. `npm test` does not catch this either for browser-side modules — only the smoke test exercises them.
 - Pointer lock has a browser-enforced cooldown after `exitPointerLock()`; re-locking too soon silently fails. The canvas click handler recovers, keep that behavior when touching menus.
 - The game loop only simulates while pointer lock is held (`game.locked && game.started`) but always renders. Anything added to the loop should respect that split.
 - **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k <port>/tcp`, start the server with `--port <n> --strictPort`, and confirm the port from its log. With parallel worktrees, parallel dev servers are expected — pick a distinct port per worktree; note `scripts/smoke-test.mjs` currently assumes 5173.
@@ -67,4 +79,13 @@ The smoke test drives the user's Brave browser via puppeteer-core; its executabl
 
 ## Roadmap / deferred ideas
 
-- Unify Bot and the player under a shared entity/combatant base class (both currently duplicate movement/collision/shooting logic in different forms). Deferred — revisit when adding a second entity type or weapon.
+Maintainability tranche 1 (in progress) — see the plan for full rationale:
+
+- **PR 1 (done):** split `core.js` into pure `core/state.js` + browser-only `core/engine.js`; explicit init order; Vitest.
+- **PR 2:** extract pure sim math into `src/sim/` (`accuracy`, `recoil`, `ballistics`, `damage`, `movement`) with unit tests; hoist the frame pipeline into `main.js` so intra-frame ordering is visible.
+- **PR 3:** single geometry-registration path in `src/world.js` (`addSolidBox`, `registerGroupParts`), replacing the duplicated `addBox` in `map.js`/`range.js`; make `collidesAt` take `colliders` as a parameter.
+- **PR 4:** `sim/validateWeapons.js` enforcing the `recoilRecover < recoilKick / fireRate` class of constraint that has now been fixed twice by hand.
+
+Deferred to a later tranche: TypeScript migration, unifying the two time bases (`clock.elapsedTime` vs `performance.now()`) behind one game clock plus a pausable scheduler, and splitting `game` into owner-scoped slices.
+
+Dropped: unifying Bot and the player under a shared entity base class. It addresses none of the regression classes this codebase has actually hit, and would couple a probabilistic AI to a physics-driven controller.

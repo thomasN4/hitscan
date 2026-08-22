@@ -4,7 +4,7 @@
 // is a pitch-swept oscillator. If you add a new sound, follow the same
 // pattern — create nodes per playback and let them be garbage-collected
 // (do NOT reuse buffers across sounds; each call builds its own).
-import { camera } from './core.js';
+import { camera } from './core/engine.js';
 
 let audioCtx;
 function ac() {

@@ -29,7 +29,7 @@ export function aimPitch(pitch, recoil, punchRad) {
  * `rate` MUST stay below the weapon's sustained-fire input
  * (recoilKick ÷ fireRate), or the drain outpaces accumulation and the spray
  * never climbs — it just vibrates. That constraint has been fixed by hand
- * twice (`46900f7`, `b080350`); sim/validateWeapons.js enforces it.
+ * twice (`46900f7`, `b080350`); PR 4's sim/validateWeapons.js will enforce it.
  *
  * @param {number} recoil current recoil units
  * @param {number} dt     frame delta in seconds

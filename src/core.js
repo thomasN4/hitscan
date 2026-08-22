@@ -90,12 +90,11 @@ export const WEAPONS = [
                       // (~9.5 shots/s × recoilKick = 9.5/s), or the drain outpaces
                       // accumulation and spray never climbs (it just vibrates).
                       // 6 → full 6-unit climb in ~1.3 s, ~1 s settle-back
-    bloomRecover: 0.13, // spread bloom units/s — MUST stay below the sustained-fire
-                        // input (~9.5 shots/s × bloomKick ≈ 0.19/s), or the drain
-                        // outpaces accumulation and sprays never bloom at all.
-                        // 0.13 clears full bloom ~2 s after stopping (was 0.06 → ~4 s)
+                      // (also decays the horizontal component, see recoilYaw)
     punchRad: 0.012,   // radians of aim climb per recoil unit — sustained spray
                        // climbs toward ~4° (cap 6), pull down to compensate
+    yawKick: 0.4,      // ± horizontal recoil units per shot (random walk, cap ±3):
+                       // typical full-mag drift ~1-1.5° via punchRad, compensable
     scopedOverlay: false,
   },
   {
@@ -113,6 +112,8 @@ export const WEAPONS = [
     recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
     punchRad: 0.02,    // radians of aim climb per recoil unit — one meaty ~4.6°
                        // kick per shot that settles slowly with the recoil
+    yawKick: 0.8,      // ± horizontal recoil units per shot — up to ~±0.55° of
+                       // sideways jump on the big punch, real guns kick crooked
     sprayRecover: 0.08, // slow settle matches the bolt-action feel (input ≈ 0.9 shots/s × 0.25)
     scopeGate: 0.5,    // RMB re-scope is blocked until recoil decays below this
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
@@ -181,6 +182,10 @@ export const game = {
   recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
                    // While above WEAPONS[slot].scopeGate, a new RMB press
                    // can't enter the scope (main.js)
+  recoilYaw: 0,    // signed HORIZONTAL recoil (same units as `recoil`): each
+                   // shot adds up to ±yawKick — a random walk the player
+                   // steers against. Decays toward 0 at recoilRecover/s and
+                   // converts to radians via punchRad (see weapons.aimYaw).
    crouchLerp: 0,
    adsLerp: 0,
    slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)

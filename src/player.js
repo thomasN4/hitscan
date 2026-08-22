@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { player, camera, clock, game, keys } from './core.js';
 import { collidesAt } from './collision.js';
 import { sfxFootstep } from './audio.js';
-import { gunGroup, updateWeapon, aimPitch } from './weapons.js';
+import { gunGroup, updateWeapon, aimPitch, aimYaw } from './weapons.js';
 import { crosshair } from './hud.js';
 
 const GRAVITY = 22;    // m/s^2; tuned so jump arc feels snappy at 60fps+
@@ -97,11 +97,12 @@ export function updatePlayer(dt) {
 
   updateWeapon(dt);
 
-  // Camera pitch includes the recoil view punch via aimPitch() — the same
-  // expression shoot() uses for bullet direction, so the crosshair (screen
-  // center) always marks where bullets go on average. Set AFTER updateWeapon
-  // so both read the same post-decay recoil value this frame.
-  camera.rotation.set(aimPitch(), game.yaw, 0, 'YXZ');
+  // Camera angles include the recoil view punches via aimPitch()/aimYaw() —
+  // the same expressions shoot() uses for bullet direction, so the crosshair
+  // (screen center) always marks where bullets go on average, vertically AND
+  // horizontally. Set AFTER updateWeapon so both read the same post-decay
+  // recoil values this frame.
+  camera.rotation.set(aimPitch(), aimYaw(), 0, 'YXZ');
 
   // Viewmodel transform: blend hip-fire offset -> centered iron sights with
   // adsLerp; add bob and recoil kick on top.
@@ -110,6 +111,7 @@ export function updatePlayer(dt) {
   gunGroup.position.z = game.recoil * 0.012 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
   gunGroup.rotation.x = game.recoil * 0.015; // small: recoil now accumulates to the cap (6),
                                              // so a full climb must stay a nudge, not a tilt
+  gunGroup.rotation.y = -game.recoilYaw * 0.01; // subtle sideways pull matching the walk
 
   // Crosshair tightens/fades when aiming (sight picture takes over);
   // arm gap itself is driven by the accuracy model in weapons.js

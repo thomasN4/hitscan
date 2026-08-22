@@ -66,11 +66,19 @@ scene.add(muzzleFlashLight);
 
 /**
  * Vertical aim angle including recoil view punch. The camera (player.js)
- * and the shot direction (shoot()) must BOTH use this so the crosshair
- * center is always truthful about where bullets actually go.
+ * and the shot direction (shoot()) must BOTH use this (and aimYaw) so the
+ * crosshair center is always truthful about where bullets actually go.
  */
 export function aimPitch() {
   return game.pitch + game.recoil * WEAPONS[game.slot].punchRad;
+}
+
+/**
+ * Horizontal counterpart of aimPitch(): base yaw plus the signed horizontal
+ * recoil walk. Same consumer contract as aimPitch() — camera AND shots.
+ */
+export function aimYaw() {
+  return game.yaw + game.recoilYaw * WEAPONS[game.slot].punchRad;
 }
 
 // ---------- Reload animation ----------
@@ -170,15 +178,19 @@ export function shoot() {
     (Math.random() - 0.5) * game.spread,
     // 'YXZ' must match the camera's rotation order (player.js) or the shot
     // direction diverges from the view direction as pitch/yaw grow; the
-    // pitch includes the recoil punch via aimPitch() so shots follow the
-    // same climb the camera shows.
+    // pitch includes the recoil punch via aimPitch(), the yaw the horizontal
+    // recoil walk via aimYaw(), so shots follow exactly what the camera shows.
     -1
-  ).normalize().applyEuler(new THREE.Euler(aimPitch(), game.yaw, 0, 'YXZ'));
+  ).normalize().applyEuler(new THREE.Euler(aimPitch(), aimYaw(), 0, 'YXZ'));
 
   // Recoil/spray kicks are applied only AFTER this shot's ray is built:
   // a bullet leaves from the pre-kick aim point (first round is dead-on),
   // and its own kick steers the FOLLOWING shots.
   game.recoil = Math.min(game.recoil + def.recoilKick, 6);
+  // Horizontal noise: a signed random walk (cap ±3 units ≈ ±2° for the smg),
+  // so sprays wander sideways unpredictably and must be steered back.
+  game.recoilYaw = THREE.MathUtils.clamp(
+    game.recoilYaw + (Math.random() * 2 - 1) * def.yawKick, -3, 3);
   game.spray = Math.min(game.spray + def.sprayKick, def.sprayCap);
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
@@ -226,8 +238,13 @@ export function updateWeapon(dt) {
   const def = WEAPONS[game.slot];
 
   // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
-  // the sniper settles slowly for bolt-action feel; see core.WEAPONS)
+  // the sniper settles slowly for bolt-action feel; see core.WEAPONS). The
+  // horizontal walk decays toward zero at the same rate, so spray wander and
+  // climb settle together.
   game.recoil = Math.max(0, game.recoil - dt * weapon.recoilRecover);
+  game.recoilYaw = Math.abs(game.recoilYaw) <= dt * weapon.recoilRecover
+    ? 0
+    : game.recoilYaw - Math.sign(game.recoilYaw) * dt * weapon.recoilRecover;
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // the smg has a single iron-sights step; the sniper cycles its wheel-chosen

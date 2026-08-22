@@ -79,7 +79,12 @@ addEventListener('wheel', e => {
 // rather than one-shot events because firing is continuous in updateWeapon.
 addEventListener('mousedown', e => {
   if (e.button === 0 && game.locked && player.alive) game.shooting = true;
-  if (e.button === 2 && game.locked && player.alive) game.aiming = true;
+  // A fresh RMB press can't enter the scope while recoil is still settling
+  // (sniper bolt-action feel); a press already held is unaffected.
+  if (e.button === 2 && game.locked && player.alive) {
+    const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (rifle)
+    if (gate === undefined || game.recoil < gate) game.aiming = true;
+  }
 });
 addEventListener('mouseup', e => {
   if (e.button === 0) game.shooting = false;

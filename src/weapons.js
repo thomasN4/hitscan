@@ -89,6 +89,7 @@ export function switchWeapon(slot) {
     reloadTime: def.reloadTime,
     damage: def.damage,
     headshotMult: def.headshotMult,
+    recoilRecover: def.recoilRecover,
   });
   sfxSwitch();
 }
@@ -168,8 +169,9 @@ let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on re
 export function updateWeapon(dt) {
   const def = WEAPONS[game.slot];
 
-  // Recoil kick decay
-  game.recoil = Math.max(0, game.recoil - dt * 30);
+  // Recoil kick decay — rate is per-weapon (rifle resets fast for full-auto,
+  // the sniper settles slowly for bolt-action feel; see core.WEAPONS)
+  game.recoil = Math.max(0, game.recoil - dt * weapon.recoilRecover);
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // rifle has a single iron-sights step; the sniper cycles its wheel-chosen

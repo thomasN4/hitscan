@@ -79,6 +79,7 @@ export const WEAPONS = [
     zoomFovs: [55],  // iron sights
     spreadMul: 0.3,
     bloomKick: 0.02, recoilKick: 1,
+    recoilRecover: 30, // recoil units/s — full-auto needs a fast reset between shots
     scopedOverlay: false,
   },
   {
@@ -91,6 +92,8 @@ export const WEAPONS = [
     zoomFovs: [25, 12.5, 6.25], // ≈ 3x / 6x / 12x on the 75° base FOV
     spreadMul: 0.05, // near-laser when scoped and still
     bloomKick: 0.09, recoilKick: 4,
+    recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
+    scopeGate: 0.5,    // RMB re-scope is blocked until recoil decays below this
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
     semiAuto: true,      // one shot per LMB press; holding does nothing
     unscopeOnShot: true, // firing kicks you out of the scope (re-press RMB)
@@ -113,6 +116,7 @@ export const weapon = {
   reloading: false, reloadTime: WEAPONS[0].reloadTime, reloadEnd: 0,
   damage: WEAPONS[0].damage,
   headshotMult: WEAPONS[0].headshotMult,
+  recoilRecover: WEAPONS[0].recoilRecover,
 };
 
 /** Reset both slots' ammo and mirror slot 0 into `weapon`. Used on respawn. */
@@ -123,6 +127,7 @@ export function resetAmmo() {
   weapon.magSize = w.magSize; weapon.mag = w.magSize; weapon.reserve = w.reserveMax;
   weapon.fireRate = w.fireRate; weapon.reloadTime = w.reloadTime;
   weapon.damage = w.damage; weapon.headshotMult = w.headshotMult;
+  weapon.recoilRecover = w.recoilRecover;
   weapon.reloading = false;
 }
 
@@ -151,7 +156,9 @@ export const game = {
   bloom: 0,        // recoil spread kick: +0.02 per shot, decays ~0.06/s
   moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
                    // drives the movement accuracy penalty
-  recoil: 0,       // drives viewmodel kick, decays fast
+  recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
+                   // While above WEAPONS[slot].scopeGate, a new RMB press
+                   // can't enter the scope (main.js)
    crouchLerp: 0,
    adsLerp: 0,
    slot: 0,         // active weapon index into WEAPONS (0 rifle, 1 sniper)

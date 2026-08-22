@@ -109,6 +109,34 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       console.log(`[accuracy] OK`, JSON.stringify(spreads));
     }
 
+    // 5) Sniper: 1/2 weapon switch, scope overlay, and wheel zoom steps
+    //    (range only, same reason as sprint/accuracy above)
+    if (sprintCheck) {
+      const sniper = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        await wait(150);
+        const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag };
+        // Hold "RMB" to raise the scope, then scroll through the zoom levels
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+        await wait(800); // let adsLerp settle onto the first zoom step
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); // zoom in
+        await wait(400);
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+        await wait(600); // FOV needs time to blend to the tightest step
+        const zoomed = { level: cs.game.zoomLevel, overlay: document.getElementById('scopeOverlay').style.display };
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        return { switched, zoomed, backTo: cs.game.slot };
+      });
+      if (sniper.switched.slot !== 1 || sniper.switched.name !== 'SNIPER') throw new Error(`switch to sniper failed: ${JSON.stringify(sniper.switched)}`);
+      if (sniper.zoomed.level !== 2 || sniper.zoomed.overlay !== 'block') throw new Error(`zoom steps failed: ${JSON.stringify(sniper.zoomed)}`);
+      if (sniper.backTo !== 0) throw new Error(`switch back to rifle failed: slot ${sniper.backTo}`);
+      console.log(`[sniper] OK`, JSON.stringify(sniper));
+    }
+
     console.log(`[${name}] OK`, JSON.stringify({ reload: 'ok', holes: fired.holes, magAfterBurst: fired.mag, reserve: fired.reserve, ...(sprint && { sprintDist: +sprint.dist.toFixed(2) }) }));
   } catch (e) {
     failures++;

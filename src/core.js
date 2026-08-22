@@ -20,7 +20,8 @@ scene.background = new THREE.Color(0xbfae8f); // dusty haze
 scene.fog = new THREE.Fog(0xbfae8f, 40, 140);
 
 export const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 300);
-// FOV is animated by weapons.js when aiming (75 hip-fire -> 55 iron sights).
+// FOV is animated by weapons.js when aiming (75 hip-fire -> per-weapon
+// zoom targets, down to ~6° at full sniper zoom).
 
 scene.add(new THREE.HemisphereLight(0xfff3e0, 0x8a7a5c, 0.85));
 const sun = new THREE.DirectionalLight(0xffeecc, 1.4);
@@ -61,15 +62,67 @@ export const player = {
   eyeHeight: 1.7,
 };
 
-/** Rifle state. Tuning notes inline; damage model lives in weapons.js. */
+/**
+ * Weapon definitions (slot order = switch order via keys 1/2). Static stats
+ * only — the live mutable copy is `weapon` below. zoomFovs are the scoped
+ * FOV targets cycled with the mouse wheel while aiming (rifle has one
+ * "iron sights" step); spreadMul is the ADS cone multiplier.
+ */
+export const WEAPONS = [
+  {
+    name: 'RIFLE',
+    magSize: 30, reserveMax: 90,
+    fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, rifle-like)
+    reloadTime: 2.2,
+    damage: 26,      // per body shot; legs x0.75, head x4 -> one-tap kill
+    headshotMult: 4,
+    zoomFovs: [55],  // iron sights
+    spreadMul: 0.3,
+    bloomKick: 0.02, recoilKick: 1,
+    scopedOverlay: false,
+  },
+  {
+    name: 'SNIPER',
+    magSize: 10, reserveMax: 30,
+    fireRate: 1.1,   // bolt-action pacing (~0.9 shots/sec)
+    reloadTime: 3.2,
+    damage: 100,     // one-shot body kill at any range
+    headshotMult: 2, // head already lethal vs 100 hp; kept for hitmarker color
+    zoomFovs: [25, 12.5, 6.25], // ≈ 3x / 6x / 12x on the 75° base FOV
+    spreadMul: 0.05, // near-laser when scoped and still
+    bloomKick: 0.09, recoilKick: 4,
+    scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
+  },
+];
+
+/** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
+export const ammoStore = WEAPONS.map(w => ({ mag: w.magSize, reserve: w.reserveMax }));
+
+/**
+ * Live state of the ACTIVE weapon. Stat fields are copied from
+ * WEAPONS[game.slot] by switchWeapon() in weapons.js; HUD/combat read this
+ * object only. Initialized to slot 0.
+ */
 export const weapon = {
-  magSize: 30, mag: 30, reserve: 90,
-  fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, rifle-like)
+  name: WEAPONS[0].name,
+  magSize: WEAPONS[0].magSize, mag: WEAPONS[0].magSize, reserve: WEAPONS[0].reserveMax,
+  fireRate: WEAPONS[0].fireRate,
   lastShot: 0,
-  reloading: false, reloadTime: 2.2, reloadEnd: 0,
-  damage: 26,       // per body shot; legs x0.75, head x4 -> one-tap kill
-  headshotMult: 4,
+  reloading: false, reloadTime: WEAPONS[0].reloadTime, reloadEnd: 0,
+  damage: WEAPONS[0].damage,
+  headshotMult: WEAPONS[0].headshotMult,
 };
+
+/** Reset both slots' ammo and mirror slot 0 into `weapon`. Used on respawn. */
+export function resetAmmo() {
+  WEAPONS.forEach((w, i) => { ammoStore[i].mag = w.magSize; ammoStore[i].reserve = w.reserveMax; });
+  const w = WEAPONS[0];
+  weapon.name = w.name;
+  weapon.magSize = w.magSize; weapon.mag = w.magSize; weapon.reserve = w.reserveMax;
+  weapon.fireRate = w.fireRate; weapon.reloadTime = w.reloadTime;
+  weapon.damage = w.damage; weapon.headshotMult = w.headshotMult;
+  weapon.reloading = false;
+}
 
 /**
  * Misc per-frame / transient flags. Grouped here because they are touched
@@ -97,9 +150,13 @@ export const game = {
   moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
                    // drives the movement accuracy penalty
   recoil: 0,       // drives viewmodel kick, decays fast
-  crouchLerp: 0,
-  adsLerp: 0,
-  stepTimer: 0.2,  // countdown to next footstep sound
+   crouchLerp: 0,
+   adsLerp: 0,
+   slot: 0,         // active weapon index into WEAPONS (0 rifle, 1 sniper)
+   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
+   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
+                    // doesn't get twitchy at 12x (computed in weapons.js)
+   stepTimer: 0.2,  // countdown to next footstep sound
   bobAmt: 0,       // current view-bob amplitude, computed in player.js
   scoreKills: 0,   // shown as "CT" score
   scoreDeaths: 0,  // shown as "T" score

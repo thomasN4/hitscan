@@ -37,6 +37,7 @@ let rifleMag; // kept for the reload animation (mag drop/reseat)
 }
 
 const sniperGroup = new THREE.Group();
+let sniperMag; // kept for the reload animation (mag drop/reseat)
 {
   const dark = new THREE.MeshLambertMaterial({ color: 0x24301f }); // green gunmetal
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.62), dark);
@@ -52,6 +53,8 @@ const sniperGroup = new THREE.Group();
   scope.position.set(0.26, -0.12, -0.6);
   const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.10, 0.10), dark);
   mag.position.set(0.26, -0.29, -0.52);
+  mag.userData.baseY = -0.29;
+  sniperMag = mag;
   sniperGroup.add(body, barrel, stock, scope, mag);
 }
 
@@ -239,6 +242,7 @@ export function updateWeapon(dt) {
     ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - nowS) / weapon.reloadTime, 0, 1)
     : 0;
   if (game.slot === 0) poseReload(rifleGroup, rifleMag, reloadT);
+  else poseReload(sniperGroup, sniperMag, reloadT);
 
   // Reload finish: top the mag back up from reserve (partial reloads allowed).
   // Range mode: reserve is not deducted — R always restores a full loadout

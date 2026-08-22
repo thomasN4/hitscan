@@ -127,12 +127,26 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         await wait(600); // FOV needs time to blend to the tightest step
         const zoomed = { level: cs.game.zoomLevel, overlay: document.getElementById('scopeOverlay').style.display };
         window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
+        await wait(400); // let adsLerp fall back out
+        // Semi-auto + unscope-on-shot: aim, hold LMB for ~1.5 s (fireRate is
+        // 1.1 s, so full-auto would fire twice), expect exactly one round.
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+        await wait(800);
+        const magBeforeShot = cs.weapon.mag;
+        cs.game.pitch = -1.2; // into the floor so the shot lands somewhere safe
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+        await wait(1500);
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+        const shot = { fired: magBeforeShot - cs.weapon.mag, aimingAfter: cs.game.aiming };
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
-        return { switched, zoomed, backTo: cs.game.slot };
+        return { switched, zoomed, shot, backTo: cs.game.slot };
       });
       if (sniper.switched.slot !== 1 || sniper.switched.name !== 'SNIPER') throw new Error(`switch to sniper failed: ${JSON.stringify(sniper.switched)}`);
       if (sniper.zoomed.level !== 2 || sniper.zoomed.overlay !== 'block') throw new Error(`zoom steps failed: ${JSON.stringify(sniper.zoomed)}`);
+      if (sniper.shot.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(sniper.shot)}`);
+      if (sniper.shot.aimingAfter !== false) throw new Error(`shot should exit the scope: ${JSON.stringify(sniper.shot)}`);
       if (sniper.backTo !== 0) throw new Error(`switch back to rifle failed: slot ${sniper.backTo}`);
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }

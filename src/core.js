@@ -84,14 +84,16 @@ export const WEAPONS = [
   {
     name: 'SNIPER',
     magSize: 10, reserveMax: 30,
-    fireRate: 1.1,   // bolt-action pacing (~0.9 shots/sec)
+    fireRate: 1.1,   // semi-auto pacing (~0.9 shots/sec)
     reloadTime: 3.2,
-    damage: 100,     // one-shot body kill at any range
-    headshotMult: 2, // head already lethal vs 100 hp; kept for hitmarker color
+    damage: 60,      // two torso shots to kill; head x4 = one-tap, legs x0.75
+    headshotMult: 4,
     zoomFovs: [25, 12.5, 6.25], // ≈ 3x / 6x / 12x on the 75° base FOV
     spreadMul: 0.05, // near-laser when scoped and still
     bloomKick: 0.09, recoilKick: 4,
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
+    semiAuto: true,      // one shot per LMB press; holding does nothing
+    unscopeOnShot: true, // firing kicks you out of the scope (re-press RMB)
   },
 ];
 

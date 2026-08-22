@@ -96,8 +96,9 @@ export function switchWeapon(slot) {
 /**
  * Fire one shot: consume ammo, apply recoil/spread bloom, then hitscan.
  * The spread cone widens with consecutive fire (`game.spread`) and shrinks
- * to 30% while aiming. Nearest hit across solids + live bot parts decides
- * the outcome — bot hit -> damage by zone, wall hit -> impact puff only.
+ * to the weapon's spreadMul while aiming. Nearest hit across solids + live
+ * bot parts decides the outcome — bot hit -> damage by zone, wall hit ->
+ * impact puff only.
  */
 export function shoot() {
   if (weapon.reloading || weapon.mag <= 0) {
@@ -114,6 +115,11 @@ export function shoot() {
   muzzleFlashLight.intensity = 3;
   setTimeout(() => muzzleFlashLight.intensity = 0, 50);
   (game.slot === 1 ? sfxSniper : sfxShoot)();
+
+  // Bolt-action feel: firing kicks you out of the scope. Clearing
+  // game.aiming means a fresh RMB press is needed to re-scope even if the
+  // button is still held (mouseup will just re-clear it harmlessly).
+  if (def.unscopeOnShot) game.aiming = false;
 
   const dir = new THREE.Vector3(
     (Math.random() - 0.5) * game.spread,
@@ -157,6 +163,8 @@ export function shoot() {
  * target, reload completion, trigger handling, spread recovery. Called from
  * player.js inside the game loop.
  */
+let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on release
+
 export function updateWeapon(dt) {
   const def = WEAPONS[game.slot];
 
@@ -167,6 +175,7 @@ export function updateWeapon(dt) {
   // rifle has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules).
+  if (!game.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
   const aimFov = def.zoomFovs[Math.min(game.zoomLevel, def.zoomFovs.length - 1)];
   game.adsLerp += ((game.aiming ? 1 : 0) - game.adsLerp) * Math.min(1, dt * 12);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
@@ -198,8 +207,15 @@ export function updateWeapon(dt) {
     weapon.reloading = false;
   }
 
-  // Trigger: full-auto while LMB held, paced by fireRate
-  if (game.shooting && clock.elapsedTime - weapon.lastShot >= weapon.fireRate) shoot();
+  // Trigger: rifle is full-auto while LMB held; semi-autos (sniper) fire
+  // once per press — the latch blocks repeats until the button is released.
+  if (!game.shooting) triggerLatch = false;
+  else if (!def.semiAuto || !triggerLatch) {
+    if (clock.elapsedTime - weapon.lastShot >= weapon.fireRate) {
+      shoot();
+      if (def.semiAuto) triggerLatch = true;
+    }
+  }
 
   // ---- Accuracy model -------------------------------------------------
   // totalSpread = (stance base + movement penalty + recoil bloom) × ADS

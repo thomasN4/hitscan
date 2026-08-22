@@ -52,6 +52,8 @@ export function respawn() {
   player.alive = true;
   game.yaw = 0;   // face -z, into the arena / downrange
   game.pitch = 0;
+  game.recoil = 0; // else the view punch would spawn the camera mid-climb
+  game.bloom = 0;
   resetAmmo();    // refills both slots and mirrors the rifle into `weapon`
   game.slot = 0;
   game.zoomLevel = 0;

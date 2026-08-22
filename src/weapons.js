@@ -135,20 +135,21 @@ export function updateWeapon(dt) {
 
   // ---- Accuracy model -------------------------------------------------
   // totalSpread = (stance base + movement penalty + recoil bloom) × ADS
-  //   stance base: crouching roughly halves it (lerped via crouchLerp)
-  //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js), so
-  //                walking costs ~+0.010 and sprinting ~+0.015 rad
+  //   stance base: crouching cuts it ~72% AND halves the movement penalty,
+  //                making crouch-walk the most accurate mobile stance
+  //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js)
   //   ADS:         iron sights shrink the whole cone to 30%
-  // game.spread is consumed by shoot(); the crosshair gap in player.js maps
+  // game.spread is consumed by shoot(); the crosshair gap in weapons.js maps
   // from the same value, keeping what you see in sync with where bullets go.
   const adsMul = game.aiming ? 0.3 : 1;
-  const stanceBase = 0.002 - 0.001 * game.crouchLerp;
-  const movePenalty = 0.010 * game.moveLerp;
+  const stanceBase = 0.0025 - 0.0018 * game.crouchLerp;
+  const movePenalty = 0.010 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
   game.spread = Math.max(0.0005,
     (stanceBase + movePenalty + game.bloom) * adsMul);
   game.bloom = Math.max(0, game.bloom - dt * 0.06);
 
-  // Crosshair mirrors the cone: ~5 px when tight, opening with movement and
-  // bloom (capped so a long spray doesn't push arms off-screen)
-  setCrosshairGap(Math.min(4 + game.spread * 400, 60));
+  // Crosshair mirrors the cone: ~6 px standing still, opening with movement
+  // and bloom (capped so a long spray doesn't push arms off-screen).
+  // Multiplier chosen so stance/movement differences are visible per arm.
+  setCrosshairGap(Math.min(3 + game.spread * 1100, 60));
 }

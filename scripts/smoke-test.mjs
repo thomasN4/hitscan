@@ -109,6 +109,61 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       console.log(`[accuracy] OK`, JSON.stringify(spreads));
     }
 
+    // 5) Sniper: 1/2 weapon switch, scope overlay, and wheel zoom steps
+    //    (range only, same reason as sprint/accuracy above)
+    if (sprintCheck) {
+      const sniper = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        await wait(150);
+        const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag };
+        // Hold "RMB" to raise the scope, then scroll through the zoom levels
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+        await wait(800); // let adsLerp settle onto the first zoom step
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); // zoom in
+        await wait(400);
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+        await wait(600); // FOV needs time to blend to the tightest step
+        const zoomed = { level: cs.game.zoomLevel, overlay: document.getElementById('scopeOverlay').style.display };
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
+        await wait(400); // let adsLerp fall back out
+        // Semi-auto + unscope-on-shot: aim, fire one round (the trigger
+        // latch makes holding LMB a no-op after the first shot).
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+        await wait(800);
+        const magBeforeShot = cs.weapon.mag;
+        cs.game.pitch = -1.2; // into the floor so the shot lands somewhere safe
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+        await wait(250); // enough for one frame to process the semi-auto shot
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+        const shot = { fired: magBeforeShot - cs.weapon.mag, aimingAfter: cs.game.aiming };
+        // Re-scope gate: an immediate RMB press after the shot must be
+        // rejected while recoil (kick 4, recover 13/s) is still settling.
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+        await wait(150);
+        const gated = { aiming: cs.game.aiming, overlay: document.getElementById('scopeOverlay').style.display };
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
+        await wait(900); // recoil falls below the 0.5 gate (~0.27 s at full sim speed)
+        // After settling, a fresh press must scope in normally.
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+        await wait(800); // adsLerp needs ~0.16 s to cross the overlay threshold
+        const rescope = { aiming: cs.game.aiming, overlay: document.getElementById('scopeOverlay').style.display };
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        return { switched, zoomed, shot, gated, rescope, backTo: cs.game.slot };
+      });
+      if (sniper.switched.slot !== 1 || sniper.switched.name !== 'SNIPER') throw new Error(`switch to sniper failed: ${JSON.stringify(sniper.switched)}`);
+      if (sniper.zoomed.level !== 2 || sniper.zoomed.overlay !== 'block') throw new Error(`zoom steps failed: ${JSON.stringify(sniper.zoomed)}`);
+      if (sniper.shot.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(sniper.shot)}`);
+      if (sniper.shot.aimingAfter !== false) throw new Error(`shot should exit the scope: ${JSON.stringify(sniper.shot)}`);
+      if (sniper.gated.aiming !== false || sniper.gated.overlay !== 'none') throw new Error(`re-scope during recoil settle must stay blocked: ${JSON.stringify(sniper.gated)}`);
+      if (sniper.rescope.aiming !== true || sniper.rescope.overlay !== 'block') throw new Error(`re-scope after settle failed: ${JSON.stringify(sniper.rescope)}`);
+      if (sniper.backTo !== 0) throw new Error(`switch back to rifle failed: slot ${sniper.backTo}`);
+      console.log(`[sniper] OK`, JSON.stringify(sniper));
+    }
+
     console.log(`[${name}] OK`, JSON.stringify({ reload: 'ok', holes: fired.holes, magAfterBurst: fired.mag, reserve: fired.reserve, ...(sprint && { sprintDist: +sprint.dist.toFixed(2) }) }));
   } catch (e) {
     failures++;

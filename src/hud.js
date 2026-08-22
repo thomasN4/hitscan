@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core.js state directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, game } from './core.js';
+import { player, weapon, game, WEAPONS } from './core.js';
 
 const el = id => document.getElementById(id);
 const hudEl = el('hud');
@@ -20,6 +20,9 @@ const healthFill = el('healthFill');
 const magText = el('magText');
 const ammoReserve = el('ammoReserve');
 const reloadHint = el('reloadHint');
+const scopeOverlay = el('scopeOverlay');
+const zoomText = el('zoomText');
+const weaponName = el('weaponName');
 
 export { hudEl, crosshair, vignette };
 
@@ -84,6 +87,22 @@ export function setCrosshairGap(px) {
   crosshair.style.setProperty('--gap', px.toFixed(1) + 'px');
 }
 
+/**
+ * Show/hide the full-screen sniper scope reticle. While it is up the normal
+ * crosshair is hidden (the reticle replaces it). Called every frame from
+ * weapons.js, so flips are cached to avoid DOM churn; main.js also forces
+ * `false` on pointer-lock loss since updateWeapon stops running then.
+ */
+let scopeShown = false;
+export function setScopeOverlay(on) {
+  if (on === scopeShown) return;
+  scopeShown = on;
+  scopeOverlay.style.display = on ? 'block' : 'none';
+  crosshair.style.visibility = on ? 'hidden' : 'visible';
+}
+
+let lastName = '';
+let lastZoomLabel = '';
 export function updateHUD() {
   hpText.textContent = Math.max(0, Math.round(player.hp));
   healthFill.style.width = Math.max(0, player.hp) + '%';
@@ -94,4 +113,17 @@ export function updateHUD() {
   reloadHint.style.visibility = (weapon.mag <= 10 && !weapon.reloading) ? 'visible' : 'hidden';
   if (weapon.reloading) reloadHint.textContent = 'RELOADING...';
   else reloadHint.textContent = 'PRESS [R] TO RELOAD';
+  // Weapon name + scope zoom label; cached so unchanged values don't touch
+  // the DOM (these are written every frame like the rest of updateHUD).
+  if (weapon.name !== lastName) {
+    lastName = weapon.name;
+    weaponName.textContent = weapon.name;
+  }
+  const zoomLabel = game.aiming && game.slot === 1
+    ? Math.round(75 / WEAPONS[game.slot].zoomFovs[game.zoomLevel]) + 'x'
+    : '';
+  if (zoomLabel !== lastZoomLabel) {
+    lastZoomLabel = zoomLabel;
+    zoomText.textContent = zoomLabel;
+  }
 }

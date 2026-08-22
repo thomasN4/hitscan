@@ -3,7 +3,7 @@
 // This module is the single place where HP crosses 0: bots call
 // damagePlayer, weapons.js calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
-import { player, weapon, game, bots } from './core.js';
+import { player, game, bots, resetAmmo } from './core.js';
 import { sfxHurt } from './audio.js';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud.js';
 
@@ -52,9 +52,9 @@ export function respawn() {
   player.alive = true;
   game.yaw = 0;   // face -z, into the arena / downrange
   game.pitch = 0;
-  weapon.mag = weapon.magSize;
-  weapon.reserve = 90;
-  weapon.reloading = false;
+  resetAmmo();    // refills both slots and mirrors the rifle into `weapon`
+  game.slot = 0;
+  game.zoomLevel = 0;
   updateHUD();
   clearVignette();
 }

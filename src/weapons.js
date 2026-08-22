@@ -307,8 +307,8 @@ export function updateWeapon(dt) {
   //                halves the movement penalty, keeping crouch-walk the most
   //                accurate mobile stance
   //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js), scaled
-  //                superlinearly (^2.5) so sprinting diverges sharply from
-  //                walking: walk ≈ 50" @ 50 m, sprint ≈ 119"
+  //                cubically so sprinting diverges sharply from walking:
+  //                walk ≈ 50" @ 50 m, sprint ≈ 144"
   //   spray:       cone multiplier, 1 rested; grows per shot (sprayKick up to
   //                sprayCap), recovers toward 1 at sprayRecover/s. It scales
   //                the (stance + movement) group, so situational spread opens
@@ -321,7 +321,7 @@ export function updateWeapon(dt) {
   // from the same value, keeping what you see in sync with where bullets go.
   const adsMul = game.aiming ? def.spreadMul : 1;
   const stanceBase = 0.0006 + 0.0018 * (1 - game.crouchLerp);
-  const movePenalty = 0.02 * Math.pow(game.moveLerp, 2.5) * (1 - 0.5 * game.crouchLerp);
+  const movePenalty = 0.02 * Math.pow(game.moveLerp, 3) * (1 - 0.5 * game.crouchLerp);
   game.spread = Math.max(0.00005,
     ((stanceBase + movePenalty) * game.spray + def.inherent) * adsMul);
   game.spray = Math.max(1, game.spray - dt * def.sprayRecover);
@@ -332,7 +332,9 @@ export function updateWeapon(dt) {
   // changes stay visible: `inherent` dominates hip-fire spread, and an
   // additive floor would bury its stance-dependent share under ~4 px of
   // stance-independent width (sub-pixel, imperceptible). The mean impact
-  // point is screen center itself via aimPitch().
+  // point is screen center itself via aimPitch(). The cap is generous enough
+  // that only extreme sprint/spray cones reach it (full sprint ≈ 114 px @ an
+  // 800 px viewport); below it the gap tracks spread exactly.
   const pxPerTan = window.innerHeight / 2 / Math.tan(camera.fov * Math.PI / 360);
-  setCrosshairGap(Math.min(Math.tan(game.spread / 2) * pxPerTan * CROSSHAIR_GAIN, 60));
+  setCrosshairGap(Math.min(Math.tan(game.spread / 2) * pxPerTan * CROSSHAIR_GAIN, 120));
 }

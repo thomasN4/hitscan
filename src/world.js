@@ -26,8 +26,16 @@ export const colliders = [];
  * Register a mesh as a raycast target only — no movement AABB.
  *
  * For the ground planes in both builders: they need decals and must stop
- * bullets, but walking is bounded by the perimeter walls instead, and a
- * ground-plane AABB would be a floor-height box the player stands inside.
+ * bullets, but movement is bounded by other geometry instead (map.js's
+ * perimeter walls, range.js's lane walls). Giving a flat plane an AABB would
+ * not trap anyone — it would simply do nothing: a PlaneGeometry rotated -PI/2
+ * measures to a ZERO-HEIGHT box at y ~ 0, entirely below TEST_BOX_MIN_Y, so
+ * collidesAt could never intersect it.
+ *
+ * That distinction matters when you extend a map. Geometry with real HEIGHT —
+ * a thick floor slab, a raised platform, a ramp — is NOT this case. Routing
+ * one of those through here ships a walk-through floor; it belongs in
+ * addSolidBox (or registerSolidBox, if you positioned it yourself).
  *
  * @param {THREE.Object3D} mesh
  * @returns {THREE.Object3D} the same mesh, for chaining
@@ -71,16 +79,39 @@ export function registerSolidBox(mesh) {
  * @param {THREE.Object3D[]} [parts.shootable] raycast targets
  * @param {THREE.Object3D[]} [parts.blocking]  movement blockers
  */
-export function registerGroupParts(group, { shootable = [], blocking = [] }) {
+export function registerGroupParts(group, { shootable = [], blocking = [] } = {}) {
   group.updateMatrixWorld(true);
   solids.push(...shootable);
   for (const part of blocking) colliders.push(new THREE.Box3().setFromObject(part));
 }
 
 /**
+ * Build a box mesh sitting on y = `y`. No scene, no registration — pure, so
+ * the base-vs-centre convention below is unit-testable in plain Node.
+ *
+ * `y` is the box's BASE, not its centre: callers place walls and crates by the
+ * ground they stand on. BoxGeometry is centred on its origin, so the mesh has
+ * to be lifted by half its height. Drop that lift and every solid in both maps
+ * sinks halfway into the floor.
+ *
+ * @param {number} x centre x
+ * @param {number} y base y — the box's BASE, not its centre
+ * @param {number} z centre z
+ * @param {number} w width  @param {number} h height  @param {number} d depth
+ * @param {THREE.Material} mat
+ * @returns {THREE.Mesh} unregistered, not in the scene
+ */
+export function createSolidBox(x, y, z, w, h, d, mat) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y + h / 2, z); // BoxGeometry is centered; shift up so base sits at y
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
+/**
  * Create a box sitting on y = `y`, add it to the scene, and register it in
  * both registries. The shared body of what `map.js` and `range.js` each used
- * to implement separately.
+ * to implement separately, and the default for walls and crates.
  *
  * Browser-only: this is the one function here that touches the scene, so it
  * requires initEngine() to have run.
@@ -93,9 +124,7 @@ export function registerGroupParts(group, { shootable = [], blocking = [] }) {
  * @returns {THREE.Mesh}
  */
 export function addSolidBox(x, y, z, w, h, d, mat) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  mesh.position.set(x, y + h / 2, z); // BoxGeometry is centered; shift up so base sits at y
-  mesh.castShadow = mesh.receiveShadow = true;
+  const mesh = createSolidBox(x, y, z, w, h, d, mat);
   scene.add(mesh);
   return registerSolidBox(mesh);
 }

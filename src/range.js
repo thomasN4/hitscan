@@ -6,6 +6,11 @@
 // decorated with elliptical bullseye rings.
 // All target parts are registered as `solids` so bullet-hole decals work
 // on them; nothing here shoots back.
+//
+// Geometry goes through world.js. This file used to keep its own copy of the
+// registration logic, and that copy shipped without the `colliders` push —
+// the whole range map was no-clip (`431ac6e`). There is now one
+// implementation to get wrong.
 import * as THREE from 'three';
 import { scene } from './core/engine.js';
 import { addSolidBox, registerSolid, registerGroupParts } from './world.js';
@@ -14,11 +19,6 @@ const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });
 const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
 const matPost   = new THREE.MeshLambertMaterial({ color: 0x6b5a3e });
-
-// Shared with map.js via world.js. This file used to keep its own copy, and
-// that copy shipped without the `colliders` push — the whole range map was
-// no-clip (`431ac6e`). There is now one implementation to get wrong.
-const addBox = addSolidBox;
 
 /** Render text to a canvas and return it as a texture. */
 function makeTextTexture(text, { width = 256, height = 128, font = 'bold 72px sans-serif', color = '#3a3226' } = {}) {
@@ -130,10 +130,10 @@ export function buildRange() {
 
   // Lane walls run continuously from the backstop (z=-80.5) to the rear wall
   // (z=20) — no gaps, so no void is visible anywhere from inside the lane.
-  addBox(-10, 0, -30, 1, 4, 101, matWall2);  // left wall
-  addBox( 10, 0, -30, 1, 4, 101, matWall2);  // right wall
-  addBox(0, 0, 20, 21, 4, 1, matWall2);      // rear wall behind firing line
-  addBox(0, 0, -80.5, 21, 5, 1, matWall);    // backstop
+  addSolidBox(-10, 0, -30, 1, 4, 101, matWall2);  // left wall
+  addSolidBox( 10, 0, -30, 1, 4, 101, matWall2);  // right wall
+  addSolidBox(0, 0, 20, 21, 4, 1, matWall2);      // rear wall behind firing line
+  addSolidBox(0, 0, -80.5, 21, 5, 1, matWall);    // backstop
 
   // Firing-line marker strip across the floor
   const line = new THREE.Mesh(new THREE.BoxGeometry(18, 0.02, 0.4), new THREE.MeshLambertMaterial({ color: 0x3a3226 }));

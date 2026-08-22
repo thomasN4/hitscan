@@ -65,13 +65,21 @@ Two test layers, deliberately split:
   ```
 
   `updateWeapon` consumes the blends `updateMovement` writes and decays `game.recoil`; `updateCamera` and `updateViewmodel` then read that post-decay recoil, so camera, viewmodel and bullets agree within a frame. Reordering aims the camera a frame ahead of the shots (`5e004a5`). The pin runs the other way too: `updateMovement` writes `camera.position`, and `shoot()` — reached from inside `updateWeapon` — rays from `camera.getWorldPosition()`, so that write cannot be deferred to `updateCamera` without firing every shot from the previous frame's eye. Keep the sequence flat in `animate()` — do not nest one stage inside another.
-- **Dependency direction:** everything may import from `core/state.js` and `sim/`; browser-side modules also import `core/engine.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → {sim, core}.
-- **Level geometry must go through `src/world.js`**, which owns `solids` (raycast targets: bullets, decals, bot LOS) and `colliders` (world-space AABBs for movement). Adding meshes to the scene directly creates walk-through/shoot-through bugs. Pick by what the geometry should do:
-  - `addSolidBox(x, y, z, w, h, d, mat)` — creates, adds to the scene, registers both. The default for walls and crates. Browser-only.
-  - `registerSolid(mesh)` — raycast target with no AABB; for ground planes, where movement is bounded by walls instead.
-  - `registerGroupParts(group, { shootable, blocking })` — for parts under a transformed parent. Flushes the group's world matrix before measuring, and takes two lists because they legitimately differ (a range target's post blocks walking but not bullets).
+- **Dependency direction:** everything may import from `core/state.js` and `sim/`; browser-side modules also import `core/engine.js` and `world.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons, map, range} → {world, sim, core}. `world.js` sits between the map builders and `core/`: unlike `sim/` it is not engine-free — it imports `scene` from `core/engine.js` — but it reads `scene` only inside `addSolidBox`, which is what keeps the module importable in plain Node.
+- **Level geometry must go through `src/world.js`**, which owns `solids` (raycast targets: bullets, decals, bot LOS) and `colliders` (world-space AABBs for movement). Adding meshes to the scene directly creates walk-through/shoot-through bugs. That is the whole public surface — if none of these fits, add a function here rather than pushing to the arrays yourself:
 
-  Only `addSolidBox` touches the scene; the rest are pure and unit-tested, because both bugs this has caused (`431ac6e` no-clip, `faa52c5` AABBs at the origin) live in the scene-free half.
+  | | |
+  |---|---|
+  | `addSolidBox(x,y,z,w,h,d,mat)` | Create + `scene.add` + register both. **The default** for walls and crates. Browser-only. |
+  | `createSolidBox(x,y,z,w,h,d,mat)` | Same construction, but no scene and no registration. Pure; the seam `addSolidBox` is built from, and where `y` = BASE is unit-tested. |
+  | `registerSolidBox(mesh)` | Both registries, for a mesh you positioned yourself. Pure. |
+  | `registerSolid(mesh)` | Raycast target, **no** AABB — flat ground planes only. Pure. |
+  | `registerGroupParts(group, {shootable, blocking})` | Parts under a transformed parent. Flushes the group's world matrix before measuring, and takes two lists because they legitimately differ (a range target's post blocks walking but not bullets). Pure. |
+  | `resetWorld()` | Clears both registries. Tests only. |
+
+  `registerSolid` is narrower than it looks: it is right for the ground planes because a flat `PlaneGeometry` measures to a **zero-height** box at y ≈ 0, below `TEST_BOX_MIN_Y`, so an AABB there would do nothing at all — movement is bounded by the perimeter/lane walls instead. Geometry with real height (a floor slab, a raised platform, a ramp) is **not** this case and must go through `addSolidBox`/`registerSolidBox`, or you ship a walk-through floor.
+
+  Only `addSolidBox` touches the scene; the rest are pure and unit-tested, because all three bugs this has caused (`431ac6e` no-clip, `faa52c5` AABBs at the origin, and the base-vs-centre offset) live in the scene-free half.
 - **Map switching is a full page reload** driven by the `?map=` URL param (read once by `main.js` at startup into `game.map`). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
 - **Damage flows through `combat.js`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
 - DOM writes only in `hud.js`. Sound synthesis only in `audio.js`.

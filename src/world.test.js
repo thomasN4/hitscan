@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import {
   solids, colliders, resetWorld,
-  registerSolid, registerSolidBox, registerGroupParts,
+  createSolidBox, registerSolid, registerSolidBox, registerGroupParts,
 } from './world.js';
 
 const box = (w = 1, h = 1, d = 1) =>
@@ -37,7 +37,8 @@ describe('registerSolidBox', () => {
 describe('registerSolid', () => {
   test('adds a raycast target with NO movement AABB', () => {
     // Ground planes: bullets and decals need them, but an AABB would be a
-    // floor-height box the player is permanently standing inside.
+    // zero-height box at y ~ 0 — below TEST_BOX_MIN_Y, so it could never
+    // block anything. Geometry with real height must NOT come through here.
     registerSolid(box());
     expect(solids).toHaveLength(1);
     expect(colliders).toHaveLength(0);
@@ -91,6 +92,40 @@ describe('registerGroupParts', () => {
 
   test('defaults both lists to empty', () => {
     registerGroupParts(new THREE.Group(), {});
+    expect(solids).toHaveLength(0);
+    expect(colliders).toHaveLength(0);
+  });
+});
+
+describe('createSolidBox', () => {
+  test('`y` is the BASE of the box, not its centre', () => {
+    // The only line encoding this convention. Callers place walls and crates
+    // by the ground they stand on, so a box of height 3 based at y=0 must
+    // span 0..3 — not -1.5..1.5.
+    registerSolidBox(createSolidBox(0, 0, 0, 2, 3, 2));
+    expect(colliders[0].min.y).toBeCloseTo(0, 6);
+    expect(colliders[0].max.y).toBeCloseTo(3, 6);
+  });
+
+  test('and that assertion is not vacuous — without the lift it straddles y=0', () => {
+    // Reproduces the un-lifted behavior directly: BoxGeometry centred on the
+    // origin sinks half its height below the floor.
+    const mesh = createSolidBox(0, 0, 0, 2, 3, 2);
+    mesh.position.set(0, 0, 0); // drop the + h / 2
+    const sunk = new THREE.Box3().setFromObject(mesh);
+    expect(sunk.min.y).toBeCloseTo(-1.5, 6);
+  });
+
+  test('a raised box is based at `y`, so it clears the ground', () => {
+    // map.js stacks crates this way: addSolidBox(-9, 3, ..., 3, 3, 3).
+    registerSolidBox(createSolidBox(0, 3, 0, 3, 3, 3));
+    expect(colliders[0].min.y).toBeCloseTo(3, 6);
+    expect(colliders[0].max.y).toBeCloseTo(6, 6);
+  });
+
+  test('is pure — no scene, no registration', () => {
+    const mesh = createSolidBox(0, 0, 0, 1, 1, 1);
+    expect(mesh.parent).toBe(null);
     expect(solids).toHaveLength(0);
     expect(colliders).toHaveLength(0);
   });

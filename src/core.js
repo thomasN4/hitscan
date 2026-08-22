@@ -79,7 +79,10 @@ export const WEAPONS = [
     zoomFovs: [55],  // iron sights
     spreadMul: 0.3,
     bloomKick: 0.02, recoilKick: 1,
-    recoilRecover: 30, // recoil units/s — full-auto needs a fast reset between shots
+    recoilRecover: 6, // recoil units/s — MUST stay below the sustained-fire input
+                      // (~9.5 shots/s × recoilKick = 9.5/s), or the drain outpaces
+                      // accumulation and spray never climbs (it just vibrates).
+                      // 6 → full 6-unit climb in ~1.3 s, ~1 s settle-back
     bloomRecover: 0.13, // spread bloom units/s — MUST stay below the sustained-fire
                         // input (~9.5 shots/s × bloomKick ≈ 0.19/s), or the drain
                         // outpaces accumulation and sprays never bloom at all.

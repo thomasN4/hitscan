@@ -107,8 +107,9 @@ export function updatePlayer(dt) {
   // adsLerp; add bob and recoil kick on top.
   gunGroup.position.x = -0.25 * game.adsLerp;
   gunGroup.position.y = 0.14 * game.adsLerp + Math.sin(clock.elapsedTime * 10) * game.bobAmt;
-  gunGroup.position.z = game.recoil * 0.03 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
-  gunGroup.rotation.x = game.recoil * 0.05;
+  gunGroup.position.z = game.recoil * 0.012 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
+  gunGroup.rotation.x = game.recoil * 0.015; // small: recoil now accumulates to the cap (6),
+                                             // so a full climb must stay a nudge, not a tilt
 
   // Crosshair tightens/fades when aiming (sight picture takes over);
   // arm gap itself is driven by the accuracy model in weapons.js

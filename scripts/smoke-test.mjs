@@ -146,6 +146,24 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       if (clip.z < -79.9) throw new Error(`no-clip: walked into/through backstop to z=${clip.z.toFixed(2)}`);
       if (clip.z > -76.5) throw new Error(`no progress toward backstop: z=${clip.z.toFixed(2)}`);
       console.log(`[noclip] OK`, JSON.stringify(clip));
+
+      // 6) Target collision: walk into the 10 m silhouette (torso front
+      //    face at z=-4.8, at x=-4.5). Must stop short of its center plane.
+      const target = await page.evaluate(async () => {
+        const cs = window.__cs;
+        cs.player.pos.set(-4.5, 1.7, -2);
+        cs.game.yaw = 0; // face -z, straight at the target
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        const t0 = performance.now();
+        while (performance.now() - t0 < 1200) await new Promise(r => requestAnimationFrame(r));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        return { x: cs.player.pos.x, z: cs.player.pos.z };
+      });
+      // Blocked around z ≈ -4.35 (front face + radius); through would reach
+      // well past the torso center (-5)
+      if (target.z < -4.9) throw new Error(`no-clip: walked through target to ${JSON.stringify(target)}`);
+      if (target.z > -2.8 || Math.abs(target.x + 4.5) > 0.3) throw new Error(`no progress toward target: ${JSON.stringify(target)}`);
+      console.log(`[targetclip] OK`, JSON.stringify(target));
     }
 
     // 5) Sniper: 1/2 weapon switch, scope overlay, and wheel zoom steps

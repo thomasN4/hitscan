@@ -112,6 +112,11 @@ function addTarget(x, z, { height = 0, yaw = 0 } = {}) { // yaw 0 = facing firin
   g.position.set(x, height, z);
   g.rotation.y = yaw;
   scene.add(g);
+  // Flush the group transform into matrixWorld NOW — Box3.setFromObject
+  // below composes each part against its parent's CURRENT world matrix,
+  // which is still identity until the first render. Without this, every
+  // target's collision box lands at the map origin.
+  g.updateMatrixWorld(true);
 
   // Register parts as raycast targets so decals stick...
   solids.push(head, torso, legs);

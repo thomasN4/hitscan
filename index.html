@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Counter-Strike Clone Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #000; font-family: 'Segoe UI', Arial, sans-serif; user-select: none; }
+  canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
+
+  /* Crosshair */
+  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 24px; height: 24px; }
+  #crosshair div { position: absolute; background: #00ff41; box-shadow: 0 0 2px #000; }
+  .ch-v { width: 2px; height: 7px; left: 11px; }
+  .ch-h { height: 2px; width: 7px; top: 11px; }
+
+  /* Bottom bar */
+  #bottom { position: absolute; bottom: 20px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 30px; align-items: flex-end; }
+  #healthBox { display: flex; align-items: center; gap: 10px; font-size: 34px; font-weight: bold; text-shadow: 0 0 4px #000; }
+  #healthBar { width: 160px; height: 8px; background: rgba(255,255,255,.15); margin-top: 6px; border-radius: 2px; overflow: hidden; }
+  #healthFill { height: 100%; width: 100%; background: #4caf50; transition: width .15s, background .3s; }
+  #ammoBox { font-size: 34px; font-weight: bold; text-align: right; text-shadow: 0 0 4px #000; }
+  #ammoReserve { font-size: 18px; color: #aaa; }
+  #reloadHint { font-size: 14px; color: #ff5252; visibility: hidden; }
+
+  /* Top */
+  #topbar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; font-size: 22px; font-weight: bold; text-shadow: 0 0 4px #000; }
+  .score { padding: 4px 14px; border-radius: 4px; background: rgba(0,0,0,.45); }
+  #scoreCT { color: #66b2ff; } #scoreT { color: #ffcc66; }
+  #timer { color: #fff; min-width: 70px; text-align: center; }
+
+  /* Kill feed */
+  #killfeed { position: absolute; top: 60px; right: 20px; text-align: right; font-size: 14px; text-shadow: 0 1px 2px #000; }
+  .kf { background: rgba(0,0,0,.45); padding: 3px 8px; margin-top: 4px; border-radius: 3px; opacity: 1; transition: opacity 1s; }
+
+  /* Hit marker / damage vignette */
+  #hitmarker { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%) rotate(45deg); width: 22px; height: 22px; opacity: 0; }
+  #hitmarker div { position: absolute; background: #fff; width: 10px; height: 2px; }
+  #vignette { position: absolute; inset: 0; box-shadow: inset 0 0 120px rgba(255,0,0,0); transition: box-shadow .12s; }
+
+  /* Menus */
+  .menu { position: fixed; inset: 0; background: rgba(10,12,16,.92); color: #eee; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+  .menu h1 { font-size: 52px; letter-spacing: 4px; color: #ffcc66; text-transform: uppercase; margin-bottom: 8px; }
+  .menu h1 span { color: #66b2ff; }
+  .menu p { color: #999; margin-bottom: 28px; }
+  .menu button { pointer-events: auto; background: #ffcc66; border: 0; color: #222; font-size: 20px; font-weight: bold; padding: 14px 46px; cursor: pointer; border-radius: 3px; letter-spacing: 2px; text-transform: uppercase; }
+  .menu button:hover { background: #ffe099; }
+  .keys { margin-top: 34px; font-size: 13px; color: #777; line-height: 1.9; text-align: center; }
+  .keys b { color: #bbb; }
+  #deathScreen h1 { color: #ff5252; }
+</style>
+</head>
+<body>
+
+<div id="hud" style="display:none">
+  <div id="crosshair">
+    <div class="ch-v" style="top:0"></div><div class="ch-v" style="bottom:0"></div>
+    <div class="ch-h" style="left:0"></div><div class="ch-h" style="right:0"></div>
+  </div>
+  <div id="hitmarker">
+    <div style="left:0;top:0"></div><div style="right:0;top:0"></div>
+    <div style="left:0;bottom:0"></div><div style="right:0;bottom:0"></div>
+  </div>
+  <div id="vignette"></div>
+  <div id="topbar">
+    <div class="score" id="scoreCT">CT 0</div>
+    <div class="score" id="timer">1:55</div>
+    <div class="score" id="scoreT">T 0</div>
+  </div>
+  <div id="killfeed"></div>
+  <div id="bottom">
+    <div id="healthBox">
+      <span style="font-size:26px">&#10010;</span>
+      <div>
+        <span id="hpText">100</span>
+        <div id="healthBar"><div id="healthFill"></div></div>
+      </div>
+    </div>
+    <div id="ammoBox">
+      <span id="magText">30</span> <span style="color:#aaa;font-size:20px">/</span> <span id="ammoReserve">90</span>
+      <div id="reloadHint">PRESS [R] TO RELOAD</div>
+    </div>
+  </div>
+</div>
+
+<div class="menu" id="startMenu">
+  <h1>Counter<span>-Strike</span></h1>
+  <p>Clone Demo &mdash; eliminate all Ts to win the round</p>
+  <button id="playBtn">Play</button>
+  <div class="keys">
+    <b>WASD</b> move &nbsp;&middot;&nbsp; <b>Mouse</b> aim &nbsp;&middot;&nbsp; <b>LMB</b> fire &nbsp;&middot;&nbsp; <b>RMB</b> iron sights &nbsp;&middot;&nbsp; <b>R</b> reload<br>
+    <b>Shift</b> crouch (silent) &nbsp;&middot;&nbsp; <b>Space</b> jump &nbsp;&middot;&nbsp; <b>Esc</b> pause
+  </div>
+</div>
+
+<div class="menu" id="deathScreen" style="display:none">
+  <h1>You Died</h1>
+  <p id="deathMsg">Better luck next round.</p>
+  <button id="respawnBtn">Respawn</button>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

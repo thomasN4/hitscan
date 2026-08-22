@@ -223,6 +223,25 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }
 
+    // 7) Dead players don't shoot. exitPointerLock() dispatches
+    //    pointerlockchange asynchronously, so frames still run with
+    //    alive === false and locked === true; a held LMB must not spend
+    //    ammo (or score) in them. Guarded in weapons.js:updateWeapon.
+    const dead = await page.evaluate(async () => {
+      const cs = window.__cs;
+      cs.weapon.mag = 10;
+      cs.player.alive = false;
+      cs.game.shooting = true;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 300) await new Promise(r => requestAnimationFrame(r));
+      cs.game.shooting = false;
+      const mag = cs.weapon.mag;
+      cs.player.alive = true; // restore for anything downstream
+      return { mag };
+    });
+    if (dead.mag !== 10) throw new Error(`firing while dead consumed ammo: mag ${dead.mag}, expected 10`);
+    console.log(`[deadfire] OK`, JSON.stringify(dead));
+
     console.log(`[${name}] OK`, JSON.stringify({ reload: 'ok', holes: fired.holes, magAfterBurst: fired.mag, reserve: fired.reserve, ...(sprint && { sprintDist: +sprint.dist.toFixed(2) }) }));
   } catch (e) {
     failures++;

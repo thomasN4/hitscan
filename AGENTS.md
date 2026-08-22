@@ -56,7 +56,16 @@ Two test layers, deliberately split:
   initEngine() → initHUD() → initWeaponViewmodels() → buildMap()/buildRange() → respawn() → loop
   ```
 
-- **Dependency direction:** everything may import from `core/state.js`; browser-side modules also import `core/engine.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → core.
+- **Gameplay math lives in `src/sim/`, as pure functions.** Accuracy, recoil, ballistics, damage zones, speed tiers and blend easing take every input as a parameter — no engine imports, no DOM, no reads of shared state. That is what makes them unit-testable in plain Node (`npm test`), and it is where new gameplay math belongs. Modules like `weapons.js` are thin bindings that feed live state in.
+- **Extract and wire in the same commit.** If you lift a formula or constant into `sim/`, delete the inline original and switch every call site at once. A named constant that nothing imports, or a pure function shadowed by a surviving inline copy, is two sources of truth plus a comment that lies.
+- **The per-frame stage order in `main.js:animate()` is load-bearing:**
+
+  ```
+  updateMovement → updateWeapon → updateCamera → updateViewmodel → updateBots → updateHUD
+  ```
+
+  `updateWeapon` consumes the blends `updateMovement` writes and decays `game.recoil`; `updateCamera` and `updateViewmodel` then read that post-decay recoil, so camera, viewmodel and bullets agree within a frame. Reordering aims the camera a frame ahead of the shots (`5e004a5`). The pin runs the other way too: `updateMovement` writes `camera.position`, and `shoot()` — reached from inside `updateWeapon` — rays from `camera.getWorldPosition()`, so that write cannot be deferred to `updateCamera` without firing every shot from the previous frame's eye. Keep the sequence flat in `animate()` — do not nest one stage inside another.
+- **Dependency direction:** everything may import from `core/state.js` and `sim/`; browser-side modules also import `core/engine.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → {sim, core}.
 - **Level geometry must go through `map.js:addBox`**, which registers both the movement AABB (`colliders`) and the raycast target (`solids`). Adding meshes directly to the scene creates walk-through/shoot-through bugs.
 - **Map switching is a full page reload** driven by the `?map=` URL param (read once by `main.js` at startup into `game.map`). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
 - **Damage flows through `combat.js`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
@@ -69,7 +78,7 @@ Two test layers, deliberately split:
 - The game loop only simulates while pointer lock is held (`game.locked && game.started`) but always renders. Anything added to the loop should respect that split.
 - **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k <port>/tcp`, start the server with `--port <n> --strictPort`, and confirm the port from its log. With parallel worktrees, parallel dev servers are expected — pick a distinct port per worktree and point the smoke test at it with `CS_SMOKE_BASE` (it defaults to 5173).
 - `window.__cs` in main.js is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player, bulletHoles, colliders }`.
-- **Euler rotation orders matter**: the camera and shot-direction math must both use `'YXZ'`. Default `'XYZ'` silently aims shots somewhere else (this caused bullets flying skyward once).
+- **Euler rotation orders matter**: the camera and shot-direction math must both use `'YXZ'`. Default `'XYZ'` silently aims shots somewhere else (this caused bullets flying skyward once). The order now lives in one place — `sim/ballistics.js:EULER_ORDER` — with a test pinning shot direction against a `'YXZ'` camera matrix, so the two can no longer drift apart silently.
 
 ## Conventions
 
@@ -82,10 +91,14 @@ Two test layers, deliberately split:
 Maintainability tranche 1 (in progress) — see the plan for full rationale:
 
 - **PR 1 (done):** split `core.js` into pure `core/state.js` + browser-only `core/engine.js`; explicit init order; Vitest.
-- **PR 2:** extract pure sim math into `src/sim/` (`accuracy`, `recoil`, `ballistics`, `damage`, `movement`) with unit tests; hoist the frame pipeline into `main.js` so intra-frame ordering is visible.
+- **PR 2 (done):** extract pure sim math into `src/sim/` (`accuracy`, `recoil`, `ballistics`, `damage`, `movement`, `smoothing`) with unit tests; hoist the frame pipeline into `main.js` so intra-frame ordering is visible.
 - **PR 3:** single geometry-registration path in `src/world.js` (`addSolidBox`, `registerGroupParts`), replacing the duplicated `addBox` in `map.js`/`range.js`; make `collidesAt` take `colliders` as a parameter.
 - **PR 4:** `sim/validateWeapons.js` enforcing the `recoilRecover < recoilKick / fireRate` class of constraint that has now been fixed twice by hand.
 
-Deferred to a later tranche: TypeScript migration, unifying the two time bases (`clock.elapsedTime` vs `performance.now()`) behind one game clock plus a pausable scheduler, and splitting `game` into owner-scoped slices.
+Deferred to a later tranche:
+
+- **TypeScript migration + an ESLint gate.** Full `.ts`, starting with `src/sim/*` (already pure functions with explicit params, so they convert with no restructuring). The lint config bans `any` — `@typescript-eslint/no-explicit-any` plus the `no-unsafe-*` family, since explicit-`any` alone doesn't stop `any` leaking in from loosely-typed three.js surfaces — and `ban-ts-comment` for `@ts-ignore`. Two `tsconfig` flags matter as much: `strict` and `noUncheckedIndexedAccess` (`WEAPONS[game.slot]` and `zoomFovs[game.zoomLevel]` are unchecked index reads on input-mutated state). Note `no-undef` needs no TypeScript and would catch the missing-import gotcha above today, if it's ever worth pulling forward on its own.
+- Unifying the two time bases (`clock.elapsedTime` vs `performance.now()`) behind one game clock plus a pausable scheduler.
+- Splitting `game` into owner-scoped slices.
 
 Dropped: unifying Bot and the player under a shared entity base class. It addresses none of the regression classes this codebase has actually hit, and would couple a probabilistic AI to a physics-driven controller.

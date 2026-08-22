@@ -1,3 +1,9 @@
+// main.js — entry point: builds the world, wires all input, owns the game loop.
+//
+// Flow: import modules (side effects create renderer/scene) -> buildMap +
+// spawnBots -> register input/pointer-lock handlers -> start the render loop.
+// The loop only simulates (player, bots, timer) while pointer lock is held;
+// rendering and effect updates run always so pause screens stay visible.
 import { renderer, scene, camera, clock, game, keys, player, weapon } from './core.js';
 import { buildMap } from './map.js';
 import { updatePlayer } from './player.js';
@@ -24,14 +30,17 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => keys[e.code] = false);
 
-const SENS = 0.0022;
+const SENS = 0.0022; // radians per pixel of mouse movement
 document.addEventListener('mousemove', e => {
   if (!game.locked || !player.alive) return;
   game.yaw -= e.movementX * SENS;
   game.pitch -= e.movementY * SENS;
+  // Clamp pitch so the player can't flip over backwards
   game.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, game.pitch));
 });
 
+// LMB = fire (held), RMB = iron sights (held). Buttons are tracked as state
+// rather than one-shot events because firing is continuous in updateWeapon.
 addEventListener('mousedown', e => {
   if (e.button === 0 && game.locked && player.alive) game.shooting = true;
   if (e.button === 2 && game.locked && player.alive) game.aiming = true;
@@ -40,7 +49,7 @@ addEventListener('mouseup', e => {
   if (e.button === 0) game.shooting = false;
   if (e.button === 2) game.aiming = false;
 });
-addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 
 // ---------- Pointer lock / menus ----------
 const startMenu = document.getElementById('startMenu');
@@ -58,6 +67,8 @@ document.addEventListener('pointerlockchange', () => {
     game.started = true;
     deathScreen.style.display = 'none';
   }
+  // Losing lock while alive means Esc was pressed -> show pause menu.
+  // Losing lock while dead is handled by damagePlayer's death screen.
   if (!game.locked && game.started && player.alive) {
     startMenu.querySelector('p').textContent = 'Paused — click Play to resume';
     document.getElementById('playBtn').textContent = 'Resume';
@@ -70,13 +81,13 @@ document.addEventListener('pointerlockchange', () => {
 // ---------- Game loop ----------
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const dt = Math.min(clock.getDelta(), 0.05); // clamp: tab-switch spikes shouldn't teleport entities
 
   if (game.locked && game.started) {
     updatePlayer(dt);
     updateBots(dt, player);
 
-    // Round timer
+    // Round timer: counts down and resets — no round-end consequence yet
     game.roundTime -= dt;
     if (game.roundTime <= 0) game.roundTime = 115;
     setTimer(game.roundTime);
@@ -84,10 +95,12 @@ function animate() {
     updateHUD();
   }
 
+  // Effects keep fading while paused so impacts don't freeze on screen
   updateEffects(dt);
   renderer.render(scene, camera);
 }
 animate();
 
-// Debug/testing hook (inspect from devtools: __cs)
+// Debug/testing hook: inspect live state from devtools (`__cs.game`, ...)
+// or from scripts/smoke-test.mjs.
 window.__cs = { game, weapon, player };

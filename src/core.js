@@ -1,3 +1,10 @@
+// core.js — single source of truth for shared state and engine singletons.
+//
+// Every other module imports from here; nothing imports back into the
+// modules that use it (no dependency cycles). All mutable cross-module
+// game state lives in this file: if you need to share new state between
+// systems (player, bots, weapons, HUD...), add it here rather than
+// reaching across modules.
 import * as THREE from 'three';
 
 // ---------- Renderer / scene / camera ----------
@@ -13,6 +20,7 @@ scene.background = new THREE.Color(0xbfae8f); // dusty haze
 scene.fog = new THREE.Fog(0xbfae8f, 40, 140);
 
 export const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 300);
+// FOV is animated by weapons.js when aiming (75 hip-fire -> 55 iron sights).
 
 scene.add(new THREE.HemisphereLight(0xfff3e0, 0x8a7a5c, 0.85));
 const sun = new THREE.DirectionalLight(0xffeecc, 1.4);
@@ -26,12 +34,21 @@ scene.add(sun);
 export const clock = new THREE.Clock();
 
 // ---------- Shared collections ----------
-export const solids = [];    // meshes that block bullets / sight
-export const colliders = []; // AABBs for movement collision
+/** Meshes (walls, crates, ground) that block bullets AND bot line-of-sight. */
+export const solids = [];
+/** AABBs derived from `solids` boxes, used for cheap movement collision. */
+export const colliders = [];
+/** All Bot instances (see bots.js). */
 export const bots = [];
+/** Short-lived bullet impact puffs (see effects.js). */
 export const impacts = [];
 
 // ---------- Shared mutable game state ----------
+/**
+ * Player entity. `pos` is the EYE position (not feet); physics uses
+ * `eyeHeight` as the ground-rest y value. Crouch only offsets the camera,
+ * not `pos` itself.
+ */
 export const player = {
   pos: new THREE.Vector3(0, 1.7, 48),
   vel: new THREE.Vector3(),
@@ -42,29 +59,40 @@ export const player = {
   eyeHeight: 1.7,
 };
 
+/** Rifle state. Tuning notes inline; damage model lives in weapons.js. */
 export const weapon = {
   magSize: 30, mag: 30, reserve: 90,
-  fireRate: 0.105, lastShot: 0,
+  fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, rifle-like)
+  lastShot: 0,
   reloading: false, reloadTime: 2.2, reloadEnd: 0,
-  damage: 26, headshotMult: 4,
+  damage: 26,       // per body shot; legs x0.75, head x4 -> one-tap kill
+  headshotMult: 4,
 };
 
+/**
+ * Misc per-frame / transient flags. Grouped here because they are touched
+ * by several systems (input in main.js, consumed in player.js/weapons.js).
+ *
+ * Lerp values (`crouchLerp`, `adsLerp`) are smoothed 0..1 blends updated
+ * every frame; never set them directly from input.
+ */
 export const game = {
-  locked: false,
-  started: false,
-  shooting: false,
-  aiming: false,
+  locked: false,   // pointer lock active (Esc/menu releases it)
+  started: false,  // first Play click happened; distinguishes pause from pre-game
+  shooting: false, // LMB held
+  aiming: false,   // RMB held (iron sights)
   yaw: Math.PI,
   pitch: 0,
-  spread: 0.001,
-  recoil: 0,
+  spread: 0.001,   // radians of cone half-angle-ish bloom; grows per shot
+  recoil: 0,       // drives viewmodel kick, decays fast
   crouchLerp: 0,
   adsLerp: 0,
-  stepTimer: 0.2,
-  bobAmt: 0,
-  scoreKills: 0,
-  scoreDeaths: 0,
-  roundTime: 115,
+  stepTimer: 0.2,  // countdown to next footstep sound
+  bobAmt: 0,       // current view-bob amplitude, computed in player.js
+  scoreKills: 0,   // shown as "CT" score
+  scoreDeaths: 0,  // shown as "T" score
+  roundTime: 115,  // seconds; resets to 1:55 when it expires
 };
 
+/** Raw keyboard state by `event.code`. Written in main.js, read in player.js. */
 export const keys = {};

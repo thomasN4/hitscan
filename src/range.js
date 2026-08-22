@@ -1,8 +1,9 @@
 // range.js — shooting range map for testing accuracy and recoil patterns.
 //
-// A long walled lane with distance markers painted on the floor and
-// bot-silhouette targets (same body-part dimensions as Bot in bots.js, so
-// headshot practice transfers) decorated with elliptical bullseye rings.
+// A fully enclosed lane (floor, side walls, rear wall, back berm) with
+// distance markers painted on the floor and bot-silhouette targets (same
+// body-part dimensions as Bot in bots.js, so headshot practice transfers)
+// decorated with elliptical bullseye rings.
 // All target parts are registered as `solids` so bullet-hole decals work
 // on them; nothing here shoots back.
 import * as THREE from 'three';
@@ -116,17 +117,20 @@ function addTarget(x, z, { height = 0, yaw = 0 } = {}) { // yaw 0 = facing firin
 
 /** Build the shooting range. Called once from main.js instead of buildMap. */
 export function buildRange() {
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 100), matGround);
+  // Floor spans the full lane: z from -95 to +35, so every wall, target and
+  // marker stands on it; the far edge stays hidden behind the backstop + fog.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 130), matGround);
   ground.rotation.x = -Math.PI / 2;
+  ground.position.z = -30;
   ground.receiveShadow = true;
   scene.add(ground);
   solids.push(ground);
 
-  // Lane walls + back berm. Lane runs from z=+5 (firing line) to z=-75.
-  addBox(-10, 0, -35, 1, 4, 90, matWall2);   // left wall
-  addBox( 10, 0, -35, 1, 4, 90, matWall2);   // right wall
-  addBox(-14.5, 0, 20, 20, 4, 1, matWall2);  // rear wall behind firing line
-  addBox( 14.5, 0, 20, 20, 4, 1, matWall2);  // rear wall behind firing line
+  // Lane walls run continuously from the backstop (z=-80.5) to the rear wall
+  // (z=20) — no gaps, so no void is visible anywhere from inside the lane.
+  addBox(-10, 0, -30, 1, 4, 101, matWall2);  // left wall
+  addBox( 10, 0, -30, 1, 4, 101, matWall2);  // right wall
+  addBox(0, 0, 20, 21, 4, 1, matWall2);      // rear wall behind firing line
   addBox(0, 0, -80.5, 21, 5, 1, matWall);    // backstop
 
   // Firing-line marker strip across the floor
@@ -134,8 +138,9 @@ export function buildRange() {
   line.position.set(0, 0.01, 5);
   scene.add(line);
 
-  // Distance markers down the center of each half-lane
-  for (const d of [10, 20, 30, 40, 50]) {
+  // Distance markers down the center of each half-lane (60 M flanks the
+  // centered far target like the closer pairs do).
+  for (const d of [10, 20, 30, 40, 50, 60]) {
     addFloorLabel(`${d} M`, -5, 5 - d);
     addFloorLabel(`${d} M`,  5, 5 - d);
   }

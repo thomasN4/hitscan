@@ -1,26 +1,43 @@
 // player.js — first-person controller: movement, crouch, footsteps, camera.
 //
-// The player is a capsule-ish box (core.player) moved on the XZ plane with
-// axis-separated collision tests so sliding along walls feels smooth; Y is
-// only gravity/jump. Crouch and aim modify speed; crouch also lowers the
-// camera and silences footsteps.
+// The player is a capsule-ish box (core/state.js player) moved on the XZ
+// plane with axis-separated collision tests so sliding along walls feels
+// smooth; Y is only gravity/jump. Crouch and aim modify speed; crouch also
+// lowers the camera and silences footsteps.
+//
+// The three exports here are ORDERED stages of one frame, sequenced by
+// main.js: updateMovement -> (updateWeapon) -> updateCamera -> updateViewmodel.
+// updateCamera and updateViewmodel both read post-decay recoil, so they must
+// run after updateWeapon. Speed tiers and the moveLerp math live in
+// sim/movement.js; the blends use sim/smoothing.js.
 import * as THREE from 'three';
 import { camera, clock } from './core/engine.js';
 import { player, game, keys } from './core/state.js';
 import { collidesAt } from './collision.js';
 import { sfxFootstep } from './audio.js';
-import { gunGroup, updateWeapon, aimPitch } from './weapons.js';
+import { gunGroup, currentAimPitch } from './weapons.js';
 import { crosshair } from './hud.js';
+import { speedFor, measuredMoveLerp } from './sim/movement.js';
+import { approach, deadZone } from './sim/smoothing.js';
 
 const GRAVITY = 22;    // m/s^2; tuned so jump arc feels snappy at 60fps+
 const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex
 
+/** Blend rate (1/s) for moveLerp and crouchLerp; ~100 ms to settle. */
+const BLEND_RATE = 10;
+/** Sprint ramp time constant (s) — ~0.2 s from standstill to full speed. */
+const SPRINT_RAMP = 0.2;
+/** How far the camera drops at full crouch (m). */
+const CROUCH_DROP = 0.7;
+
 /**
- * Per-frame player update. Also drives the weapon viewmodel transform
- * (bob + ADS position) and the crosshair state, since all three depend on
- * movement data computed here. Calls updateWeapon(dt) internally.
+ * Stage 1 — movement, stance, footsteps.
+ *
+ * Writes player.pos/vel and the blends the accuracy model reads
+ * (moveLerp, crouchLerp, runLerp, bobAmt). Must run BEFORE updateWeapon,
+ * which consumes those blends to compute spread.
  */
-export function updatePlayer(dt) {
+export function updateMovement(dt) {
   if (!player.alive) return;
 
   // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
@@ -28,10 +45,7 @@ export function updatePlayer(dt) {
   // can't crouch mid-air to shrink the camera.
   const crouching = keys['ShiftLeft'] && player.onGround;
   const running = game.running && !crouching && !game.aiming;
-  let speed = 6.5;                 // walk
-  if (crouching) speed = 2.4;
-  else if (game.aiming) speed = 3.8;
-  else if (running) speed = 6.5 + 3.25 * game.runLerp; // ramp 6.5 -> 9.75 (1.5x)
+  const speed = speedFor({ crouching, aiming: game.aiming, running, runLerp: game.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(game.yaw), 0, -Math.cos(game.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)
@@ -55,12 +69,11 @@ export function updatePlayer(dt) {
   const testZ = new THREE.Vector3(player.pos.x, player.eyeHeight, nz);
   if (!collidesAt(testZ, player.radius)) player.pos.z = nz;
 
-  // Movement-accuracy input: MEASURED planar speed (not intended speed), so
-  // being blocked by a wall doesn't count as moving. Normalized so walk = 1,
-  // sprint = 1.5; smoothed ~100 ms for gradual crosshair/spread transitions.
-  const hSpeed = Math.hypot(player.pos.x - preX, player.pos.z - preZ) / dt;
-  game.moveLerp += (Math.min(hSpeed / 6.5, 1.5) - game.moveLerp) * Math.min(1, dt * 10);
-  if (game.moveLerp < 0.001) game.moveLerp = 0;
+  // Movement-accuracy input: MEASURED displacement, so being blocked by a
+  // wall doesn't count as moving. Smoothed ~100 ms for gradual crosshair
+  // transitions.
+  const target = measuredMoveLerp(player.pos.x - preX, player.pos.z - preZ, dt);
+  game.moveLerp = deadZone(approach(game.moveLerp, target, dt, BLEND_RATE));
 
   // Jump / gravity
   if (keys['Space'] && player.onGround) { player.vel.y = JUMP_VEL; player.onGround = false; }
@@ -73,15 +86,12 @@ export function updatePlayer(dt) {
 
   // Sprint acceleration ramp: ~0.2 s to full speed (exponential ease-in).
   // Decays when not running so releasing W eases out the same way.
-  const runTarget = running && moving ? 1 : 0;
-  game.runLerp += (runTarget - game.runLerp) * Math.min(1, dt / 0.2);
-  if (game.runLerp < 0.001) game.runLerp = 0;
+  game.runLerp = deadZone(
+    approach(game.runLerp, running && moving ? 1 : 0, dt, 1 / SPRINT_RAMP));
 
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
-  game.crouchLerp += ((crouching ? 1 : 0) - game.crouchLerp) * Math.min(1, dt * 10);
-  camera.position.copy(player.pos);
-  camera.position.y -= 0.7 * game.crouchLerp;
+  game.crouchLerp = approach(game.crouchLerp, crouching ? 1 : 0, dt, BLEND_RATE);
 
   // Footsteps: timed by distance-run (stepTimer), silent while crouching or
   // airborne. Timer is pre-charged when stopping so the first step after a
@@ -95,21 +105,38 @@ export function updatePlayer(dt) {
 
   // View bob (applied to the weapon viewmodel); heavier while sprinting
   game.bobAmt = moving ? (crouching ? 0.008 : 0.02 + 0.01 * game.runLerp) : 0;
+}
 
-  updateWeapon(dt);
+/**
+ * Stage 3 — camera transform.
+ *
+ * MUST run after updateWeapon: pitch comes from currentAimPitch(), the same
+ * expression shoot() uses for bullet direction, so the crosshair (screen
+ * center) always marks where bullets go on average. Reading it before the
+ * frame's recoil decay would aim the camera a frame ahead of the bullets.
+ */
+export function updateCamera() {
+  if (!player.alive) return;
+  camera.position.copy(player.pos);
+  camera.position.y -= CROUCH_DROP * game.crouchLerp;
+  camera.rotation.set(currentAimPitch(), game.yaw, 0, 'YXZ');
+}
 
-  // Camera pitch includes the recoil view punch via aimPitch() — the same
-  // expression shoot() uses for bullet direction, so the crosshair (screen
-  // center) always marks where bullets go on average. Set AFTER updateWeapon
-  // so both read the same post-decay recoil value this frame.
-  camera.rotation.set(aimPitch(), game.yaw, 0, 'YXZ');
+/**
+ * Stage 4 — weapon viewmodel transform and crosshair styling.
+ *
+ * MUST run after updateWeapon: the kick reads game.recoil and the ADS blend
+ * reads game.adsLerp, both written there this frame.
+ */
+export function updateViewmodel() {
+  if (!player.alive) return;
 
-  // Viewmodel transform: blend hip-fire offset -> centered iron sights with
-  // adsLerp; add bob and recoil kick on top.
+  // Blend hip-fire offset -> centered iron sights with adsLerp; add bob and
+  // recoil kick on top.
   gunGroup.position.x = -0.25 * game.adsLerp;
   gunGroup.position.y = 0.14 * game.adsLerp + Math.sin(clock.elapsedTime * 10) * game.bobAmt;
   gunGroup.position.z = game.recoil * 0.012 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
-  gunGroup.rotation.x = game.recoil * 0.015; // small: recoil now accumulates to the cap (6),
+  gunGroup.rotation.x = game.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
                                              // so a full climb must stay a nudge, not a tilt
 
   // Crosshair tightens/fades when aiming (sight picture takes over);

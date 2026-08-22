@@ -13,12 +13,17 @@ import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';
 import { damageBot } from './combat.js';
 import { spawnImpact, spawnBulletHole } from './effects.js';
+import { computeSpread, crosshairGapPx } from './sim/accuracy.js';
+import { aimPitch, decayRecoil, decayBloom } from './sim/recoil.js';
+import { shotDirection } from './sim/ballistics.js';
+import { damageForPart, partForMesh } from './sim/damage.js';
+import { approach } from './sim/smoothing.js';
 
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the
 // view transform. One group per slot (rifle / sniper); visibility follows
 // game.slot every frame. Position is animated each frame in
-// updateWeapon/updatePlayer: x/y shift toward center when aiming (adsLerp),
+// updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.js).
 // The viewmodel meshes below are pure THREE objects, so they are built at
 // module scope; only ATTACHING them to the engine's camera/scene needs
@@ -78,12 +83,15 @@ export function initWeaponViewmodels() {
 }
 
 /**
- * Vertical aim angle including recoil view punch. The camera (player.js)
- * and the shot direction (shoot()) must BOTH use this so the crosshair
- * center is always truthful about where bullets actually go.
+ * Vertical aim angle for the CURRENT weapon and recoil state.
+ *
+ * Thin binding over sim/recoil.js:aimPitch — the pure function is the one
+ * source of truth, this just supplies the live state. The camera
+ * (player.js:updateCamera) and the shot direction (shoot()) must BOTH go
+ * through it so the crosshair stays truthful about where bullets go.
  */
-export function aimPitch() {
-  return game.pitch + game.recoil * WEAPONS[game.slot].punchRad;
+export function currentAimPitch() {
+  return aimPitch(game.pitch, game.recoil, WEAPONS[game.slot].punchRad);
 }
 
 // ---------- Reload animation ----------
@@ -178,15 +186,9 @@ export function shoot() {
   // button is still held (mouseup will just re-clear it harmlessly).
   if (def.unscopeOnShot) game.aiming = false;
 
-  const dir = new THREE.Vector3(
-    (Math.random() - 0.5) * game.spread,
-    (Math.random() - 0.5) * game.spread,
-    // 'YXZ' must match the camera's rotation order (player.js) or the shot
-    // direction diverges from the view direction as pitch/yaw grow; the
-    // pitch includes the recoil punch via aimPitch() so shots follow the
-    // same climb the camera shows.
-    -1
-  ).normalize().applyEuler(new THREE.Euler(aimPitch(), game.yaw, 0, 'YXZ'));
+  // Euler order and cone sampling live in sim/ballistics.js; the pitch
+  // includes the recoil punch so shots follow the climb the camera shows.
+  const dir = shotDirection(currentAimPitch(), game.yaw, game.spread);
 
   // Recoil/bloom kicks are applied only AFTER this shot's ray is built:
   // a bullet leaves from the pre-kick aim point (first round is dead-on),
@@ -209,10 +211,9 @@ export function shoot() {
     const hit = hits[0];
     const bot = hit.object.userData.bot; // stamped onto each part in Bot's constructor
     if (bot) {
-      const part = hit.object === bot.head ? 'head' : hit.object === bot.legs ? 'legs' : 'torso';
-      const dmg = weapon.damage * (part === 'head' ? weapon.headshotMult : part === 'legs' ? 0.75 : 1);
+      const part = partForMesh(bot, hit.object);
       showHitmarker(part === 'head');
-      damageBot(bot, dmg, part);
+      damageBot(bot, damageForPart(weapon, part), part);
     } else {
       spawnImpact(hit.point);
       // Decal needs the surface normal in world space; face.normal is
@@ -225,17 +226,23 @@ export function shoot() {
 
 /**
  * Per-frame weapon upkeep: recoil/ADS smoothing, FOV zoom toward iron-sight
- * target, reload completion, trigger handling, spread recovery. Called from
- * player.js inside the game loop.
+ * target, reload completion, trigger handling, spread recovery.
+ *
+ * Stage 2 of the frame, sequenced by main.js: runs AFTER updateMovement
+ * (whose blends feed the spread model) and BEFORE updateCamera /
+ * updateViewmodel (which read the recoil this decays).
  */
 let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on release
+
+/** Blend rate for ADS position and FOV zoom (1/s); ~12 ≈ 80 ms to settle. */
+const ADS_RATE = 12;
 
 export function updateWeapon(dt) {
   const def = WEAPONS[game.slot];
 
   // Recoil kick decay — rate is per-weapon (rifle resets fast for full-auto,
-  // the sniper settles slowly for bolt-action feel; see core.WEAPONS)
-  game.recoil = Math.max(0, game.recoil - dt * weapon.recoilRecover);
+  // the sniper settles slowly for bolt-action feel; see core/state.js WEAPONS)
+  game.recoil = decayRecoil(game.recoil, dt, weapon.recoilRecover);
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // rifle has a single iron-sights step; the sniper cycles its wheel-chosen
@@ -243,13 +250,13 @@ export function updateWeapon(dt) {
   // mutually exclusive by the movement precedence rules).
   if (!game.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
   const aimFov = def.zoomFovs[Math.min(game.zoomLevel, def.zoomFovs.length - 1)];
-  game.adsLerp += ((game.aiming ? 1 : 0) - game.adsLerp) * Math.min(1, dt * 12);
+  game.adsLerp = approach(game.adsLerp, game.aiming ? 1 : 0, dt, ADS_RATE);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
   // usable; main.js multiplies mouse deltas by this.
   game.zoomScale = 1 - (1 - aimFov / BASE_FOV) * game.adsLerp;
   const targetFov = BASE_FOV + 5 * game.runLerp - (BASE_FOV - aimFov) * game.adsLerp;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
-    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12);
+    camera.fov = approach(camera.fov, targetFov, dt, ADS_RATE);
     camera.updateProjectionMatrix();
   }
 
@@ -293,25 +300,16 @@ export function updateWeapon(dt) {
   }
 
   // ---- Accuracy model -------------------------------------------------
-  // totalSpread = (stance base + movement penalty + recoil bloom) × ADS
-  //   stance base: crouching cuts it ~72% AND halves the movement penalty,
-  //                making crouch-walk the most accurate mobile stance
-  //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js)
-  //   ADS:         weapon's spreadMul — 30% for the rifle's iron sights,
-  //                5% for a scoped sniper shot
-  // game.spread is consumed by shoot(); the crosshair gap in hud.js maps
-  // from the same value, keeping what you see in sync with where bullets go.
-  const adsMul = game.aiming ? def.spreadMul : 1;
-  const stanceBase = 0.0025 - 0.0018 * game.crouchLerp;
-  const movePenalty = 0.010 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
-  game.spread = Math.max(0.0005,
-    (stanceBase + movePenalty + game.bloom) * adsMul);
-  game.bloom = Math.max(0, game.bloom - dt * def.bloomRecover);
-
-  // Crosshair arms sit at the EDGE of the actual scatter cone, projected to
-  // screen space with the live FOV (per-axis half-angle ≈ spread/2) — so the
-  // gap always matches where bullets can land, hip-fire or ADS. The mean
-  // impact point is screen center itself via aimPitch().
-  const pxPerTan = window.innerHeight / 2 / Math.tan(camera.fov * Math.PI / 360);
-  setCrosshairGap(Math.min(3 + Math.tan(game.spread / 2) * pxPerTan, 60));
+  // The model itself (and its tuning constants) lives in sim/accuracy.js;
+  // this just feeds it live state. game.spread is consumed by shoot(), and
+  // the crosshair gap derives from the SAME value, keeping what you see in
+  // sync with where bullets go.
+  game.spread = computeSpread({
+    crouchLerp: game.crouchLerp,
+    moveLerp: game.moveLerp,
+    bloom: game.bloom,
+    adsMul: game.aiming ? def.spreadMul : 1,
+  });
+  game.bloom = decayBloom(game.bloom, dt, def.bloomRecover);
+  setCrosshairGap(crosshairGapPx(game.spread, camera.fov, window.innerHeight));
 }

@@ -4,13 +4,16 @@
 // spawnBots -> register input/pointer-lock handlers -> start the render loop.
 // The loop only simulates (player, bots, timer) while pointer lock is held;
 // rendering and effect updates run always so pause screens stay visible.
+//
+// The per-frame stage order lives in animate() at the bottom of this file
+// and is load-bearing — see the comment there before reordering anything.
 import { initEngine, renderer, scene, camera, clock } from './core/engine.js';
 import { game, keys, player, weapon, bulletHoles, colliders, WEAPONS } from './core/state.js';
 import { buildMap } from './map.js';
 import { buildRange } from './range.js';
-import { updatePlayer } from './player.js';
+import { updateMovement, updateCamera, updateViewmodel } from './player.js';
 import { spawnBots, updateBots } from './bots.js';
-import { tryReload, switchWeapon, initWeaponViewmodels } from './weapons.js';
+import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons.js';
 import { updateEffects } from './effects.js';
 import { respawn } from './combat.js';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud.js';
@@ -147,7 +150,17 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05); // clamp: tab-switch spikes shouldn't teleport entities
 
   if (game.locked && game.started) {
-    updatePlayer(dt);
+    // Stage order is load-bearing, which is why it lives here rather than
+    // nested inside updateMovement. updateWeapon decays game.recoil and
+    // recomputes game.spread from the blends updateMovement just wrote;
+    // updateCamera and updateViewmodel then read that post-decay recoil, so
+    // the camera, the viewmodel kick and the bullets all agree within a
+    // frame. Moving updateWeapon after updateCamera aims the camera one
+    // frame ahead of the shots (see `5e004a5`).
+    updateMovement(dt);
+    updateWeapon(dt);
+    updateCamera();
+    updateViewmodel();
     if (!RANGE) updateBots(dt, player);
 
     // Round timer: arena only — meaningless on the range, so freeze it there

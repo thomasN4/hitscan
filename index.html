@@ -21,12 +21,22 @@
   .ch-l { right: var(--gap); }
   .ch-r { left: var(--gap); }
 
+  /* Scope reticle: opaque ring outside a clear center circle, with fine
+     crosshair lines spanning the whole screen (sniper only) */
+  #scopeOverlay { position: absolute; inset: 0; display: none;
+    background: radial-gradient(circle at center, transparent 30%, rgba(0,0,0,.97) 36%); }
+  .scope-line { position: absolute; background: rgba(0,0,0,.85); }
+  .scope-line.v { left: 50%; top: 0; bottom: 0; width: 1px; margin-left: -0.5px; }
+  .scope-line.h { top: 50%; left: 0; right: 0; height: 1px; margin-top: -0.5px; }
+
   /* Bottom bar */
   #bottom { position: absolute; bottom: 20px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 30px; align-items: flex-end; }
   #healthBox { display: flex; align-items: center; gap: 10px; font-size: 34px; font-weight: bold; text-shadow: 0 0 4px #000; }
   #healthBar { width: 160px; height: 8px; background: rgba(255,255,255,.15); margin-top: 6px; border-radius: 2px; overflow: hidden; }
   #healthFill { height: 100%; width: 100%; background: #4caf50; transition: width .15s, background .3s; }
   #ammoBox { font-size: 34px; font-weight: bold; text-align: right; text-shadow: 0 0 4px #000; }
+  #weaponName { font-size: 14px; color: #aaa; letter-spacing: 3px; margin-bottom: 2px; }
+  #zoomText { font-size: 18px; color: #7dff9e; vertical-align: middle; margin-left: 10px; }
   #ammoReserve { font-size: 18px; color: #aaa; }
   #reloadHint { font-size: 14px; color: #ff5252; visibility: hidden; }
 
@@ -59,7 +69,11 @@
 </head>
 <body>
 
-<div id="hud" style="display:none">
+  <div id="hud" style="display:none">
+  <div id="scopeOverlay">
+    <div class="scope-line v"></div>
+    <div class="scope-line h"></div>
+  </div>
   <div id="crosshair">
     <div class="ch-v ch-t"></div><div class="ch-v ch-b"></div>
     <div class="ch-h ch-l"></div><div class="ch-h ch-r"></div>
@@ -84,7 +98,9 @@
       </div>
     </div>
     <div id="ammoBox">
+      <div id="weaponName">RIFLE</div>
       <span id="magText">30</span> <span style="color:#aaa;font-size:20px">/</span> <span id="ammoReserve">90</span>
+      <span id="zoomText"></span>
       <div id="reloadHint">PRESS [R] TO RELOAD</div>
     </div>
   </div>
@@ -98,8 +114,8 @@
     <button id="rangeBtn" style="background:#9db8d9">Shooting Range</button>
   </div>
   <div class="keys">
-    <b>WASD</b> move &nbsp;&middot;&nbsp; <b>Mouse</b> aim &nbsp;&middot;&nbsp; <b>LMB</b> fire &nbsp;&middot;&nbsp; <b>RMB</b> iron sights &nbsp;&middot;&nbsp; <b>R</b> reload<br>
-    <b>Shift</b> crouch (silent) &nbsp;&middot;&nbsp; <b>Space</b> jump &nbsp;&middot;&nbsp; <b>Esc</b> pause
+    <b>WASD</b> move &nbsp;&middot;&nbsp; <b>Mouse</b> aim &nbsp;&middot;&nbsp; <b>LMB</b> fire &nbsp;&middot;&nbsp; <b>RMB</b> iron sights / scope &nbsp;&middot;&nbsp; <b>R</b> reload<br>
+    <b>1/2</b> rifle / sniper &nbsp;&middot;&nbsp; <b>Wheel</b> scope zoom (scoped) &nbsp;&middot;&nbsp; <b>Shift</b> crouch (silent) &nbsp;&middot;&nbsp; <b>Space</b> jump &nbsp;&middot;&nbsp; <b>Esc</b> pause
   </div>
 </div>
 

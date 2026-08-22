@@ -44,6 +44,15 @@ function playGunshot(vol = 0.35, freqBase = 900, dur = 0.12) {
 
 export const sfxShoot = () => playGunshot(0.4, 1400, 0.14);
 
+/** Sniper: deeper boom with a longer tail than the rifle crack. */
+export const sfxSniper = () => playGunshot(0.5, 500, 0.3);
+
+/** Weapon switch: short metallic click. */
+export const sfxSwitch = () => playGunshot(0.1, 1800, 0.04);
+
+/** Scope zoom step: even softer tick. */
+export const sfxZoom = () => playGunshot(0.08, 2400, 0.03);
+
 /** Enemy gunshot: quieter, attenuated with distance from the camera. */
 export function sfxEnemyShoot(pos) {
   const d = camera.position.distanceTo(pos);

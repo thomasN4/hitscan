@@ -22,12 +22,15 @@ const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex
 export function updatePlayer(dt) {
   if (!player.alive) return;
 
-  // Speed tiers: crouch < aim < run. Crouching requires ground contact so
-  // you can't crouch mid-air to shrink the camera.
+  // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
+  // over sprint (no sprint-scoping). Crouch requires ground contact so you
+  // can't crouch mid-air to shrink the camera.
   const crouching = keys['ShiftLeft'] && player.onGround;
-  let speed = 6.5;
+  const running = game.running && !crouching && !game.aiming;
+  let speed = 6.5;                 // walk
   if (crouching) speed = 2.4;
   else if (game.aiming) speed = 3.8;
+  else if (running) speed = 6.5 + 3.25 * game.runLerp; // ramp 6.5 -> 9.75 (1.5x)
 
   const forward = new THREE.Vector3(-Math.sin(game.yaw), 0, -Math.cos(game.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)
@@ -56,6 +59,15 @@ export function updatePlayer(dt) {
   player.pos.y += player.vel.y * dt;
   if (player.pos.y <= player.eyeHeight) { player.pos.y = player.eyeHeight; player.vel.y = 0; player.onGround = true; }
 
+  // "Actually moving" gate for sprint ramp/footsteps/bob
+  const moving = move.lengthSq() > 0 && player.onGround;
+
+  // Sprint acceleration ramp: ~0.2 s to full speed (exponential ease-in).
+  // Decays when not running so releasing W eases out the same way.
+  const runTarget = running && moving ? 1 : 0;
+  game.runLerp += (runTarget - game.runLerp) * Math.min(1, dt / 0.2);
+  if (game.runLerp < 0.001) game.runLerp = 0;
+
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
   game.crouchLerp += ((crouching ? 1 : 0) - game.crouchLerp) * Math.min(1, dt * 10);
@@ -66,16 +78,15 @@ export function updatePlayer(dt) {
   // Footsteps: timed by distance-run (stepTimer), silent while crouching or
   // airborne. Timer is pre-charged when stopping so the first step after a
   // pause comes quickly but not instantly.
-  const moving = move.lengthSq() > 0 && player.onGround;
   if (moving && !crouching) {
     game.stepTimer -= dt;
-    if (game.stepTimer <= 0) { sfxFootstep(); game.stepTimer = speed > 5 ? 0.38 : 0.55; }
+    if (game.stepTimer <= 0) { sfxFootstep(); game.stepTimer = speed > 8 ? 0.3 : speed > 5 ? 0.38 : 0.55; }
   } else {
     game.stepTimer = Math.min(game.stepTimer, 0.2);
   }
 
-  // View bob (applied to the weapon viewmodel)
-  game.bobAmt = moving ? (crouching ? 0.008 : 0.02) : 0;
+  // View bob (applied to the weapon viewmodel); heavier while sprinting
+  game.bobAmt = moving ? (crouching ? 0.008 : 0.02 + 0.01 * game.runLerp) : 0;
 
   updateWeapon(dt);
 

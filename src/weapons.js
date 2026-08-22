@@ -109,9 +109,11 @@ export function updateWeapon(dt) {
   // Recoil kick decay
   game.recoil = Math.max(0, game.recoil - dt * 30);
 
-  // Iron sights: blend FOV 75 -> 55 with adsLerp for a smooth zoom-in
+  // Iron sights: blend FOV with adsLerp for a smooth zoom-in. Running adds
+  // a +5° speed-feel kick (run and aim are mutually exclusive by the
+  // movement precedence rules, so the two never fight over the target).
   game.adsLerp += ((game.aiming ? 1 : 0) - game.adsLerp) * Math.min(1, dt * 12);
-  const targetFov = game.aiming ? 55 : 75;
+  const targetFov = 75 + 5 * game.runLerp - 20 * game.adsLerp;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12);
     camera.updateProjectionMatrix();

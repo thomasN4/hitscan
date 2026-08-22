@@ -31,11 +31,26 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+// Double-tap-W sprint detector: two W presses within 300 ms start a run;
+// the run lasts only while W stays held. Timestamp is module-local — it is
+// input-layer state, not shared game state.
+const RUN_TAP_WINDOW_MS = 300;
+let lastWTapTime = -Infinity;
+
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') tryReload();
+  // e.repeat guards against OS key-repeat re-triggering the double tap
+  if (e.code === 'KeyW' && !e.repeat) {
+    const now = performance.now();
+    if (now - lastWTapTime < RUN_TAP_WINDOW_MS) game.running = true;
+    lastWTapTime = now;
+  }
 });
-addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'KeyW') game.running = false; // sprint requires W held
+});
 
 const SENS = 0.0022; // radians per pixel of mouse movement
 document.addEventListener('mousemove', e => {

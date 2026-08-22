@@ -86,6 +86,8 @@ export const game = {
   started: false,  // first Play click happened; distinguishes pause from pre-game
   shooting: false, // LMB held
   aiming: false,   // RMB held (iron sights)
+  running: false,  // double-tapped W and still holding it (sprint)
+  runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
   yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
   pitch: 0,
   spread: 0.001,   // radians of cone half-angle-ish bloom; grows per shot

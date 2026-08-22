@@ -80,6 +80,7 @@ export const WEAPONS = [
     spreadMul: 0.3,
     bloomKick: 0.02, recoilKick: 1,
     recoilRecover: 30, // recoil units/s — full-auto needs a fast reset between shots
+    bloomRecover: 0.45, // spread bloom units/s — full bloom clears in <1 s after a spray
     scopedOverlay: false,
   },
   {
@@ -93,6 +94,7 @@ export const WEAPONS = [
     spreadMul: 0.05, // near-laser when scoped and still
     bloomKick: 0.09, recoilKick: 4,
     recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
+    bloomRecover: 0.06, // spread bloom units/s — slow settle matches the bolt-action feel
     scopeGate: 0.5,    // RMB re-scope is blocked until recoil decays below this
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
     semiAuto: true,      // one shot per LMB press; holding does nothing

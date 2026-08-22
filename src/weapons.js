@@ -23,15 +23,17 @@ camera.add(gunGroup);
 scene.add(camera);
 
 const rifleGroup = new THREE.Group();
+let rifleMag; // kept for the reload animation (mag drop/reseat)
 {
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b2b2b });
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.5), dark);
   body.position.set(0.25, -0.22, -0.45); // lower-right of the view
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
   barrel.position.set(0.25, -0.19, -0.82);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
-  mag.position.set(0.25, -0.31, -0.42);
-  rifleGroup.add(body, barrel, mag);
+  rifleMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
+  rifleMag.position.set(0.25, -0.31, -0.42);
+  rifleMag.userData.baseY = -0.31;
+  rifleGroup.add(body, barrel, rifleMag);
 }
 
 const sniperGroup = new THREE.Group();
@@ -58,6 +60,38 @@ gunGroup.add(rifleGroup, sniperGroup);
 const raycaster = new THREE.Raycaster();
 const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
 scene.add(muzzleFlashLight);
+
+// ---------- Reload animation ----------
+// Procedural viewmodel reload: the gun dips away from the camera and tilts
+// while the magazine drops out and slides back in. Everything is driven by
+// reload progress (0..1 over weapon.reloadTime), so calling with t = 0
+// restores the rest pose — offsets self-reset when `weapon.reloading` clears.
+const MAG_TRAVEL = 0.22; // how far the magazine drops, view units
+
+/** Smooth 0→1→0 hold envelope: eases in over [0,inFrac], out over [1-outFrac,1]. */
+function holdEnv(t, inFrac, outFrac) {
+  return THREE.MathUtils.smoothstep(t, 0, inFrac) *
+    (1 - THREE.MathUtils.smoothstep(t, 1 - outFrac, 1));
+}
+
+/**
+ * Pose one weapon group for reload progress `t`. Applied to the per-slot
+ * group (not gunGroup, whose transform player.js owns every frame).
+ * @param {THREE.Group} group weapon viewmodel group
+ * @param {THREE.Mesh} mag its magazine mesh (needs userData.baseY set)
+ * @param {number} t reload progress 0..1
+ */
+function poseReload(group, mag, t) {
+  const dip = holdEnv(t, 0.2, 0.25);
+  // Negative x-rotation tips the muzzle down; z rolls it toward center
+  group.position.y = -0.15 * dip;
+  group.rotation.x = -0.32 * dip;
+  group.rotation.z = 0.15 * dip;
+  // Mag falls out early (8%..38%), seats home late (55%..88%)
+  const drop = THREE.MathUtils.smoothstep(t, 0.08, 0.38);
+  const seat = THREE.MathUtils.smoothstep(t, 0.55, 0.88);
+  mag.position.y = mag.userData.baseY - MAG_TRAVEL * drop * (1 - seat);
+}
 
 /** Start reloading if possible. Bound to R and to firing an empty mag. */
 export function tryReload() {
@@ -198,6 +232,14 @@ export function updateWeapon(dt) {
   // Scope reticle is DOM (hud.js); only touch it on state flips.
   setScopeOverlay(def.scopedOverlay && game.adsLerp > 0.85);
 
+  // Reload animation: progress through the active reload (0 when idle so
+  // the pose resets). Uses wall-clock time to match weapon.reloadEnd.
+  const nowS = performance.now() / 1000;
+  const reloadT = weapon.reloading
+    ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - nowS) / weapon.reloadTime, 0, 1)
+    : 0;
+  if (game.slot === 0) poseReload(rifleGroup, rifleMag, reloadT);
+
   // Reload finish: top the mag back up from reserve (partial reloads allowed).
   // Range mode: reserve is not deducted — R always restores a full loadout
   // so accuracy/recoil practice never pauses for ammo runs.
@@ -233,7 +275,7 @@ export function updateWeapon(dt) {
   const movePenalty = 0.010 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
   game.spread = Math.max(0.0005,
     (stanceBase + movePenalty + game.bloom) * adsMul);
-  game.bloom = Math.max(0, game.bloom - dt * 0.06);
+  game.bloom = Math.max(0, game.bloom - dt * def.bloomRecover);
 
   // Crosshair mirrors the cone: ~6 px standing still, opening with movement
   // and bloom (capped so a long spray doesn't push arms off-screen).

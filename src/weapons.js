@@ -281,13 +281,14 @@ export function updateWeapon(dt) {
 
   // ---- Accuracy model -------------------------------------------------
   // totalSpread = ((stance base + movement penalty) × spray + inherent) × ADS
-  //   stance base: 0.0003 rad crouched, +0.0009 standing (CS2: crouch ≈ 0.77×
-  //                stand, so standing ≈ 1.3–4× the stance term); crouching also
+  //   stance base: 0.0006 rad crouched, +0.0018 standing; crouching also
   //                halves the movement penalty, keeping crouch-walk the most
   //                accurate mobile stance
   //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js)
   //   spray:       cone multiplier, 1 rested; grows per shot (sprayKick up to
-  //                sprayCap), recovers toward 1 at sprayRecover/s
+  //                sprayCap), recovers toward 1 at sprayRecover/s. It scales
+  //                the (stance + movement) group, so situational spread opens
+  //                wide under sustained fire while `inherent` stays fixed.
   //   inherent:    per-weapon rest cone — dominates hip-fire so both weapons
   //                are ~similarly bad from the hip
   //   ADS:         weapon's spreadMul — 30% for the smg's iron sights
@@ -295,8 +296,8 @@ export function updateWeapon(dt) {
   // game.spread is consumed by shoot(); the crosshair gap in hud.js maps
   // from the same value, keeping what you see in sync with where bullets go.
   const adsMul = game.aiming ? def.spreadMul : 1;
-  const stanceBase = 0.0003 + 0.0009 * (1 - game.crouchLerp);
-  const movePenalty = 0.012 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
+  const stanceBase = 0.0006 + 0.0018 * (1 - game.crouchLerp);
+  const movePenalty = 0.024 * game.moveLerp * (1 - 0.5 * game.crouchLerp);
   game.spread = Math.max(0.00005,
     ((stanceBase + movePenalty) * game.spray + def.inherent) * adsMul);
   game.spray = Math.max(1, game.spray - dt * def.sprayRecover);

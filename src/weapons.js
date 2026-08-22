@@ -155,9 +155,6 @@ export function shoot() {
   weapon.mag--;
   weapon.lastShot = clock.elapsedTime;
   const def = WEAPONS[game.slot];
-  game.recoil = Math.min(game.recoil + def.recoilKick, 6);
-  // Recoil bloom kick; capped so sustained fire stays controllable-ish
-  game.bloom = Math.min(game.bloom + def.bloomKick, 0.25);
 
   muzzleFlashLight.intensity = 3;
   setTimeout(() => muzzleFlashLight.intensity = 0, 50);
@@ -177,6 +174,12 @@ export function shoot() {
     // same climb the camera shows.
     -1
   ).normalize().applyEuler(new THREE.Euler(aimPitch(), game.yaw, 0, 'YXZ'));
+
+  // Recoil/bloom kicks are applied only AFTER this shot's ray is built:
+  // a bullet leaves from the pre-kick aim point (first round is dead-on),
+  // and its own kick steers the FOLLOWING shots.
+  game.recoil = Math.min(game.recoil + def.recoilKick, 6);
+  game.bloom = Math.min(game.bloom + def.bloomKick, 0.25);
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;

@@ -117,12 +117,14 @@ export function updateWeapon(dt) {
     camera.updateProjectionMatrix();
   }
 
-  // Reload finish: top the mag back up from reserve (partial reloads allowed)
+  // Reload finish: top the mag back up from reserve (partial reloads allowed).
+  // Range mode: reserve is not deducted — R always restores a full loadout
+  // so accuracy/recoil practice never pauses for ammo runs.
   if (weapon.reloading && performance.now() / 1000 >= weapon.reloadEnd) {
     const need = weapon.magSize - weapon.mag;
     const take = Math.min(need, weapon.reserve);
     weapon.mag += take;
-    weapon.reserve -= take;
+    if (game.map !== 'range') weapon.reserve -= take;
     weapon.reloading = false;
   }
 

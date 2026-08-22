@@ -32,8 +32,15 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 
 ## Gameplay
 
-- 6 enemy bots spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
+Two maps, chosen from the start menu (switching reloads the page with `?map=range`):
+
+- **Arena** (`src/map.js`) — 6 enemy bots spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
+- **Shooting Range** (`src/range.js`) — a private lane with floor markers at 10–50 m and bot-silhouette targets (identical hitbox dimensions to real bots) wearing elliptical bullseye rings at 10–60 m. Nothing shoots back; `R` restores your full loadout without consuming reserve ammo. Use it to practice accuracy and recoil patterns.
+
+Common rules:
+
 - Damage zones: head ×4 (one-shot kill), torso ×1, legs ×0.75.
+- Bullets leave persistent decals (capped at 200; oldest recycled) — check your grouping on any surface.
 - Clearing all bots simultaneously wins the round; individual bots self-respawn after 6 s.
 - Bots' accuracy degrades with distance.
 

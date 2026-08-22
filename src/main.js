@@ -6,6 +6,7 @@
 // rendering and effect updates run always so pause screens stay visible.
 import { renderer, scene, camera, clock, game, keys, player, weapon, bulletHoles } from './core.js';
 import { buildMap } from './map.js';
+import { buildRange } from './range.js';
 import { updatePlayer } from './player.js';
 import { spawnBots, updateBots } from './bots.js';
 import { tryReload } from './weapons.js';
@@ -14,8 +15,14 @@ import { respawn } from './combat.js';
 import { updateHUD, setTimer, hudEl } from './hud.js';
 
 // ---------- World ----------
-buildMap();
-spawnBots();
+const RANGE = game.map === 'range';
+if (RANGE) {
+  buildRange();
+} else {
+  buildMap();
+  spawnBots();
+}
+respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
 
 // ---------- Input ----------
 addEventListener('resize', () => {
@@ -57,6 +64,13 @@ const deathScreen = document.getElementById('deathScreen');
 
 function lock() { renderer.domElement.requestPointerLock(); }
 document.getElementById('playBtn').onclick = lock;
+// Map switch is a full page reload (?map=...) — scenes are never hot-swapped.
+const rangeBtn = document.getElementById('rangeBtn');
+rangeBtn.textContent = RANGE ? 'Play Arena' : 'Shooting Range';
+rangeBtn.onclick = () => { location.search = RANGE ? '' : '?map=range'; };
+if (RANGE) {
+  document.querySelector('#startMenu p').textContent = 'Practice your aim — silhouettes with bullseyes at 10\u201360 m';
+}
 document.getElementById('respawnBtn').onclick = () => { deathScreen.style.display = 'none'; respawn(); lock(); };
 renderer.domElement.addEventListener('click', () => { if (!game.locked && player.alive && game.started) lock(); });
 
@@ -85,12 +99,14 @@ function animate() {
 
   if (game.locked && game.started) {
     updatePlayer(dt);
-    updateBots(dt, player);
+    if (!RANGE) updateBots(dt, player);
 
-    // Round timer: counts down and resets — no round-end consequence yet
-    game.roundTime -= dt;
-    if (game.roundTime <= 0) game.roundTime = 115;
-    setTimer(game.roundTime);
+    // Round timer: arena only — meaningless on the range, so freeze it there
+    if (!RANGE) {
+      game.roundTime -= dt;
+      if (game.roundTime <= 0) game.roundTime = 115;
+      setTimer(game.roundTime);
+    }
 
     updateHUD();
   }

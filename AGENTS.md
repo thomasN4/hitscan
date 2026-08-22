@@ -29,6 +29,7 @@ The smoke test drives the user's Brave browser via puppeteer-core; its executabl
 - **All shared mutable state lives in `src/core.js`** (`player`, `weapon`, `game`, `keys`, collections). Do not create new cross-module mutable globals elsewhere.
 - **Dependency direction:** everything may import from `core.js`; modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → core.
 - **Level geometry must go through `map.js:addBox`**, which registers both the movement AABB (`colliders`) and the raycast target (`solids`). Adding meshes directly to the scene creates walk-through/shoot-through bugs.
+- **Map switching is a full page reload** driven by the `?map=` URL param (read once into `game.map` in core.js). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
 - **Damage flows through `combat.js`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
 - DOM writes only in `hud.js`. Sound synthesis only in `audio.js`.
 
@@ -38,6 +39,7 @@ The smoke test drives the user's Brave browser via puppeteer-core; its executabl
 - Pointer lock has a browser-enforced cooldown after `exitPointerLock()`; re-locking too soon silently fails. The canvas click handler recovers, keep that behavior when touching menus.
 - The game loop only simulates while pointer lock is held (`game.locked && game.started`) but always renders. Anything added to the loop should respect that split.
 - `window.__cs` in main.js is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player, bulletHoles }`.
+- **Euler rotation orders matter**: the camera and shot-direction math must both use `'YXZ'`. Default `'XYZ'` silently aims shots somewhere else (this caused bullets flying skyward once).
 
 ## Conventions
 

@@ -1,55 +1,54 @@
+// smoke-test.mjs — headless E2E check for both maps.
+//
+// Usage: start `npm run dev` in another terminal, then:
+//   node scripts/smoke-test.mjs
+//
+// Requires Brave (Flatpak path below is machine-specific).
 import puppeteer from 'puppeteer-core';
 
 const BRAVE = '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave';
+const BASE = 'http://localhost:5173';
 
 const browser = await puppeteer.launch({
   executablePath: BRAVE,
   headless: 'new',
   args: ['--no-sandbox', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });
-const page = await browser.newPage();
-await page.setViewport({ width: 1280, height: 720 });
 
 const errors = [];
-page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.type() + ': ' + m.text()); });
-page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
+let failures = 0;
 
-try {
-  await page.goto('http://localhost:5173', { waitUntil: 'networkidle0', timeout: 20000 });
-  await new Promise(r => setTimeout(r, 1500));
+async function runMap(name, url) {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
-  const hook = await page.evaluate(() => !!window.__cs);
-  const canvas = await page.evaluate(() => !!document.querySelector('canvas'));
-  console.log('module loaded:', { hook, canvas });
-  console.log('errors so far:', JSON.stringify(errors, null, 2));
+  try {
+    await page.goto(BASE + url, { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1500));
 
-  if (hook) {
+    const hook = await page.evaluate(() => !!window.__cs);
+    if (!hook) throw new Error('debug hook __cs missing — module failed to load?');
+
+    // Enter "playing" state headlessly (pointer lock is unreliable in CI)
     await page.evaluate(() => {
       window.__cs.game.started = true;
       window.__cs.game.locked = true;
       window.__cs.weapon.mag = 10;
     });
-    await page.keyboard.press('KeyR');
-    await new Promise(r => setTimeout(r, 300));
-    const after = await page.evaluate(() => ({
-      mag: window.__cs.weapon.mag,
-      reloading: window.__cs.weapon.reloading,
-      reserve: window.__cs.weapon.reserve,
-    }));
-    console.log('after R:', JSON.stringify(after));
-    await new Promise(r => setTimeout(r, 2300));
-    const done = await page.evaluate(() => ({
-      mag: window.__cs.weapon.mag,
-      reloading: window.__cs.weapon.reloading,
-      reserve: window.__cs.weapon.reserve,
-    }));
-    console.log('after reload window:', JSON.stringify(done));
 
-    // Fire a burst at the ground and verify bullet-hole decals spawn.
+    // 1) Reload works
+    await page.keyboard.press('KeyR');
+    await new Promise(r => setTimeout(r, 2600));
+    const reload = await page.evaluate(() => ({ ...window.__cs.weapon }));
+    if (reload.mag !== 30 || reload.reloading) throw new Error(`reload incomplete: ${JSON.stringify(reload)}`);
+
+    // 2) Firing spawns bullet-hole decals (aim down at the floor)
     await page.evaluate(() => {
       const cs = window.__cs;
-      cs.player.pos.set(0, 1.7, 48);   // open ground near spawn
-      cs.game.pitch = -1.4;            // aim almost straight down
+      cs.game.pitch = -1.4;
       cs.game.shooting = true;
     });
     await new Promise(r => setTimeout(r, 600));
@@ -57,12 +56,25 @@ try {
     const fired = await page.evaluate(() => ({
       holes: window.__cs.bulletHoles.length,
       mag: window.__cs.weapon.mag,
+      reserve: window.__cs.weapon.reserve,
     }));
-    console.log('after firing burst:', JSON.stringify(fired));
     if (fired.holes === 0) throw new Error('expected bullet holes after firing, got 0');
+
+    console.log(`[${name}] OK`, JSON.stringify({ reload: 'ok', holes: fired.holes, magAfterBurst: fired.mag, reserve: fired.reserve }));
+  } catch (e) {
+    failures++;
+    console.log(`[${name}] FAIL: ${e.message}`);
   }
-} catch (e) {
-  console.log('test exception:', e.message);
+  errors.push(...mapErrors.map(e => `[${name}] ${e}`));
+  await page.close();
 }
-console.log('console/page errors:', JSON.stringify(errors, null, 2));
-await browser.close();
+
+try {
+  await runMap('arena', '/');
+  await runMap('range', '/?map=range');
+} finally {
+  await browser.close();
+}
+
+console.log('console/page errors:', errors.length ? JSON.stringify(errors, null, 2) : 'none');
+process.exit(failures > 0 || errors.length > 0 ? 1 : 0);

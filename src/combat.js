@@ -45,11 +45,12 @@ export function damageBot(bot, dmg, part) {
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
 export function respawn() {
-  player.pos.set(0, player.eyeHeight, 48);
+  const spawnZ = game.map === 'range' ? 8 : 48; // range: behind the firing line
+  player.pos.set(0, player.eyeHeight, spawnZ);
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;
-  game.yaw = Math.PI;   // face into the arena (-z)
+  game.yaw = 0;   // face -z, into the arena / downrange
   game.pitch = 0;
   weapon.mag = weapon.magSize;
   weapon.reserve = 90;

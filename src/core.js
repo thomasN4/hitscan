@@ -79,11 +79,14 @@ export const weapon = {
  * every frame; never set them directly from input.
  */
 export const game = {
+  // Map is chosen at page load via ?map=range (start-menu buttons trigger a
+  // full reload); there is deliberately no hot-swapping of scenes at runtime.
+  map: new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena',
   locked: false,   // pointer lock active (Esc/menu releases it)
   started: false,  // first Play click happened; distinguishes pause from pre-game
   shooting: false, // LMB held
   aiming: false,   // RMB held (iron sights)
-  yaw: Math.PI,
+  yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
   pitch: 0,
   spread: 0.001,   // radians of cone half-angle-ish bloom; grows per shot
   recoil: 0,       // drives viewmodel kick, decays fast

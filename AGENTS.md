@@ -8,20 +8,26 @@ Browser FPS demo: Three.js + Vite, plain ES modules, no framework. All game code
 
 ## Workflow
 
-Default loop for every non-trivial change: **plan → implement → open draft PR**.
+Default loop for every non-trivial change: **plan → worktree → implement → open draft PR**.
 
 1. **Plan** — agree scope and approach with the user before touching code.
-2. **Implement** — on a feature branch cut from `main`:
+2. **Worktree** — every branch is developed in its own git worktree, never directly in the shared primary checkout (which stays on `main`). One session per worktree; never run two sessions against one working copy:
+
+   ```sh
+   git worktree add ../cs-demo-<slug> -b feat/<short-slug>
+   ```
+
+3. **Implement** — on a feature branch cut from `main` (inside its worktree):
    - `feat/<short-slug>` for features, `fix/<short-slug>` for bug fixes
    - As many WIP commits as sensible while working; commit messages: short imperative summary, optionally `;`-joined clauses, e.g.
 
    ```
    Fix missing player import breaking reload; add smoke test and debug hook
    ```
-3. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
+4. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
    - `gh pr create --draft --title "<imperative summary>" --body "..."`
    - PR body: what changed, why, and verification results.
-4. **Review** — the user merges personally in the GitHub UI. Do NOT run `gh pr merge` or `gh pr ready` unless explicitly instructed for that specific PR.
+5. **Review** — the user merges personally in the GitHub UI. Do NOT run `gh pr merge` or `gh pr ready` unless explicitly instructed for that specific PR.
 
 Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 
@@ -49,8 +55,7 @@ The smoke test drives the user's Brave browser via puppeteer-core; its executabl
 - **Missing imports are NOT build errors here.** Vite/rollup won't flag an identifier used inside a function body if it happens to resolve as a global at runtime — it becomes a silent `ReferenceError` when that code path first runs (this is how reload broke once). After refactors or moving code between modules, run the smoke test, not just `npm run build`.
 - Pointer lock has a browser-enforced cooldown after `exitPointerLock()`; re-locking too soon silently fails. The canvas click handler recovers, keep that behavior when touching menus.
 - The game loop only simulates while pointer lock is held (`game.locked && game.started`) but always renders. Anything added to the loop should respect that split.
-- **Concurrent sessions on one checkout eat uncommitted work.** If another coding agent may touch this repo, use `git worktree` per session. A sibling session reverted staged-but-uncommitted edits here, which turned a "fixed" bug into hours of phantom-chasing.
-- **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k 5173/tcp`, start the server with `--strictPort`, and confirm the port from its log.
+- **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k <port>/tcp`, start the server with `--port <n> --strictPort`, and confirm the port from its log. With parallel worktrees, parallel dev servers are expected — pick a distinct port per worktree; note `scripts/smoke-test.mjs` currently assumes 5173.
 - `window.__cs` in main.js is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player, bulletHoles, colliders }`.
 - **Euler rotation orders matter**: the camera and shot-direction math must both use `'YXZ'`. Default `'XYZ'` silently aims shots somewhere else (this caused bullets flying skyward once).
 

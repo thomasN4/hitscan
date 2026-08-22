@@ -6,7 +6,8 @@
 // If you add geometry, route it through addBox so both stay in sync,
 // otherwise entities will walk through it or shoot through it.
 import * as THREE from 'three';
-import { scene, solids, colliders } from './core.js';
+import { scene } from './core/engine.js';
+import { solids, colliders } from './core/state.js';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xc9a86c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });

@@ -7,7 +7,9 @@
 import puppeteer from 'puppeteer-core';
 
 const BRAVE = '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave';
-const BASE = 'http://localhost:5173';
+// Parallel worktrees run parallel dev servers on distinct ports (see
+// AGENTS.md); point the test at one with CS_SMOKE_BASE=http://localhost:5174
+const BASE = process.env.CS_SMOKE_BASE || 'http://localhost:5173';
 
 const browser = await puppeteer.launch({
   executablePath: BRAVE,

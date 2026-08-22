@@ -1,22 +1,34 @@
 // main.js — entry point: builds the world, wires all input, owns the game loop.
 //
-// Flow: import modules (side effects create renderer/scene) -> buildMap +
+// Flow: initEngine() (imports have no engine/DOM side effects) -> buildMap +
 // spawnBots -> register input/pointer-lock handlers -> start the render loop.
 // The loop only simulates (player, bots, timer) while pointer lock is held;
 // rendering and effect updates run always so pause screens stay visible.
-import { renderer, scene, camera, clock, game, keys, player, weapon, bulletHoles, colliders, WEAPONS } from './core.js';
+import { initEngine, renderer, scene, camera, clock } from './core/engine.js';
+import { game, keys, player, weapon, bulletHoles, colliders, WEAPONS } from './core/state.js';
 import { buildMap } from './map.js';
 import { buildRange } from './range.js';
 import { updatePlayer } from './player.js';
 import { spawnBots, updateBots } from './bots.js';
-import { tryReload, switchWeapon } from './weapons.js';
+import { tryReload, switchWeapon, initWeaponViewmodels } from './weapons.js';
 import { updateEffects } from './effects.js';
 import { respawn } from './combat.js';
-import { updateHUD, setTimer, hudEl, setScopeOverlay } from './hud.js';
+import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud.js';
 import { sfxZoom } from './audio.js';
 
-// ---------- World ----------
+// ---------- Startup ----------
+// Order matters and is deliberately explicit: initEngine() creates the
+// renderer/scene/camera that everything below reaches for, so nothing may
+// touch those singletons at module scope. Each init* function is safe to
+// call exactly once, here.
+// core/state.js stays free of browser globals, so the ?map= param is read
+// here and written into the shared state before anything reads game.map.
+game.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
 const RANGE = game.map === 'range';
+
+initEngine();
+initHUD();
+initWeaponViewmodels();  // needs camera/scene
 if (RANGE) {
   buildRange();
 } else {

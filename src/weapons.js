@@ -6,7 +6,9 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
-import { scene, camera, clock, solids, bots, weapon, game, player, WEAPONS, ammoStore } from './core.js';
+import { scene, camera, clock } from './core/engine.js';
+import { solids, bots, weapon, game, player, WEAPONS, ammoStore,
+         RECOIL_CAP, BLOOM_CAP, BASE_FOV } from './core/state.js';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';
 import { damageBot } from './combat.js';
@@ -18,9 +20,10 @@ import { spawnImpact, spawnBulletHole } from './effects.js';
 // game.slot every frame. Position is animated each frame in
 // updateWeapon/updatePlayer: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.js).
+// The viewmodel meshes below are pure THREE objects, so they are built at
+// module scope; only ATTACHING them to the engine's camera/scene needs
+// initEngine() to have run first — see initWeaponViewmodels().
 export const gunGroup = new THREE.Group();
-camera.add(gunGroup);
-scene.add(camera);
 
 const rifleGroup = new THREE.Group();
 let rifleMag; // kept for the reload animation (mag drop/reseat)
@@ -62,7 +65,17 @@ gunGroup.add(rifleGroup, sniperGroup);
 
 const raycaster = new THREE.Raycaster();
 const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
-scene.add(muzzleFlashLight);
+
+/**
+ * Attach the viewmodel to the camera and the muzzle flash to the scene.
+ * Requires initEngine() to have run; call once from main.js before the loop.
+ * `scene.add(camera)` is what makes the camera-parented gun render at all.
+ */
+export function initWeaponViewmodels() {
+  camera.add(gunGroup);
+  scene.add(camera);
+  scene.add(muzzleFlashLight);
+}
 
 /**
  * Vertical aim angle including recoil view punch. The camera (player.js)
@@ -178,8 +191,8 @@ export function shoot() {
   // Recoil/bloom kicks are applied only AFTER this shot's ray is built:
   // a bullet leaves from the pre-kick aim point (first round is dead-on),
   // and its own kick steers the FOLLOWING shots.
-  game.recoil = Math.min(game.recoil + def.recoilKick, 6);
-  game.bloom = Math.min(game.bloom + def.bloomKick, 0.25);
+  game.recoil = Math.min(game.recoil + def.recoilKick, RECOIL_CAP);
+  game.bloom = Math.min(game.bloom + def.bloomKick, BLOOM_CAP);
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;
@@ -233,8 +246,8 @@ export function updateWeapon(dt) {
   game.adsLerp += ((game.aiming ? 1 : 0) - game.adsLerp) * Math.min(1, dt * 12);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
   // usable; main.js multiplies mouse deltas by this.
-  game.zoomScale = 1 - (1 - aimFov / 75) * game.adsLerp;
-  const targetFov = 75 + 5 * game.runLerp - (75 - aimFov) * game.adsLerp;
+  game.zoomScale = 1 - (1 - aimFov / BASE_FOV) * game.adsLerp;
+  const targetFov = BASE_FOV + 5 * game.runLerp - (BASE_FOV - aimFov) * game.adsLerp;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12);
     camera.updateProjectionMatrix();

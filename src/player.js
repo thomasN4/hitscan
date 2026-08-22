@@ -5,7 +5,8 @@
 // only gravity/jump. Crouch and aim modify speed; crouch also lowers the
 // camera and silences footsteps.
 import * as THREE from 'three';
-import { player, camera, clock, game, keys } from './core.js';
+import { camera, clock } from './core/engine.js';
+import { player, game, keys } from './core/state.js';
 import { collidesAt } from './collision.js';
 import { sfxFootstep } from './audio.js';
 import { gunGroup, updateWeapon, aimPitch } from './weapons.js';

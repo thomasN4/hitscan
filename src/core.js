@@ -187,7 +187,9 @@ export const game = {
                    // steers against. Decays toward 0 at recoilRecover/s and
                    // converts to radians via punchRad (see weapons.aimYaw).
    crouchLerp: 0,
-   adsLerp: 0,
+    airLerp: 0,      // 0 grounded .. 1 airborne; smoothed blend of
+                     // !player.onGround, drives the jumping accuracy penalty
+    adsLerp: 0,
    slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
    zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
    zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming

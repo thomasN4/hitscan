@@ -309,6 +309,9 @@ export function updateWeapon(dt) {
   //   movement:    moveLerp is MEASURED speed ÷ walk (see player.js), scaled
   //                cubically so sprinting diverges sharply from walking:
   //                walk ≈ 50" @ 50 m, sprint ≈ 144"
+  //   airborne:    airLerp blends in a flat 0.08 rad penalty — mid-air beats
+  //                even a standing sprint (~168" @ 50 m), so jump-shooting is
+  //                never viable; landing eases back out with airLerp
   //   spray:       cone multiplier, 1 rested; grows per shot (sprayKick up to
   //                sprayCap), recovers toward 1 at sprayRecover/s. It scales
   //                the (stance + movement) group, so situational spread opens
@@ -322,8 +325,9 @@ export function updateWeapon(dt) {
   const adsMul = game.aiming ? def.spreadMul : 1;
   const stanceBase = 0.0006 + 0.0018 * (1 - game.crouchLerp);
   const movePenalty = 0.02 * Math.pow(game.moveLerp, 3) * (1 - 0.5 * game.crouchLerp);
+  const airPenalty = 0.08 * game.airLerp;
   game.spread = Math.max(0.00005,
-    ((stanceBase + movePenalty) * game.spray + def.inherent) * adsMul);
+    ((stanceBase + movePenalty + airPenalty) * game.spray + def.inherent) * adsMul);
   game.spray = Math.max(1, game.spray - dt * def.sprayRecover);
 
   // Crosshair arms sit at the EDGE of the actual scatter cone, projected to

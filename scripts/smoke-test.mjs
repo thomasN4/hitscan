@@ -121,10 +121,17 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         cs.game.spray = 1;
         const walking = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
-        return { standing, crouched, walking };
+        await wait(400); // let moveLerp settle back down before jumping
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));
+        await wait(250); // reach apex-ish; airLerp -> ~0.95
+        cs.game.spray = 1;
+        const airborne = cs.game.spread;
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space' }));
+        return { standing, crouched, walking, airborne };
       });
       if (spreads.crouched >= spreads.standing) throw new Error(`crouch should tighten spread: ${JSON.stringify(spreads)}`);
       if (spreads.walking < spreads.standing * 3) throw new Error(`walking should open spread 3x+: ${JSON.stringify(spreads)}`);
+      if (spreads.airborne <= spreads.walking) throw new Error(`jumping should be worse than walking: ${JSON.stringify(spreads)}`);
       console.log(`[accuracy] OK`, JSON.stringify(spreads));
 
       // 5) No-clip regression: walking into the backstop must stop the

@@ -79,6 +79,10 @@ export function updatePlayer(dt) {
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
   game.crouchLerp += ((crouching ? 1 : 0) - game.crouchLerp) * Math.min(1, dt * 10);
+  // Airborne blend for the accuracy model: eases takeoff/landing over
+  // ~100-200 ms so the jump spread penalty doesn't snap in and out.
+  game.airLerp += ((!player.onGround ? 1 : 0) - game.airLerp) * Math.min(1, dt * 12);
+  if (game.airLerp < 0.001) game.airLerp = 0;
   camera.position.copy(player.pos);
   camera.position.y -= 0.7 * game.crouchLerp;
 

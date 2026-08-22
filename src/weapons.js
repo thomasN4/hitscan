@@ -64,6 +64,15 @@ const raycaster = new THREE.Raycaster();
 const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
 scene.add(muzzleFlashLight);
 
+/**
+ * Vertical aim angle including recoil view punch. The camera (player.js)
+ * and the shot direction (shoot()) must BOTH use this so the crosshair
+ * center is always truthful about where bullets actually go.
+ */
+export function aimPitch() {
+  return game.pitch + game.recoil * WEAPONS[game.slot].punchRad;
+}
+
 // ---------- Reload animation ----------
 // Procedural viewmodel reload: the gun dips away from the camera and tilts
 // while the magazine drops out and slides back in. Everything is driven by
@@ -163,9 +172,11 @@ export function shoot() {
     (Math.random() - 0.5) * game.spread,
     (Math.random() - 0.5) * game.spread,
     // 'YXZ' must match the camera's rotation order (player.js) or the shot
-    // direction diverges from the view direction as pitch/yaw grow.
+    // direction diverges from the view direction as pitch/yaw grow; the
+    // pitch includes the recoil punch via aimPitch() so shots follow the
+    // same climb the camera shows.
     -1
-  ).normalize().applyEuler(new THREE.Euler(game.pitch, game.yaw, 0, 'YXZ'));
+  ).normalize().applyEuler(new THREE.Euler(aimPitch(), game.yaw, 0, 'YXZ'));
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;
@@ -281,8 +292,10 @@ export function updateWeapon(dt) {
     (stanceBase + movePenalty + game.bloom) * adsMul);
   game.bloom = Math.max(0, game.bloom - dt * def.bloomRecover);
 
-  // Crosshair mirrors the cone: ~6 px standing still, opening with movement
-  // and bloom (capped so a long spray doesn't push arms off-screen).
-  // Multiplier chosen so stance/movement differences are visible per arm.
-  setCrosshairGap(Math.min(3 + game.spread * 1100, 60));
+  // Crosshair arms sit at the EDGE of the actual scatter cone, projected to
+  // screen space with the live FOV (per-axis half-angle ≈ spread/2) — so the
+  // gap always matches where bullets can land, hip-fire or ADS. The mean
+  // impact point is screen center itself via aimPitch().
+  const pxPerTan = window.innerHeight / 2 / Math.tan(camera.fov * Math.PI / 360);
+  setCrosshairGap(Math.min(3 + Math.tan(game.spread / 2) * pxPerTan, 60));
 }

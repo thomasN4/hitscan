@@ -84,6 +84,8 @@ export const WEAPONS = [
                         // input (~9.5 shots/s × bloomKick ≈ 0.19/s), or the drain
                         // outpaces accumulation and sprays never bloom at all.
                         // 0.13 clears full bloom ~2 s after stopping (was 0.06 → ~4 s)
+    punchRad: 0.012,   // radians of aim climb per recoil unit — sustained spray
+                       // climbs toward ~4° (cap 6), pull down to compensate
     scopedOverlay: false,
   },
   {
@@ -97,6 +99,8 @@ export const WEAPONS = [
     spreadMul: 0.05, // near-laser when scoped and still
     bloomKick: 0.09, recoilKick: 4,
     recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
+    punchRad: 0.02,    // radians of aim climb per recoil unit — one meaty ~4.6°
+                       // kick per shot that settles slowly with the recoil
     bloomRecover: 0.06, // spread bloom units/s — slow settle matches the bolt-action feel
     scopeGate: 0.5,    // RMB re-scope is blocked until recoil decays below this
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel

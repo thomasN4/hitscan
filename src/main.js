@@ -1,4 +1,4 @@
-import { renderer, scene, camera, clock, game, keys, player } from './core.js';
+import { renderer, scene, camera, clock, game, keys, player, weapon } from './core.js';
 import { buildMap } from './map.js';
 import { updatePlayer } from './player.js';
 import { spawnBots, updateBots } from './bots.js';
@@ -88,3 +88,6 @@ function animate() {
   renderer.render(scene, camera);
 }
 animate();
+
+// Debug/testing hook (inspect from devtools: __cs)
+window.__cs = { game, weapon, player };

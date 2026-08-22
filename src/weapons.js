@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { scene, camera, clock, solids, bots, weapon, game } from './core.js';
+import { scene, camera, clock, solids, bots, weapon, game, player } from './core.js';
 import { sfxShoot, sfxReload } from './audio.js';
 import { showHitmarker } from './hud.js';
 import { damageBot } from './combat.js';

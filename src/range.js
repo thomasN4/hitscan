@@ -8,25 +8,17 @@
 // on them; nothing here shoots back.
 import * as THREE from 'three';
 import { scene } from './core/engine.js';
-import { solids, colliders } from './core/state.js';
+import { addSolidBox, registerSolid, registerGroupParts } from './world.js';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });
 const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
 const matPost   = new THREE.MeshLambertMaterial({ color: 0x6b5a3e });
 
-// Must register BOTH collections, same as map.js:addBox — solids block
-// bullets/sight, colliders block movement. Skipping colliders here is how
-// the range map ended up fully no-clip.
-function addBox(x, y, z, w, h, d, mat) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y + h / 2, z);
-  m.castShadow = m.receiveShadow = true;
-  scene.add(m);
-  solids.push(m);
-  colliders.push(new THREE.Box3().setFromObject(m));
-  return m;
-}
+// Shared with map.js via world.js. This file used to keep its own copy, and
+// that copy shipped without the `colliders` push — the whole range map was
+// no-clip (`431ac6e`). There is now one implementation to get wrong.
+const addBox = addSolidBox;
 
 /** Render text to a canvas and return it as a texture. */
 function makeTextTexture(text, { width = 256, height = 128, font = 'bold 72px sans-serif', color = '#3a3226' } = {}) {
@@ -113,21 +105,15 @@ function addTarget(x, z, { height = 0, yaw = 0 } = {}) { // yaw 0 = facing firin
   g.position.set(x, height, z);
   g.rotation.y = yaw;
   scene.add(g);
-  // Flush the group transform into matrixWorld NOW — Box3.setFromObject
-  // below composes each part against its parent's CURRENT world matrix,
-  // which is still identity until the first render. Without this, every
-  // target's collision box lands at the map origin.
-  g.updateMatrixWorld(true);
-
-  // Register parts as raycast targets so decals stick...
-  solids.push(head, torso, legs);
-  // ...and as movement colliders so the player can't walk through targets.
-  // Box3.setFromObject resolves each part's WORLD AABB (group transform
-  // included). Raised targets' floating leg boxes also block walking under
-  // them — accepted as realistic.
-  for (const p of [post, head, torso, legs]) {
-    colliders.push(new THREE.Box3().setFromObject(p));
-  }
+  // The post blocks walking but is NOT a bullet target, so the two lists
+  // differ. registerGroupParts flushes the group's world matrix before
+  // measuring — without that every AABB lands at the map origin (`faa52c5`).
+  // Raised targets' floating leg boxes also block walking under them —
+  // accepted as realistic.
+  registerGroupParts(g, {
+    shootable: [head, torso, legs],
+    blocking: [post, head, torso, legs],
+  });
   return g;
 }
 
@@ -140,7 +126,7 @@ export function buildRange() {
   ground.position.z = -30;
   ground.receiveShadow = true;
   scene.add(ground);
-  solids.push(ground);
+  registerSolid(ground); // raycast target only — the lane walls bound movement
 
   // Lane walls run continuously from the backstop (z=-80.5) to the rear wall
   // (z=20) — no gaps, so no void is visible anywhere from inside the lane.

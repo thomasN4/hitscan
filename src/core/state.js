@@ -13,10 +13,8 @@
 import * as THREE from 'three';
 
 // ---------- Shared collections ----------
-/** Meshes (walls, crates, ground) that block bullets AND bot line-of-sight. */
-export const solids = [];
-/** AABBs derived from `solids` boxes, used for cheap movement collision. */
-export const colliders = [];
+// Level geometry registries (`solids`, `colliders`) live in world.js, which
+// owns the one path by which geometry is registered.
 /** All Bot instances (see bots.js). */
 export const bots = [];
 /** Short-lived bullet impact puffs (see effects.js). */

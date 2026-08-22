@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { camera, clock } from './core/engine.js';
 import { player, game, keys } from './core/state.js';
 import { collidesAt } from './collision.js';
+import { colliders } from './world.js';
 import { sfxFootstep } from './audio.js';
 import { gunGroup, currentAimPitch } from './weapons.js';
 import { crosshair } from './hud.js';
@@ -72,10 +73,10 @@ export function updateMovement(dt) {
   const preX = player.pos.x, preZ = player.pos.z;
   const nx = player.pos.x + move.x;
   const testX = new THREE.Vector3(nx, player.eyeHeight, player.pos.z);
-  if (!collidesAt(testX, player.radius)) player.pos.x = nx;
+  if (!collidesAt(testX, player.radius, colliders)) player.pos.x = nx;
   const nz = player.pos.z + move.z;
   const testZ = new THREE.Vector3(player.pos.x, player.eyeHeight, nz);
-  if (!collidesAt(testZ, player.radius)) player.pos.z = nz;
+  if (!collidesAt(testZ, player.radius, colliders)) player.pos.z = nz;
 
   // Movement-accuracy input: MEASURED displacement, so being blocked by a
   // wall doesn't count as moving. Smoothed ~100 ms for gradual crosshair

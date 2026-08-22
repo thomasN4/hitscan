@@ -8,7 +8,8 @@
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
 import { initEngine, renderer, scene, camera, clock } from './core/engine.js';
-import { game, keys, player, weapon, bulletHoles, colliders, WEAPONS } from './core/state.js';
+import { game, keys, player, weapon, bulletHoles, WEAPONS } from './core/state.js';
+import { colliders } from './world.js';
 import { buildMap } from './map.js';
 import { buildRange } from './range.js';
 import { updateMovement, updateCamera, updateViewmodel } from './player.js';

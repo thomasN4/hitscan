@@ -12,7 +12,8 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine.js';
-import { bots, solids, game } from './core/state.js';
+import { bots, game } from './core/state.js';
+import { solids, colliders } from './world.js';
 import { collidesAt, hasLineOfSight } from './collision.js';
 import { damagePlayer, checkRoundEnd } from './combat.js';
 import { sfxEnemyShoot } from './audio.js';
@@ -91,7 +92,7 @@ class Bot {
 
     const nextPos = this.mesh.position.clone().add(move);
     nextPos.y = 0;
-    if (!collidesAt(nextPos, 0.5)) this.mesh.position.copy(nextPos);
+    if (!collidesAt(nextPos, 0.5, colliders)) this.mesh.position.copy(nextPos);
     else this.strafeDir *= -1; // bumped into geometry: reverse strafe
 
     if (Math.random() < dt * 0.5) this.strafeDir *= -1; // ~50% chance/sec to juke

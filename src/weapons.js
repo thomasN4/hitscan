@@ -7,7 +7,8 @@
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
 import { scene, camera, clock } from './core/engine.js';
-import { solids, bots, weapon, game, player, WEAPONS, ammoStore,
+import { solids } from './world.js';
+import { bots, weapon, game, player, WEAPONS, ammoStore,
          RECOIL_CAP, BLOOM_CAP, BASE_FOV } from './core/state.js';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';

@@ -4,7 +4,7 @@
 // spawnBots -> register input/pointer-lock handlers -> start the render loop.
 // The loop only simulates (player, bots, timer) while pointer lock is held;
 // rendering and effect updates run always so pause screens stay visible.
-import { renderer, scene, camera, clock, game, keys, player, weapon, bulletHoles, WEAPONS } from './core.js';
+import { renderer, scene, camera, clock, game, keys, player, weapon, bulletHoles, colliders, WEAPONS } from './core.js';
 import { buildMap } from './map.js';
 import { buildRange } from './range.js';
 import { updatePlayer } from './player.js';
@@ -156,4 +156,4 @@ animate();
 
 // Debug/testing hook: inspect live state from devtools (`__cs.game`, ...)
 // or from scripts/smoke-test.mjs.
-window.__cs = { game, weapon, player, bulletHoles };
+window.__cs = { game, weapon, player, bulletHoles, colliders };

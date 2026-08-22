@@ -63,25 +63,38 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
     let sprint = null;
     // 3) Double-tap-W sprint (range only — on arena, bot fire during earlier
     //    stationary phases can damage/distract the measurement).
-    //    Displacement over 1 s must exceed walk speed (6.5 m/s); full run is
-    //    9.75 m/s minus the ~0.2 s ramp. dt-scaled movement keeps this stable
-    //    under SwiftShader's low FPS.
+    //
+    // We assert MECHANICS, not absolute distance: headless SwiftShader FPS
+    // swings enough that wall-clock displacement is unstable (the sim's dt
+    // clamp makes game-time diverge from wall-time at low FPS). So:
+    //   - `game.running` must latch after the double tap (detector works)
+    //   - `game.runLerp` must climb past 0.4 (ramp works)
+    //   - player must cover >5 m (movement integration alive)
     if (sprintCheck) {
       sprint = await page.evaluate(async () => {
         const cs = window.__cs;
         cs.game.pitch = 0; // level, so all displacement is horizontal
         cs.player.pos.set(0, 1.7, 8);
-        // Two W presses 100 ms apart -> inside the 300 ms double-tap window
+        // Two rapid W presses -> inside the 300 ms double-tap window.
+        // Dispatched back-to-back WITHOUT an async gap: under SwiftShader
+        // the main thread can stall long enough for a timed gap (>300 ms)
+        // to miss the window and make this test flaky.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
-        await new Promise(r => setTimeout(r, 100));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', repeat: false }));
         const startZ = cs.player.pos.z;
+        let runningSeen = false, runLerpPeak = 0;
         const t0 = performance.now();
-        while (performance.now() - t0 < 1000) await new Promise(r => requestAnimationFrame(r));
+        while (performance.now() - t0 < 1000) {
+          await new Promise(r => requestAnimationFrame(r));
+          runningSeen = runningSeen || cs.game.running;
+          runLerpPeak = Math.max(runLerpPeak, cs.game.runLerp);
+        }
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
-        return { dist: Math.abs(startZ - cs.player.pos.z), running: cs.game.running };
+        return { dist: Math.abs(startZ - cs.player.pos.z), runningSeen, runLerpPeak };
       });
-      if (sprint.dist < 7.5) throw new Error(`sprint distance too low: ${sprint.dist.toFixed(2)} m`);
+      if (!sprint.runningSeen) throw new Error('double-tap did not latch game.running');
+      if (sprint.runLerpPeak < 0.4) throw new Error(`sprint ramp too weak: ${sprint.runLerpPeak.toFixed(2)}`);
+      if (sprint.dist < 5) throw new Error(`barely moved during sprint: ${sprint.dist.toFixed(2)} m`);
     }
 
     // 4) Accuracy model: spread must reflect stance and movement
@@ -91,15 +104,19 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         const wait = ms => new Promise(r => setTimeout(r, ms));
         cs.game.pitch = 0;
         cs.player.pos.set(0, 1.7, 8);
-        await wait(400); // let bloom from earlier phases decay
+        await wait(400); // let moveLerp/crouchLerp settle
+        cs.game.bloom = 0; // isolate stance/movement layers from prior phases
+        await wait(150);   // let the frame loop recompute spread from bloom=0
         const standing = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
         await wait(400); // crouchLerp -> 1
+        cs.game.bloom = 0;
         const crouched = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
         await wait(400);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         await wait(600); // walk long enough for moveLerp to settle near 1
+        cs.game.bloom = 0;
         const walking = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         return { standing, crouched, walking };
@@ -107,6 +124,46 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       if (spreads.crouched >= spreads.standing) throw new Error(`crouch should tighten spread: ${JSON.stringify(spreads)}`);
       if (spreads.walking < spreads.standing * 3) throw new Error(`walking should open spread 3x+: ${JSON.stringify(spreads)}`);
       console.log(`[accuracy] OK`, JSON.stringify(spreads));
+
+      // 5) No-clip regression: walking into the backstop must stop the
+      //    player at the wall instead of passing through it. The inner face
+      //    of the backstop sits at z = -80; from -75 there's ~4.5 m runway.
+      //    Bounded both ways: must make progress (collision fix didn't
+      //    freeze movement) but must stop short of the face.
+      const clip = await page.evaluate(async () => {
+        const cs = window.__cs;
+        cs.player.pos.set(0, 1.7, -75);
+        cs.game.yaw = 0; // forward is -z: straight into the backstop
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        const t0 = performance.now();
+        while (performance.now() - t0 < 1200) await new Promise(r => requestAnimationFrame(r));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        return { z: cs.player.pos.z };
+      });
+      // Wall box spans [-81,-80]; with radius 0.45 the player stops at
+      // ~z=-79.55. Fail if they penetrate past the inner face (-80) or
+      // never made progress toward it.
+      if (clip.z < -79.9) throw new Error(`no-clip: walked into/through backstop to z=${clip.z.toFixed(2)}`);
+      if (clip.z > -76.5) throw new Error(`no progress toward backstop: z=${clip.z.toFixed(2)}`);
+      console.log(`[noclip] OK`, JSON.stringify(clip));
+
+      // 6) Target collision: walk into the 10 m silhouette (torso front
+      //    face at z=-4.8, at x=-4.5). Must stop short of its center plane.
+      const target = await page.evaluate(async () => {
+        const cs = window.__cs;
+        cs.player.pos.set(-4.5, 1.7, -2);
+        cs.game.yaw = 0; // face -z, straight at the target
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        const t0 = performance.now();
+        while (performance.now() - t0 < 1200) await new Promise(r => requestAnimationFrame(r));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        return { x: cs.player.pos.x, z: cs.player.pos.z };
+      });
+      // Blocked around z ≈ -4.35 (front face + radius); through would reach
+      // well past the torso center (-5)
+      if (target.z < -4.9) throw new Error(`no-clip: walked through target to ${JSON.stringify(target)}`);
+      if (target.z > -2.8 || Math.abs(target.x + 4.5) > 0.3) throw new Error(`no progress toward target: ${JSON.stringify(target)}`);
+      console.log(`[targetclip] OK`, JSON.stringify(target));
     }
 
     // 5) Sniper: 1/2 weapon switch, scope overlay, and wheel zoom steps

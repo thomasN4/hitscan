@@ -238,6 +238,12 @@ let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on re
 const ADS_RATE = 12;
 
 export function updateWeapon(dt) {
+  // Dead players don't shoot, reload or blend. exitPointerLock() fires
+  // pointerlockchange asynchronously, so at least one frame runs with
+  // alive === false and locked === true; without this guard a held LMB
+  // would spend ammo and could still score a kill from that frame.
+  if (!player.alive) return;
+
   const def = WEAPONS[game.slot];
 
   // Recoil kick decay — rate is per-weapon (rifle resets fast for full-auto,

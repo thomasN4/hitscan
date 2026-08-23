@@ -358,14 +358,31 @@ export const input: InputState = {
   running: false,
 };
 
+/**
+ * Look angles, in radians. Written by main.ts's mousemove handler (pitch
+ * clamped there) and combat.ts's respawn; read by player.ts's movement
+ * forward vector and by weapons.ts's currentAimPitch/currentAimYaw — the
+ * shared source for both camera and shot direction.
+ *
+ * These are the BASE angles. Recoil punch is added on top per read
+ * (sim/recoil.ts), never folded in here — routing the view punch into the
+ * base would steer the player's legs and fight the mouse.
+ */
+export interface AimState {
+  /** Look yaw; 0 = facing -z, Math.PI would face the arena's rear wall. */
+  yaw: number;
+  pitch: number;
+}
+
+export const aim: AimState = {
+  yaw: 0,
+  pitch: 0,
+};
+
 /** Misc per-frame / transient flags — see the slices above/below. */
 export interface GameState {
   /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
   runLerp: number;
-  /** Look yaw; 0 = facing -z, Math.PI would face the arena's rear wall. */
-  yaw: number;
-  pitch: number;
-  /** CURRENT total shot cone (radians), recomputed each frame in weapons.ts. */
   spread: number;
   /** Shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies). */
   spray: number;
@@ -397,8 +414,6 @@ export interface GameState {
  */
 export const game: GameState = {
   runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
-  yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
-  pitch: 0,
   spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
                    // in weapons.ts from (stance + movement + air) × spray,
                    // plus the weapon's inherent cone, all × ADS. Do not add

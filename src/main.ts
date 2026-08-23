@@ -12,7 +12,7 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { GameState, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
+import { session, input, aim, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -90,10 +90,10 @@ document.addEventListener('mousemove', e => {
   if (!session.locked || !player.alive) return;
   // zoomScale shrinks toward the FOV ratio while scoped (weapons.ts), so
   // aiming stays controllable at 12x instead of flinging across the sky.
-  game.yaw -= e.movementX * SENS * game.zoomScale;
-  game.pitch -= e.movementY * SENS * game.zoomScale;
+  aim.yaw -= e.movementX * SENS * game.zoomScale;
+  aim.pitch -= e.movementY * SENS * game.zoomScale;
   // Clamp pitch so the player can't flip over backwards
-  game.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, game.pitch));
+  aim.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, aim.pitch));
 });
 
 // Wheel = scope zoom steps, only while scoped with the sniper (slot 1).

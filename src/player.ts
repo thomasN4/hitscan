@@ -14,7 +14,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, game, keys, gameTime } from './core/state';
+import { player, input, aim, game, keys, gameTime } from './core/state';
 import { collidesAt } from './collision';
 import { colliders } from './world';
 import { sfxFootstep } from './audio';
@@ -67,7 +67,7 @@ export function updateMovement(dt: number): void {
   const running = input.running && !crouching && !input.aiming;
   const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: game.runLerp });
 
-  const forward = new THREE.Vector3(-Math.sin(game.yaw), 0, -Math.cos(game.yaw));
+  const forward = new THREE.Vector3(-Math.sin(aim.yaw), 0, -Math.cos(aim.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)
   const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
@@ -148,7 +148,7 @@ export function updateMovement(dt: number): void {
  * decay would aim the camera a frame ahead of the bullets.
  *
  * Note this is the VIEW yaw only. Movement (updateMovement's forward vector)
- * and mouse input stay on the base game.yaw, or the recoil walk would steer
+ * and mouse input stay on the base aim.yaw, or the recoil walk would steer
  * the player's legs and fight the mouse.
  */
 export function updateCamera(): void {

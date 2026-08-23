@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, input, game, player, gameTime, WEAPONS, ammoStore,
+import { bots, weapon, session, input, aim, game, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          type WeaponDef, type WeaponSlot } from './core/state';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
@@ -114,7 +114,7 @@ export function initWeaponViewmodels(): void {
  * through it so the crosshair stays truthful about where bullets go.
  */
 export function currentAimPitch(): number {
-  return aimPitch(game.pitch, game.recoil, currentDef().punchRad);
+  return aimPitch(aim.pitch, game.recoil, currentDef().punchRad);
 }
 
 /**
@@ -126,7 +126,7 @@ export function currentAimPitch(): number {
  * about horizontal drift the way it once did about vertical climb.
  */
 export function currentAimYaw(): number {
-  return aimYaw(game.yaw, game.recoilYaw, currentDef().punchRad);
+  return aimYaw(aim.yaw, game.recoilYaw, currentDef().punchRad);
 }
 
 // ---------- Reload animation ----------

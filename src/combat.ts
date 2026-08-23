@@ -4,7 +4,7 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone } from './core/state';
-import { player, session, game, bots, gameTime, resetAmmo } from './core/state';
+import { player, session, aim, game, bots, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
@@ -54,8 +54,8 @@ export function respawn(): void {
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;
-  game.yaw = 0;   // face -z, into the arena / downrange
-  game.pitch = 0;
+  aim.yaw = 0;   // face -z, into the arena / downrange
+  aim.pitch = 0;
   game.recoil = 0;    // else the view punch would spawn the camera mid-climb
   game.recoilYaw = 0; // and mid-wander, off to one side
   game.spray = 1;     // resting multiplier, NOT 0 — see core/state.ts

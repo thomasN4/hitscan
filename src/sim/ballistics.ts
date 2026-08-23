@@ -24,7 +24,7 @@ export const EULER_ORDER = 'YXZ';
  *
  * @param pitch  aim pitch in radians, INCLUDING the recoil punch
  *               (i.e. the result of sim/recoil.ts:aimPitch)
- * @param yaw    aim yaw in radians (game.yaw)
+ * @param yaw    aim yaw in radians (aim.yaw)
  * @param spread total cone in radians, from sim/accuracy.ts
  * @param rng    uniform [0,1) source; injected so tests can make the
  *               scatter deterministic

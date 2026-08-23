@@ -79,7 +79,7 @@ Two test layers, deliberately split:
 
   `registerSolid` is narrower than it looks: it is right for the ground planes because a flat `PlaneGeometry` measures to a **zero-height** box at y ≈ 0, below `TEST_BOX_MIN_Y`, so an AABB there would do nothing at all — movement is bounded by the perimeter/lane walls instead. Geometry with real height (a floor slab, a raised platform, a ramp) is **not** this case and must go through `addSolidBox`/`registerSolidBox`, or you ship a walk-through floor.
 
-  Only `addSolidBox` touches the scene; the rest are pure and unit-tested, because all three bugs this has caused (`431ac6e` no-clip, `faa52c5` AABBs at the origin, and the base-vs-centre offset) live in the scene-free half.
+  Only `addSolidBox` touches the scene; the rest are pure and unit-tested, because both bugs this has caused (`431ac6e` no-clip, `faa52c5` AABBs at the origin) live in the scene-free half — as does the base-vs-centre offset, which has not bitten yet but had no test until `createSolidBox` gave it a seam.
 - **Map switching is a full page reload** driven by the `?map=` URL param (read once by `main.js` at startup into `game.map`). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
 - **Damage flows through `combat.js`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
 - DOM writes only in `hud.js`. Sound synthesis only in `audio.js`.

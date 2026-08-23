@@ -77,7 +77,7 @@ a Vitest hard gate over the real `WEAPONS` table, and a dev-gated
 fatal). The module docs state the bounds are necessary, not sufficient; the
 loop-replaying tests in `sim/recoil.test.js` pin actual numbers.
 
-### PR 6 — ESLint gate (#TBD)
+### PR 6 — ESLint gate (#13)
 
 `eslint.config.js` (flat), `npm run lint`, no TypeScript — the piece the
 "later tranche" section below flagged as worth pulling forward on its own.

@@ -80,27 +80,55 @@ describe('decaySpray', () => {
     expect(decaySpray(3, 1, 0.5)).toBeCloseTo(2.5, 12);
   });
 
-  test('the smg clears a full-mag spray in about four seconds', () => {
-    // sprayRecover's tuning note: 30 shots x 0.06 = 1.8 over ~4 s.
+  test('a full smg magazine blooms the cone to about 1.9x', () => {
+    // Simulated against the REAL fire loop, not a hand-seeded end state: decay
+    // runs concurrently with fire, so the net per shot is
+    // sprayKick − sprayRecover × fireRate, well under sprayKick. An earlier
+    // version of this test seeded 1 + 30 × sprayKick = 2.8 and measured pure
+    // decay from there — a value the game could not produce, which is how a
+    // spray that only reached 1.28 shipped green.
     const smg = WEAPONS[0];
-    let spray = 1 + 30 * smg.sprayKick;
+    expect(magazineSprayPeak(smg)).toBeCloseTo(1.9, 1);
+  });
+
+  test('that bloom settles back in about three seconds', () => {
+    const smg = WEAPONS[0];
+    let spray = magazineSprayPeak(smg);
     let elapsed = 0;
     const dt = 1 / 60;
     while (spray > 1 && elapsed < 10) {
       spray = decaySpray(spray, dt, smg.sprayRecover);
       elapsed += dt;
     }
-    expect(elapsed).toBeGreaterThan(3.4);
-    expect(elapsed).toBeLessThan(4.6);
+    expect(elapsed).toBeGreaterThan(2.7);
+    expect(elapsed).toBeLessThan(3.5);
   });
 
   test('a sustained smg spray outruns its own recovery', () => {
     // The invariant two commits fixed by hand: recover must stay under the
-    // per-second input, or the spray never accumulates at all.
+    // per-second input, or the spray never accumulates at all. Necessary but
+    // NOT sufficient — 0.45 satisfied it and still barely bloomed, which is
+    // what the magazine simulation above exists to catch.
     const smg = WEAPONS[0];
     expect(smg.sprayRecover).toBeLessThan(smg.sprayKick / smg.fireRate);
   });
 });
+
+/** Peak spray after emptying a magazine, kicking and decaying as weapons.js does. */
+function magazineSprayPeak(def) {
+  const dt = 1 / 60;
+  let spray = 1, t = 0, nextShot = 0, fired = 0;
+  while (fired < def.magSize) {
+    if (t >= nextShot) {
+      spray = Math.min(spray + def.sprayKick, def.sprayCap);
+      nextShot += def.fireRate;
+      fired++;
+    }
+    spray = decaySpray(spray, dt, def.sprayRecover);
+    t += dt;
+  }
+  return spray;
+}
 
 describe('decayToward', () => {
   test('pulls a positive value down to exactly 0', () => {

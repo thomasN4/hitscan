@@ -75,11 +75,18 @@ export const WEAPONS = [
     spreadMul: 0.3,
     inherent: 0.0031, // rest-cone rad — ADS crouched ≈ 2" @ 50 m; hip ≈ 6.7"
     sprayKick: 0.06, recoilKick: 1,
-    sprayCap: 4,       // max spray multiplier (rested = 1) after a long burst
-    sprayRecover: 0.45, // multiplier units/s — MUST stay below sustained-fire input
+    sprayCap: 4,       // hard ceiling on the multiplier (rested = 1). Sustained
+                       // fire alone tops out near 1.9 (see sprayRecover), so this
+                       // only binds on spray carried in from the other slot
+    sprayRecover: 0.29, // multiplier units/s — MUST stay below sustained-fire input
                         // (~9.5 shots/s × sprayKick = 0.57/s), or the drain outpaces
-                        // accumulation and sprays never bloom at all.
-                        // 0.45 clears a full-mag spray (30×0.06 = 1.8) in ~4 s
+                        // accumulation and sprays never bloom at all. Necessary but
+                        // NOT sufficient: decay runs DURING fire, so what actually
+                        // accumulates is (sprayKick − sprayRecover × fireRate) per
+                        // shot = 0.0296 here. A full 30-round mag therefore peaks at
+                        // spray ≈ 1.9 — +39% on the standing hip cone — and settles
+                        // back in ~3.1 s. At 0.45 the net was 0.0128/shot: a mag
+                        // reached only 1.28 and sustained fire cost ~12%.
     recoilRecover: 6, // recoil units/s — MUST stay below the sustained-fire input
                       // (~9.5 shots/s × recoilKick = 9.5/s), or the drain outpaces
                       // accumulation and spray never climbs (it just vibrates).

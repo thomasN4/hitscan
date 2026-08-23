@@ -42,7 +42,7 @@ export let crosshair: HTMLElement;
 export let vignette: HTMLElement;
 
 /** Resolve every HUD element reference. Call once, after the DOM is ready. */
-export function initHUD() {
+export function initHUD(): void {
   hudEl = el('hud');
   crosshair = el('crosshair');
   hitmarkerEl = el('hitmarker');
@@ -137,7 +137,7 @@ export function setScopeOverlay(on: boolean): void {
 
 let lastName = '';
 let lastZoomLabel = '';
-export function updateHUD() {
+export function updateHUD(): void {
   hpText.textContent = String(Math.max(0, Math.round(player.hp)));
   healthFill.style.width = Math.max(0, player.hp) + '%';
   // Color shifts green -> orange -> red as HP drops.
@@ -153,10 +153,14 @@ export function updateHUD() {
     lastName = weapon.name;
     weaponName.textContent = weapon.name;
   }
-  // zoomLevel is wheel-wrapped and reset to 0 by weapons.ts, so a miss here
-  // cannot happen in play — but the honest guard under noUncheckedIndexedAccess
-  // degrades to no label instead of crashing the HUD refresh.
-  const zoomFov = game.aiming && game.slot === 1 ? WEAPONS[game.slot]?.zoomFovs[game.zoomLevel] : undefined;
+  // The WEAPONS read needs no guard (tuple + WeaponSlot), but zoomFovs is a
+  // plain array indexed by the unbounded game.zoomLevel, so that read is still
+  // `T | undefined`. weapons.ts:aimFovFor CLAMPS the same index because it owes
+  // its caller a number; the HUD degrades to no label instead, because a view
+  // must never throw mid-frame over a cosmetic string. Both are unreachable in
+  // play — zoomLevel is wheel-wrapped mod n and reset to 0 on swap — but they
+  // are deliberately different answers to the same miss, so change them together.
+  const zoomFov = game.aiming && game.slot === 1 ? WEAPONS[game.slot].zoomFovs[game.zoomLevel] : undefined;
   const zoomLabel = zoomFov !== undefined ? Math.round(BASE_FOV / zoomFov) + 'x' : '';
   if (zoomLabel !== lastZoomLabel) {
     lastZoomLabel = zoomLabel;

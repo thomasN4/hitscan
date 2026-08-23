@@ -140,7 +140,19 @@ export const BASE_FOV = 75;
  * "iron sights" step); spreadMul is the ADS cone multiplier; inherent is the
  * weapon's resting shot cone in radians, before any stance/movement/spray.
  */
-export const WEAPONS: WeaponDef[] = [
+/**
+ * Which weapon slot is live. A two-entry union, not `number`, because the
+ * table below is statically populated and every consumer already branches on
+ * `=== 0` / `=== 1`. Indexing a TUPLE by this union is exempt from
+ * noUncheckedIndexedAccess, so `WEAPONS[game.slot]` is a plain WeaponDef and
+ * the misses simply cannot happen rather than being guarded for.
+ */
+export type WeaponSlot = 0 | 1;
+
+/** The slots, for iterating both without widening the index back to `number`. */
+export const SLOTS: readonly WeaponSlot[] = [0, 1];
+
+export const WEAPONS: readonly [WeaponDef, WeaponDef] = [
   {
     name: 'SMG',
     magSize: 30, reserveMax: 90,
@@ -224,7 +236,10 @@ export interface AmmoStore {
 }
 
 /** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
-export const ammoStore: AmmoStore[] = WEAPONS.map(w => ({ mag: w.magSize, reserve: w.reserveMax }));
+export const ammoStore: [AmmoStore, AmmoStore] = [
+  { mag: WEAPONS[0].magSize, reserve: WEAPONS[0].reserveMax },
+  { mag: WEAPONS[1].magSize, reserve: WEAPONS[1].reserveMax },
+];
 
 /**
  * Live state of the ACTIVE weapon. Stat fields are copied from
@@ -248,10 +263,8 @@ export interface LiveWeapon {
   recoilRecover: number;
 }
 
-// The table is statically populated right above, so slot 0 always exists;
-// the assertions below are about THAT fact, not about runtime guarantees.
-// Dynamic reads (WEAPONS[game.slot] in consumers) get real guards instead.
-const SMG = WEAPONS[0]!;
+// WEAPONS is a tuple, so this needs no assertion — slot 0 exists by type.
+const SMG = WEAPONS[0];
 
 /** Live state of the ACTIVE weapon. Initialized to slot 0. */
 export const weapon: LiveWeapon = {
@@ -267,7 +280,7 @@ export const weapon: LiveWeapon = {
 
 /** Reset both slots' ammo and mirror slot 0 into `weapon`. Used on respawn. */
 export function resetAmmo(): void {
-  WEAPONS.forEach((w, i) => { ammoStore[i]!.mag = w.magSize; ammoStore[i]!.reserve = w.reserveMax; });
+  SLOTS.forEach(i => { ammoStore[i].mag = WEAPONS[i].magSize; ammoStore[i].reserve = WEAPONS[i].reserveMax; });
   weapon.name = SMG.name;
   weapon.magSize = SMG.magSize; weapon.mag = SMG.magSize; weapon.reserve = SMG.reserveMax;
   weapon.fireRate = SMG.fireRate; weapon.reloadTime = SMG.reloadTime;
@@ -309,7 +322,7 @@ export interface GameState {
   airLerp: number;
   adsLerp: number;
   /** Active weapon index into WEAPONS (0 smg, 1 sniper). */
-  slot: number;
+  slot: WeaponSlot;
   /** Scoped zoom step: index into WEAPONS[slot].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;

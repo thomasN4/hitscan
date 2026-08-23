@@ -105,7 +105,8 @@ All of `src/**` renamed to `.ts` in one pass; `index.html` entry updated;
 typescript-eslint peers `<6.1.0`), `typescript-eslint@8.67`, `@types/three@0.160`.
 tsconfig: `strict`, **`noUncheckedIndexedAccess: true`** (folded in from the old
 PR-8 plan — with browser modules converting in the same pass there were no
-unchecked-JS consumers left to defer for), `allowJs`/`checkJs:false`,
+unchecked-JS consumers left to defer for), `allowJs:false` (review: src/ is
+100% .ts, so leaving it on would let a stray .js join the program unchecked),
 `moduleResolution:"bundler"`, `verbatimModuleSyntax`. New `npm run typecheck`
 gate; typescript-eslint's `recommendedTypeChecked` scoped to `src/**/*.ts` with
 `no-undef` off there (tsc owns missing imports in TS).
@@ -119,10 +120,12 @@ Type design highlights:
 - three.js's `userData` is `Record<string, any>` — the one `any` leak vector.
   Two owned accessors hold the only casts: `bots.ts:botFor()` (returns
   `Bot | undefined`; callers narrow) and `weapons.ts:magBaseY()`.
-- Dynamic index reads get narrowing helpers that throw named errors on
-  impossible values (`currentDef()`, `aimFovFor()`), optional reads use `?.`
-  (`scopeGate`) or degrade gracefully (HUD zoom label), and no `?? fallback`
-  was introduced anywhere.
+- Dynamic index reads decide their miss case explicitly: `aimFovFor()` clamps,
+  the HUD zoom label degrades to empty, and no `?? fallback` was introduced
+  anywhere. Review went one better on the weapon table — `WEAPONS` is a tuple
+  and `game.slot` a `WeaponSlot` union, so that read has no miss to decide and
+  `currentDef()`'s throw, the `ammoStore` guard and 27 `!` assertions were
+  deleted as unreachable rather than maintained.
 - `hud.ts:requireEl(id)` throws a named startup error for missing markup —
   the migration's one *intended* behavior change, replacing distant
   null-property crashes.

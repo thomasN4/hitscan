@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest';
 import { validateWeapons } from './validateWeapons';
 import { WEAPONS, RECOIL_CAP, type WeaponDef } from '../core/state';
 
-const SMG = WEAPONS[0]!;
-const SNIPER = WEAPONS[1]!;
+const SMG = WEAPONS[0];
+const SNIPER = WEAPONS[1];
 
 /** The numeric fields — exactly the ones a NaN can poison. */
 type NumericField = {

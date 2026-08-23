@@ -18,8 +18,8 @@ describe('state module purity', () => {
 describe('resetAmmo', () => {
   beforeEach(() => {
     // Dirty every field resetAmmo is responsible for restoring.
-    ammoStore[0]!.mag = 3; ammoStore[0]!.reserve = 7;
-    ammoStore[1]!.mag = 1; ammoStore[1]!.reserve = 2;
+    ammoStore[0].mag = 3; ammoStore[0].reserve = 7;
+    ammoStore[1].mag = 1; ammoStore[1].reserve = 2;
     Object.assign(weapon, { name: 'SNIPER', mag: 0, reserve: 0, reloading: true });
     resetAmmo();
   });
@@ -32,7 +32,7 @@ describe('resetAmmo', () => {
   });
 
   test('mirrors slot 0 into the live weapon and clears an in-flight reload', () => {
-    const smg = WEAPONS[0]!;
+    const smg = WEAPONS[0];
     expect(weapon.name).toBe(smg.name);
     expect(weapon.mag).toBe(smg.magSize);
     expect(weapon.reserve).toBe(smg.reserveMax);

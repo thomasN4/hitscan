@@ -1,8 +1,9 @@
 // sim/damage.ts — hit-zone resolution and damage multipliers.
 //
-// Pure: every input is a parameter, and this module has NO imports at all —
-// bot parts are compared by identity, so `object` is the honest parameter
-// type (real callers pass THREE.Mesh; tests pass bare stand-ins).
+// Pure: every input is a parameter, and this module has NO RUNTIME imports —
+// the single `import type` below is erased, so nothing is pulled into Node at
+// import time. Bot parts are compared by identity, so `object` is the honest
+// parameter type (real callers pass THREE.Mesh; tests pass bare stand-ins).
 //
 // Zone multipliers are the game's core balance contract — head ×4 makes the
 // smg a one-tap (26 × 4 = 104) and the sniper a guaranteed one

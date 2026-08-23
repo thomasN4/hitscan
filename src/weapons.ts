@@ -10,7 +10,7 @@ import { scene, camera, clock } from './core/engine';
 import { solids } from './world';
 import { bots, weapon, game, player, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
-         type WeaponDef } from './core/state';
+         type WeaponDef, type WeaponSlot } from './core/state';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
@@ -22,15 +22,12 @@ import { shotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { approach } from './sim/smoothing';
 
-// Dynamic reads of the weapon table go through these helpers rather than
-// bare `!` assertions: game.slot and game.zoomLevel are input-mutated state,
-// so a miss here means corrupted internal state, and a named throw beats a
-// silent undefined deref. Literal static indices (WEAPONS[1] in main.ts)
-// are a different case — the table is statically populated.
+// The live weapon def. WEAPONS is a tuple and game.slot is WeaponSlot, so
+// this read cannot miss and needs no guard — the type does the work that a
+// named throw used to. game.zoomLevel is still a plain number, though, so
+// aimFovFor below still has a real miss case to decide about.
 function currentDef(): WeaponDef {
-  const def = WEAPONS[game.slot];
-  if (!def) throw new Error(`WEAPONS has no slot ${game.slot}`);
-  return def;
+  return WEAPONS[game.slot];
 }
 
 /** Zoom FOV target for the current zoom level, clamped into range. */
@@ -176,13 +173,10 @@ export function tryReload(): void {
  * the incoming weapon's terms, and resets scope zoom. Blocked while reloading
  * to avoid mid-mag-swap state corruption.
  */
-export function switchWeapon(slot: number): void {
+export function switchWeapon(slot: WeaponSlot): void {
   if (slot === game.slot || !game.started || !player.alive || weapon.reloading) return;
   const saved = ammoStore[game.slot];
   const loaded = ammoStore[slot];
-  // Both slots exist by construction (ammoStore is built from WEAPONS); a
-  // miss means an out-of-range slot reached this function.
-  if (!saved || !loaded) throw new Error(`bad ammoStore slot (${game.slot} -> ${slot})`);
   saved.mag = weapon.mag;
   saved.reserve = weapon.reserve;
 
@@ -197,7 +191,6 @@ export function switchWeapon(slot: number): void {
   // 128 tests green (review lesson 2, and now lesson 19).
   const outgoing = currentDef();
   const incoming = WEAPONS[slot];
-  if (!incoming) throw new Error(`WEAPONS has no slot ${slot}`);
   const converted = convertOnSwap(game, outgoing, incoming,
     { recoil: RECOIL_CAP, recoilYaw: RECOIL_YAW_CAP });
   game.recoil = converted.recoil;

@@ -36,7 +36,6 @@ export const colliders: THREE.Box3[] = [];
  * a thick floor slab, a raised platform, a ramp — is NOT this case. Routing
  * one of those through here ships a walk-through floor; it belongs in
  * addSolidBox (or registerSolidBox, if you positioned it yourself).
- *
  */
 export function registerSolid(mesh: THREE.Object3D): THREE.Object3D {
   solids.push(mesh);
@@ -49,7 +48,6 @@ export function registerSolid(mesh: THREE.Object3D): THREE.Object3D {
  * The AABB is resolved from the mesh's current world transform, so the mesh
  * must already be positioned (and parented, if it has a parent — see
  * registerGroupParts) before calling.
- *
  */
 export function registerSolidBox(mesh: THREE.Object3D): THREE.Object3D {
   solids.push(mesh);

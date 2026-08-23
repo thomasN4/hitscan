@@ -96,7 +96,7 @@ document.addEventListener('mousemove', e => {
 // Scroll up zooms in, scroll down zooms out, wrapping through the levels.
 addEventListener('wheel', e => {
   if (!game.locked || !player.alive || game.slot !== 1 || !game.aiming) return;
-  const n = WEAPONS[1]!.zoomFovs.length; // slot 1 is statically populated
+  const n = WEAPONS[1].zoomFovs.length; // tuple index — slot 1 exists by type
   game.zoomLevel = (game.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
   sfxZoom();
 });
@@ -108,7 +108,7 @@ addEventListener('mousedown', e => {
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
   if (e.button === 2 && game.locked && player.alive) {
-    const gate = WEAPONS[game.slot]?.scopeGate; // undefined = no gate (smg)
+    const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (smg)
     if (gate === undefined || game.recoil < gate) game.aiming = true;
   }
 });

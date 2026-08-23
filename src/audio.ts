@@ -4,6 +4,11 @@
 // is a pitch-swept oscillator. If you add a new sound, follow the same
 // pattern — create nodes per playback and let them be garbage-collected
 // (do NOT reuse buffers across sounds; each call builds its own).
+// `import type` because only THREE.Vector3's TYPE is used here — without it
+// the reference resolved through @types/three's `export as namespace THREE`
+// UMD alias, which is legal in type position but silently ties this file to a
+// declaration detail of the types package. Erased under verbatimModuleSyntax.
+import type * as THREE from 'three';
 import { camera } from './core/engine';
 
 let audioCtx: AudioContext | undefined;

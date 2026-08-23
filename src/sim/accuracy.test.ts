@@ -99,8 +99,8 @@ describe('computeSpread — inherent cone', () => {
   });
 
   test('dominates hip-fire, so both weapons are similarly bad from the hip', () => {
-    const smg = WEAPONS[0]!;
-    const sniper = WEAPONS[1]!;
+    const smg = WEAPONS[0];
+    const sniper = WEAPONS[1];
     const hip = (def: WeaponDef) => computeSpread({ ...still, crouchLerp: 1, inherent: def.inherent });
     const ratio = hip(smg) / hip(sniper);
     expect(ratio).toBeGreaterThan(0.9);
@@ -110,15 +110,15 @@ describe('computeSpread — inherent cone', () => {
 
 describe('computeSpread — ADS', () => {
   test('scales the whole cone, inherent included', () => {
-    const smg = WEAPONS[0]!;
+    const smg = WEAPONS[0];
     const hip = computeSpread({ ...still, inherent: smg.inherent });
     const ads = computeSpread({ ...still, inherent: smg.inherent, adsMul: smg.spreadMul });
     expect(ads).toBeCloseTo(hip * smg.spreadMul, 12);
   });
 
   test('a scoped sniper is tighter than smg iron sights', () => {
-    const smg = WEAPONS[0]!;
-    const sniper = WEAPONS[1]!;
+    const smg = WEAPONS[0];
+    const sniper = WEAPONS[1];
     const ads = (def: WeaponDef) => computeSpread({
       ...still, crouchLerp: 1, inherent: def.inherent, adsMul: def.spreadMul,
     });

@@ -63,7 +63,7 @@ export function updateMovement(dt: number): void {
   // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
-  const crouching = key('ShiftLeft') && player.onGround;
+  const crouching = input.crouching && player.onGround;
   const running = input.running && !crouching && !input.aiming;
   const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: motion.runLerp });
 

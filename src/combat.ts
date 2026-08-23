@@ -4,7 +4,7 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, gameTime, resetAmmo } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
@@ -64,6 +64,7 @@ export function respawn(): void {
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
   motion.airLerp = 0;
   motion.crouchLerp = 0;
+  input.crouching = false; // else a death while crouch-toggled respawns you crouched
   wpn.adsLerp = 0;
   resetAmmo();    // refills both slots and mirrors the smg into `weapon`
   wpn.slot = 0;

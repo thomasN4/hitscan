@@ -62,28 +62,20 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// Double-tap-W sprint detector: two W presses within 300 ms start a run;
-// the run lasts only while W stays held. Timestamp is module-local — it is
-// input-layer state, not shared game state — and WALL-clock on purpose:
-// keydowns arrive before lock and during pause, where game time is frozen.
-const RUN_TAP_WINDOW_MS = 300;
-let lastWTapTime = -Infinity;
-
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
-  // e.repeat guards against OS key-repeat re-triggering the double tap
-  if (e.code === 'KeyW' && !e.repeat) {
-    const now = performance.now();
-    if (now - lastWTapTime < RUN_TAP_WINDOW_MS) input.running = true;
-    lastWTapTime = now;
-  }
+  // Sprint is hold-Shift; crouch is a Ctrl toggle (either side of both).
+  // e.repeat guards against OS key-repeat re-toggling crouch.
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.running = true;
+  if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) input.crouching = !input.crouching;
 });
 addEventListener('keyup', e => {
   keys[e.code] = false;
-  if (e.code === 'KeyW') input.running = false; // sprint requires W held
+  // Only drop the run when no Shift remains held.
+  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !keys.ShiftLeft && !keys.ShiftRight) input.running = false;
 });
 
 const SENS = 0.0022; // radians per pixel of mouse movement
@@ -227,6 +219,7 @@ const game: DebugGame = {
   get shooting() { return input.shooting; }, set shooting(v: boolean) { input.shooting = v; },
   get aiming() { return input.aiming; }, set aiming(v: boolean) { input.aiming = v; },
   get running() { return input.running; }, set running(v: boolean) { input.running = v; },
+  get crouching() { return input.crouching; }, set crouching(v: boolean) { input.crouching = v; },
   get yaw() { return aim.yaw; }, set yaw(v: number) { aim.yaw = v; },
   get pitch() { return aim.pitch; }, set pitch(v: number) { aim.pitch = v; },
   get spread() { return wpn.spread; }, set spread(v: number) { wpn.spread = v; },

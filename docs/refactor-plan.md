@@ -196,6 +196,13 @@ bots stop reviving during pause; reload audio freezes with its animation.
 `smoke-test.mjs` byte-for-byte unchanged, every phase green on both maps
 against dev server and `vite preview`.
 
+Verification honesty note: pause/resume mid-reload was confirmed by manual
+playtest in review. The bot-respawn half was NOT confirmed end-to-end — bots
+are unnamed, identical meshes often behind cover, and `__cs` doesn't expose
+them — so it rests on the clock's unit-tested freeze semantics plus
+inspection of `Bot.die`'s one-line binding. Deferred with an issue (#17)
+rather than counted as manually verified.
+
 ---
 
 ## Review lessons

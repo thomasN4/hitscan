@@ -10,6 +10,7 @@
 // declaration detail of the types package. Erased under verbatimModuleSyntax.
 import type * as THREE from 'three';
 import { camera } from './core/engine';
+import { gameTime } from './core/state';
 
 let audioCtx: AudioContext | undefined;
 function ac() {
@@ -64,11 +65,16 @@ export function sfxEnemyShoot(pos: THREE.Vector3): void {
   playGunshot(Math.max(0.05, 0.3 - d / 150), 700, 0.1);
 }
 
-/** Three clicks approximating mag-out / mag-in / bolt. Timed to reloadTime. */
+/**
+ * Three clicks approximating mag-out / mag-in / bolt. Timed to reloadTime,
+ * scheduled on the GAME clock so they freeze if the reload pauses — the
+ * sounds stay in sync with the animation instead of playing over a
+ * suspended one.
+ */
 export function sfxReload(): void {
   playGunshot(0.12, 500, 0.06);   // click 1: immediately
-  setTimeout(() => playGunshot(0.12, 800, 0.06), 250);    // click 2
-  setTimeout(() => playGunshot(0.15, 1000, 0.08), 1100);  // final clack (~halfway through 2.2s reload)
+  gameTime.schedule(0.25, () => playGunshot(0.12, 800, 0.06));    // click 2
+  gameTime.schedule(1.1, () => playGunshot(0.15, 1000, 0.08));  // final clack (~halfway through 2.2s reload)
 }
 
 /** Soft footstep; randomized pitch/level so repeats don't sound mechanical. */

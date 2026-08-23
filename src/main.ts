@@ -4,12 +4,15 @@
 // spawnBots -> register input/pointer-lock handlers -> start the render loop.
 // The loop only simulates (player, bots, timer) while pointer lock is held;
 // rendering and effect updates run always so pause screens stay visible.
+// Game time (core/state.ts:gameTime) advances only inside that simulated
+// window too — see GameClock in sim/gameClock.ts for why everything
+// gameplay-related measures against it.
 //
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
 import type { GameState, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { game, keys, player, weapon, bulletHoles, WEAPONS } from './core/state';
+import { game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -60,7 +63,8 @@ addEventListener('resize', () => {
 
 // Double-tap-W sprint detector: two W presses within 300 ms start a run;
 // the run lasts only while W stays held. Timestamp is module-local — it is
-// input-layer state, not shared game state.
+// input-layer state, not shared game state — and WALL-clock on purpose:
+// keydowns arrive before lock and during pause, where game time is frozen.
 const RUN_TAP_WINDOW_MS = 300;
 let lastWTapTime = -Infinity;
 
@@ -163,6 +167,13 @@ function animate(): void {
   const dt = Math.min(clock.getDelta(), 0.05); // clamp: tab-switch spikes shouldn't teleport entities
 
   if (game.locked && game.started) {
+    // Stage 0 — advance game time. Every stage below measures against this
+    // epoch (fire-rate gates, reloads, respawn timers), and keeping the
+    // advance inside the sim block is what makes them all pausable. dt is
+    // already clamped, so a tab-switch spike can't fast-forward the
+    // scheduler.
+    gameTime.advance(dt);
+
     // Stage order is load-bearing, which is why it lives here rather than
     // nested inside updateMovement. It is pinned from both sides:
     //   - updateMovement writes camera.position, and shoot() (called from

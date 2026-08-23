@@ -6,9 +6,9 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
-import { scene, camera, clock } from './core/engine';
+import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, game, player, WEAPONS, ammoStore,
+import { bots, weapon, game, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          type WeaponDef, type WeaponSlot } from './core/state';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
@@ -162,7 +162,7 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
 export function tryReload(): void {
   if (!game.started || !player.alive || weapon.reloading || weapon.mag === weapon.magSize || weapon.reserve <= 0) return;
   weapon.reloading = true;
-  weapon.reloadEnd = performance.now() / 1000 + weapon.reloadTime;
+  weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
   sfxReload();
 }
 
@@ -235,10 +235,13 @@ export function shoot(): void {
     return;
   }
   weapon.mag--;
-  weapon.lastShot = clock.elapsedTime;
+  weapon.lastShot = gameTime.now();
   const def = currentDef();
 
   muzzleFlashLight.intensity = 3;
+  // Wall clock on purpose: purely visual cleanup, and running it during
+  // pause means a shot fired on the same frame as Esc can't leave the light
+  // stuck on behind the menu.
   setTimeout(() => muzzleFlashLight.intensity = 0, 50);
   (game.slot === 1 ? sfxSniper : sfxShoot)();
 
@@ -350,10 +353,11 @@ export function updateWeapon(dt: number): void {
   setScopeOverlay(def.scopedOverlay && game.adsLerp > 0.85);
 
   // Reload animation: progress through the active reload (0 when idle so
-  // the pose resets). Uses wall-clock time to match weapon.reloadEnd.
-  const nowS = performance.now() / 1000;
+  // the pose resets). Uses game time to match weapon.reloadEnd, so a paused
+  // reload freezes mid-animation instead of finishing behind the menu.
+  const now = gameTime.now();
   const reloadT = weapon.reloading
-    ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - nowS) / weapon.reloadTime, 0, 1)
+    ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - now) / weapon.reloadTime, 0, 1)
     : 0;
   if (game.slot === 0) poseReload(smgGroup, smgMag, reloadT);
   else poseReload(sniperGroup, sniperMag, reloadT);
@@ -361,7 +365,7 @@ export function updateWeapon(dt: number): void {
   // Reload finish: top the mag back up from reserve (partial reloads allowed).
   // Range mode: reserve is not deducted — R always restores a full loadout
   // so accuracy/recoil practice never pauses for ammo runs.
-  if (weapon.reloading && performance.now() / 1000 >= weapon.reloadEnd) {
+  if (weapon.reloading && gameTime.now() >= weapon.reloadEnd) {
     const need = weapon.magSize - weapon.mag;
     const take = Math.min(need, weapon.reserve);
     weapon.mag += take;
@@ -373,7 +377,7 @@ export function updateWeapon(dt: number): void {
   // once per press — the latch blocks repeats until the button is released.
   if (!game.shooting) triggerLatch = false;
   else if (!def.semiAuto || !triggerLatch) {
-    if (clock.elapsedTime - weapon.lastShot >= weapon.fireRate) {
+    if (gameTime.now() - weapon.lastShot >= weapon.fireRate) {
       shoot();
       if (def.semiAuto) triggerLatch = true;
     }

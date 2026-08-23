@@ -59,7 +59,7 @@ Four static/sim layers, deliberately split:
 
 ## Architecture rules
 
-- **All shared mutable state lives in `src/core/state.ts`** (`player`, `weapon`, `game`, `keys`, `bots`, effects collections) — plus the domain vocabulary (`WeaponDef`, `LiveWeapon`, `GameState`, `PlayerState`, the structural `Bot` shape, `HitZone`) — except the level-geometry registries `solids`/`colliders`, which `world.ts` owns so registration has exactly one path. Do not create new cross-module mutable globals elsewhere.
+- **All shared mutable state lives in `src/core/state.ts`** (`player`, `weapon`, `game`, `gameTime`, `keys`, `bots`, effects collections) — plus the domain vocabulary (`WeaponDef`, `LiveWeapon`, `GameState`, `PlayerState`, the structural `Bot` shape, `HitZone`) — except the level-geometry registries `solids`/`colliders`, which `world.ts` owns so registration has exactly one path. Do not create new cross-module mutable globals elsewhere.
 - **`core/state.ts` must stay importable in plain Node.** It may use THREE's math classes (`Vector3`, `Box3`), but never `document`, `window`, `location`, or a `WebGLRenderer`. This is what makes the simulation unit-testable: `src/core/state.test.ts` runs in plain Node, so a browser global at module scope breaks every test in it on import. Browser-derived values are written IN by `main.ts` at startup (see `game.map`) rather than read here. Anything browser-only belongs in `core/engine.ts` or behind an `init*()` function.
 - **Engine singletons (`renderer`, `scene`, `camera`, `clock`) live in `src/core/engine.ts`** and are created by `initEngine()`, not at module scope. They are `export let` live bindings typed at their non-optional class types: reading them before init yields `undefined` at runtime, and the "read only after init" contract is documented rather than encoded as `| undefined`.
 - **No module-scope side effects that touch the engine or the DOM.** A module needing either exposes an `init*()` function that `main.ts` calls in order. Current order, which `main.ts` documents inline:
@@ -142,10 +142,10 @@ already cost a cycle each.
 
 - **PR 6 (done, #13):** the ESLint gate, no TypeScript — pulled forward exactly as flagged above.
 - **PR 7 (done):** full `.ts` migration under `strict`/`noUncheckedIndexedAccess`, with the typescript-eslint rules from this section layered onto PR 6's flat config. One deviation from the original note: "start with `src/sim/*`" was unworkable as written (Vite maps `'./x.js'` specifiers onto `.ts` files only for TS importers), solved by extensionless intra-src imports instead of top-down forced ordering.
+- **PR 8 (done):** one gameplay clock — pure `sim/gameClock.ts` GameClock, shared instance `core/state.ts:gameTime`, advanced only from main.ts's sim block, with a scheduler drained from inside `advance()`. All gameplay timestamps (lastShot/fireRate, reload bookkeeping, view bob) and world respawn timers measure against it; the death-screen delay, cosmetic fades and the double-tap window stay wall-clock by documented exception. See the PR 8 section of `docs/refactor-plan.md` before adding any new timer.
 
 Deferred to a later tranche:
 
-- Unifying the two time bases (`clock.elapsedTime` vs `performance.now()`) behind one game clock plus a pausable scheduler.
 - Splitting `game` into owner-scoped slices.
 - Making weapon switching cost time (a draw/holster delay, ideally with a viewmodel animation on `poseReload`'s model). Switching is instant today, so `1-2-1` is a free recoil cancel — the conversion in `switchWeapon` is lossless, but the incoming weapon's `recoilRecover` then drains the carried units, and the sniper's 13/s clears a full smg climb in 0.277 s. The same zero-cost window also lets a swap dodge `scopeGate` and re-clamp `spray`. Tracked as **issue #15** (not a PR number — the `#N` elsewhere in this file means PR). Pre-existing, not a migration regression; pinned as behavior in `sim/recoil.test.ts` so a fix has to update the test deliberately.
 

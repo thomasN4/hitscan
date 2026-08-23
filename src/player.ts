@@ -13,8 +13,8 @@
 // AFTER it. Speed tiers and the moveLerp math live in sim/movement.ts; the
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
-import { camera, clock } from './core/engine';
-import { player, game, keys } from './core/state';
+import { camera } from './core/engine';
+import { player, game, keys, gameTime } from './core/state';
 import { collidesAt } from './collision';
 import { colliders } from './world';
 import { sfxFootstep } from './audio';
@@ -168,7 +168,9 @@ export function updateViewmodel(): void {
   // Blend hip-fire offset -> centered iron sights with adsLerp; add bob and
   // recoil kick on top.
   gunGroup.position.x = -0.25 * game.adsLerp;
-  gunGroup.position.y = 0.14 * game.adsLerp + Math.sin(clock.elapsedTime * 10) * game.bobAmt;
+  // Bob phase runs on game time so a pause doesn't snap the weapon to an
+  // arbitrary point of the cycle on resume.
+  gunGroup.position.y = 0.14 * game.adsLerp + Math.sin(gameTime.now() * 10) * game.bobAmt;
   gunGroup.position.z = game.recoil * 0.012 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
   gunGroup.rotation.x = game.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
                                              // so a full climb must stay a nudge, not a tilt

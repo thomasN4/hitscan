@@ -11,6 +11,7 @@
 // state between systems (player, bots, weapons, HUD...), add it here rather
 // than reaching across modules.
 import * as THREE from 'three';
+import { GameClock } from '../sim/gameClock';
 
 // ---------- Domain vocabulary ----------
 /**
@@ -86,6 +87,23 @@ export const bots: Bot[] = [];
 export const impacts: Impact[] = [];
 /** Persistent wall decals (see effects.ts); FIFO-capped, oldest recycled. */
 export const bulletHoles: THREE.Mesh[] = [];
+
+// ---------- Game time ----------
+/**
+ * THE gameplay epoch. Seconds of simulated time, advanced once per frame from
+ * main.ts's simulation block ONLY — which is what makes pausing structural:
+ * everything measured against this clock (weapon.lastShot, weapon.reloadEnd,
+ * bot respawn delays) freezes when the loop pauses and resumes where it
+ * stopped.
+ *
+ * Gameplay timestamps MUST read gameTime.now(), never clock.elapsedTime or
+ * performance.now(): those bases keep running through pause (THREE.Clock's
+ * getDelta is called even for render-only frames) and disagree on their zero
+ * point besides. Wall-clock time stays correct only for input-layer state
+ * that must work before lock (main.ts's double-tap-W window) and cosmetic
+ * DOM fades (hud.ts).
+ */
+export const gameTime = new GameClock();
 
 // ---------- Shared mutable game state ----------
 /** Player entity shape — see `player` below for the live instance. */

@@ -4,7 +4,7 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone } from './core/state';
-import { player, game, bots, resetAmmo } from './core/state';
+import { player, game, bots, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
@@ -25,6 +25,9 @@ export function damagePlayer(dmg: number): void {
     addKillfeed('Bot killed You');
     updateScore();
     document.exitPointerLock();
+    // Wall clock ON PURPOSE: pointer lock was just released, so game time is
+    // frozen — a pausable schedule here would never fire and the death
+    // screen would never show. The delay exists to be seen while paused.
     // Small delay so the killer's shot is visible before the menu covers it.
     setTimeout(() => {
       requireEl('deathScreen').style.display = 'flex';
@@ -77,6 +80,7 @@ export function respawn(): void {
 export function checkRoundEnd(): void {
   if (bots.every(b => !b.alive)) {
     addKillfeed('★ Round won! Respawning enemies...');
-    setTimeout(() => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }), 2500);
+    // Game time: the wave stays dead while paused.
+    gameTime.schedule(2.5, () => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }));
   }
 }

@@ -1,6 +1,6 @@
 # Maintainability tranche — plan and running log
 
-Living document. PRs 1–4 are merged; **PR 5 is the next piece of work.** The
+Living document. PRs 1–5 are merged. The
 review lessons below are the most reusable part of this file: each one cost a
 review cycle to find, and several describe traps that are still easy to walk
 back into.
@@ -64,6 +64,18 @@ spread = ((stance + movement + air) × spray + inherent) × ADS
 
 Plus horizontal recoil (`recoilYaw`, `aimYaw`), airborne as a fourth stance, and
 a proportional crosshair projection.
+
+### PR 5 — Validate tuning constants (#12, `d81f0ea`)
+
+`src/sim/validateWeapons.js`: pure `validateWeapons(defs)` → violation strings,
+enforcing the three sustained-fire bounds (vertical, spray, yaw against the
+MEAN kick) with the `semiAuto` exemption the sniper's bolt-cycle settle needs,
+plus static sanity — caps, cones, the zoom ladder, scalar ranges, the
+`scopeGate` window, and the view-climb ceiling at `RECOIL_CAP`. Consumed twice:
+a Vitest hard gate over the real `WEAPONS` table, and a dev-gated
+`console.error` per violation in `main.js` before `initEngine()` (loud, not
+fatal). The module docs state the bounds are necessary, not sufficient; the
+loop-replaying tests in `sim/recoil.test.js` pin actual numbers.
 
 ---
 
@@ -139,90 +151,6 @@ Ordered roughly by how easy they are to repeat.
 13. **Document the full public surface.** `registerSolidBox` was exported but
     unlisted, so a contributor with an already-positioned mesh would find no
     listed option and reach for the arrays directly.
-
----
-
-## PR 5 — Validate tuning constants (NEXT)
-
-Two commits (`46900f7`, `b080350`) fixed the same class of invariant by hand,
-and PR 4 added two more coupled rates. Nothing enforces any of them.
-
-**Scope note:** `sim/damage.test.js` already covers the balance intents
-(one-tap headshot, sniper two-tap torso, legs never out-damaging torso). Do not
-duplicate them.
-
-### Three sustained-fire rules, two different shapes
-
-Checked against the merged table — **the exemptions are not cosmetic**, a naive
-rule flags correct tuning:
-
-| Rule | SMG | SNIPER |
-|---|---|---|
-| `recoilRecover < recoilKick / fireRate` | 6 < 9.52 ok | 13 < 3.64 **violates** |
-| `sprayRecover < sprayKick / fireRate` | 0.29 < 0.571 ok | 0.08 < 0.227 ok |
-| `yawRecover × fireRate < yawKick / 2` | 0.052 < 0.2 ok | 14.3 < 0.4 **violates** |
-
-- The **recoil** and **yaw** rules apply only when `!def.semiAuto`. The sniper
-  over-drains both deliberately: full settle inside the bolt cycle *is* the
-  feel, and the vertical settle is what makes `scopeGate` work. Shipping the
-  naive rules would flag shipped-correct tuning, and the obvious "fix" breaks
-  the scope gate.
-- The **spray** rule applies to every weapon; both satisfy it.
-- Note the yaw rule's shape differs: the walk is zero-mean, so the drain per
-  shot interval is compared against the **mean** kick (`yawKick / 2`), not the
-  full kick. Sizing it like the vertical rule is exactly the bug `ce1c3c5`
-  fixed.
-
-**These bounds are necessary, not sufficient — say so in the module's docs.**
-Passing them means an accumulator *can* grow, not that it grows to the figure
-its tuning comment quotes: decay runs during fire, so `sprayRecover: 0.45`
-cleared the rule and still peaked at 1.28 against a documented 2.8. The
-validator is a floor on sanity; the loop-replaying tests in `sim/recoil.test.js`
-are what pin the actual numbers. A validator that implies otherwise is the
-"comment that lies" failure in a new costume.
-
-### `validateWeapons(defs)` → array of violation strings
-
-Pure, in `src/sim/validateWeapons.js`. Beyond the three above:
-
-- `sprayCap > 1` (rested is 1; a cap at 1 means spray never accumulates)
-- `inherent > 0`, `yawKick > 0`
-- `zoomFovs` non-empty, strictly decreasing, every entry below `BASE_FOV`
-- `magSize > 0`, `reserveMax >= 0`, `fireRate > 0`, `reloadTime > 0`,
-  `damage > 0`, `headshotMult >= 1`
-- `scopeGate`, when present, `> 0` and below `RECOIL_CAP` (a gate at the cap
-  never opens)
-- `punchRad × RECOIL_CAP` under ~10° of view climb
-
-Use `RECOIL_CAP` / `RECOIL_YAW_CAP` / `BASE_FOV` from `core/state.js` — PR 1's
-review wired those into every call site; do not reintroduce the literals.
-
-### Two consumers
-
-- **Vitest over the real `WEAPONS`** — the hard gate; a bad constant fails
-  `npm test`.
-- **`main.js` behind `import.meta.env.DEV`** — `console.error` per violation,
-  naming weapon, numbers and consequence ("SMG: sprayRecover 0.8 exceeds
-  sustained-fire input 0.57 — sprays will not bloom"). Deliberately **not** a
-  throw: this runs before `initEngine()`, so throwing blanks the page and hides
-  the message behind a broken app.
-
-### Tests
-
-- both real weapons produce zero violations
-- a full-auto clone carrying the sniper's recoil numbers **is** flagged, and
-  likewise for the yaw rule — proving each exemption is a live branch, not a
-  disabled rule
-- one case per rule, each asserting the message names the offending weapon and
-  field
-- a fully valid def returns `[]`
-
-**Files:** new `src/sim/validateWeapons.js` + test; `src/main.js`.
-
-**Risk note.** No runtime behavior change — the only production edit is a
-dev-gated `console.error`. The risk is the inverse of PR 2's: a *wrong rule*
-failing CI on good tuning. Check every rule against the real table before
-writing it.
 
 ---
 

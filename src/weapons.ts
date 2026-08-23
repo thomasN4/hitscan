@@ -17,7 +17,7 @@ import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
-import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './sim/recoil';
+import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
 import { shotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { approach } from './sim/smoothing';
@@ -187,24 +187,22 @@ export function switchWeapon(slot: number): void {
   saved.reserve = weapon.reserve;
 
   // Recoil/spray state is weapon-RELATIVE, so the swap converts it instead of
-  // carrying the raw numbers across. `recoil`/`recoilYaw` are abstract units
-  // that only become an angle via punchRad, so rescaling by the punchRad ratio
-  // is what keeps the view punch continuous — otherwise the sniper's 0.02
-  // renders the smg's stored units as a different angle and the aim snaps.
-  // `spray` is weapon-agnostic but bounded per weapon, so it re-clamps: without
-  // this the sniper's 2.7 followed a swap onto an smg that cannot generate past
-  // ~1.9, widening its cone ~75% for seconds.
-  // Converting rather than zeroing also matters because switching costs no time
-  // here: a reset would make 1-2-1 a free recoil cancel and would let a swap
-  // dodge the sniper's scopeGate.
+  // carrying the raw numbers across, and converting rather than zeroing matters
+  // because switching costs no time here: a reset would make 1-2-1 a free
+  // recoil cancel and would let a swap dodge the sniper's scopeGate.
+  //
+  // The arithmetic itself lives in sim/recoil.ts. It is pure, and leaving it
+  // inline here put it behind sfxSwitch()'s AudioContext where the Node test
+  // suite could not reach it — which is how the ratio shipped inverted with all
+  // 128 tests green (review lesson 2, and now lesson 19).
   const outgoing = currentDef();
   const incoming = WEAPONS[slot];
   if (!incoming) throw new Error(`WEAPONS has no slot ${slot}`);
-  const punchRatio = incoming.punchRad / outgoing.punchRad;
-  game.recoil = Math.min(game.recoil * punchRatio, RECOIL_CAP);
-  game.recoilYaw = THREE.MathUtils.clamp(
-    game.recoilYaw * punchRatio, -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
-  game.spray = Math.min(game.spray, incoming.sprayCap);
+  const converted = convertOnSwap(game, outgoing, incoming,
+    { recoil: RECOIL_CAP, recoilYaw: RECOIL_YAW_CAP });
+  game.recoil = converted.recoil;
+  game.recoilYaw = converted.recoilYaw;
+  game.spray = converted.spray;
 
   game.slot = slot;
   game.zoomLevel = 0; // always re-enter the scope at its lowest step

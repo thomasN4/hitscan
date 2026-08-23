@@ -4,7 +4,8 @@
 //
 // `recoil` is in abstract "recoil units" (capped at RECOIL_CAP in
 // core/state.ts), converted to an aim angle only by aimPitch() via the
-// weapon's punchRad.
+// weapon's punchRad. Because the units are weapon-RELATIVE in exactly that
+// way, changing weapons has to rescale them — convertOnSwap() below.
 
 /**
  * Vertical aim angle including the recoil view punch.
@@ -86,4 +87,58 @@ export function decaySpray(spray: number, dt: number, rate: number): number {
 export function decayToward(value: number, dt: number, rate: number): number {
   const step = dt * rate;
   return Math.abs(value) <= step ? 0 : value - Math.sign(value) * step;
+}
+
+/** The weapon-relative state a swap has to carry across. */
+export interface SwapState {
+  recoil: number;
+  recoilYaw: number;
+  spray: number;
+}
+
+/**
+ * Convert recoil/spray state onto an incoming weapon's terms, for a swap that
+ * costs no time.
+ *
+ * INVARIANT: the rendered view punch — `recoil × punchRad`, the angle
+ * aimPitch/aimYaw actually apply — comes out unchanged. That invariant is what
+ * fixes the ratio's DIRECTION: holding `recoil × punchRad` constant requires
+ * scaling by outgoing ÷ incoming. The reciprocal scales the angle by ratio²
+ * instead of holding it, which is how `f5fcb6a` shipped a ~2.8° aim snap on
+ * every mid-spray swap — and, because the overshoot clips at the cap, a 1-2-1
+ * that returned 40% less recoil than it started with. Both are exactly what
+ * converting (rather than zeroing) exists to prevent, so the direction is the
+ * whole contract here.
+ *
+ * The caps still bite by design: converting onto a weapon with a SMALLER
+ * punchRad scales recoil up, and clipping there is a real loss of state, not
+ * a leak. Only the direction that scales down is continuous end to end.
+ *
+ * `spray` is weapon-agnostic but bounded per weapon, so it re-clamps rather
+ * than rescaling — carrying a sniper's 2.7 onto an smg that cannot generate
+ * past ~1.9 widens its cone for seconds.
+ *
+ * Taking the two weapons as objects rather than four bare numbers is
+ * deliberate: transposing them is a type error, since `incoming` needs a
+ * sprayCap and `outgoing` does not.
+ *
+ * @param outgoing the weapon being holstered
+ * @param incoming the weapon being drawn
+ * @param caps     RECOIL_CAP / RECOIL_YAW_CAP from core/state
+ */
+export function convertOnSwap(
+  state: SwapState,
+  outgoing: { punchRad: number },
+  incoming: { punchRad: number; sprayCap: number },
+  caps: { recoil: number; recoilYaw: number },
+): SwapState {
+  const punchRatio = outgoing.punchRad / incoming.punchRad;
+  const yaw = state.recoilYaw * punchRatio;
+  return {
+    recoil: Math.min(state.recoil * punchRatio, caps.recoil),
+    // Symmetric clamp, inlined rather than THREE.MathUtils.clamp so this
+    // module keeps its "every input is a parameter, no imports" contract.
+    recoilYaw: Math.max(-caps.recoilYaw, Math.min(caps.recoilYaw, yaw)),
+    spray: Math.min(state.spray, incoming.sprayCap),
+  };
 }

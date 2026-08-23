@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './recoil';
+import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './recoil';
 import { WEAPONS, RECOIL_CAP, RECOIL_YAW_CAP } from '../core/state';
 import type { WeaponDef } from '../core/state';
 
@@ -236,5 +236,89 @@ describe('yawRecover — the horizontal walk actually walks', () => {
     const sniper = WEAPONS[1]!;
     expect(sniper.yawRecover * sniper.fireRate).toBeGreaterThan(sniper.yawKick);
     expect(magazineYawAtShots(sniper, 12345).every(v => v === 0)).toBe(true);
+  });
+});
+
+/** The angle the player actually sees: recoil units become degrees via punchRad. */
+function punchDeg(recoil: number, def: WeaponDef): number {
+  return recoil * def.punchRad * 180 / Math.PI;
+}
+
+const CAPS = { recoil: RECOIL_CAP, recoilYaw: RECOIL_YAW_CAP };
+
+describe('convertOnSwap — the view punch survives a weapon swap', () => {
+  const smg = WEAPONS[0]!;
+  const sniper = WEAPONS[1]!;
+  const rest = { recoil: 0, recoilYaw: 0, spray: 1 };
+
+  test('the rendered angle is unchanged, which is the whole contract', () => {
+    // recoil units are meaningless on their own — only recoil × punchRad is
+    // visible. Seeded below the cap so nothing clips and the equality is exact.
+    const before = { ...rest, recoil: 3 };
+    const after = convertOnSwap(before, smg, sniper, CAPS);
+    expect(punchDeg(after.recoil, sniper)).toBeCloseTo(punchDeg(before.recoil, smg), 12);
+  });
+
+  test('and the two ratio directions are observably different, so the choice matters', () => {
+    // Non-vacuity per review lesson 7, kept in-suite as documentation: this
+    // asserts nothing about convertOnSwap, only that `f5fcb6a`'s inverted
+    // incoming ÷ outgoing lands somewhere else entirely (4.13° -> 6.88°). It
+    // is what makes the assertion above capable of failing; the tests that
+    // actually pin the implementation's direction are the two below.
+    const before = { ...rest, recoil: 3 };
+    const inverted = before.recoil * (sniper.punchRad / smg.punchRad);
+    expect(punchDeg(inverted, sniper)).not.toBeCloseTo(punchDeg(before.recoil, smg), 2);
+  });
+
+  test('1-2-1 hands back the exact recoil it started with — no free cancel', () => {
+    // Switching costs no time, so a lossy round trip is an exploit: spray the
+    // smg, tap 2 then 1, and the climb you earned is gone. Under the inverted
+    // ratio this returned 3.6 from 6 — a 40% cancel.
+    const start = { ...rest, recoil: RECOIL_CAP };
+    const onSniper = convertOnSwap(start, smg, sniper, CAPS);
+    const back = convertOnSwap(onSniper, sniper, smg, CAPS);
+    expect(back.recoil).toBeCloseTo(start.recoil, 12);
+  });
+
+  test('smg -> sniper scales recoil DOWN, so a full climb never reaches the cap', () => {
+    // The sharpest discriminator: the sniper's bigger punchRad means fewer
+    // units render the same angle. The inverted ratio scales UP instead and
+    // clips at RECOIL_CAP, which is what made the round trip lossy.
+    const after = convertOnSwap({ ...rest, recoil: RECOIL_CAP }, smg, sniper, CAPS);
+    expect(after.recoil).toBeLessThan(RECOIL_CAP);
+    expect(after.recoil).toBeCloseTo(RECOIL_CAP * (smg.punchRad / sniper.punchRad), 12);
+  });
+
+  test('sniper -> smg can hit the cap, and clipping there is by design', () => {
+    // The reverse direction genuinely loses state: 6 units of sniper climb
+    // want 10 smg units to render the same angle. Pinned as intent, not a leak.
+    const after = convertOnSwap({ ...rest, recoil: RECOIL_CAP }, sniper, smg, CAPS);
+    expect(after.recoil).toBe(RECOIL_CAP);
+  });
+
+  test('recoilYaw rides the same ratio and keeps its sign', () => {
+    // recoilYaw is signed and shares punchRad with the vertical climb, so it
+    // took the inverted ratio too — the second wrong line in `f5fcb6a`.
+    const after = convertOnSwap({ ...rest, recoilYaw: -1.5 }, smg, sniper, CAPS);
+    expect(after.recoilYaw).toBeCloseTo(-1.5 * (smg.punchRad / sniper.punchRad), 12);
+  });
+
+  test('recoilYaw clamps symmetrically at ±RECOIL_YAW_CAP', () => {
+    const up = convertOnSwap({ ...rest, recoilYaw: RECOIL_YAW_CAP }, sniper, smg, CAPS);
+    const down = convertOnSwap({ ...rest, recoilYaw: -RECOIL_YAW_CAP }, sniper, smg, CAPS);
+    expect(up.recoilYaw).toBe(RECOIL_YAW_CAP);
+    expect(down.recoilYaw).toBe(-RECOIL_YAW_CAP);
+  });
+
+  test('spray re-clamps to the incoming cap instead of rescaling', () => {
+    // spray is a weapon-agnostic multiplier, so it must NOT take the ratio —
+    // it is only bounded differently per weapon.
+    const after = convertOnSwap({ ...rest, spray: 3.5 }, smg, sniper, CAPS);
+    expect(after.spray).toBe(sniper.sprayCap);
+  });
+
+  test('spray below the incoming cap rides across untouched', () => {
+    const after = convertOnSwap({ ...rest, spray: 2.2 }, smg, sniper, CAPS);
+    expect(after.spray).toBe(2.2);
   });
 });

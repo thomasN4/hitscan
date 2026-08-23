@@ -111,7 +111,10 @@ Two test layers, deliberately split:
 
 ## Roadmap / deferred ideas
 
-Maintainability tranche 1 (in progress) — see the plan for full rationale:
+Maintainability tranche 1 (in progress). **Full plan, rationale and the running
+list of review lessons: [`docs/refactor-plan.md`](docs/refactor-plan.md)** — read
+it before picking this work up, especially the review-lessons section, which
+records traps that have already cost a cycle each.
 
 - **PR 1 (done):** split `core.js` into pure `core/state.js` + browser-only `core/engine.js`; explicit init order; Vitest.
 - **PR 2 (done):** extract pure sim math into `src/sim/` (`accuracy`, `recoil`, `ballistics`, `damage`, `movement`, `smoothing`) with unit tests; hoist the frame pipeline into `main.js` so intra-frame ordering is visible.

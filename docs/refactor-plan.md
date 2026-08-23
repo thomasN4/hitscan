@@ -144,7 +144,11 @@ migration had silently disarmed:
   the Node suite cannot reach. Fixed by lesson 2's remedy — a pure seam,
   `sim/recoil.ts:convertOnSwap()` — with nine cases pinning it against the real
   table, non-vacuity re-proven per lesson 7 (the inverted ratio fails 6 of 9).
-  Recorded as lesson 19.
+  Recorded as lesson 19. Playtesting the fix then found the comment that
+  motivated it was itself half wrong — converting stops the aim snap but NOT
+  1-2-1 as a recoil cancel, because the incoming weapon's `recoilRecover`
+  drains the carried units anyway (0.277 s on the sniper). Pre-existing on
+  `main`, deferred to issue #15, pinned as behavior, and recorded as lesson 20.
 - **Unit-test purity went unguarded.** `no-undef` off for `.ts` disarmed the
   lesson-10 `ignores` mechanism the moment the tests became TypeScript, and
   `lib.es2022.full` gave tsc no reason to object either. Re-armed with
@@ -279,7 +283,8 @@ Ordered roughly by how easy they are to repeat.
     mode had been sitting there since before the migration and the migration is
     merely what tripped it. Two consequences, both of them things the code's own
     comment said the conversion existed to prevent (a mid-spray aim snap, and
-    1-2-1 as a free recoil cancel). Three rules fall out:
+    1-2-1 as a free recoil cancel — though see lesson 20: the comment was only
+    right about the first). Three rules fall out:
     - A mechanical refactor needs its invariant pinned **before** the refactor,
       not after. A test written afterwards pins whatever shipped.
     - When the refactor is *what* moves logic across the browser boundary, apply
@@ -287,6 +292,23 @@ Ordered roughly by how easy they are to repeat.
     - Prefer a signature where the mistake is a type error. `convertOnSwap` takes
       the two weapons as objects, not four numbers, so transposing them fails to
       compile: `incoming` needs a `sprayCap` and `outgoing` does not.
+20. **A pure-function test can be exactly right and still miss the behavior,
+    when the behavior is an interaction with TIME.** The nine `convertOnSwap`
+    cases from lesson 19 all pass, all assert the correct thing, and between
+    them cover both cap directions — and 137 green tests still shipped a
+    playtest-obvious bug, because every one of them passes ZERO time. The
+    conversion is lossless; the reset happens over the next 0.277 s, as the
+    incoming weapon's `recoilRecover` drains what the swap carried. The unit
+    under test was fine. The unit was the wrong unit.
+    - This is lesson 6 from the other side. Lesson 6 is about hand-seeding an
+      *accumulation* (seeding `1 + 30 × sprayKick` instead of replaying the fire
+      loop); this is hand-seeding a *duration*. Same remedy: replay the loop.
+    - Ask what happens in the frames AFTER the function returns. Extracting a
+      pure seam moves an instant into a module that cannot see time pass, which
+      makes the seam correct and the question easier to forget.
+    - When a comment claims an invariant, test the invariant as stated, not the
+      function. "1-2-1 is not a free recoil cancel" is a claim about a sequence
+      of player actions; no test of a single conversion can settle it.
 
 ---
 

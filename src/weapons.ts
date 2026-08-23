@@ -181,14 +181,22 @@ export function switchWeapon(slot: WeaponSlot): void {
   saved.reserve = weapon.reserve;
 
   // Recoil/spray state is weapon-RELATIVE, so the swap converts it instead of
-  // carrying the raw numbers across, and converting rather than zeroing matters
-  // because switching costs no time here: a reset would make 1-2-1 a free
-  // recoil cancel and would let a swap dodge the sniper's scopeGate.
+  // carrying the raw numbers across: without this the sniper's punchRad renders
+  // the smg's stored units as a different angle and the aim snaps mid-swap.
+  //
+  // This comment used to claim converting also stops 1-2-1 being a free recoil
+  // cancel. It does NOT, and playtesting PR #14 found it out. Converting only
+  // prevents an INSTANT reset — the swap then copies the incoming weapon's
+  // recoilRecover into `weapon`, and the decay does the reset regardless. The
+  // sniper drains a full smg climb (3.6 units after conversion) at 13 units/s,
+  // so it is gone in 0.277 s, well inside a human swap. Same for the scopeGate
+  // half of the old claim. The real fix is for switching to cost time; tracked
+  // as issue #15, and NOT a regression — main behaves identically.
   //
   // The arithmetic itself lives in sim/recoil.ts. It is pure, and leaving it
   // inline here put it behind sfxSwitch()'s AudioContext where the Node test
   // suite could not reach it — which is how the ratio shipped inverted with all
-  // 128 tests green (review lesson 2, and now lesson 19).
+  // 128 tests green (review lesson 2, and now lessons 19-20).
   const outgoing = currentDef();
   const incoming = WEAPONS[slot];
   const converted = convertOnSwap(game, outgoing, incoming,

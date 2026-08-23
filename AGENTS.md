@@ -147,5 +147,6 @@ Deferred to a later tranche:
 
 - Unifying the two time bases (`clock.elapsedTime` vs `performance.now()`) behind one game clock plus a pausable scheduler.
 - Splitting `game` into owner-scoped slices.
+- Making weapon switching cost time (a draw/holster delay, ideally with a viewmodel animation on `poseReload`'s model). Switching is instant today, so `1-2-1` is a free recoil cancel — the conversion in `switchWeapon` is lossless, but the incoming weapon's `recoilRecover` then drains the carried units, and the sniper's 13/s clears a full smg climb in 0.277 s. The same zero-cost window also lets a swap dodge `scopeGate` and re-clamp `spray`. Tracked as **issue #15** (not a PR number — the `#N` elsewhere in this file means PR). Pre-existing, not a migration regression; pinned as behavior in `sim/recoil.test.ts` so a fix has to update the test deliberately.
 
 Dropped: unifying Bot and the player under a shared entity base class. It addresses none of the regression classes this codebase has actually hit, and would couple a probabilistic AI to a physics-driven controller.

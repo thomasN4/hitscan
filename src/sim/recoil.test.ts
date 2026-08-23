@@ -270,10 +270,11 @@ describe('convertOnSwap — the view punch survives a weapon swap', () => {
     expect(punchDeg(inverted, sniper)).not.toBeCloseTo(punchDeg(before.recoil, smg), 2);
   });
 
-  test('1-2-1 hands back the exact recoil it started with — no free cancel', () => {
-    // Switching costs no time, so a lossy round trip is an exploit: spray the
-    // smg, tap 2 then 1, and the climb you earned is gone. Under the inverted
-    // ratio this returned 3.6 from 6 — a 40% cancel.
+  test('the conversion itself is lossless — an instant 1-2-1 round-trips exactly', () => {
+    // Scoped deliberately: this pins the CONVERSION, with no time passing. It
+    // says nothing about what a real 1-2-1 returns — see the decay cases below,
+    // which is the distinction this test originally blurred by calling itself
+    // "no free cancel". Under the inverted ratio it returned 3.6 from 6.
     const start = { ...rest, recoil: RECOIL_CAP };
     const onSniper = convertOnSwap(start, smg, sniper, CAPS);
     const back = convertOnSwap(onSniper, sniper, smg, CAPS);
@@ -320,5 +321,68 @@ describe('convertOnSwap — the view punch survives a weapon swap', () => {
   test('spray below the incoming cap rides across untouched', () => {
     const after = convertOnSwap({ ...rest, spray: 2.2 }, smg, sniper, CAPS);
     expect(after.spray).toBe(2.2);
+  });
+});
+
+/**
+ * Replay a 1-2-1 the way it is actually played: convert onto the sniper, hold
+ * it for `hold` seconds with decay running at the SNIPER's recoilRecover (which
+ * is what switchWeapon copies into `weapon`), then convert back.
+ *
+ * The decay is the half the zero-duration cases above cannot see — review
+ * lesson 6 from the other side. Lesson 6 is about hand-seeding an accumulation;
+ * this is about hand-seeding a duration.
+ */
+function roundTripRecoil(hold: number, startRecoil = RECOIL_CAP): number {
+  let s = convertOnSwap({ recoil: startRecoil, recoilYaw: 0, spray: 1 }, smgDef, sniperDef, CAPS);
+  const dt = 1 / 60;
+  for (let t = 0; t < hold; t += dt) {
+    s = { ...s, recoil: decayRecoil(s.recoil, dt, sniperDef.recoilRecover) };
+  }
+  return convertOnSwap(s, sniperDef, smgDef, CAPS).recoil;
+}
+
+const smgDef = WEAPONS[0];
+const sniperDef = WEAPONS[1];
+
+describe('convertOnSwap — what a swap actually returns once decay runs', () => {
+  test('the incoming weapon owns the drain, so its rate is what erases the climb', () => {
+    // NOT the conversion — that is lossless (see above). switchWeapon copies
+    // the incoming def's recoilRecover into `weapon`, and updateWeapon decays
+    // game.recoil at it. Derived from the constants rather than the literal
+    // 0.277 s, so a retune moves this test with the tuning instead of failing.
+    const carried = RECOIL_CAP * (smgDef.punchRad / sniperDef.punchRad);
+    const expected = carried / sniperDef.recoilRecover;
+
+    let recoil = carried;
+    let elapsed = 0;
+    const dt = 1 / 60;
+    while (recoil > 0 && elapsed < 5) {
+      recoil = decayRecoil(recoil, dt, sniperDef.recoilRecover);
+      elapsed += dt;
+    }
+    expect(elapsed).toBeCloseTo(expected, 1);
+  });
+
+  test('that drain outruns any human swap, so 1-2-1 IS a free recoil cancel', () => {
+    // KNOWN GAP, pinned as behavior rather than fixed: see issue #15. The fix
+    // is for switching to cost time, which is a gameplay change and does not
+    // belong in the TypeScript migration. Pre-existing on main — the inverted
+    // ratio shipped in PR #14 actually MASKED it slightly, inflating the
+    // carried units to the cap so they took 0.46 s to drain instead of 0.28 s.
+    //
+    // This test is the tripwire: when a draw/holster delay lands, it fails and
+    // whoever adds it has to decide about this deliberately.
+    expect(roundTripRecoil(0.5)).toBe(0);
+    expect(roundTripRecoil(0.3)).toBe(0);
+  });
+
+  test('only an inhumanly fast tap keeps any of it', () => {
+    // The boundary, so the numbers in issue #15 stay honest: a 100 ms swap
+    // retains a bit over half the climb, 200 ms about a fifth.
+    const full = RECOIL_CAP;
+    expect(roundTripRecoil(0.1) / full).toBeGreaterThan(0.5);
+    expect(roundTripRecoil(0.2) / full).toBeLessThan(0.25);
+    expect(roundTripRecoil(0.2)).toBeGreaterThan(0);
   });
 });

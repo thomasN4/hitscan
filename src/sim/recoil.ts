@@ -106,9 +106,15 @@ export interface SwapState {
  * scaling by outgoing ÷ incoming. The reciprocal scales the angle by ratio²
  * instead of holding it, which is how `f5fcb6a` shipped a ~2.8° aim snap on
  * every mid-spray swap — and, because the overshoot clips at the cap, a 1-2-1
- * that returned 40% less recoil than it started with. Both are exactly what
- * converting (rather than zeroing) exists to prevent, so the direction is the
- * whole contract here.
+ * that returned 40% less recoil than it started with. Preventing that snap is
+ * what this function is for, so the direction is its whole contract.
+ *
+ * SCOPE, because the caller's comment used to overclaim: this is the swap's
+ * INSTANT effect only. It does not and cannot stop 1-2-1 being a recoil
+ * cancel — once converted, the units decay at the incoming weapon's
+ * recoilRecover, and the sniper's 13/s clears a full smg climb in 0.277 s.
+ * A lossless conversion followed by a fast drain still nets a reset. Fixing
+ * that needs switching to cost time (issue #15); it is not fixable here.
  *
  * The caps still bite by design: converting onto a weapon with a SMALLER
  * punchRad scales recoil up, and clipping there is a real loss of state, not

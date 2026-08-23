@@ -1,6 +1,6 @@
 # Maintainability tranche — plan and running log
 
-Living document. PRs 1–5 are merged. The
+Living document. PRs 1–8 are merged or under review. The
 review lessons below are the most reusable part of this file: each one cost a
 review cycle to find, and several describe traps that are still easy to walk
 back into.
@@ -156,6 +156,45 @@ migration had silently disarmed:
   modules, scoped to `src/**/*.test.ts`; re-proven per environment. Lesson 17
   is about this class; that it recurred *here* is the point of lesson 19's
   second half.
+
+### PR 8 — One gameplay clock with a pausable scheduler (`refactor/game-clock`)
+
+Gameplay timing had drifted onto three bases that disagree about both epoch
+and pause: THREE.Clock's `elapsedTime` (fire-rate gate, view bob) keeps
+running through pause because `animate()` always calls `getDelta()`; raw
+`performance.now()` (reload start/progress/end) shares neither its zero point
+nor its pause; wall-clock `setTimeout` fired gameplay events mid-pause — dead
+bots revived behind the menu at 6 s / 2.5 s, and reload clicks played over a
+reload that (had it been pausable) wasn't progressing.
+
+The unification: a pure `GameClock` (`sim/gameClock.ts`) — an accumulator
+advanced ONLY from main.ts's sim block as stage 0 of the load-bearing frame
+order, plus a scheduler drained from inside `advance()`, so scheduled work
+inherits pause semantics structurally rather than via flags. The shared
+instance lives in `core/state.ts:gameTime` per the single-state-home rule;
+the class stays in `sim/`, where Node tests replay real frame cadences
+directly (16 cases: ordering, cancel, chaining, drain-during-one-advance,
+frame-by-frame replay).
+
+Moved onto game time: `weapon.lastShot` + the fire-rate gate, all three
+reload bookkeeping sites, view-bob phase (which used to snap to an arbitrary
+cycle point on resume), bot self-respawn, the round-win wave respawn, and the
+reload click sequence in `audio.ts`.
+
+Deliberately left on wall clock, each documented at its site: combat.ts's
+death-screen delay (it fires DURING pause — scheduling it on game time would
+mean the screen never appears), muzzle-flash cleanup and hud fades (cosmetic,
+and readable behind menus), main.ts's double-tap-W window (input layer, must
+work pre-lock). `clock.getDelta()` remains main's raw-frame-dt source; the
+clamp happens before `advance`, so a tab-switch spike can't fast-forward the
+scheduler.
+
+Declared behavior changes, all intended: no free first shot after a long
+pause; a paused reload suspends mid-mag instead of finishing behind the menu
+(the smoke test's 2.6 s wait held under headless SwiftShader on BOTH servers);
+bots stop reviving during pause; reload audio freezes with its animation.
+`smoke-test.mjs` byte-for-byte unchanged, every phase green on both maps
+against dev server and `vite preview`.
 
 ---
 
@@ -314,12 +353,10 @@ Ordered roughly by how easy they are to repeat.
 
 ## Later tranche — what remains
 
-The TypeScript migration and the ESLint gate both landed (PR 6, PR 7); the
-rule table and tsconfig decisions that used to live here are now history, not
-plan. Still deferred:
+The TypeScript migration, the ESLint gate and the game clock all landed
+(PR 6, PR 7, PR 8); the rule table, tsconfig decisions and time-base notes
+that used to live here are now history, not plan. Still deferred:
 
-- Unifying the two time bases (`clock.elapsedTime` vs `performance.now()`)
-  behind one game clock plus a pausable scheduler.
 - Splitting `game` into owner-scoped slices.
 
 ---

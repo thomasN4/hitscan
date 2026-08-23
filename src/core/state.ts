@@ -162,7 +162,7 @@ export const BASE_FOV = 75;
  * Which weapon slot is live. A two-entry union, not `number`, because the
  * table below is statically populated and every consumer already branches on
  * `=== 0` / `=== 1`. Indexing a TUPLE by this union is exempt from
- * noUncheckedIndexedAccess, so `WEAPONS[game.slot]` is a plain WeaponDef and
+ * noUncheckedIndexedAccess, so `WEAPONS[wpn.slot]` is a plain WeaponDef and
  * the misses simply cannot happen rather than being guarded for.
  */
 export type WeaponSlot = 0 | 1;
@@ -261,7 +261,7 @@ export const ammoStore: [AmmoStore, AmmoStore] = [
 
 /**
  * Live state of the ACTIVE weapon. Stat fields are copied from
- * WEAPONS[game.slot] by switchWeapon() in weapons.ts; HUD/combat read this
+ * WEAPONS[wpn.slot] by switchWeapon() in weapons.ts; HUD/combat read this
  * object only. A subset of WeaponDef plus mutable ammo/reload bookkeeping —
  * deliberately NOT a WeaponDef, since Object.assign in switchWeapon copies
  * only the fields listed here.
@@ -310,68 +310,133 @@ export function resetAmmo(): void {
 /** Maps selectable from the start menu (?map= URL param). */
 export type MapName = 'arena' | 'range';
 
-/** Misc per-frame / transient flags — see `game` below. */
-export interface GameState {
+// ---------- Owner-scoped slices ----------
+// The old single `game` bag, split by owning system. Each slice documents its
+// WRITER(S); every other module reads. The slices still live here in the
+// shared-state home — the split is about ownership clarity, not new module
+// homes. window.__cs.game keeps its historical flat shape through a
+// delegation-only facade built at the debug hook in main.ts; gameplay code
+// imports slices directly.
+
+/** Session-level flags. Written by main.ts (startup ?map= read, pointer-lock events). */
+export interface SessionState {
+  // Map is chosen at page load via ?map=range (start-menu buttons trigger a
+  // full reload); there is deliberately no hot-swapping of scenes at runtime.
+  // main.ts overwrites this from the URL at startup — reading `location` here
+  // would break this module's importability in Node.
   map: MapName;
   /** Pointer lock active (Esc/menu releases it). */
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */
   started: boolean;
+}
+
+export const session: SessionState = {
+  map: 'arena',
+  locked: false,
+  started: false,
+};
+
+/**
+ * Raw button state (LMB/RMB/sprint). Written by main.ts's event handlers —
+ * plus one weapons.ts write (`shoot()` clears `aiming` on unscopeOnShot) —
+ * and read by player/weapons/hud. Tracked as state rather than one-shot
+ * events because firing is continuous in updateWeapon.
+ */
+export interface InputState {
   /** LMB held. */
   shooting: boolean;
   /** RMB held (iron sights). */
   aiming: boolean;
   /** Double-tapped W and still holding it (sprint). */
   running: boolean;
-  /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
-  runLerp: number;
+}
+
+export const input: InputState = {
+  shooting: false,
+  aiming: false,
+  running: false,
+};
+
+/**
+ * Look angles, in radians. Written by main.ts's mousemove handler (pitch
+ * clamped there) and combat.ts's respawn; read by player.ts's movement
+ * forward vector and by weapons.ts's currentAimPitch/currentAimYaw — the
+ * shared source for both camera and shot direction.
+ *
+ * These are the BASE angles. Recoil punch is added on top per read
+ * (sim/recoil.ts), never folded in here — routing the view punch into the
+ * base would steer the player's legs and fight the mouse.
+ */
+export interface AimState {
   /** Look yaw; 0 = facing -z, Math.PI would face the arena's rear wall. */
   yaw: number;
   pitch: number;
+}
+
+export const aim: AimState = {
+  yaw: 0,
+  pitch: 0,
+};
+
+/**
+ * Weapon DYNAMICS — the live accuracy/recoil/ADS state driven by firing and
+ * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, updateWeapon)
+ * plus one main.ts write — its wheel handler steps zoomLevel while scoped;
+ * combat.ts's respawn() resets it to round-start values; main.ts and hud.ts
+ * read it (sensitivity scaling and scope gate, zoom label).
+ *
+ * Lerp values (`adsLerp`) are smoothed 0..1 blends updated every frame;
+ * never set them directly from input.
+ */
+export interface WeaponDynamics {
   /** CURRENT total shot cone (radians), recomputed each frame in weapons.ts. */
   spread: number;
   /** Shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies). */
   spray: number;
-  /** Smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5). */
-  moveLerp: number;
   recoil: number;
   recoilYaw: number;
-  crouchLerp: number;
-  airLerp: number;
   adsLerp: number;
   /** Active weapon index into WEAPONS (0 smg, 1 sniper). */
   slot: WeaponSlot;
   /** Scoped zoom step: index into WEAPONS[slot].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
-  stepTimer: number;
-  bobAmt: number;
-  scoreKills: number;
-  scoreDeaths: number;
-  roundTime: number;
 }
 
 /**
- * Misc per-frame / transient flags. Grouped here because they are touched
- * by several systems (input in main.ts, consumed in player.ts/weapons.ts).
+ * Movement/stance blends and feedback timers. Written by player.ts's
+ * updateMovement (stage 1); combat.ts's respawn() resets the stance blends
+ * so you don't respawn mid-air or mid-crouch; weapons.ts reads them to feed
+ * the accuracy model and the sprint FOV kick.
  *
- * Lerp values (`crouchLerp`, `adsLerp`) are smoothed 0..1 blends updated
- * every frame; never set them directly from input.
+ * Every `*Lerp` here is a smoothed 0..1 blend updated each frame — never set
+ * one directly from input.
  */
-export const game: GameState = {
-  // Map is chosen at page load via ?map=range (start-menu buttons trigger a
-  // full reload); there is deliberately no hot-swapping of scenes at runtime.
-  // main.ts overwrites this from the URL at startup — reading `location` here
-  // would break this module's importability in Node.
-  map: 'arena',
-  locked: false,   // pointer lock active (Esc/menu releases it)
-  started: false,  // first Play click happened; distinguishes pause from pre-game
-  shooting: false, // LMB held
-  aiming: false,   // RMB held (iron sights)
-  running: false,  // double-tapped W and still holding it (sprint)
+export interface MotionState {
+  /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
+  runLerp: number;
+  /** Smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5). */
+  moveLerp: number;
+  crouchLerp: number;
+  /** 0..1 airborne blend; see updateMovement for why it is written in stage 1. */
+  airLerp: number;
+  stepTimer: number;
+  bobAmt: number;
+}
+
+export const motion: MotionState = {
   runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
-  yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
-  pitch: 0,
+  moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
+                   // drives the movement accuracy penalty
+  crouchLerp: 0,
+  airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
+                   // out over ~100-200 ms so it doesn't snap on takeoff/landing
+  stepTimer: 0.2,  // countdown to next footstep sound
+  bobAmt: 0,       // current view-bob amplitude, computed in player.ts
+};
+
+export const wpn: WeaponDynamics = {
   spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
                    // in weapons.ts from (stance + movement + air) × spray,
                    // plus the weapon's inherent cone, all × ADS. Do not add
@@ -380,8 +445,6 @@ export const game: GameState = {
                    // +sprayKick per shot up to the weapon's sprayCap, decaying
                    // back toward 1 at sprayRecover/s. Scales only the
                    // situational terms; `inherent` is unaffected by it.
-  moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
-                   // drives the movement accuracy penalty
   recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
                    // While above WEAPONS[slot].scopeGate, a new RMB press
                    // can't enter the scope (main.ts)
@@ -391,19 +454,31 @@ export const game: GameState = {
                    // toward 0 at the weapon's own yawRecover/s — NOT at
                    // recoilRecover, which drains fast enough to zero the walk
                    // between shots.
-  crouchLerp: 0,
-  airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
-                   // out over ~100-200 ms so it doesn't snap on takeoff/landing
   adsLerp: 0,
   slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                    // doesn't get twitchy at 12x (computed in weapons.ts)
-  stepTimer: 0.2,  // countdown to next footstep sound
-  bobAmt: 0,       // current view-bob amplitude, computed in player.ts
-  scoreKills: 0,   // shown as "CT" score
-  scoreDeaths: 0,  // shown as "T" score
-  roundTime: 115,  // seconds; resets to 1:55 when it expires
+};
+
+/**
+ * Match bookkeeping. Three writers, one field each: bots.ts increments
+ * scoreKills on a kill, combat.ts increments scoreDeaths when the player
+ * dies, main.ts's loop counts roundTime down (arena only). hud.ts renders.
+ */
+export interface ScoreState {
+  /** Shown as the CT score. */
+  scoreKills: number;
+  /** Shown as the T score. */
+  scoreDeaths: number;
+  /** Seconds left in the round; resets to 1:55 when it expires. */
+  roundTime: number;
+}
+
+export const score: ScoreState = {
+  scoreKills: 0,
+  scoreDeaths: 0,
+  roundTime: 115,
 };
 
 /** Raw keyboard state by `event.code`. Written in main.ts, read in player.ts. */

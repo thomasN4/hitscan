@@ -10,9 +10,10 @@
 //
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
-import type { GameState, LiveWeapon, PlayerState } from './core/state';
+import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
+              MapName, WeaponSlot, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -31,9 +32,9 @@ import { validateWeapons } from './sim/validateWeapons';
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
 // core/state.ts stays free of browser globals, so the ?map= param is read
-// here and written into the shared state before anything reads game.map.
-game.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
-const RANGE = game.map === 'range';
+// here and written into the shared state before anything reads session.map.
+session.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
+const RANGE = session.map === 'range';
 
 // Loud, not fatal: this runs before initEngine(), so throwing would blank
 // the page and hide the message behind a broken app. A violation is a
@@ -76,49 +77,49 @@ addEventListener('keydown', e => {
   // e.repeat guards against OS key-repeat re-triggering the double tap
   if (e.code === 'KeyW' && !e.repeat) {
     const now = performance.now();
-    if (now - lastWTapTime < RUN_TAP_WINDOW_MS) game.running = true;
+    if (now - lastWTapTime < RUN_TAP_WINDOW_MS) input.running = true;
     lastWTapTime = now;
   }
 });
 addEventListener('keyup', e => {
   keys[e.code] = false;
-  if (e.code === 'KeyW') game.running = false; // sprint requires W held
+  if (e.code === 'KeyW') input.running = false; // sprint requires W held
 });
 
 const SENS = 0.0022; // radians per pixel of mouse movement
 document.addEventListener('mousemove', e => {
-  if (!game.locked || !player.alive) return;
+  if (!session.locked || !player.alive) return;
   // zoomScale shrinks toward the FOV ratio while scoped (weapons.ts), so
   // aiming stays controllable at 12x instead of flinging across the sky.
-  game.yaw -= e.movementX * SENS * game.zoomScale;
-  game.pitch -= e.movementY * SENS * game.zoomScale;
+  aim.yaw -= e.movementX * SENS * wpn.zoomScale;
+  aim.pitch -= e.movementY * SENS * wpn.zoomScale;
   // Clamp pitch so the player can't flip over backwards
-  game.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, game.pitch));
+  aim.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, aim.pitch));
 });
 
 // Wheel = scope zoom steps, only while scoped with the sniper (slot 1).
 // Scroll up zooms in, scroll down zooms out, wrapping through the levels.
 addEventListener('wheel', e => {
-  if (!game.locked || !player.alive || game.slot !== 1 || !game.aiming) return;
+  if (!session.locked || !player.alive || wpn.slot !== 1 || !input.aiming) return;
   const n = WEAPONS[1].zoomFovs.length; // tuple index — slot 1 exists by type
-  game.zoomLevel = (game.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
+  wpn.zoomLevel = (wpn.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
   sfxZoom();
 });
 
 // LMB = fire (held), RMB = iron sights (held). Buttons are tracked as state
 // rather than one-shot events because firing is continuous in updateWeapon.
 addEventListener('mousedown', e => {
-  if (e.button === 0 && game.locked && player.alive) game.shooting = true;
+  if (e.button === 0 && session.locked && player.alive) input.shooting = true;
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
-  if (e.button === 2 && game.locked && player.alive) {
-    const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (smg)
-    if (gate === undefined || game.recoil < gate) game.aiming = true;
+  if (e.button === 2 && session.locked && player.alive) {
+    const gate = WEAPONS[wpn.slot].scopeGate; // undefined = no gate (smg)
+    if (gate === undefined || wpn.recoil < gate) input.aiming = true;
   }
 });
 addEventListener('mouseup', e => {
-  if (e.button === 0) game.shooting = false;
-  if (e.button === 2) game.aiming = false;
+  if (e.button === 0) input.shooting = false;
+  if (e.button === 2) input.aiming = false;
 });
 addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 
@@ -138,21 +139,21 @@ if (RANGE) {
   menuBlurb.textContent = 'Practice your aim \u2014 silhouettes with bullseyes at 10\u201360 m';
 }
 requireEl('respawnBtn').onclick = () => { deathScreen.style.display = 'none'; respawn(); lock(); };
-renderer.domElement.addEventListener('click', () => { if (!game.locked && player.alive && game.started) lock(); });
+renderer.domElement.addEventListener('click', () => { if (!session.locked && player.alive && session.started) lock(); });
 
 document.addEventListener('pointerlockchange', () => {
-  game.locked = document.pointerLockElement === renderer.domElement;
-  hudEl.style.display = game.locked ? 'block' : 'none';
+  session.locked = document.pointerLockElement === renderer.domElement;
+  hudEl.style.display = session.locked ? 'block' : 'none';
   // updateWeapon stops running when the loop pauses; make sure a held scope
   // can't stay stuck on screen across pause/death.
-  if (!game.locked) setScopeOverlay(false);
-  if (game.locked) {
-    game.started = true;
+  if (!session.locked) setScopeOverlay(false);
+  if (session.locked) {
+    session.started = true;
     deathScreen.style.display = 'none';
   }
   // Losing lock while alive means Esc was pressed -> show pause menu.
   // Losing lock while dead is handled by damagePlayer's death screen.
-  if (!game.locked && game.started && player.alive) {
+  if (!session.locked && session.started && player.alive) {
     menuBlurb.textContent = 'Paused \u2014 click Play to resume';
     requireEl('playBtn').textContent = 'Resume';
     startMenu.style.display = 'flex';
@@ -166,7 +167,7 @@ function animate(): void {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05); // clamp: tab-switch spikes shouldn't teleport entities
 
-  if (game.locked && game.started) {
+  if (session.locked && session.started) {
     // Stage 0 — advance game time. Every stage below measures against this
     // epoch (fire-rate gates, reloads, respawn timers), and keeping the
     // advance inside the sim block is what makes them all pausable. dt is
@@ -180,7 +181,7 @@ function animate(): void {
     //     inside updateWeapon) rays from camera.getWorldPosition() — so the
     //     position must be written BEFORE updateWeapon, or every shot leaves
     //     from last frame's eye.
-    //   - updateWeapon decays game.recoil and recomputes game.spread from the
+    //   - updateWeapon decays wpn.recoil and recomputes wpn.spread from the
     //     blends updateMovement just wrote; updateCamera and updateViewmodel
     //     then read that post-decay recoil, so they must run AFTER it and the
     //     camera, the viewmodel kick and the bullets all agree within a frame.
@@ -194,9 +195,9 @@ function animate(): void {
 
     // Round timer: arena only — meaningless on the range, so freeze it there
     if (!RANGE) {
-      game.roundTime -= dt;
-      if (game.roundTime <= 0) game.roundTime = 115;
-      setTimer(game.roundTime);
+      score.roundTime -= dt;
+      if (score.roundTime <= 0) score.roundTime = 115;
+      setTimer(score.roundTime);
     }
 
     updateHUD();
@@ -210,10 +211,47 @@ animate();
 
 // Debug/testing hook: inspect live state from devtools (`__cs.game`, ...)
 // or from scripts/smoke-test.mjs.
+//
+// `game` below is a delegation-only FACADE over the owner-scoped slices from
+// core/state.ts (session/input/aim/wpn/motion/score). It exists purely to
+// keep this hook's historical flat shape — the AGENTS.md invariant and the
+// smoke test both read `__cs.game.x` — and holds no state of its own:
+// every access round-trips to a slice. Gameplay code imports the slices
+// directly; do not route logic through this object.
+type DebugGame = SessionState & InputState & AimState & WeaponDynamics & MotionState & ScoreState;
+
+const game: DebugGame = {
+  get map() { return session.map; }, set map(v: MapName) { session.map = v; },
+  get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
+  get started() { return session.started; }, set started(v: boolean) { session.started = v; },
+  get shooting() { return input.shooting; }, set shooting(v: boolean) { input.shooting = v; },
+  get aiming() { return input.aiming; }, set aiming(v: boolean) { input.aiming = v; },
+  get running() { return input.running; }, set running(v: boolean) { input.running = v; },
+  get yaw() { return aim.yaw; }, set yaw(v: number) { aim.yaw = v; },
+  get pitch() { return aim.pitch; }, set pitch(v: number) { aim.pitch = v; },
+  get spread() { return wpn.spread; }, set spread(v: number) { wpn.spread = v; },
+  get spray() { return wpn.spray; }, set spray(v: number) { wpn.spray = v; },
+  get recoil() { return wpn.recoil; }, set recoil(v: number) { wpn.recoil = v; },
+  get recoilYaw() { return wpn.recoilYaw; }, set recoilYaw(v: number) { wpn.recoilYaw = v; },
+  get adsLerp() { return wpn.adsLerp; }, set adsLerp(v: number) { wpn.adsLerp = v; },
+  get slot() { return wpn.slot; }, set slot(v: WeaponSlot) { wpn.slot = v; },
+  get zoomLevel() { return wpn.zoomLevel; }, set zoomLevel(v: number) { wpn.zoomLevel = v; },
+  get zoomScale() { return wpn.zoomScale; }, set zoomScale(v: number) { wpn.zoomScale = v; },
+  get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },
+  get moveLerp() { return motion.moveLerp; }, set moveLerp(v: number) { motion.moveLerp = v; },
+  get crouchLerp() { return motion.crouchLerp; }, set crouchLerp(v: number) { motion.crouchLerp = v; },
+  get airLerp() { return motion.airLerp; }, set airLerp(v: number) { motion.airLerp = v; },
+  get stepTimer() { return motion.stepTimer; }, set stepTimer(v: number) { motion.stepTimer = v; },
+  get bobAmt() { return motion.bobAmt; }, set bobAmt(v: number) { motion.bobAmt = v; },
+  get scoreKills() { return score.scoreKills; }, set scoreKills(v: number) { score.scoreKills = v; },
+  get scoreDeaths() { return score.scoreDeaths; }, set scoreDeaths(v: number) { score.scoreDeaths = v; },
+  get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
+};
+
 declare global {
   interface Window {
     __cs: {
-      game: GameState;
+      game: DebugGame;
       weapon: LiveWeapon;
       player: PlayerState;
       bulletHoles: typeof bulletHoles;

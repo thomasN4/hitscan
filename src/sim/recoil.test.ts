@@ -349,7 +349,7 @@ describe('convertOnSwap — what a swap actually returns once decay runs', () =>
   test('the incoming weapon owns the drain, so its rate is what erases the climb', () => {
     // NOT the conversion — that is lossless (see above). switchWeapon copies
     // the incoming def's recoilRecover into `weapon`, and updateWeapon decays
-    // game.recoil at it. Derived from the constants rather than the literal
+    // wpn.recoil at it. Derived from the constants rather than the literal
     // 0.277 s, so a retune moves this test with the tuning instead of failing.
     const carried = RECOIL_CAP * (smgDef.punchRad / sniperDef.punchRad);
     const expected = carried / sniperDef.recoilRecover;

@@ -18,7 +18,12 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    ```
 
 3. **Implement** — on a feature branch cut from `main` (inside its worktree):
-   - `feat/<short-slug>` for features, `fix/<short-slug>` for bug fixes
+   - Branch prefix, `<prefix>/<short-slug>` — the set is these four, no others:
+     `feat/` new gameplay or behavior · `fix/` bug fixes · `refactor/` structure
+     and tooling with no behavior change (the maintainability tranche: #5, #6,
+     #7) · `docs/` documentation only. Take the prefix from this list rather
+     than from habit: `chore/` is the Conventional Commits default for tooling
+     and is NOT used here.
    - As many WIP commits as sensible while working; commit messages: short imperative summary, optionally `;`-joined clauses, e.g.
 
    ```
@@ -36,11 +41,14 @@ Direct pushes to `main` are the exception, only when the user asks (e.g., hotfix
 ```sh
 npm run dev                    # dev server (http://localhost:5173)
 npm run build                  # production build -> dist/
+npm run lint                   # ESLint (flat config); no-undef is the point
 npm test                       # Vitest unit tests (no browser, ~200 ms)
 node scripts/smoke-test.mjs    # headless E2E check (requires dev server running)
 ```
 
-Two test layers, deliberately split:
+Three layers, deliberately split:
+
+- **`npm run lint`** — static: undeclared identifiers, unused bindings. Catches the missing-import class (below) at edit time, which neither `npm run build` nor `npm test` can. Config in `eslint.config.js`.
 
 - **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit.
 - **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, both maps. This is the layer that catches missing imports and wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`.
@@ -96,7 +104,7 @@ Two test layers, deliberately split:
 
 ## Gotchas learned the hard way
 
-- **Missing imports are NOT build errors here.** Vite/rollup won't flag an identifier used inside a function body if it happens to resolve as a global at runtime — it becomes a silent `ReferenceError` when that code path first runs (this is how reload broke once). After refactors or moving code between modules, run the smoke test, not just `npm run build`. `npm test` does not catch this either for browser-side modules — only the smoke test exercises them.
+- **Missing imports are NOT build errors here.** Vite/rollup won't flag an identifier used inside a function body if it happens to resolve as a global at runtime — it becomes a silent `ReferenceError` when that code path first runs (this is how reload broke once). `npm run lint` now catches this class directly (`no-undef`, with per-environment globals declared in `eslint.config.js`) — run it after any code movement. It is a static check, not a substitute for the smoke test: lint sees undeclared names, the smoke test sees wiring. `npm test` catches neither for browser-side modules.
 - Pointer lock has a browser-enforced cooldown after `exitPointerLock()`; re-locking too soon silently fails. The canvas click handler recovers, keep that behavior when touching menus.
 - The game loop only simulates while pointer lock is held (`game.locked && game.started`) but always renders. Anything added to the loop should respect that split.
 - **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k <port>/tcp`, start the server with `--port <n> --strictPort`, and confirm the port from its log. With parallel worktrees, parallel dev servers are expected — pick a distinct port per worktree and point the smoke test at it with `CS_SMOKE_BASE` (it defaults to 5173).

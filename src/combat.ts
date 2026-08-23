@@ -4,7 +4,7 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone } from './core/state';
-import { player, session, aim, game, bots, gameTime, resetAmmo } from './core/state';
+import { player, session, aim, wpn, game, bots, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
@@ -56,18 +56,18 @@ export function respawn(): void {
   player.alive = true;
   aim.yaw = 0;   // face -z, into the arena / downrange
   aim.pitch = 0;
-  game.recoil = 0;    // else the view punch would spawn the camera mid-climb
-  game.recoilYaw = 0; // and mid-wander, off to one side
-  game.spray = 1;     // resting multiplier, NOT 0 — see core/state.ts
+  wpn.recoil = 0;    // else the view punch would spawn the camera mid-climb
+  wpn.recoilYaw = 0; // and mid-wander, off to one side
+  wpn.spray = 1;     // resting multiplier, NOT 0 — see core/state.ts
   // Same class: the accuracy/pose blends are smoothed toward their target over
   // ~100-200 ms, so dying mid-air respawns you inside the full AIR_PENALTY
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
   game.airLerp = 0;
   game.crouchLerp = 0;
-  game.adsLerp = 0;
+  wpn.adsLerp = 0;
   resetAmmo();    // refills both slots and mirrors the smg into `weapon`
-  game.slot = 0;
-  game.zoomLevel = 0;
+  wpn.slot = 0;
+  wpn.zoomLevel = 0;
   updateHUD();
   clearVignette();
 }

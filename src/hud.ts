@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, game, WEAPONS, BASE_FOV } from './core/state';
+import { player, weapon, input, wpn, game, WEAPONS, BASE_FOV } from './core/state';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -154,13 +154,13 @@ export function updateHUD(): void {
     weaponName.textContent = weapon.name;
   }
   // The WEAPONS read needs no guard (tuple + WeaponSlot), but zoomFovs is a
-  // plain array indexed by the unbounded game.zoomLevel, so that read is still
+  // plain array indexed by the unbounded wpn.zoomLevel, so that read is still
   // `T | undefined`. weapons.ts:aimFovFor CLAMPS the same index because it owes
   // its caller a number; the HUD degrades to no label instead, because a view
   // must never throw mid-frame over a cosmetic string. Both are unreachable in
   // play — zoomLevel is wheel-wrapped mod n and reset to 0 on swap — but they
   // are deliberately different answers to the same miss, so change them together.
-  const zoomFov = input.aiming && game.slot === 1 ? WEAPONS[game.slot].zoomFovs[game.zoomLevel] : undefined;
+  const zoomFov = input.aiming && wpn.slot === 1 ? WEAPONS[wpn.slot].zoomFovs[wpn.zoomLevel] : undefined;
   const zoomLabel = zoomFov !== undefined ? Math.round(BASE_FOV / zoomFov) + 'x' : '';
   if (zoomLabel !== lastZoomLabel) {
     lastZoomLabel = zoomLabel;

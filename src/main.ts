@@ -12,7 +12,7 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { GameState, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
+import { session, input, aim, wpn, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -90,8 +90,8 @@ document.addEventListener('mousemove', e => {
   if (!session.locked || !player.alive) return;
   // zoomScale shrinks toward the FOV ratio while scoped (weapons.ts), so
   // aiming stays controllable at 12x instead of flinging across the sky.
-  aim.yaw -= e.movementX * SENS * game.zoomScale;
-  aim.pitch -= e.movementY * SENS * game.zoomScale;
+  aim.yaw -= e.movementX * SENS * wpn.zoomScale;
+  aim.pitch -= e.movementY * SENS * wpn.zoomScale;
   // Clamp pitch so the player can't flip over backwards
   aim.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, aim.pitch));
 });
@@ -99,9 +99,9 @@ document.addEventListener('mousemove', e => {
 // Wheel = scope zoom steps, only while scoped with the sniper (slot 1).
 // Scroll up zooms in, scroll down zooms out, wrapping through the levels.
 addEventListener('wheel', e => {
-  if (!session.locked || !player.alive || game.slot !== 1 || !input.aiming) return;
+  if (!session.locked || !player.alive || wpn.slot !== 1 || !input.aiming) return;
   const n = WEAPONS[1].zoomFovs.length; // tuple index — slot 1 exists by type
-  game.zoomLevel = (game.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
+  wpn.zoomLevel = (wpn.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
   sfxZoom();
 });
 
@@ -112,8 +112,8 @@ addEventListener('mousedown', e => {
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
   if (e.button === 2 && session.locked && player.alive) {
-    const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (smg)
-    if (gate === undefined || game.recoil < gate) input.aiming = true;
+    const gate = WEAPONS[wpn.slot].scopeGate; // undefined = no gate (smg)
+    if (gate === undefined || wpn.recoil < gate) input.aiming = true;
   }
 });
 addEventListener('mouseup', e => {
@@ -180,7 +180,7 @@ function animate(): void {
     //     inside updateWeapon) rays from camera.getWorldPosition() — so the
     //     position must be written BEFORE updateWeapon, or every shot leaves
     //     from last frame's eye.
-    //   - updateWeapon decays game.recoil and recomputes game.spread from the
+    //   - updateWeapon decays wpn.recoil and recomputes wpn.spread from the
     //     blends updateMovement just wrote; updateCamera and updateViewmodel
     //     then read that post-decay recoil, so they must run AFTER it and the
     //     camera, the viewmodel kick and the bullets all agree within a frame.

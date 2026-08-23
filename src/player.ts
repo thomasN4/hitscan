@@ -14,7 +14,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, aim, game, keys, gameTime } from './core/state';
+import { player, input, aim, wpn, game, keys, gameTime } from './core/state';
 import { collidesAt } from './collision';
 import { colliders } from './world';
 import { sfxFootstep } from './audio';
@@ -159,26 +159,26 @@ export function updateCamera(): void {
 /**
  * Stage 4 — weapon viewmodel transform and crosshair styling.
  *
- * MUST run after updateWeapon: the kick reads game.recoil and the ADS blend
- * reads game.adsLerp, both written there this frame.
+ * MUST run after updateWeapon: the kick reads wpn.recoil and the ADS blend
+ * reads wpn.adsLerp, both written there this frame.
  */
 export function updateViewmodel(): void {
   if (!player.alive) return;
 
   // Blend hip-fire offset -> centered iron sights with adsLerp; add bob and
   // recoil kick on top.
-  gunGroup.position.x = -0.25 * game.adsLerp;
+  gunGroup.position.x = -0.25 * wpn.adsLerp;
   // Bob phase runs on game time so a pause doesn't snap the weapon to an
   // arbitrary point of the cycle on resume.
-  gunGroup.position.y = 0.14 * game.adsLerp + Math.sin(gameTime.now() * 10) * game.bobAmt;
-  gunGroup.position.z = game.recoil * 0.012 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
-  gunGroup.rotation.x = game.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
+  gunGroup.position.y = 0.14 * wpn.adsLerp + Math.sin(gameTime.now() * 10) * game.bobAmt;
+  gunGroup.position.z = wpn.recoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
+  gunGroup.rotation.x = wpn.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
                                              // so a full climb must stay a nudge, not a tilt
-  gunGroup.rotation.y = -game.recoilYaw * 0.01; // subtle sideways pull matching the walk
+  gunGroup.rotation.y = -wpn.recoilYaw * 0.01; // subtle sideways pull matching the walk
 
   // Crosshair tightens/fades when aiming (sight picture takes over);
   // arm gap itself is driven by the accuracy model in weapons.ts
-  crosshair.style.transform = `scale(${1 - 0.35 * game.adsLerp})`;
+  crosshair.style.transform = `scale(${1 - 0.35 * wpn.adsLerp})`;
   // style properties are CSS strings; a bare number only worked via coercion
-  crosshair.style.opacity = String(1 - 0.4 * game.adsLerp);
+  crosshair.style.opacity = String(1 - 0.4 * wpn.adsLerp);
 }

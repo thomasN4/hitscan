@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, input, aim, game, player, gameTime, WEAPONS, ammoStore,
+import { bots, weapon, session, input, aim, wpn, game, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          type WeaponDef, type WeaponSlot } from './core/state';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
@@ -22,17 +22,17 @@ import { shotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { approach } from './sim/smoothing';
 
-// The live weapon def. WEAPONS is a tuple and game.slot is WeaponSlot, so
+// The live weapon def. WEAPONS is a tuple and wpn.slot is WeaponSlot, so
 // this read cannot miss and needs no guard — the type does the work that a
-// named throw used to. game.zoomLevel is still a plain number, though, so
+// named throw used to. wpn.zoomLevel is still a plain number, though, so
 // aimFovFor below still has a real miss case to decide about.
 function currentDef(): WeaponDef {
-  return WEAPONS[game.slot];
+  return WEAPONS[wpn.slot];
 }
 
 /** Zoom FOV target for the current zoom level, clamped into range. */
 function aimFovFor(def: WeaponDef): number {
-  const fov = def.zoomFovs[Math.min(game.zoomLevel, def.zoomFovs.length - 1)];
+  const fov = def.zoomFovs[Math.min(wpn.zoomLevel, def.zoomFovs.length - 1)];
   if (fov === undefined) throw new Error(`${def.name}: empty zoomFovs`);
   return fov;
 }
@@ -45,7 +45,7 @@ function magBaseY(mag: THREE.Mesh): number {
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the
 // view transform. One group per slot (smg / sniper); visibility follows
-// game.slot every frame. Position is animated each frame in
+// wpn.slot every frame. Position is animated each frame in
 // updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.ts).
 // The viewmodel meshes below are pure THREE objects, so they are built at
@@ -114,7 +114,7 @@ export function initWeaponViewmodels(): void {
  * through it so the crosshair stays truthful about where bullets go.
  */
 export function currentAimPitch(): number {
-  return aimPitch(aim.pitch, game.recoil, currentDef().punchRad);
+  return aimPitch(aim.pitch, wpn.recoil, currentDef().punchRad);
 }
 
 /**
@@ -126,7 +126,7 @@ export function currentAimPitch(): number {
  * about horizontal drift the way it once did about vertical climb.
  */
 export function currentAimYaw(): number {
-  return aimYaw(aim.yaw, game.recoilYaw, currentDef().punchRad);
+  return aimYaw(aim.yaw, wpn.recoilYaw, currentDef().punchRad);
 }
 
 // ---------- Reload animation ----------
@@ -174,8 +174,8 @@ export function tryReload(): void {
  * to avoid mid-mag-swap state corruption.
  */
 export function switchWeapon(slot: WeaponSlot): void {
-  if (slot === game.slot || !session.started || !player.alive || weapon.reloading) return;
-  const saved = ammoStore[game.slot];
+  if (slot === wpn.slot || !session.started || !player.alive || weapon.reloading) return;
+  const saved = ammoStore[wpn.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;
   saved.reserve = weapon.reserve;
@@ -199,14 +199,14 @@ export function switchWeapon(slot: WeaponSlot): void {
   // 128 tests green (review lesson 2, and now lessons 19-20).
   const outgoing = currentDef();
   const incoming = WEAPONS[slot];
-  const converted = convertOnSwap(game, outgoing, incoming,
+  const converted = convertOnSwap(wpn, outgoing, incoming,
     { recoil: RECOIL_CAP, recoilYaw: RECOIL_YAW_CAP });
-  game.recoil = converted.recoil;
-  game.recoilYaw = converted.recoilYaw;
-  game.spray = converted.spray;
+  wpn.recoil = converted.recoil;
+  wpn.recoilYaw = converted.recoilYaw;
+  wpn.spray = converted.spray;
 
-  game.slot = slot;
-  game.zoomLevel = 0; // always re-enter the scope at its lowest step
+  wpn.slot = slot;
+  wpn.zoomLevel = 0; // always re-enter the scope at its lowest step
   const def = incoming;
   Object.assign(weapon, {
     name: def.name,
@@ -224,7 +224,7 @@ export function switchWeapon(slot: WeaponSlot): void {
 
 /**
  * Fire one shot: consume ammo, kick recoil and spray, then hitscan.
- * The spread cone widens with consecutive fire (via the `game.spray`
+ * The spread cone widens with consecutive fire (via the `wpn.spray`
  * multiplier) and shrinks to the weapon's spreadMul while aiming. Nearest hit across solids + live
  * bot parts decides the outcome — bot hit -> damage by zone, wall hit ->
  * impact puff only.
@@ -243,7 +243,7 @@ export function shoot(): void {
   // pause means a shot fired on the same frame as Esc can't leave the light
   // stuck on behind the menu.
   setTimeout(() => muzzleFlashLight.intensity = 0, 50);
-  (game.slot === 1 ? sfxSniper : sfxShoot)();
+  (wpn.slot === 1 ? sfxSniper : sfxShoot)();
 
   // Bolt-action feel: firing kicks you out of the scope. Clearing
   // input.aiming means a fresh RMB press is needed to re-scope even if the
@@ -253,18 +253,18 @@ export function shoot(): void {
   // Euler order and cone sampling live in sim/ballistics.ts; pitch and yaw
   // both carry their recoil punch, so shots follow exactly what the camera
   // shows — vertically via currentAimPitch, horizontally via currentAimYaw.
-  const dir = shotDirection(currentAimPitch(), currentAimYaw(), game.spread);
+  const dir = shotDirection(currentAimPitch(), currentAimYaw(), wpn.spread);
 
   // Recoil/spray kicks are applied only AFTER this shot's ray is built:
   // a bullet leaves from the pre-kick aim point (first round is dead-on),
   // and its own kick steers the FOLLOWING shots.
-  game.recoil = Math.min(game.recoil + def.recoilKick, RECOIL_CAP);
+  wpn.recoil = Math.min(wpn.recoil + def.recoilKick, RECOIL_CAP);
   // Horizontal noise: a signed random walk, so sprays wander sideways
   // unpredictably and have to be steered back rather than just pulled down.
-  game.recoilYaw = THREE.MathUtils.clamp(
-    game.recoilYaw + (Math.random() * 2 - 1) * def.yawKick,
+  wpn.recoilYaw = THREE.MathUtils.clamp(
+    wpn.recoilYaw + (Math.random() * 2 - 1) * def.yawKick,
     -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
-  game.spray = Math.min(game.spray + def.sprayKick, def.sprayCap);
+  wpn.spray = Math.min(wpn.spray + def.sprayKick, def.sprayCap);
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;
@@ -324,20 +324,20 @@ export function updateWeapon(dt: number): void {
   // The horizontal walk drains at its OWN, much slower rate: it is mean-zero, so
   // a drain sized against the vertical climb outruns it and zeroes the wander
   // before the next shot leaves.
-  game.recoil = decayRecoil(game.recoil, dt, weapon.recoilRecover);
-  game.recoilYaw = decayToward(game.recoilYaw, dt, def.yawRecover);
+  wpn.recoil = decayRecoil(wpn.recoil, dt, weapon.recoilRecover);
+  wpn.recoilYaw = decayToward(wpn.recoilYaw, dt, def.yawRecover);
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // the smg has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules).
-  if (!input.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
+  if (!input.aiming) wpn.zoomLevel = 0; // every re-scope starts at lowest zoom
   const aimFov = aimFovFor(def);
-  game.adsLerp = approach(game.adsLerp, input.aiming ? 1 : 0, dt, ADS_RATE);
+  wpn.adsLerp = approach(wpn.adsLerp, input.aiming ? 1 : 0, dt, ADS_RATE);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
   // usable; main.ts multiplies mouse deltas by this.
-  game.zoomScale = 1 - (1 - aimFov / BASE_FOV) * game.adsLerp;
-  const targetFov = BASE_FOV + 5 * game.runLerp - (BASE_FOV - aimFov) * game.adsLerp;
+  wpn.zoomScale = 1 - (1 - aimFov / BASE_FOV) * wpn.adsLerp;
+  const targetFov = BASE_FOV + 5 * game.runLerp - (BASE_FOV - aimFov) * wpn.adsLerp;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov = approach(camera.fov, targetFov, dt, ADS_RATE);
     camera.updateProjectionMatrix();
@@ -345,12 +345,12 @@ export function updateWeapon(dt: number): void {
 
   // Viewmodel visibility: per-slot group swap; the sniper disappears
   // entirely once the full-screen scope reticle takes over.
-  smgGroup.visible = game.slot === 0;
-  sniperGroup.visible = game.slot === 1;
-  gunGroup.visible = !(def.scopedOverlay && game.adsLerp > 0.85);
+  smgGroup.visible = wpn.slot === 0;
+  sniperGroup.visible = wpn.slot === 1;
+  gunGroup.visible = !(def.scopedOverlay && wpn.adsLerp > 0.85);
 
   // Scope reticle is DOM (hud.ts); only touch it on state flips.
-  setScopeOverlay(def.scopedOverlay && game.adsLerp > 0.85);
+  setScopeOverlay(def.scopedOverlay && wpn.adsLerp > 0.85);
 
   // Reload animation: progress through the active reload (0 when idle so
   // the pose resets). Uses game time to match weapon.reloadEnd, so a paused
@@ -359,7 +359,7 @@ export function updateWeapon(dt: number): void {
   const reloadT = weapon.reloading
     ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - now) / weapon.reloadTime, 0, 1)
     : 0;
-  if (game.slot === 0) poseReload(smgGroup, smgMag, reloadT);
+  if (wpn.slot === 0) poseReload(smgGroup, smgMag, reloadT);
   else poseReload(sniperGroup, sniperMag, reloadT);
 
   // Reload finish: top the mag back up from reserve (partial reloads allowed).
@@ -385,18 +385,18 @@ export function updateWeapon(dt: number): void {
 
   // ---- Accuracy model -------------------------------------------------
   // The model itself (and its tuning constants) lives in sim/accuracy.ts;
-  // this just feeds it live state. game.spread is consumed by shoot(), and the
+  // this just feeds it live state. wpn.spread is consumed by shoot(), and the
   // crosshair gap derives from the SAME value, so the arms move with every
   // change in the real cone — deliberately exaggerated by CROSSHAIR_GAIN, so
   // they read as a proportional indicator, not the edge of the group.
-  game.spread = computeSpread({
+  wpn.spread = computeSpread({
     crouchLerp: game.crouchLerp,
     moveLerp: game.moveLerp,
     airLerp: game.airLerp,
-    spray: game.spray,
+    spray: wpn.spray,
     inherent: def.inherent,
     adsMul: input.aiming ? def.spreadMul : 1,
   });
-  game.spray = decaySpray(game.spray, dt, def.sprayRecover);
-  setCrosshairGap(crosshairGapPx(game.spread, camera.fov, window.innerHeight));
+  wpn.spray = decaySpray(wpn.spray, dt, def.sprayRecover);
+  setCrosshairGap(crosshairGapPx(wpn.spread, camera.fov, window.innerHeight));
 }

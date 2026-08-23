@@ -162,7 +162,7 @@ export const BASE_FOV = 75;
  * Which weapon slot is live. A two-entry union, not `number`, because the
  * table below is statically populated and every consumer already branches on
  * `=== 0` / `=== 1`. Indexing a TUPLE by this union is exempt from
- * noUncheckedIndexedAccess, so `WEAPONS[game.slot]` is a plain WeaponDef and
+ * noUncheckedIndexedAccess, so `WEAPONS[wpn.slot]` is a plain WeaponDef and
  * the misses simply cannot happen rather than being guarded for.
  */
 export type WeaponSlot = 0 | 1;
@@ -261,7 +261,7 @@ export const ammoStore: [AmmoStore, AmmoStore] = [
 
 /**
  * Live state of the ACTIVE weapon. Stat fields are copied from
- * WEAPONS[game.slot] by switchWeapon() in weapons.ts; HUD/combat read this
+ * WEAPONS[wpn.slot] by switchWeapon() in weapons.ts; HUD/combat read this
  * object only. A subset of WeaponDef plus mutable ammo/reload bookkeeping —
  * deliberately NOT a WeaponDef, since Object.assign in switchWeapon copies
  * only the fields listed here.
@@ -379,25 +379,62 @@ export const aim: AimState = {
   pitch: 0,
 };
 
-/** Misc per-frame / transient flags — see the slices above/below. */
-export interface GameState {
-  /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
-  runLerp: number;
+/**
+ * Weapon DYNAMICS — the live accuracy/recoil/ADS state driven by firing and
+ * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, updateWeapon);
+ * combat.ts's respawn() resets it to round-start values; main.ts and hud.ts
+ * read it (scope gate, wheel zoom, zoom label).
+ *
+ * Lerp values (`adsLerp`) are smoothed 0..1 blends updated every frame;
+ * never set them directly from input.
+ */
+export interface WeaponDynamics {
+  /** CURRENT total shot cone (radians), recomputed each frame in weapons.ts. */
   spread: number;
   /** Shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies). */
   spray: number;
-  /** Smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5). */
-  moveLerp: number;
   recoil: number;
   recoilYaw: number;
-  crouchLerp: number;
-  airLerp: number;
   adsLerp: number;
   /** Active weapon index into WEAPONS (0 smg, 1 sniper). */
   slot: WeaponSlot;
   /** Scoped zoom step: index into WEAPONS[slot].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
+}
+
+export const wpn: WeaponDynamics = {
+  spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
+                   // in weapons.ts from (stance + movement + air) × spray,
+                   // plus the weapon's inherent cone, all × ADS. Do not add
+                   // to it directly — kick `spray` instead.
+  spray: 1,        // shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies).
+                   // +sprayKick per shot up to the weapon's sprayCap, decaying
+                   // back toward 1 at sprayRecover/s. Scales only the
+                   // situational terms; `inherent` is unaffected by it.
+  recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
+                   // While above WEAPONS[slot].scopeGate, a new RMB press
+                   // can't enter the scope (main.ts)
+  recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot
+                   // adds up to ±yawKick — a random walk, clamped to
+                   // ±RECOIL_YAW_CAP, that the player steers against. Decays
+                   // toward 0 at the weapon's own yawRecover/s — NOT at
+                   // recoilRecover, which drains fast enough to zero the walk
+                   // between shots.
+  adsLerp: 0,
+  slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
+  zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
+  zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
+                   // doesn't get twitchy at 12x (computed in weapons.ts)
+};
+
+/** Misc per-frame / transient flags — see the slices above/below. */
+export interface GameState {
+  /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
+  runLerp: number;
+  moveLerp: number;
+  crouchLerp: number;
+  airLerp: number;
   stepTimer: number;
   bobAmt: number;
   scoreKills: number;
@@ -414,33 +451,11 @@ export interface GameState {
  */
 export const game: GameState = {
   runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
-  spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
-                   // in weapons.ts from (stance + movement + air) × spray,
-                   // plus the weapon's inherent cone, all × ADS. Do not add
-                   // to it directly — kick `spray` instead.
-  spray: 1,        // shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies).
-                   // +sprayKick per shot up to the weapon's sprayCap, decaying
-                   // back toward 1 at sprayRecover/s. Scales only the
-                   // situational terms; `inherent` is unaffected by it.
   moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
                    // drives the movement accuracy penalty
-  recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
-                   // While above WEAPONS[slot].scopeGate, a new RMB press
-                   // can't enter the scope (main.ts)
-  recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot
-                   // adds up to ±yawKick — a random walk, clamped to
-                   // ±RECOIL_YAW_CAP, that the player steers against. Decays
-                   // toward 0 at the weapon's own yawRecover/s — NOT at
-                   // recoilRecover, which drains fast enough to zero the walk
-                   // between shots.
   crouchLerp: 0,
   airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
                    // out over ~100-200 ms so it doesn't snap on takeoff/landing
-  adsLerp: 0,
-  slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
-  zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
-  zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
-                   // doesn't get twitchy at 12x (computed in weapons.ts)
   stepTimer: 0.2,  // countdown to next footstep sound
   bobAmt: 0,       // current view-bob amplitude, computed in player.ts
   scoreKills: 0,   // shown as "CT" score

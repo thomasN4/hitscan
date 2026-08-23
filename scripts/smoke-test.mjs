@@ -71,6 +71,7 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
     // clamp makes game-time diverge from wall-time at low FPS). So:
     //   - `game.running` must be set while Shift is held
     //   - `game.runLerp` must climb past 0.4 (ramp works)
+    //   - a mid-sprint jump must NOT drain the ramp (momentum carries)
     //   - player must cover >5 m (movement integration alive)
     if (sprintCheck) {
       sprint = await page.evaluate(async () => {
@@ -82,17 +83,37 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         const startZ = cs.player.pos.z;
         let runningSeen = false, runLerpPeak = 0;
         const t0 = performance.now();
-        while (performance.now() - t0 < 1000) {
+        while (performance.now() - t0 < 600) {
           await new Promise(r => requestAnimationFrame(r));
           runningSeen = runningSeen || cs.game.running;
           runLerpPeak = Math.max(runLerpPeak, cs.game.runLerp);
         }
+        // Jump mid-sprint and keep sampling until landed. The ramp target
+        // ignores ground contact, so runLerp must stay high while airborne.
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));
+        let airSamples = 0, airRunLerpMin = 1;
+        const t1 = performance.now();
+        while (performance.now() - t1 < 1200) {
+          await new Promise(r => requestAnimationFrame(r));
+          if (!cs.player.onGround) {
+            airSamples++;
+            airRunLerpMin = Math.min(airRunLerpMin, cs.game.runLerp);
+          } else if (airSamples > 0) {
+            break; // landed after the jump
+          }
+        }
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space' }));
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
-        return { dist: Math.abs(startZ - cs.player.pos.z), runningSeen, runLerpPeak };
+        return {
+          dist: Math.abs(startZ - cs.player.pos.z),
+          runningSeen, runLerpPeak, airSamples, airRunLerpMin,
+        };
       });
       if (!sprint.runningSeen) throw new Error('holding Shift did not set game.running');
       if (sprint.runLerpPeak < 0.4) throw new Error(`sprint ramp too weak: ${sprint.runLerpPeak.toFixed(2)}`);
+      if (sprint.airSamples < 2) throw new Error(`jump never seen airborne (samples=${sprint.airSamples})`);
+      if (sprint.airRunLerpMin < 0.5) throw new Error(`sprint ramp drained mid-jump: min runLerp ${sprint.airRunLerpMin.toFixed(2)}`);
       if (sprint.dist < 5) throw new Error(`barely moved during sprint: ${sprint.dist.toFixed(2)} m`);
     }
 

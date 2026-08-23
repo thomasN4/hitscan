@@ -350,7 +350,7 @@ export interface InputState {
   aiming: boolean;
   /** Shift held, either side (sprint). */
   running: boolean;
-  /** Crouch toggled by a Ctrl tap, either side; effective only on ground. */
+  /** Crouch toggled by a Ctrl/C tap; effective only on ground. */
   crouching: boolean;
 }
 

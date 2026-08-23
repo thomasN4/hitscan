@@ -67,10 +67,14 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
-  // Sprint is hold-Shift; crouch is a Ctrl toggle (either side of both).
-  // e.repeat guards against OS key-repeat re-toggling crouch.
+  // Stance keys only count during live play — same gate as the mouse
+  // handlers — so nothing toggled pre-lock or behind the pause menu leaks
+  // into the session. Sprint is hold-Shift; crouch is a Ctrl/C tap toggle
+  // (either side of both), and e.repeat guards against OS key-repeat
+  // re-toggling it.
+  if (!session.locked || !player.alive) return;
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.running = true;
-  if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) input.crouching = !input.crouching;
+  if ((e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyC') && !e.repeat) input.crouching = !input.crouching;
 });
 addEventListener('keyup', e => {
   keys[e.code] = false;

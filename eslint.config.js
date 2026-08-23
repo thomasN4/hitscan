@@ -9,10 +9,17 @@
 //
 // It only works if the globals are declared per environment, which is what
 // the `files` blocks below do: browser for the game, node for the tooling.
+//
+// Division of labor since the TS migration: `no-undef` owns missing imports
+// in `.js` files only. In `.ts` files it must stay OFF (typescript-eslint
+// requirement — type names trip it), and the job moves to `tsc --noEmit`
+// (`npm run typecheck`, TS2304). Either gate alone catches `730d9cc`; run
+// both.
 import js from '@eslint/js';
 import globals from 'globals';
+import tseslint from 'typescript-eslint';
 
-export default [
+export default tseslint.config(
   { ignores: ['dist/**'] },
 
   // Rules live here ONCE, with no `files`, so every linted file gets them.
@@ -31,8 +38,8 @@ export default [
   // reaching for `document` would pass clean. A block lower down cannot
   // undo that merge; exclusion can only happen in the first one.
   {
-    files: ['src/**/*.js'],
-    ignores: ['src/**/*.test.js'],
+    files: ['src/**/*.{js,ts}'],
+    ignores: ['src/**/*.test.{js,ts}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -46,11 +53,28 @@ export default [
   // `{ describe, expect, test }` from 'vitest' explicitly, and bare
   // `test`/`expect` tripping `no-undef` keeps it that way.
   {
-    files: ['src/**/*.test.js'],
+    files: ['src/**/*.test.{js,ts}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: globals.node,
+    },
+  },
+
+  // TypeScript game + test code: type-aware rules from the migration's rule
+  // table (AGENTS.md roadmap), with `no-undef` OFF — see the header. The
+  // block is scoped to `.ts` so the presets never reach `.js`/`.mjs`, which
+  // is why no disableTypeChecked pass is needed below.
+  {
+    files: ['src/**/*.ts'],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+      },
+    },
+    rules: {
+      'no-undef': 'off',
     },
   },
 
@@ -78,4 +102,4 @@ export default [
       globals: { ...globals.node, ...globals.browser },
     },
   },
-];
+);

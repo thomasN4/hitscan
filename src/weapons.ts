@@ -1,4 +1,4 @@
-// weapons.js — the player's weapons: viewmodels, firing, reloading,
+// weapons.ts — the player's weapons: viewmodels, firing, reloading,
 // weapon switching, iron sights / sniper scope.
 //
 // Damage model: weapon.damage per torso hit, legs x0.75, head x
@@ -6,33 +6,55 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
-import { scene, camera, clock } from './core/engine.js';
-import { solids } from './world.js';
+import { scene, camera, clock } from './core/engine';
+import { solids } from './world';
 import { bots, weapon, game, player, WEAPONS, ammoStore,
-         RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV } from './core/state.js';
-import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
-import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';
-import { damageBot } from './combat.js';
-import { spawnImpact, spawnBulletHole } from './effects.js';
-import { computeSpread, crosshairGapPx } from './sim/accuracy.js';
-import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './sim/recoil.js';
-import { shotDirection } from './sim/ballistics.js';
-import { damageForPart, partForMesh } from './sim/damage.js';
-import { approach } from './sim/smoothing.js';
+         RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
+         type WeaponDef, type WeaponSlot } from './core/state';
+import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
+import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
+import { damageBot } from './combat';
+import { spawnImpact, spawnBulletHole } from './effects';
+import { botFor } from './bots';
+import { computeSpread, crosshairGapPx } from './sim/accuracy';
+import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
+import { shotDirection } from './sim/ballistics';
+import { damageForPart, partForMesh } from './sim/damage';
+import { approach } from './sim/smoothing';
+
+// The live weapon def. WEAPONS is a tuple and game.slot is WeaponSlot, so
+// this read cannot miss and needs no guard — the type does the work that a
+// named throw used to. game.zoomLevel is still a plain number, though, so
+// aimFovFor below still has a real miss case to decide about.
+function currentDef(): WeaponDef {
+  return WEAPONS[game.slot];
+}
+
+/** Zoom FOV target for the current zoom level, clamped into range. */
+function aimFovFor(def: WeaponDef): number {
+  const fov = def.zoomFovs[Math.min(game.zoomLevel, def.zoomFovs.length - 1)];
+  if (fov === undefined) throw new Error(`${def.name}: empty zoomFovs`);
+  return fov;
+}
+
+/** The ONE read of `userData.baseY`, stamped on each viewmodel magazine below. */
+function magBaseY(mag: THREE.Mesh): number {
+  return mag.userData.baseY as number;
+}
 
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the
 // view transform. One group per slot (smg / sniper); visibility follows
 // game.slot every frame. Position is animated each frame in
 // updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
-// z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.js).
+// z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.ts).
 // The viewmodel meshes below are pure THREE objects, so they are built at
 // module scope; only ATTACHING them to the engine's camera/scene needs
 // initEngine() to have run first — see initWeaponViewmodels().
 export const gunGroup = new THREE.Group();
 
 const smgGroup = new THREE.Group();
-let smgMag; // kept for the reload animation (mag drop/reseat)
+let smgMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 {
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b2b2b });
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.5), dark);
@@ -46,7 +68,7 @@ let smgMag; // kept for the reload animation (mag drop/reseat)
 }
 
 const sniperGroup = new THREE.Group();
-let sniperMag; // kept for the reload animation (mag drop/reseat)
+let sniperMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 {
   const dark = new THREE.MeshLambertMaterial({ color: 0x24301f }); // green gunmetal
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.62), dark);
@@ -74,10 +96,10 @@ const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
 
 /**
  * Attach the viewmodel to the camera and the muzzle flash to the scene.
- * Requires initEngine() to have run; call once from main.js before the loop.
+ * Requires initEngine() to have run; call once from main.ts before the loop.
  * `scene.add(camera)` is what makes the camera-parented gun render at all.
  */
-export function initWeaponViewmodels() {
+export function initWeaponViewmodels(): void {
   camera.add(gunGroup);
   scene.add(camera);
   scene.add(muzzleFlashLight);
@@ -86,25 +108,25 @@ export function initWeaponViewmodels() {
 /**
  * Vertical aim angle for the CURRENT weapon and recoil state.
  *
- * Thin binding over sim/recoil.js:aimPitch — the pure function is the one
+ * Thin binding over sim/recoil.ts:aimPitch — the pure function is the one
  * source of truth, this just supplies the live state. The camera
- * (player.js:updateCamera) and the shot direction (shoot()) must BOTH go
+ * (player.ts:updateCamera) and the shot direction (shoot()) must BOTH go
  * through it so the crosshair stays truthful about where bullets go.
  */
-export function currentAimPitch() {
-  return aimPitch(game.pitch, game.recoil, WEAPONS[game.slot].punchRad);
+export function currentAimPitch(): number {
+  return aimPitch(game.pitch, game.recoil, currentDef().punchRad);
 }
 
 /**
  * Horizontal aim angle for the CURRENT weapon and recoil state — the
- * counterpart of currentAimPitch(), over sim/recoil.js:aimYaw.
+ * counterpart of currentAimPitch(), over sim/recoil.ts:aimYaw.
  *
- * Same contract: the camera (player.js:updateCamera) and the shot direction
+ * Same contract: the camera (player.ts:updateCamera) and the shot direction
  * (shoot()) must BOTH go through it, or the crosshair stops being truthful
  * about horizontal drift the way it once did about vertical climb.
  */
-export function currentAimYaw() {
-  return aimYaw(game.yaw, game.recoilYaw, WEAPONS[game.slot].punchRad);
+export function currentAimYaw(): number {
+  return aimYaw(game.yaw, game.recoilYaw, currentDef().punchRad);
 }
 
 // ---------- Reload animation ----------
@@ -115,19 +137,16 @@ export function currentAimYaw() {
 const MAG_TRAVEL = 0.22; // how far the magazine drops, view units
 
 /** Smooth 0→1→0 hold envelope: eases in over [0,inFrac], out over [1-outFrac,1]. */
-function holdEnv(t, inFrac, outFrac) {
+function holdEnv(t: number, inFrac: number, outFrac: number): number {
   return THREE.MathUtils.smoothstep(t, 0, inFrac) *
     (1 - THREE.MathUtils.smoothstep(t, 1 - outFrac, 1));
 }
 
 /**
  * Pose one weapon group for reload progress `t`. Applied to the per-slot
- * group (not gunGroup, whose transform player.js owns every frame).
- * @param {THREE.Group} group weapon viewmodel group
- * @param {THREE.Mesh} mag its magazine mesh (needs userData.baseY set)
- * @param {number} t reload progress 0..1
+ * group (not gunGroup, whose transform player.ts owns every frame).
  */
-function poseReload(group, mag, t) {
+function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
   const dip = holdEnv(t, 0.2, 0.25);
   // Negative x-rotation tips the muzzle down; z rolls it toward center
   group.position.y = -0.15 * dip;
@@ -136,11 +155,11 @@ function poseReload(group, mag, t) {
   // Mag falls out early (8%..38%), seats home late (55%..88%)
   const drop = THREE.MathUtils.smoothstep(t, 0.08, 0.38);
   const seat = THREE.MathUtils.smoothstep(t, 0.55, 0.88);
-  mag.position.y = mag.userData.baseY - MAG_TRAVEL * drop * (1 - seat);
+  mag.position.y = magBaseY(mag) - MAG_TRAVEL * drop * (1 - seat);
 }
 
 /** Start reloading if possible. Bound to R and to firing an empty mag. */
-export function tryReload() {
+export function tryReload(): void {
   if (!game.started || !player.alive || weapon.reloading || weapon.mag === weapon.magSize || weapon.reserve <= 0) return;
   weapon.reloading = true;
   weapon.reloadEnd = performance.now() / 1000 + weapon.reloadTime;
@@ -154,36 +173,46 @@ export function tryReload() {
  * the incoming weapon's terms, and resets scope zoom. Blocked while reloading
  * to avoid mid-mag-swap state corruption.
  */
-export function switchWeapon(slot) {
+export function switchWeapon(slot: WeaponSlot): void {
   if (slot === game.slot || !game.started || !player.alive || weapon.reloading) return;
-  ammoStore[game.slot].mag = weapon.mag;
-  ammoStore[game.slot].reserve = weapon.reserve;
+  const saved = ammoStore[game.slot];
+  const loaded = ammoStore[slot];
+  saved.mag = weapon.mag;
+  saved.reserve = weapon.reserve;
 
   // Recoil/spray state is weapon-RELATIVE, so the swap converts it instead of
-  // carrying the raw numbers across. `recoil`/`recoilYaw` are abstract units
-  // that only become an angle via punchRad, so rescaling by the punchRad ratio
-  // is what keeps the view punch continuous — otherwise the sniper's 0.02
-  // renders the smg's stored units as a different angle and the aim snaps.
-  // `spray` is weapon-agnostic but bounded per weapon, so it re-clamps: without
-  // this the sniper's 2.7 followed a swap onto an smg that cannot generate past
-  // ~1.9, widening its cone ~75% for seconds.
-  // Converting rather than zeroing also matters because switching costs no time
-  // here: a reset would make 1-2-1 a free recoil cancel and would let a swap
-  // dodge the sniper's scopeGate.
-  const punchRatio = WEAPONS[game.slot].punchRad / WEAPONS[slot].punchRad;
-  game.recoil = Math.min(game.recoil * punchRatio, RECOIL_CAP);
-  game.recoilYaw = THREE.MathUtils.clamp(
-    game.recoilYaw * punchRatio, -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
-  game.spray = Math.min(game.spray, WEAPONS[slot].sprayCap);
+  // carrying the raw numbers across: without this the sniper's punchRad renders
+  // the smg's stored units as a different angle and the aim snaps mid-swap.
+  //
+  // This comment used to claim converting also stops 1-2-1 being a free recoil
+  // cancel. It does NOT, and playtesting PR #14 found it out. Converting only
+  // prevents an INSTANT reset — the swap then copies the incoming weapon's
+  // recoilRecover into `weapon`, and the decay does the reset regardless. The
+  // sniper drains a full smg climb (3.6 units after conversion) at 13 units/s,
+  // so it is gone in 0.277 s, well inside a human swap. Same for the scopeGate
+  // half of the old claim. The real fix is for switching to cost time; tracked
+  // as issue #15, and NOT a regression — main behaves identically.
+  //
+  // The arithmetic itself lives in sim/recoil.ts. It is pure, and leaving it
+  // inline here put it behind sfxSwitch()'s AudioContext where the Node test
+  // suite could not reach it — which is how the ratio shipped inverted with all
+  // 128 tests green (review lesson 2, and now lessons 19-20).
+  const outgoing = currentDef();
+  const incoming = WEAPONS[slot];
+  const converted = convertOnSwap(game, outgoing, incoming,
+    { recoil: RECOIL_CAP, recoilYaw: RECOIL_YAW_CAP });
+  game.recoil = converted.recoil;
+  game.recoilYaw = converted.recoilYaw;
+  game.spray = converted.spray;
 
   game.slot = slot;
   game.zoomLevel = 0; // always re-enter the scope at its lowest step
-  const def = WEAPONS[slot];
+  const def = incoming;
   Object.assign(weapon, {
     name: def.name,
     magSize: def.magSize,
-    mag: ammoStore[slot].mag,
-    reserve: ammoStore[slot].reserve,
+    mag: loaded.mag,
+    reserve: loaded.reserve,
     fireRate: def.fireRate,
     reloadTime: def.reloadTime,
     damage: def.damage,
@@ -200,14 +229,14 @@ export function switchWeapon(slot) {
  * bot parts decides the outcome — bot hit -> damage by zone, wall hit ->
  * impact puff only.
  */
-export function shoot() {
+export function shoot(): void {
   if (weapon.reloading || weapon.mag <= 0) {
     if (weapon.mag <= 0) tryReload(); // auto-reload on dry fire
     return;
   }
   weapon.mag--;
   weapon.lastShot = clock.elapsedTime;
-  const def = WEAPONS[game.slot];
+  const def = currentDef();
 
   muzzleFlashLight.intensity = 3;
   setTimeout(() => muzzleFlashLight.intensity = 0, 50);
@@ -218,7 +247,7 @@ export function shoot() {
   // button is still held (mouseup will just re-clear it harmlessly).
   if (def.unscopeOnShot) game.aiming = false;
 
-  // Euler order and cone sampling live in sim/ballistics.js; pitch and yaw
+  // Euler order and cone sampling live in sim/ballistics.ts; pitch and yaw
   // both carry their recoil punch, so shots follow exactly what the camera
   // shows — vertically via currentAimPitch, horizontally via currentAimYaw.
   const dir = shotDirection(currentAimPitch(), currentAimYaw(), game.spread);
@@ -239,15 +268,16 @@ export function shoot() {
 
   // Gather every solid (walls, crates, ground) plus live bot parts,
   // then take the single closest intersection — walls block bullets.
-  const targets = [...solids];
+  const targets: THREE.Object3D[] = [...solids];
   for (const bot of bots) {
     if (!bot.alive) continue;
     targets.push(bot.head, bot.torso, bot.legs);
   }
   const hits = raycaster.intersectObjects(targets, false);
   if (hits.length > 0) {
-    const hit = hits[0];
-    const bot = hit.object.userData.bot; // stamped onto each part in Bot's constructor
+    // length checked above; the assertion only records that fact
+    const hit = hits[0]!;
+    const bot = botFor(hit.object); // stamped onto each part in Bot's constructor
     if (bot) {
       const part = partForMesh(bot, hit.object);
       showHitmarker(part === 'head');
@@ -256,8 +286,10 @@ export function shoot() {
       spawnImpact(hit.point);
       // Decal needs the surface normal in world space; face.normal is
       // object-space and level geometry is rotated (ground plane, etc.)
-      const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-      spawnBulletHole(hit.point, worldNormal);
+      if (hit.face) {
+        const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+        spawnBulletHole(hit.point, worldNormal);
+      }
     }
   }
 }
@@ -266,7 +298,7 @@ export function shoot() {
  * Per-frame weapon upkeep: recoil/ADS smoothing, FOV zoom toward iron-sight
  * target, reload completion, trigger handling, spread recovery.
  *
- * Stage 2 of the frame, sequenced by main.js: runs AFTER updateMovement
+ * Stage 2 of the frame, sequenced by main.ts: runs AFTER updateMovement
  * (whose blends feed the spread model) and BEFORE updateCamera /
  * updateViewmodel (which read the recoil this decays).
  */
@@ -275,17 +307,17 @@ let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on re
 /** Blend rate for ADS position and FOV zoom (1/s); ~12 ≈ 80 ms to settle. */
 const ADS_RATE = 12;
 
-export function updateWeapon(dt) {
+export function updateWeapon(dt: number): void {
   // Dead players don't shoot, reload or blend. exitPointerLock() fires
   // pointerlockchange asynchronously, so at least one frame runs with
   // alive === false and locked === true; without this guard a held LMB
   // would spend ammo and could still score a kill from that frame.
   if (!player.alive) return;
 
-  const def = WEAPONS[game.slot];
+  const def = currentDef();
 
   // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
-  // the sniper settles slowly for bolt-action feel; see core/state.js WEAPONS).
+  // the sniper settles slowly for bolt-action feel; see core/state.ts WEAPONS).
   // The horizontal walk drains at its OWN, much slower rate: it is mean-zero, so
   // a drain sized against the vertical climb outruns it and zeroes the wander
   // before the next shot leaves.
@@ -297,10 +329,10 @@ export function updateWeapon(dt) {
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules).
   if (!game.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
-  const aimFov = def.zoomFovs[Math.min(game.zoomLevel, def.zoomFovs.length - 1)];
+  const aimFov = aimFovFor(def);
   game.adsLerp = approach(game.adsLerp, game.aiming ? 1 : 0, dt, ADS_RATE);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
-  // usable; main.js multiplies mouse deltas by this.
+  // usable; main.ts multiplies mouse deltas by this.
   game.zoomScale = 1 - (1 - aimFov / BASE_FOV) * game.adsLerp;
   const targetFov = BASE_FOV + 5 * game.runLerp - (BASE_FOV - aimFov) * game.adsLerp;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
@@ -314,7 +346,7 @@ export function updateWeapon(dt) {
   sniperGroup.visible = game.slot === 1;
   gunGroup.visible = !(def.scopedOverlay && game.adsLerp > 0.85);
 
-  // Scope reticle is DOM (hud.js); only touch it on state flips.
+  // Scope reticle is DOM (hud.ts); only touch it on state flips.
   setScopeOverlay(def.scopedOverlay && game.adsLerp > 0.85);
 
   // Reload animation: progress through the active reload (0 when idle so
@@ -348,7 +380,7 @@ export function updateWeapon(dt) {
   }
 
   // ---- Accuracy model -------------------------------------------------
-  // The model itself (and its tuning constants) lives in sim/accuracy.js;
+  // The model itself (and its tuning constants) lives in sim/accuracy.ts;
   // this just feeds it live state. game.spread is consumed by shoot(), and the
   // crosshair gap derives from the SAME value, so the arms move with every
   // change in the real cone — deliberately exaggerated by CROSSHAIR_GAIN, so

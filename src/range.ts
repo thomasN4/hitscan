@@ -1,31 +1,40 @@
-// range.js — shooting range map for testing accuracy and recoil patterns.
+// range.ts — shooting range map for testing accuracy and recoil patterns.
 //
 // A fully enclosed lane (floor, side walls, rear wall, back berm) with
 // distance markers painted on the floor and bot-silhouette targets (same
-// body-part dimensions as Bot in bots.js, so headshot practice transfers)
+// body-part dimensions as Bot in bots.ts, so headshot practice transfers)
 // decorated with elliptical bullseye rings.
 // All target parts are registered as `solids` so bullet-hole decals work
 // on them; nothing here shoots back.
 //
-// Geometry goes through world.js. This file used to keep its own copy of the
+// Geometry goes through world.ts. This file used to keep its own copy of the
 // registration logic, and that copy shipped without the `colliders` push —
 // the whole range map was no-clip (`431ac6e`). There is now one
 // implementation to get wrong.
 import * as THREE from 'three';
-import { scene } from './core/engine.js';
-import { addSolidBox, registerSolid, registerGroupParts } from './world.js';
+import { scene } from './core/engine';
+import { addSolidBox, registerSolid, registerGroupParts } from './world';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });
 const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
 const matPost   = new THREE.MeshLambertMaterial({ color: 0x6b5a3e });
 
+/** Options for makeTextTexture — all optional, with the shipped defaults. */
+interface TextTextureOpts {
+  width?: number;
+  height?: number;
+  font?: string;
+  color?: string;
+}
+
 /** Render text to a canvas and return it as a texture. */
-function makeTextTexture(text, { width = 256, height = 128, font = 'bold 72px sans-serif', color = '#3a3226' } = {}) {
+function makeTextTexture(text: string, { width = 256, height = 128, font = 'bold 72px sans-serif', color = '#3a3226' }: TextTextureOpts = {}): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2d canvas context unavailable — makeTextTexture cannot label the range');
   ctx.fillStyle = color;
   ctx.font = font;
   ctx.textAlign = 'center';
@@ -37,7 +46,7 @@ function makeTextTexture(text, { width = 256, height = 128, font = 'bold 72px sa
 }
 
 /** Flat label plane lying on the floor at (x, z). */
-function addFloorLabel(text, x, z, size = 4) {
+function addFloorLabel(text: string, x: number, z: number, size = 4): void {
   const tex = makeTextTexture(text);
   const m = new THREE.Mesh(new THREE.PlaneGeometry(size * 2, size), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
   m.rotation.x = -Math.PI / 2; // texture 'up' ends up pointing -z: reads correctly from the firing line
@@ -49,10 +58,11 @@ function addFloorLabel(text, x, z, size = 4) {
  * Elliptical bullseye face texture: concentric ellipses (taller than wide,
  * IPSC-style) centered on the chest area of a silhouette torso.
  */
-function makeBullseyeTexture() {
+function makeBullseyeTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 256; canvas.height = 512;
   const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2d canvas context unavailable — makeBullseyeTexture cannot draw targets');
 
   // Silhouette tan base
   ctx.fillStyle = '#8a6b2e';
@@ -80,9 +90,16 @@ function makeBullseyeTexture() {
   return tex;
 }
 
-// Same part dimensions as bots.js so training transfers 1:1. Each part is a
+// Same part dimensions as bots.ts so training transfers 1:1. Each part is a
 // separate solid -> separate decal surface + headshot-sized hitbox.
-function addTarget(x, z, { height = 0, yaw = 0 } = {}) { // yaw 0 = facing firing line
+interface TargetOpts {
+  /** Platform height under the target (0 = ground level). */
+  height?: number;
+  /** yaw 0 = facing firing line */
+  yaw?: number;
+}
+
+function addTarget(x: number, z: number, { height = 0, yaw = 0 }: TargetOpts = {}): THREE.Group {
   const bullseyeMat = new THREE.MeshLambertMaterial({ map: makeBullseyeTexture() });
   const matBody  = new THREE.MeshLambertMaterial({ color: 0x8a6b2e });
   const matHead  = new THREE.MeshLambertMaterial({ color: 0xd8c39a });
@@ -93,7 +110,7 @@ function addTarget(x, z, { height = 0, yaw = 0 } = {}) { // yaw 0 = facing firin
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.15, height + 0.05, 0.15), matPost);
   post.position.y = -(height + 0.05) / 2 + 0.025;
 
-  // Part y-offsets match bots.js exactly (torso 1.35, head 2.0, legs 0.45)
+  // Part y-offsets match bots.ts exactly (torso 1.35, head 2.0, legs 0.45)
   const legs  = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.35), matLegs);
   legs.position.y = 0.45;
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), [matBody, matBody, matBody, matBody, bullseyeMat, matBody]);
@@ -117,8 +134,8 @@ function addTarget(x, z, { height = 0, yaw = 0 } = {}) { // yaw 0 = facing firin
   return g;
 }
 
-/** Build the shooting range. Called once from main.js instead of buildMap. */
-export function buildRange() {
+/** Build the shooting range. Called once from main.ts instead of buildMap. */
+export function buildRange(): void {
   // Floor spans the full lane: z from -95 to +35, so every wall, target and
   // marker stands on it; the far edge stays hidden behind the backstop + fog.
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 130), matGround);
@@ -150,9 +167,9 @@ export function buildRange() {
   // Targets: staggered distances and heights on both halves of the lane,
   // angled slightly toward the firing line. Near ones for spray control,
   // far ones for accuracy.
-  addTarget(-4.5, -5,  { });        // 10 m
+  addTarget(-4.5, -5);              // 10 m
   addTarget( 4.5, -15, { height: 1.0 });  // 20 m, raised
-  addTarget(-5.5, -25, { });        // 30 m
+  addTarget(-5.5, -25);             // 30 m
   addTarget( 5.5, -35, { height: 0.6 });  // 40 m, slightly raised
-  addTarget( 0,   -55, { });        // 60 m — full-lane accuracy test
+  addTarget( 0,   -55);             // 60 m — full-lane accuracy test
 }

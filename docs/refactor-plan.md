@@ -98,6 +98,65 @@ prescribes: deleting `player` from `weapons.js`'s state import reproduces
 same standard silently failing for the test-file block (lesson 10); fixed
 with the `ignores` above and re-proven per environment via `--print-config`.
 
+### PR 7 — Full TypeScript migration (`refactor/ts-migration`)
+
+All of `src/**` renamed to `.ts` in one pass; `index.html` entry updated;
+`scripts/smoke-test.mjs` untouched. Toolchain: `typescript@5.9` (7.x is out —
+typescript-eslint peers `<6.1.0`), `typescript-eslint@8.67`, `@types/three@0.160`.
+tsconfig: `strict`, **`noUncheckedIndexedAccess: true`** (folded in from the old
+PR-8 plan — with browser modules converting in the same pass there were no
+unchecked-JS consumers left to defer for), `allowJs:false` (review: src/ is
+100% .ts, so leaving it on would let a stray .js join the program unchecked),
+`moduleResolution:"bundler"`, `verbatimModuleSyntax`. New `npm run typecheck`
+gate; typescript-eslint's `recommendedTypeChecked` scoped to `src/**/*.ts` with
+`no-undef` off there (tsc owns missing imports in TS).
+
+Type design highlights:
+
+- Domain vocabulary lives in `core/state.ts`: `WeaponDef` (sniper-only fields
+  optional), `LiveWeapon` as a subset-plus-ammo mirror (NOT a `WeaponDef`),
+  `GameState` with `map: 'arena' | 'range'`, the structural `Bot` shape that
+  `bots.ts`'s concrete class implements, `HitZone`.
+- three.js's `userData` is `Record<string, any>` — the one `any` leak vector.
+  Two owned accessors hold the only casts: `bots.ts:botFor()` (returns
+  `Bot | undefined`; callers narrow) and `weapons.ts:magBaseY()`.
+- Dynamic index reads decide their miss case explicitly: `aimFovFor()` clamps,
+  the HUD zoom label degrades to empty, and no `?? fallback` was introduced
+  anywhere. Review went one better on the weapon table — `WEAPONS` is a tuple
+  and `game.slot` a `WeaponSlot` union, so that read has no miss to decide and
+  `currentDef()`'s throw, the `ammoStore` guard and 27 `!` assertions were
+  deleted as unreachable rather than maintained.
+- `hud.ts:requireEl(id)` throws a named startup error for missing markup —
+  the migration's one *intended* behavior change, replacing distant
+  null-property crashes.
+
+Verification: all six gates green, smoke test byte-for-byte unmodified against
+both dev server and `vite preview`, plus non-vacuity probes (lessons 15–18).
+
+Review found a second behavior change that was not intended, and a gate the
+migration had silently disarmed:
+
+- **The swap conversion shipped inverted.** Extracting switchWeapon's operands
+  into `outgoing`/`incoming` locals flipped `punchRad` ÷ `punchRad`, scaling the
+  rendered view punch by ratio² instead of holding it: a ~2.8° aim snap on every
+  mid-spray swap, and 1-2-1 as a 40% free recoil cancel. All six gates were green
+  over it, because the arithmetic sat behind `sfxSwitch()`'s AudioContext where
+  the Node suite cannot reach. Fixed by lesson 2's remedy — a pure seam,
+  `sim/recoil.ts:convertOnSwap()` — with nine cases pinning it against the real
+  table, non-vacuity re-proven per lesson 7 (the inverted ratio fails 6 of 9).
+  Recorded as lesson 19. Playtesting the fix then found the comment that
+  motivated it was itself half wrong — converting stops the aim snap but NOT
+  1-2-1 as a recoil cancel, because the incoming weapon's `recoilRecover`
+  drains the carried units anyway (0.277 s on the sniper). Pre-existing on
+  `main`, deferred to issue #15, pinned as behavior, and recorded as lesson 20.
+- **Unit-test purity went unguarded.** `no-undef` off for `.ts` disarmed the
+  lesson-10 `ignores` mechanism the moment the tests became TypeScript, and
+  `lib.es2022.full` gave tsc no reason to object either. Re-armed with
+  `no-restricted-globals` plus a `no-restricted-imports` ban on browser-side
+  modules, scoped to `src/**/*.test.ts`; re-proven per environment. Lesson 17
+  is about this class; that it recurred *here* is the point of lesson 19's
+  second half.
+
 ---
 
 ## Review lessons
@@ -184,36 +243,84 @@ Ordered roughly by how easy they are to repeat.
     unlisted, so a contributor with an already-positioned mesh would find no
     listed option and reach for the arrays directly.
 
+### On the TypeScript migration
+
+15. **Extension mapping is gated by the IMPORTER, not the target.** Vite
+    resolves `'./x.js'` onto `x.ts` only when the file doing the importing is
+    itself TypeScript, so no incremental rename order works while specifiers
+    still carry `.js`: renaming a leaf breaks every `.js` consumer, and renaming
+    a consumer first breaks nothing but buys nothing. Dropping the extensions
+    across `src/` in their own commit (`130f267`) is what made the conversion
+    orderable at all. Verified against vite 5.4.21's resolver and tsc's
+    `bundler` mode before the sweep, not after.
+16. **Vitest resolves through its own bundled Vite, not the workspace's.** The
+    suite ran against vite 8.2.2 while `npm run dev`/`build` used 5.4.21, so a
+    resolution edge has to hold under both — a specifier change proven green by
+    `npm test` alone is proven on the wrong resolver. This is also why `npm test`
+    passing says nothing about whether `npm run build` will.
+17. **When a gate's mechanism moves, re-prove the gate, not the mechanism.**
+    Turning `no-undef` off for `.ts` handed missing-import detection to tsc
+    (TS2304) — that half genuinely transferred, and deleting an import binding
+    proves it. But `no-undef` had a *second* job: with browser globals withheld
+    from test files it was what kept the unit suite Node-pure. Probing that the
+    globals were still Node-only confirmed the wrong thing; the globals were
+    never the mechanism. See lesson 19.
+18. **A typed signature can surface behavior nobody chose.** Writing
+    `partForMesh(bot: { head: object; legs: object }, mesh: object)` made it
+    explicit that torso is the *fallback*, not a match — a ray hitting nothing
+    recognizable still reads as a torso hit. The types did not change that; they
+    made it impossible to keep not noticing. Where a signature exposes an
+    unintended default, decide about it in the same PR rather than encoding it.
+
+### On refactoring under green gates
+
+19. **Naming an expression's operands can silently invert it, and "no behavior
+    change" is exactly when nobody looks.** `f5fcb6a` turned
+    `WEAPONS[game.slot].punchRad / WEAPONS[slot].punchRad` into
+    `incoming.punchRad / outgoing.punchRad` — a reciprocal — while converting
+    weapons.js to TypeScript. All six gates stayed green: the arithmetic was
+    pure, but it sat behind `sfxSwitch()`'s AudioContext, so lesson 2's failure
+    mode had been sitting there since before the migration and the migration is
+    merely what tripped it. Two consequences, both of them things the code's own
+    comment said the conversion existed to prevent (a mid-spray aim snap, and
+    1-2-1 as a free recoil cancel — though see lesson 20: the comment was only
+    right about the first). Three rules fall out:
+    - A mechanical refactor needs its invariant pinned **before** the refactor,
+      not after. A test written afterwards pins whatever shipped.
+    - When the refactor is *what* moves logic across the browser boundary, apply
+      lesson 2 in the same commit — ask what pure logic is now unreachable.
+    - Prefer a signature where the mistake is a type error. `convertOnSwap` takes
+      the two weapons as objects, not four numbers, so transposing them fails to
+      compile: `incoming` needs a `sprayCap` and `outgoing` does not.
+20. **A pure-function test can be exactly right and still miss the behavior,
+    when the behavior is an interaction with TIME.** The nine `convertOnSwap`
+    cases from lesson 19 all pass, all assert the correct thing, and between
+    them cover both cap directions — and 137 green tests still shipped a
+    playtest-obvious bug, because every one of them passes ZERO time. The
+    conversion is lossless; the reset happens over the next 0.277 s, as the
+    incoming weapon's `recoilRecover` drains what the swap carried. The unit
+    under test was fine. The unit was the wrong unit.
+    - This is lesson 6 from the other side. Lesson 6 is about hand-seeding an
+      *accumulation* (seeding `1 + 30 × sprayKick` instead of replaying the fire
+      loop); this is hand-seeding a *duration*. Same remedy: replay the loop.
+    - Ask what happens in the frames AFTER the function returns. Extracting a
+      pure seam moves an instant into a module that cannot see time pass, which
+      makes the seam correct and the question easier to forget.
+    - When a comment claims an invariant, test the invariant as stated, not the
+      function. "1-2-1 is not a free recoil cancel" is a claim about a sequence
+      of player actions; no test of a single conversion can settle it.
+
 ---
 
-## Later tranche — TypeScript + lint gate
+## Later tranche — what remains
 
-Recorded so the decisions aren't relitigated.
+The TypeScript migration and the ESLint gate both landed (PR 6, PR 7); the
+rule table and tsconfig decisions that used to live here are now history, not
+plan. Still deferred:
 
-**Full `.ts` migration** (chosen over JSDoc + `checkJs`): rename incrementally
-under `allowJs`, starting with `src/sim/*` — already pure functions with
-explicit parameters, so they convert with no restructuring.
-
-**ESLint + typescript-eslint**, landing with the migration:
-
-| Rule | Bug class it catches |
-|---|---|
-| `no-undef` | the `730d9cc` missing-import `ReferenceError` — `AGENTS.md` gotcha #1 |
-| `@typescript-eslint/no-explicit-any` | the `any` ban |
-| `@typescript-eslint/no-unsafe-*` | `any` leaking in from loosely-typed three.js surfaces — banning explicit `any` alone does not stop this |
-| `@typescript-eslint/ban-ts-comment` | `@ts-ignore` silencing a real error |
-
-Two `tsconfig` flags matter as much: `strict`, and **`noUncheckedIndexedAccess`**
-— `WEAPONS[game.slot]` and `zoomFovs[game.zoomLevel]` are unchecked index reads
-on input-mutated state. Wire `npm run lint` into the verification set.
-
-**Pulled forward and landed** as PR 6 above: `no-undef` needs no TypeScript,
-so the flat config and `npm run lint` shipped ahead of the migration. The
-typescript-eslint rules in the table layer onto that config.
-
-**Also deferred:** unifying the two time bases (`clock.elapsedTime` vs
-`performance.now()`) behind one game clock plus a pausable scheduler; splitting
-`game` into owner-scoped slices.
+- Unifying the two time bases (`clock.elapsedTime` vs `performance.now()`)
+  behind one game clock plus a pausable scheduler.
+- Splitting `game` into owner-scoped slices.
 
 ---
 
@@ -226,17 +333,18 @@ Each PR needs its own worktree off current `origin/main` with its own
 `npm install` — symlinking the primary checkout's `node_modules` writes shared
 state the other worktrees read.
 
-All five must pass:
+All six must pass:
 
 1. `npm run lint`
-2. `npm test`
-3. `npm run build`
-4. `node scripts/smoke-test.mjs`, against **both** the dev server and
+2. `npm run typecheck`
+3. `npm test`
+4. `npm run build`
+5. `node scripts/smoke-test.mjs`, against **both** the dev server and
    `vite preview`. Pick a port no other worktree is using
    (`ss -ltnp | grep 517`), start with `--port <n> --strictPort`, confirm the
    port from its log, and pass `CS_SMOKE_BASE=http://localhost:<n>`. An orphaned
    server silently serves stale code.
-5. Manual check of both maps (`/` and `/?map=range`).
+6. Manual check of both maps (`/` and `/?map=range`).
 
 **Invariants that must survive:** `window.__cs` keeps exporting
 `{ game, weapon, player, bulletHoles, colliders }`. `scripts/smoke-test.mjs`

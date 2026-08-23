@@ -1,27 +1,27 @@
-// player.js — first-person controller: movement, crouch, footsteps, camera.
+// player.ts — first-person controller: movement, crouch, footsteps, camera.
 //
-// The player is a capsule-ish box (core/state.js player) moved on the XZ
+// The player is a capsule-ish box (core/state.ts `player`) moved on the XZ
 // plane with axis-separated collision tests so sliding along walls feels
 // smooth; Y is only gravity/jump. Crouch and aim modify speed; crouch also
 // lowers the camera and silences footsteps.
 //
 // The three exports here are ORDERED stages of one frame, sequenced by
-// main.js: updateMovement -> (updateWeapon) -> updateCamera -> updateViewmodel.
+// main.ts: updateMovement -> (updateWeapon) -> updateCamera -> updateViewmodel.
 // The order is load-bearing in both directions: updateMovement writes
 // camera.position, which shoot() rays from, so it must run BEFORE updateWeapon;
 // updateCamera and updateViewmodel read post-decay recoil, so they must run
-// AFTER it. Speed tiers and the moveLerp math live in sim/movement.js; the
-// blends use sim/smoothing.js.
+// AFTER it. Speed tiers and the moveLerp math live in sim/movement.ts; the
+// blends use sim/smoothing.ts.
 import * as THREE from 'three';
-import { camera, clock } from './core/engine.js';
-import { player, game, keys } from './core/state.js';
-import { collidesAt } from './collision.js';
-import { colliders } from './world.js';
-import { sfxFootstep } from './audio.js';
-import { gunGroup, currentAimPitch, currentAimYaw } from './weapons.js';
-import { crosshair } from './hud.js';
-import { speedFor, measuredMoveLerp } from './sim/movement.js';
-import { approach, deadZone } from './sim/smoothing.js';
+import { camera, clock } from './core/engine';
+import { player, game, keys } from './core/state';
+import { collidesAt } from './collision';
+import { colliders } from './world';
+import { sfxFootstep } from './audio';
+import { gunGroup, currentAimPitch, currentAimYaw } from './weapons';
+import { crosshair } from './hud';
+import { speedFor, measuredMoveLerp } from './sim/movement';
+import { approach, deadZone } from './sim/smoothing';
 
 const GRAVITY = 22;    // m/s^2; tuned so jump arc feels snappy at 60fps+
 const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex
@@ -36,6 +36,15 @@ const CROUCH_DROP = 0.7;
 const AIR_BLEND_RATE = 12;
 
 /**
+ * Read one keyboard slot as a plain boolean. `keys` is
+ * Record<string, boolean | undefined> — written from event handlers, so the
+ * undefined case is real and this is where it collapses.
+ */
+function key(code: string): boolean {
+  return keys[code] === true;
+}
+
+/**
  * Stage 1 — movement, stance, footsteps, camera position.
  *
  * Writes player.pos/vel and the blends the accuracy model reads
@@ -48,13 +57,13 @@ const AIR_BLEND_RATE = 12;
  * fire every shot from the PREVIOUS frame's eye — metres behind you at
  * sprint speed, and at the old spot on the first frame after respawn().
  */
-export function updateMovement(dt) {
+export function updateMovement(dt: number): void {
   if (!player.alive) return;
 
   // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
-  const crouching = keys['ShiftLeft'] && player.onGround;
+  const crouching = key('ShiftLeft') && player.onGround;
   const running = game.running && !crouching && !game.aiming;
   const speed = speedFor({ crouching, aiming: game.aiming, running, runLerp: game.runLerp });
 
@@ -63,10 +72,10 @@ export function updateMovement(dt) {
   const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
   const move = new THREE.Vector3();
-  if (keys['KeyW']) move.add(forward);
-  if (keys['KeyS']) move.sub(forward);
-  if (keys['KeyD']) move.add(right);
-  if (keys['KeyA']) move.sub(right);
+  if (key('KeyW')) move.add(forward);
+  if (key('KeyS')) move.sub(forward);
+  if (key('KeyD')) move.add(right);
+  if (key('KeyA')) move.sub(right);
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
 
   // Horizontal movement with slide-along-walls: test each axis separately,
@@ -87,7 +96,7 @@ export function updateMovement(dt) {
   game.moveLerp = deadZone(approach(game.moveLerp, target, dt, BLEND_RATE));
 
   // Jump / gravity
-  if (keys['Space'] && player.onGround) { player.vel.y = JUMP_VEL; player.onGround = false; }
+  if (key('Space') && player.onGround) { player.vel.y = JUMP_VEL; player.onGround = false; }
   player.vel.y -= GRAVITY * dt;
   player.pos.y += player.vel.y * dt;
   if (player.pos.y <= player.eyeHeight) { player.pos.y = player.eyeHeight; player.vel.y = 0; player.onGround = true; }
@@ -142,7 +151,7 @@ export function updateMovement(dt) {
  * and mouse input stay on the base game.yaw, or the recoil walk would steer
  * the player's legs and fight the mouse.
  */
-export function updateCamera() {
+export function updateCamera(): void {
   if (!player.alive) return;
   camera.rotation.set(currentAimPitch(), currentAimYaw(), 0, 'YXZ');
 }
@@ -153,7 +162,7 @@ export function updateCamera() {
  * MUST run after updateWeapon: the kick reads game.recoil and the ADS blend
  * reads game.adsLerp, both written there this frame.
  */
-export function updateViewmodel() {
+export function updateViewmodel(): void {
   if (!player.alive) return;
 
   // Blend hip-fire offset -> centered iron sights with adsLerp; add bob and
@@ -166,7 +175,8 @@ export function updateViewmodel() {
   gunGroup.rotation.y = -game.recoilYaw * 0.01; // subtle sideways pull matching the walk
 
   // Crosshair tightens/fades when aiming (sight picture takes over);
-  // arm gap itself is driven by the accuracy model in weapons.js
+  // arm gap itself is driven by the accuracy model in weapons.ts
   crosshair.style.transform = `scale(${1 - 0.35 * game.adsLerp})`;
-  crosshair.style.opacity = 1 - 0.4 * game.adsLerp;
+  // style properties are CSS strings; a bare number only worked via coercion
+  crosshair.style.opacity = String(1 - 0.4 * game.adsLerp);
 }

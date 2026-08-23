@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { collidesAt, TEST_BOX_MIN_Y, TEST_BOX_MAX_Y } from './collision.js';
+import { collidesAt, TEST_BOX_MIN_Y, TEST_BOX_MAX_Y } from './collision';
 
 /** AABB spanning y 0..height, centred on (x, z). */
-const wall = (x, z, halfW = 1, height = 4) => new THREE.Box3(
+const wall = (x: number, z: number, halfW = 1, height = 4): THREE.Box3 => new THREE.Box3(
   new THREE.Vector3(x - halfW, 0, z - halfW),
   new THREE.Vector3(x + halfW, height, z + halfW),
 );
 
-const at = (x, z) => new THREE.Vector3(x, 1.7, z);
+const at = (x: number, z: number): THREE.Vector3 => new THREE.Vector3(x, 1.7, z);
 const PLAYER_RADIUS = 0.45;
 
 describe('collidesAt', () => {

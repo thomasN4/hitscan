@@ -1,18 +1,19 @@
-// combat.js — damage resolution, player respawn, round-end detection.
+// combat.ts — damage resolution, player respawn, round-end detection.
 //
 // This module is the single place where HP crosses 0: bots call
-// damagePlayer, weapons.js calls damageBot. Keeping the two flows together
+// damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
-import { player, game, bots, resetAmmo } from './core/state.js';
-import { sfxHurt } from './audio.js';
-import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud.js';
+import type { Bot as BotShape, HitZone } from './core/state';
+import { player, game, bots, resetAmmo } from './core/state';
+import { sfxHurt } from './audio';
+import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
 /**
  * Apply damage to the player. On death: awards the bot-side score,
  * releases pointer lock (which pauses the loop) and shows the death screen.
- * @param {number} dmg - raw damage; caller decides falloff/accuracy
+ * @param dmg raw damage; caller decides falloff/accuracy
  */
-export function damagePlayer(dmg) {
+export function damagePlayer(dmg: number): void {
   if (!player.alive) return;
   player.hp -= dmg;
   flashDamageVignette(dmg);
@@ -26,25 +27,25 @@ export function damagePlayer(dmg) {
     document.exitPointerLock();
     // Small delay so the killer's shot is visible before the menu covers it.
     setTimeout(() => {
-      document.getElementById('deathScreen').style.display = 'flex';
+      requireEl('deathScreen').style.display = 'flex';
     }, 400);
   }
 }
 
 /**
  * Apply damage to a bot and kill it if HP is exhausted.
- * @param {Bot} bot - instance from core.bots
- * @param {number} dmg - already-multiplied damage from weapons.js
- * @param {'head'|'torso'|'legs'} part - hit zone, used for the killfeed text
+ * @param bot instance from core/state's `bots` registry
+ * @param dmg already-multiplied damage from weapons.ts
+ * @param part hit zone, used for the killfeed text
  */
-export function damageBot(bot, dmg, part) {
+export function damageBot(bot: BotShape, dmg: number, part: HitZone): void {
   if (!bot.alive) return;
   bot.hp -= dmg;
   if (bot.hp <= 0) bot.die(part);
 }
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
-export function respawn() {
+export function respawn(): void {
   const spawnZ = game.map === 'range' ? 8 : 48; // range: behind the firing line
   player.pos.set(0, player.eyeHeight, spawnZ);
   player.vel.set(0, 0, 0);
@@ -54,7 +55,7 @@ export function respawn() {
   game.pitch = 0;
   game.recoil = 0;    // else the view punch would spawn the camera mid-climb
   game.recoilYaw = 0; // and mid-wander, off to one side
-  game.spray = 1;     // resting multiplier, NOT 0 — see core/state.js
+  game.spray = 1;     // resting multiplier, NOT 0 — see core/state.ts
   // Same class: the accuracy/pose blends are smoothed toward their target over
   // ~100-200 ms, so dying mid-air respawns you inside the full AIR_PENALTY
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
@@ -73,7 +74,7 @@ export function respawn() {
  * the round win and bring them all back after 2.5s. Bots also self-respawn
  * 6s after dying individually, so this only fires on the brief all-clear.
  */
-export function checkRoundEnd() {
+export function checkRoundEnd(): void {
   if (bots.every(b => !b.alive)) {
     addKillfeed('★ Round won! Respawning enemies...');
     setTimeout(() => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }), 2500);

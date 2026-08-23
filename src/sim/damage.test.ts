@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { damageForPart, partForMesh } from './damage.js';
-import { WEAPONS } from '../core/state.js';
+import { damageForPart, partForMesh } from './damage';
+import { WEAPONS } from '../core/state';
 
 const bot = { head: { id: 'h' }, torso: { id: 't' }, legs: { id: 'l' } };
 
@@ -40,7 +40,8 @@ describe('balance intents from the WEAPONS comments', () => {
   });
 
   test('the sniper kills in two torso shots, the smg does not', () => {
-    const [smg, sniper] = WEAPONS;
+    const smg = WEAPONS[0];
+    const sniper = WEAPONS[1];
     expect(damageForPart(sniper, 'torso') * 2).toBeGreaterThanOrEqual(100);
     expect(damageForPart(smg, 'torso') * 2).toBeLessThan(100);
   });

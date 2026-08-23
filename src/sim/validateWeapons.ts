@@ -1,14 +1,14 @@
-// sim/validateWeapons.js — static sanity checks over the weapon table.
+// sim/validateWeapons.ts — static sanity checks over the weapon table.
 //
 // Pure: weapon defs in, human-readable violation strings out. Caps come from
-// core/state.js rather than restated literals — RECOIL_CAP/BASE_FOV are
+// core/state.ts rather than restated literals — RECOIL_CAP/BASE_FOV are
 // already wired into every call site, and a second copy here would drift.
 //
 // THESE BOUNDS ARE NECESSARY, NOT SUFFICIENT. Passing them means an
 // accumulator CAN grow, not that it grows to the figure its tuning comment
 // quotes: decay runs during fire, so sprayRecover 0.45 once cleared its bound
 // here and still peaked at 1.28 against a documented 2.8. The loop-replaying
-// simulations in sim/recoil.test.js are what pin actual numbers; this module
+// simulations in sim/recoil.test.ts are what pin actual numbers; this module
 // is only the floor on sanity.
 //
 // The semiAuto exemptions are deliberate, not gaps: the sniper over-drains
@@ -17,7 +17,7 @@
 // exemption flags shipped-correct tuning, and the obvious "fix" breaks the
 // scope gate.
 
-import { RECOIL_CAP, BASE_FOV } from '../core/state.js';
+import { RECOIL_CAP, BASE_FOV, type WeaponDef } from '../core/state';
 
 /** View climb at RECOIL_CAP beyond which pulling down can't track the kick. */
 const MAX_CLIMB_DEG = 10;
@@ -29,20 +29,17 @@ const MAX_CLIMB_DEG = 10;
  * An empty array means every static bound held.
  *
  * Consumers:
- * - validateWeapons.test.js gates the REAL WEAPONS table — a bad constant
+ * - validateWeapons.test.ts gates the REAL WEAPONS table — a bad constant
  *   fails `npm test`.
- * - main.js logs each string via console.error behind import.meta.env.DEV.
- *
- * @param {Array<object>} defs weapon defs shaped like core/state.js WEAPONS
- * @returns {string[]} zero-length when valid
+ * - main.ts logs each string via console.error behind import.meta.env.DEV.
  */
-export function validateWeapons(defs) {
-  const out = [];
+export function validateWeapons(defs: readonly WeaponDef[]): string[] {
+  const out: string[] = [];
   for (const def of defs) {
     const name = def.name;
     // Trim float noise in messages; NaN survives as 'NaN', which is fine —
     // the missing-bound rules below flag it anyway.
-    const num = v => parseFloat(Number(v).toPrecision(3));
+    const num = (v: number): number => parseFloat(Number(v).toPrecision(3));
 
     // ---------- Sustained-fire bounds ----------
     // Decay runs during fire too, so recovery must lose to the per-second
@@ -78,17 +75,27 @@ export function validateWeapons(defs) {
       out.push(`${name}: yawKick ${num(def.yawKick)} must be > 0 — a zero kick means horizontal recoil does nothing`);
     }
 
+    // The type already promises a non-empty number[]; the runtime guard is
+    // kept because defs can be assembled by hand in tests and by JS callers
+    // tsc never sees — the validator is exactly the place that must not
+    // trust that promise.
     if (!Array.isArray(def.zoomFovs) || def.zoomFovs.length === 0) {
       out.push(`${name}: zoomFovs must be a non-empty array — the wheel has nothing to cycle`);
     } else {
-      for (let i = 0; i < def.zoomFovs.length; i++) {
-        const fov = def.zoomFovs[i];
+      // Iteration (not index math) keeps this honest under
+      // noUncheckedIndexedAccess: `prev` is undefined exactly for the first
+      // step, where no monotonicity claim exists yet.
+      let prev: number | undefined;
+      let i = 0;
+      for (const fov of def.zoomFovs) {
         if (!(fov < BASE_FOV)) {
           out.push(`${name}: zoomFovs[${i}] ${num(fov)} must sit below BASE_FOV (${BASE_FOV}) — a step at/above hip FOV widens the view instead of zooming`);
         }
-        if (i > 0 && !(fov < def.zoomFovs[i - 1])) {
-          out.push(`${name}: zoomFovs must strictly decrease (${num(def.zoomFovs[i - 1])} then ${num(fov)}) — a flat/rising step zooms nothing`);
+        if (prev !== undefined && !(fov < prev)) {
+          out.push(`${name}: zoomFovs must strictly decrease (${num(prev)} then ${num(fov)}) — a flat/rising step zooms nothing`);
         }
+        prev = fov;
+        i++;
       }
     }
 

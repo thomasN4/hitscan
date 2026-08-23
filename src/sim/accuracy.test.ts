@@ -2,8 +2,9 @@ import { describe, expect, test } from 'vitest';
 import {
   computeSpread, crosshairGapPx,
   MIN_SPREAD, MAX_GAP_FRACTION, AIR_PENALTY, MOVE_EXPONENT,
-} from './accuracy.js';
-import { WEAPONS } from '../core/state.js';
+} from './accuracy';
+import { WEAPONS } from '../core/state';
+import type { WeaponDef } from '../core/state';
 
 /** Rested, standing, hip-firing, no inherent cone — isolates one term at a time. */
 const still = { crouchLerp: 0, moveLerp: 0, airLerp: 0, spray: 1, inherent: 0, adsMul: 1 };
@@ -98,8 +99,9 @@ describe('computeSpread — inherent cone', () => {
   });
 
   test('dominates hip-fire, so both weapons are similarly bad from the hip', () => {
-    const [smg, sniper] = WEAPONS;
-    const hip = def => computeSpread({ ...still, crouchLerp: 1, inherent: def.inherent });
+    const smg = WEAPONS[0];
+    const sniper = WEAPONS[1];
+    const hip = (def: WeaponDef) => computeSpread({ ...still, crouchLerp: 1, inherent: def.inherent });
     const ratio = hip(smg) / hip(sniper);
     expect(ratio).toBeGreaterThan(0.9);
     expect(ratio).toBeLessThan(1.1);
@@ -115,8 +117,9 @@ describe('computeSpread — ADS', () => {
   });
 
   test('a scoped sniper is tighter than smg iron sights', () => {
-    const [smg, sniper] = WEAPONS;
-    const ads = def => computeSpread({
+    const smg = WEAPONS[0];
+    const sniper = WEAPONS[1];
+    const ads = (def: WeaponDef) => computeSpread({
       ...still, crouchLerp: 1, inherent: def.inherent, adsMul: def.spreadMul,
     });
     expect(ads(sniper)).toBeLessThan(ads(smg));

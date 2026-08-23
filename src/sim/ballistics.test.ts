@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { shotDirection, EULER_ORDER } from './ballistics.js';
+import { shotDirection, EULER_ORDER } from './ballistics';
 
-/** Forward vector of a camera posed like player.js does. */
-function cameraForward(pitch, yaw, order) {
+/** Forward vector of a camera posed like player.ts does. */
+function cameraForward(pitch: number, yaw: number, order: THREE.EulerOrder) {
   const cam = new THREE.Object3D();
   cam.rotation.set(pitch, yaw, 0, order);
   cam.updateMatrixWorld(true);
@@ -11,7 +11,7 @@ function cameraForward(pitch, yaw, order) {
 }
 
 describe('shotDirection — Euler order', () => {
-  test('is YXZ, matching the camera in player.js', () => {
+  test('is YXZ, matching the camera in player.ts', () => {
     expect(EULER_ORDER).toBe('YXZ');
   });
 
@@ -62,7 +62,7 @@ describe('shotDirection — cone', () => {
 
 describe('recoil climb between consecutive shots', () => {
   test('the first shot is dead-on and the next is kicked by exactly punchRad', () => {
-    // weapons.js:shoot builds the ray BEFORE adding this shot's kick, so the
+    // weapons.ts:shoot builds the ray BEFORE adding this shot's kick, so the
     // opening round of a burst lands on the crosshair (`5e004a5`). The next
     // shot leaves from pitch + recoilKick * punchRad.
     const pitch = 0, yaw = 0, punchRad = 0.012, recoilKick = 1;

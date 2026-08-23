@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    "strict": true,
+    // Unchecked index reads on input-mutated state (zoomFovs[game.zoomLevel])
+    // are the exact regression class this gate exists for. Every fix is a
+    // decision about what happens on a miss — and the best answer, where the
+    // table is fixed-size, is to make the miss unrepresentable instead:
+    // WEAPONS is a tuple and game.slot is WeaponSlot, so that read needs no
+    // decision at all.
+    "noUncheckedIndexedAccess": true,
+
+    // The migration is complete — src/ is 100% .ts. allowJs stays OFF so it
+    // stays that way: with it on, a .js file dropped into src/ would join the
+    // program and be silently skipped by the checker, leaving no gate on it at
+    // all now that no-undef is off for TypeScript.
+    "allowJs": false,
+
+    // Vite/esbuild does all transpiling; tsc is a pure checker here.
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

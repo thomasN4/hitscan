@@ -1,6 +1,6 @@
 # Maintainability tranche — plan and running log
 
-Living document. PRs 1–8 are merged or under review. The
+Living document. All nine PRs are merged or under review. The
 review lessons below are the most reusable part of this file: each one cost a
 review cycle to find, and several describe traps that are still easy to walk
 back into.
@@ -215,6 +215,45 @@ test written red first (lesson 7): pending later-due job + mid-drain zero-delay
 chain. Also hardened the dt guard against NaN (`< 0` passes it, poisoning `t`
 and inverting the drain guard into drain-everything).
 
+### PR 9 — Owner-scoped state slices (`refactor/game-slices`)
+
+The flat 24-field `game` bag split by owning system, all slices still
+exported from `core/state.ts` (ownership clarity, not new module homes):
+
+| slice | fields | writer(s) |
+|---|---|---|
+| `session` | map, locked, started | main.ts |
+| `input` | shooting, aiming, running | event handlers (+ `shoot()`'s unscopeOnShot) |
+| `aim` | yaw, pitch | mousemove, respawn |
+| `wpn` | spread, spray, recoil, recoilYaw, adsLerp, slot, zoomLevel, zoomScale | weapons.ts (respawn resets) |
+| `motion` | runLerp, moveLerp, crouchLerp, airLerp, stepTimer, bobAmt | player.ts (respawn resets) |
+| `score` | scoreKills, scoreDeaths, roundTime | bots / combat / main loop |
+
+Each slice's interface doc names its writers. Mechanics that made the ~100
+call-site migration safe: ONE slice per commit with `GameState` shrinking
+each time, so tsc turned any missed `game.x` into a compile error while the
+smoke test would have caught a stale runtime read — per-commit completeness
+enforced by the gates instead of review attention (the lesson-19 failure mode,
+structurally blocked). Names dodge two collisions found by reading locals:
+`move` was taken by a Vector3 local in player.ts (`motion`), `weapon` existed
+(`wpn`).
+
+The flat shape survives for exactly one consumer: `window.__cs.game`,
+rebuilt in main.ts as a get/set-only facade typed as the intersection of the
+six slice interfaces. It stores nothing — every access round-trips to a
+slice, so it cannot drift into a second source of truth — and no importable
+`game` exists for gameplay code anymore. `smoke-test.mjs` byte-for-byte
+unchanged; its writes (`cs.game.pitch = ...`) exercise the setters, its
+reads the getters.
+
+Verification: six gates green after every commit; smoke green on both maps
+against dev server (:5197) and `vite preview` (:5198). Behavior identical —
+a pure refactor with no declared changes. AGENTS.md/tsconfig comments were
+swept onto slice names; this file's PR 7-era `game.*` mentions are left as
+period records.
+
+---
+
 ---
 
 ## Review lessons
@@ -372,11 +411,10 @@ Ordered roughly by how easy they are to repeat.
 
 ## Later tranche — what remains
 
-The TypeScript migration, the ESLint gate and the game clock all landed
-(PR 6, PR 7, PR 8); the rule table, tsconfig decisions and time-base notes
-that used to live here are now history, not plan. Still deferred:
-
-- Splitting `game` into owner-scoped slices.
+**Nothing — the maintainability tranche is complete (PRs 1–9).** Two items
+remain tracked OUTSIDE it as deliberate behavior work, not refactoring:
+issue #15 (weapon switching should cost time; pinned as behavior in
+`sim/recoil.test.ts`) and issue #17 (bot-respawn observability).
 
 ---
 

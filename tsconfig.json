@@ -5,11 +5,11 @@
     "moduleResolution": "bundler",
 
     "strict": true,
-    // Unchecked index reads on input-mutated state (zoomFovs[game.zoomLevel])
+    // Unchecked index reads on input-mutated state (zoomFovs[wpn.zoomLevel])
     // are the exact regression class this gate exists for. Every fix is a
     // decision about what happens on a miss — and the best answer, where the
     // table is fixed-size, is to make the miss unrepresentable instead:
-    // WEAPONS is a tuple and game.slot is WeaponSlot, so that read needs no
+    // WEAPONS is a tuple and wpn.slot is WeaponSlot, so that read needs no
     // decision at all.
     "noUncheckedIndexedAccess": true,
 

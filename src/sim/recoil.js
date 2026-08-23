@@ -24,6 +24,23 @@ export function aimPitch(pitch, recoil, punchRad) {
 }
 
 /**
+ * Horizontal counterpart of aimPitch(): base yaw plus the signed horizontal
+ * recoil walk, converted to an angle by the same per-weapon punchRad.
+ *
+ * Same consumer contract as aimPitch — the camera and the shot direction must
+ * both go through it, so screen center stays truthful horizontally as well as
+ * vertically. Movement and mouse input deliberately stay on the BASE yaw: the
+ * view punch must not steer the player's legs or fight the mouse.
+ *
+ * @param {number} yaw       look yaw in radians (game.yaw)
+ * @param {number} recoilYaw signed horizontal recoil units (game.recoilYaw)
+ * @param {number} punchRad  radians per recoil unit (per-weapon)
+ */
+export function aimYaw(yaw, recoilYaw, punchRad) {
+  return yaw + recoilYaw * punchRad;
+}
+
+/**
  * Decay accumulated recoil toward 0 at `rate` units/second.
  *
  * `rate` MUST stay below the weapon's sustained-fire input
@@ -41,14 +58,44 @@ export function decayRecoil(recoil, dt, rate) {
 }
 
 /**
- * Decay accumulated spread bloom toward 0 at `rate` radians/second.
- * Same sustained-fire constraint as decayRecoil.
+ * Decay the spray cone multiplier back toward its RESTING value of 1.
  *
- * @param {number} bloom current bloom in radians
+ * Note the floor is 1, not 0: spray multiplies the situational spread terms,
+ * so 1 means "no extra cone". Draining below it would make sustained fire
+ * IMPROVE accuracy.
+ *
+ * Same sustained-fire constraint as decayRecoil: `rate` must stay below
+ * sprayKick ÷ fireRate or sprays never bloom at all.
+ *
+ * @param {number} spray current multiplier (>= 1)
  * @param {number} dt    frame delta in seconds
- * @param {number} rate  radians/second (per-weapon bloomRecover)
- * @returns {number} never negative
+ * @param {number} rate  multiplier units/second (per-weapon sprayRecover)
+ * @returns {number} never below 1
  */
-export function decayBloom(bloom, dt, rate) {
-  return Math.max(0, bloom - dt * rate);
+export function decaySpray(spray, dt, rate) {
+  return Math.max(1, spray - dt * rate);
+}
+
+/**
+ * Decay a SIGNED value toward 0 at `rate` units/second, from either side.
+ *
+ * Used for the horizontal recoil walk, which swings both ways — unlike
+ * decayRecoil, whose input is always non-negative so a plain clamp at 0 works.
+ * Overshoot lands exactly on 0 rather than crossing into the opposite sign and
+ * oscillating.
+ *
+ * Sustained-fire constraint, and it is NOT the one on decayRecoil/decaySpray:
+ * the walk is mean-zero, so what matters is the drain per shot interval against
+ * the MEAN kick — `rate × fireRate` must stay below `yawKick / 2`. Sizing it
+ * against the vertical climb instead (rate = recoilRecover) returns the walk to
+ * exactly 0 before every shot, so bullets never leave off-centre and only the
+ * camera twitches. That is how horizontal recoil first shipped.
+ *
+ * @param {number} value signed
+ * @param {number} dt    frame delta in seconds
+ * @param {number} rate  units/second (weapon.yawRecover for the horizontal walk)
+ */
+export function decayToward(value, dt, rate) {
+  const step = dt * rate;
+  return Math.abs(value) <= step ? 0 : value - Math.sign(value) * step;
 }

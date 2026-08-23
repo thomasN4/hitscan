@@ -44,7 +44,7 @@ function playGunshot(vol = 0.35, freqBase = 900, dur = 0.12) {
 
 export const sfxShoot = () => playGunshot(0.4, 1400, 0.14);
 
-/** Sniper: deeper boom with a longer tail than the rifle crack. */
+/** Sniper: deeper boom with a longer tail than the smg crack. */
 export const sfxSniper = () => playGunshot(0.5, 500, 0.3);
 
 /** Weapon switch: short metallic click. */

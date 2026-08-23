@@ -17,18 +17,18 @@ describe('partForMesh', () => {
 });
 
 describe('damageForPart', () => {
-  const rifle = { damage: 26, headshotMult: 4 };
+  const smg = { damage: 26, headshotMult: 4 };
 
   test('torso is the x1 reference', () => {
-    expect(damageForPart(rifle, 'torso')).toBe(26);
+    expect(damageForPart(smg, 'torso')).toBe(26);
   });
 
   test('legs are x0.75', () => {
-    expect(damageForPart(rifle, 'legs')).toBe(19.5);
+    expect(damageForPart(smg, 'legs')).toBe(19.5);
   });
 
   test('head uses the weapon own multiplier', () => {
-    expect(damageForPart(rifle, 'head')).toBe(104);
+    expect(damageForPart(smg, 'head')).toBe(104);
   });
 });
 
@@ -39,10 +39,10 @@ describe('balance intents from the WEAPONS comments', () => {
     }
   });
 
-  test('the sniper kills in two torso shots, the rifle does not', () => {
-    const [rifle, sniper] = WEAPONS;
+  test('the sniper kills in two torso shots, the smg does not', () => {
+    const [smg, sniper] = WEAPONS;
     expect(damageForPart(sniper, 'torso') * 2).toBeGreaterThanOrEqual(100);
-    expect(damageForPart(rifle, 'torso') * 2).toBeLessThan(100);
+    expect(damageForPart(smg, 'torso') * 2).toBeLessThan(100);
   });
 
   test('leg hits never out-damage torso hits', () => {

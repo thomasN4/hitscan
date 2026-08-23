@@ -32,12 +32,12 @@ describe('resetAmmo', () => {
   });
 
   test('mirrors slot 0 into the live weapon and clears an in-flight reload', () => {
-    const rifle = WEAPONS[0];
-    expect(weapon.name).toBe(rifle.name);
-    expect(weapon.mag).toBe(rifle.magSize);
-    expect(weapon.reserve).toBe(rifle.reserveMax);
-    expect(weapon.damage).toBe(rifle.damage);
-    expect(weapon.recoilRecover).toBe(rifle.recoilRecover);
+    const smg = WEAPONS[0];
+    expect(weapon.name).toBe(smg.name);
+    expect(weapon.mag).toBe(smg.magSize);
+    expect(weapon.reserve).toBe(smg.reserveMax);
+    expect(weapon.damage).toBe(smg.damage);
+    expect(weapon.recoilRecover).toBe(smg.recoilRecover);
     expect(weapon.reloading).toBe(false);
   });
 });

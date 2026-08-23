@@ -24,7 +24,7 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 |---|---|
 | `W A S D` | Move |
 | Mouse | Aim (pointer lock) |
-| Left mouse | Fire (full auto) |
+| Left mouse | Fire (SMG full auto; sniper semi-auto) |
 | Right mouse | Iron sights (zoom + tighter spread) |
 | `R` | Reload |
 | `Shift` | Crouch (slower, silent — no footsteps) |
@@ -42,6 +42,7 @@ Two maps, chosen from the start menu (switching reloads the page with `?map=rang
 Common rules:
 
 - Damage zones: head ×4 (one-shot kill), torso ×1, legs ×0.75.
+- Accuracy stacks: each weapon has an inherent rest cone, on top of which stance, movement and being airborne add spread, all multiplied by a spray factor that grows while you hold the trigger. Crouching is the most accurate stance and crouch-walking the most accurate way to move; sprinting is far worse than walking (movement scales cubically), and shooting mid-air is worse still. Recoil climbs vertically *and* wanders horizontally, so sustained fire has to be steered, not just pulled down.
 - Bullets leave persistent decals (capped at 200; oldest recycled) — check your grouping on any surface.
 - Clearing all bots simultaneously wins the round; individual bots self-respawn after 6 s.
 - Bots' accuracy degrades with distance.
@@ -57,7 +58,7 @@ src/
 │   └── engine.js # renderer/scene/camera/clock, built by initEngine()
 ├── sim/          # pure gameplay math, unit-tested in Node (no engine, no DOM)
 │   ├── accuracy.js   # spread model + crosshair gap projection
-│   ├── recoil.js     # view punch, recoil/bloom decay
+│   ├── recoil.js     # view punch (pitch + yaw), recoil/spray decay
 │   ├── ballistics.js # shot direction (owns the YXZ Euler order)
 │   ├── damage.js     # hit zones and damage multipliers
 │   ├── movement.js   # speed tiers, measured movement input
@@ -67,7 +68,7 @@ src/
 ├── world.js      # solids/colliders registries — the ONE way to register geometry
 ├── collision.js  # AABB movement collision + line-of-sight raycast (pure)
 ├── player.js     # FPS controller: move/crouch/footsteps/camera
-├── weapons.js    # rifle viewmodel, firing, reload, ADS/recoil/spread
+├── weapons.js    # smg/sniper viewmodels, firing, reload, ADS/recoil/spread
 ├── bots.js       # Bot class and AI decision loop
 ├── combat.js     # damage resolution, respawn, round end
 ├── effects.js    # transient visuals (bullet impacts)

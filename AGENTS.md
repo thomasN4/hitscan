@@ -42,7 +42,7 @@ node scripts/smoke-test.mjs    # headless E2E check (requires dev server running
 
 Two test layers, deliberately split:
 
-- **`npm test`** — pure simulation logic (state, and from PR 2 on: accuracy, recoil, ballistics). Runs in plain Node, no browser, no dev server. Fast enough to run on every edit.
+- **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit.
 - **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, both maps. This is the layer that catches missing imports and wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`.
 
 ## Architecture rules
@@ -57,6 +57,16 @@ Two test layers, deliberately split:
   ```
 
 - **Gameplay math lives in `src/sim/`, as pure functions.** Accuracy, recoil, ballistics, damage zones, speed tiers and blend easing take every input as a parameter — no engine imports, no DOM, no reads of shared state. That is what makes them unit-testable in plain Node (`npm test`), and it is where new gameplay math belongs. Modules like `weapons.js` are thin bindings that feed live state in.
+- **The accuracy model** (`sim/accuracy.js`) is:
+
+  ```
+  spread = ((stance + movement + air) × spray + inherent) × ADS
+  ```
+
+  Two things about it are easy to get wrong:
+  - **`spray` is a MULTIPLIER resting at 1, not an additive accumulator resting at 0.** It scales the situational group only — `inherent`, the weapon's own rest cone, is added afterwards so sustained fire never degrades a weapon's intrinsic accuracy. Anything that resets spray must reset it to `1` (see `combat.js:respawn`, and the smoke test's accuracy phase).
+  - **Movement is cubic** in measured speed, so sprint diverges sharply from walk rather than scaling linearly.
+- **Aim has two axes, and both must be shared.** `currentAimPitch()` and `currentAimYaw()` in `weapons.js` are the single source for the camera (`updateCamera`) *and* the shot direction (`shoot()`). Movement's forward vector and mouse input stay on the base `game.yaw`/`game.pitch` — routing the view punch into either would steer the player's legs or fight the mouse.
 - **Extract and wire in the same commit.** If you lift a formula or constant into `sim/`, delete the inline original and switch every call site at once. A named constant that nothing imports, or a pure function shadowed by a surviving inline copy, is two sources of truth plus a comment that lies.
 - **The per-frame stage order in `main.js:animate()` is load-bearing:**
 
@@ -106,7 +116,12 @@ Maintainability tranche 1 (in progress) — see the plan for full rationale:
 - **PR 1 (done):** split `core.js` into pure `core/state.js` + browser-only `core/engine.js`; explicit init order; Vitest.
 - **PR 2 (done):** extract pure sim math into `src/sim/` (`accuracy`, `recoil`, `ballistics`, `damage`, `movement`, `smoothing`) with unit tests; hoist the frame pipeline into `main.js` so intra-frame ordering is visible.
 - **PR 3 (done):** single geometry-registration path in `src/world.js` (`addSolidBox`, `registerSolid`, `registerGroupParts`), replacing the duplicated `addBox` in `map.js`/`range.js`; `collidesAt` now takes `colliders` as a parameter, matching `hasLineOfSight`.
-- **PR 4:** `sim/validateWeapons.js` enforcing the `recoilRecover < recoilKick / fireRate` class of constraint that has now been fixed twice by hand.
+- **PR 4 (done):** port the `feat/smg-tuning` gameplay work onto the refactored tree — rifle→SMG, the `spray`/`inherent`/airborne accuracy model, and horizontal recoil (`recoilYaw`, `aimYaw`).
+- **PR 5:** `sim/validateWeapons.js` enforcing the `recoilRecover < recoilKick / fireRate` class of constraint that has now been fixed twice by hand. Note the rule must exempt `semiAuto` weapons: the sniper over-drains deliberately (13/s against a 3.64/s input) because full settle between shots is the bolt-action feel and is what makes `scopeGate` work. The `sprayRecover < sprayKick / fireRate` counterpart applies to every weapon.
+
+  Two lessons from PR 4, which shipped both failure modes green, belong in that validator:
+  - **The horizontal walk needs its own rule.** `recoilYaw` is zero-mean, so the bound is `yawRecover × fireRate < yawKick / 2` (the MEAN kick) — not the vertical form. PR 4 drained it at `recoilRecover`, which zeroed the walk before every shot: no bullet was ever displaced. Same `semiAuto` exemption as above.
+  - **These bounds are necessary, not sufficient.** `sprayRecover: 0.45` satisfied `< sprayKick / fireRate` and still only reached spray 1.28 against a documented 2.8, because decay runs *during* fire. Where a comment quotes a number, pin it with a test that simulates the fire loop (`sim/recoil.test.js`), not one that hand-seeds the end state.
 
 Deferred to a later tranche:
 

@@ -184,8 +184,9 @@ reload click sequence in `audio.ts`.
 Deliberately left on wall clock, each documented at its site: combat.ts's
 death-screen delay (it fires DURING pause — scheduling it on game time would
 mean the screen never appears), muzzle-flash cleanup and hud fades (cosmetic,
-and readable behind menus), main.ts's double-tap-W window (input layer, must
-work pre-lock). `clock.getDelta()` remains main's raw-frame-dt source; the
+and readable behind menus). A third member, main.ts's double-tap-W sprint
+window, left with the double-tap mechanic itself when sprint was remapped to
+hold-Shift. `clock.getDelta()` remains main's raw-frame-dt source; the
 clamp happens before `advance`, so a tab-switch spike can't fast-forward the
 scheduler.
 

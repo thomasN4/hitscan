@@ -63,13 +63,13 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
     if (fired.holes === 0) throw new Error('expected bullet holes after firing, got 0');
 
     let sprint = null;
-    // 3) Double-tap-W sprint (range only — on arena, bot fire during earlier
+    // 3) Hold-Shift sprint (range only — on arena, bot fire during earlier
     //    stationary phases can damage/distract the measurement).
     //
     // We assert MECHANICS, not absolute distance: headless SwiftShader FPS
     // swings enough that wall-clock displacement is unstable (the sim's dt
     // clamp makes game-time diverge from wall-time at low FPS). So:
-    //   - `game.running` must latch after the double tap (detector works)
+    //   - `game.running` must be set while Shift is held
     //   - `game.runLerp` must climb past 0.4 (ramp works)
     //   - player must cover >5 m (movement integration alive)
     if (sprintCheck) {
@@ -77,12 +77,8 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         const cs = window.__cs;
         cs.game.pitch = 0; // level, so all displacement is horizontal
         cs.player.pos.set(0, 1.7, 8);
-        // Two rapid W presses -> inside the 300 ms double-tap window.
-        // Dispatched back-to-back WITHOUT an async gap: under SwiftShader
-        // the main thread can stall long enough for a timed gap (>300 ms)
-        // to miss the window and make this test flaky.
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', repeat: false }));
         const startZ = cs.player.pos.z;
         let runningSeen = false, runLerpPeak = 0;
         const t0 = performance.now();
@@ -92,9 +88,10 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
           runLerpPeak = Math.max(runLerpPeak, cs.game.runLerp);
         }
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
         return { dist: Math.abs(startZ - cs.player.pos.z), runningSeen, runLerpPeak };
       });
-      if (!sprint.runningSeen) throw new Error('double-tap did not latch game.running');
+      if (!sprint.runningSeen) throw new Error('holding Shift did not set game.running');
       if (sprint.runLerpPeak < 0.4) throw new Error(`sprint ramp too weak: ${sprint.runLerpPeak.toFixed(2)}`);
       if (sprint.dist < 5) throw new Error(`barely moved during sprint: ${sprint.dist.toFixed(2)} m`);
     }
@@ -110,11 +107,11 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         cs.game.spray = 1; // isolate stance/movement layers from prior phases
         await wait(150);   // let the frame loop recompute spread from spray=1
         const standing = cs.game.spread;
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ControlLeft', repeat: false })); // Ctrl toggle: crouch on
         await wait(400); // crouchLerp -> 1
         cs.game.spray = 1;
         const crouched = cs.game.spread;
-        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ControlLeft', repeat: false })); // toggle back off
         await wait(400);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         await wait(600); // walk long enough for moveLerp to settle near 1

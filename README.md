@@ -27,8 +27,8 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 | Left mouse | Fire (SMG full auto; sniper semi-auto) |
 | Right mouse | Iron sights (zoom + tighter spread) |
 | `R` | Reload |
-| `Shift` | Crouch (slower, silent — no footsteps) |
-| Double-tap `W` | Run (1.5× speed, ~0.2 s ramp; hold `W` to keep sprinting) |
+| `Shift` | Run (hold — 1.5× speed, ~0.2 s ramp) |
+| `Ctrl` | Crouch (tap to toggle; slower, silent — no footsteps) |
 | `Space` | Jump |
 | `Esc` | Pause / release mouse |
 

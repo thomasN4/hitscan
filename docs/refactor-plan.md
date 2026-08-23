@@ -98,6 +98,38 @@ prescribes: deleting `player` from `weapons.js`'s state import reproduces
 same standard silently failing for the test-file block (lesson 10); fixed
 with the `ignores` above and re-proven per environment via `--print-config`.
 
+### PR 7 — Full TypeScript migration (`refactor/ts-migration`)
+
+All of `src/**` renamed to `.ts` in one pass; `index.html` entry updated;
+`scripts/smoke-test.mjs` untouched. Toolchain: `typescript@5.9` (7.x is out —
+typescript-eslint peers `<6.1.0`), `typescript-eslint@8.67`, `@types/three@0.160`.
+tsconfig: `strict`, **`noUncheckedIndexedAccess: true`** (folded in from the old
+PR-8 plan — with browser modules converting in the same pass there were no
+unchecked-JS consumers left to defer for), `allowJs`/`checkJs:false`,
+`moduleResolution:"bundler"`, `verbatimModuleSyntax`. New `npm run typecheck`
+gate; typescript-eslint's `recommendedTypeChecked` scoped to `src/**/*.ts` with
+`no-undef` off there (tsc owns missing imports in TS).
+
+Type design highlights:
+
+- Domain vocabulary lives in `core/state.ts`: `WeaponDef` (sniper-only fields
+  optional), `LiveWeapon` as a subset-plus-ammo mirror (NOT a `WeaponDef`),
+  `GameState` with `map: 'arena' | 'range'`, the structural `Bot` shape that
+  `bots.ts`'s concrete class implements, `HitZone`.
+- three.js's `userData` is `Record<string, any>` — the one `any` leak vector.
+  Two owned accessors hold the only casts: `bots.ts:botFor()` (returns
+  `Bot | undefined`; callers narrow) and `weapons.ts:magBaseY()`.
+- Dynamic index reads get narrowing helpers that throw named errors on
+  impossible values (`currentDef()`, `aimFovFor()`), optional reads use `?.`
+  (`scopeGate`) or degrade gracefully (HUD zoom label), and no `?? fallback`
+  was introduced anywhere.
+- `hud.ts:requireEl(id)` throws a named startup error for missing markup —
+  the migration's one deliberate behavior change, replacing distant
+  null-property crashes.
+
+Verification: all six gates green, smoke test byte-for-byte unmodified against
+both dev server and `vite preview`, plus non-vacuity probes (lessons 15–17).
+
 ---
 
 ## Review lessons
@@ -186,34 +218,15 @@ Ordered roughly by how easy they are to repeat.
 
 ---
 
-## Later tranche — TypeScript + lint gate
+## Later tranche — what remains
 
-Recorded so the decisions aren't relitigated.
+The TypeScript migration and the ESLint gate both landed (PR 6, PR 7); the
+rule table and tsconfig decisions that used to live here are now history, not
+plan. Still deferred:
 
-**Full `.ts` migration** (chosen over JSDoc + `checkJs`): rename incrementally
-under `allowJs`, starting with `src/sim/*` — already pure functions with
-explicit parameters, so they convert with no restructuring.
-
-**ESLint + typescript-eslint**, landing with the migration:
-
-| Rule | Bug class it catches |
-|---|---|
-| `no-undef` | the `730d9cc` missing-import `ReferenceError` — `AGENTS.md` gotcha #1 |
-| `@typescript-eslint/no-explicit-any` | the `any` ban |
-| `@typescript-eslint/no-unsafe-*` | `any` leaking in from loosely-typed three.js surfaces — banning explicit `any` alone does not stop this |
-| `@typescript-eslint/ban-ts-comment` | `@ts-ignore` silencing a real error |
-
-Two `tsconfig` flags matter as much: `strict`, and **`noUncheckedIndexedAccess`**
-— `WEAPONS[game.slot]` and `zoomFovs[game.zoomLevel]` are unchecked index reads
-on input-mutated state. Wire `npm run lint` into the verification set.
-
-**Pulled forward and landed** as PR 6 above: `no-undef` needs no TypeScript,
-so the flat config and `npm run lint` shipped ahead of the migration. The
-typescript-eslint rules in the table layer onto that config.
-
-**Also deferred:** unifying the two time bases (`clock.elapsedTime` vs
-`performance.now()`) behind one game clock plus a pausable scheduler; splitting
-`game` into owner-scoped slices.
+- Unifying the two time bases (`clock.elapsedTime` vs `performance.now()`)
+  behind one game clock plus a pausable scheduler.
+- Splitting `game` into owner-scoped slices.
 
 ---
 
@@ -226,17 +239,18 @@ Each PR needs its own worktree off current `origin/main` with its own
 `npm install` — symlinking the primary checkout's `node_modules` writes shared
 state the other worktrees read.
 
-All five must pass:
+All six must pass:
 
 1. `npm run lint`
-2. `npm test`
-3. `npm run build`
-4. `node scripts/smoke-test.mjs`, against **both** the dev server and
+2. `npm run typecheck`
+3. `npm test`
+4. `npm run build`
+5. `node scripts/smoke-test.mjs`, against **both** the dev server and
    `vite preview`. Pick a port no other worktree is using
    (`ss -ltnp | grep 517`), start with `--port <n> --strictPort`, confirm the
    port from its log, and pass `CS_SMOKE_BASE=http://localhost:<n>`. An orphaned
    server silently serves stale code.
-5. Manual check of both maps (`/` and `/?map=range`).
+6. Manual check of both maps (`/` and `/?map=range`).
 
 **Invariants that must survive:** `window.__cs` keeps exporting
 `{ game, weapon, player, bulletHoles, colliders }`. `scripts/smoke-test.mjs`

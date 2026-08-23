@@ -81,16 +81,22 @@ loop-replaying tests in `sim/recoil.test.js` pin actual numbers.
 
 `eslint.config.js` (flat), `npm run lint`, no TypeScript — the piece the
 "later tranche" section below flagged as worth pulling forward on its own.
-Three `files` blocks, because the globals are the whole point: browser for
-`src/**`, Node for `src/**/*.test.js` (a test reaching for `document` has
-stopped being a pure-simulation test) and for this config, and **both** for
-`scripts/smoke-test.mjs` — it runs in Node but every `page.evaluate()`
-callback executes in the browser, so declaring only Node flags 75 correct
-references.
+Rules live once in a top-level entry (a file matching no block would
+otherwise parse with zero rules); four `files` blocks vary only globals:
+browser for `src/**` — carrying an `ignores: ['src/**/*.test.js']` that must
+live there, because flat config merges every matching block's globals and a
+later block cannot remove them — Node for `src/**/*.test.js` (a test
+reaching for `document` has stopped being a pure-simulation test; Vitest
+itself stays undeclared so bare `test`/`expect` trip `no-undef`) and for
+this config, and **both** for `scripts/smoke-test.mjs` — it runs in Node
+but every `page.evaluate()` callback executes in the browser, so declaring
+only Node flags 75 correct references.
 
 `src/` was already clean. Non-vacuity was proven the way review lesson 7
 prescribes: deleting `player` from `weapons.js`'s state import reproduces
-`730d9cc` and lint reports three `no-undef` errors.
+`730d9cc` and lint reports three `no-undef` errors. First review caught the
+same standard silently failing for the test-file block (lesson 10); fixed
+with the `ignores` above and re-proven per environment via `--print-config`.
 
 ---
 
@@ -149,21 +155,32 @@ Ordered roughly by how easy they are to repeat.
 9. **Run the smoke test against `vite preview`, not just the dev server.**
    Rollup-only breakage in new cross-module edges does not show up in the dev
    server's unbundled ESM.
+10. **Prove each of a gate's environments, not just one representative case.**
+   PR 6's non-vacuity probe covered `no-undef` against game code but never
+   probed the test-file block, where the gate was silently vacuous: flat
+   config merges the globals of every matching `files` entry, so
+   `src/**/*.test.js` resolved to browser ∪ Node and a test touching
+   `document.title` passed clean despite three documents promising otherwise.
+   The fix is structural — exclusion via `ignores` on the *first* matching
+   block, since nothing downstream can remove a merged key — and the probe is
+   now per environment: `--print-config` on a game file (has `document`) and
+   a test file (does not), plus a deliberately browser-touching test that
+   must fail lint.
 
 ### On documentation
 
-10. **A docstring's *reason* must be right, not just its conclusion.**
+11. **A docstring's *reason* must be right, not just its conclusion.**
    `registerSolid` was justified with "an AABB would be a floor-height box the
    player stands inside" — false; a rotated `PlaneGeometry` measures to a
    zero-height box below `TEST_BOX_MIN_Y`, so the AABB is inert. The wrong
    reason would send someone adding a thick floor slab through `registerSolid`
    and ship a walk-through floor: the doc reintroducing the bug class the module
    exists to prevent.
-11. **Grep for comments the change falsifies**, and don't write present-tense
+12. **Grep for comments the change falsifies**, and don't write present-tense
     comments about work a later PR will do.
-12. **Don't overstate the history.** "All three bugs this has caused" counted a
+13. **Don't overstate the history.** "All three bugs this has caused" counted a
     latent gap as a shipped bug. Two real bugs, one covered gap.
-13. **Document the full public surface.** `registerSolidBox` was exported but
+14. **Document the full public surface.** `registerSolidBox` was exported but
     unlisted, so a contributor with an already-positioned mesh would find no
     listed option and reach for the arrays directly.
 

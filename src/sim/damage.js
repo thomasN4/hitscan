@@ -4,8 +4,8 @@
 //
 // Zone multipliers are the game's core balance contract — head ×4 makes the
 // smg a one-tap (26 × 4 = 104) and the sniper a guaranteed one
-// (60 × 4 = 240); legs ×0.75 punishes low aim. PR 4's sim/validateWeapons.js
-// will pin those design intents against the real WEAPONS table.
+// (60 × 4 = 240); legs ×0.75 punishes low aim. Those design intents are
+// pinned against the real WEAPONS table by sim/damage.test.js.
 
 /** Damage multiplier per hit zone. Torso is the ×1 reference. */
 export const ZONE_MULTIPLIERS = {

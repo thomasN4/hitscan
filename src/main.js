@@ -19,6 +19,7 @@ import { updateEffects } from './effects.js';
 import { respawn } from './combat.js';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud.js';
 import { sfxZoom } from './audio.js';
+import { validateWeapons } from './sim/validateWeapons.js';
 
 // ---------- Startup ----------
 // Order matters and is deliberately explicit: initEngine() creates the
@@ -29,6 +30,14 @@ import { sfxZoom } from './audio.js';
 // here and written into the shared state before anything reads game.map.
 game.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
 const RANGE = game.map === 'range';
+
+// Loud, not fatal: this runs before initEngine(), so throwing would blank
+// the page and hide the message behind a broken app. A violation is a
+// mis-tuned constant — the console names weapon, field and consequence,
+// and the game still runs.
+if (import.meta.env.DEV) {
+  for (const v of validateWeapons(WEAPONS)) console.error(v);
+}
 
 initEngine();
 initHUD();

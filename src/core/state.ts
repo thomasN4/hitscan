@@ -1,9 +1,9 @@
-// core/state.js — pure shared game state. NO browser APIs, NO renderer.
+// core/state.ts — pure shared game state. NO browser APIs, NO renderer.
 //
 // This module must stay importable in plain Node (that is what makes the
 // simulation unit-testable): it may use THREE's math classes (Vector3,
 // Box3...) but must never touch `document`, `window`, `location`, or
-// construct a WebGLRenderer. Engine singletons live in core/engine.js
+// construct a WebGLRenderer. Engine singletons live in core/engine.ts
 // instead — and browser-derived values (the ?map= param) are written in by
 // main.js at startup rather than read here.
 //
@@ -12,23 +12,100 @@
 // than reaching across modules.
 import * as THREE from 'three';
 
+// ---------- Domain vocabulary ----------
+/**
+ * Static stats for one weapon, shaped like the WEAPONS entries below.
+ *
+ * The three optional fields are sniper-only; every consumer must tolerate
+ * their absence (the smg has no scope gate, fires full-auto, and does not
+ * kick you out of iron sights).
+ */
+export interface WeaponDef {
+  name: string;
+  magSize: number;
+  reserveMax: number;
+  /** Seconds between shots (~9.5 rounds/sec for the smg). */
+  fireRate: number;
+  reloadTime: number;
+  /** Per body shot; legs x0.75, head x headshotMult. */
+  damage: number;
+  headshotMult: number;
+  /** Scoped FOV targets cycled with the mouse wheel while aiming. */
+  zoomFovs: number[];
+  /** ADS cone multiplier: 1 hip-firing, else spreadMul. */
+  spreadMul: number;
+  /** Resting shot cone in radians, before any stance/movement/spray. */
+  inherent: number;
+  sprayKick: number;
+  recoilKick: number;
+  sprayCap: number;
+  sprayRecover: number;
+  recoilRecover: number;
+  punchRad: number;
+  yawKick: number;
+  yawRecover: number;
+  scopedOverlay: boolean;
+  /** Recoil below which a fresh RMB press may enter the scope. Sniper only. */
+  scopeGate?: number;
+  /** One shot per LMB press; holding does nothing. Sniper only. */
+  semiAuto?: boolean;
+  /** Firing kicks you out of the scope (re-press RMB). Sniper only. */
+  unscopeOnShot?: boolean;
+}
+
+/** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
+export type HitZone = 'head' | 'torso' | 'legs';
+
+/** Structural shape of one enemy (see bots.js for the concrete class). */
+export interface Bot {
+  mesh: THREE.Group;
+  head: THREE.Mesh;
+  torso: THREE.Mesh;
+  legs: THREE.Mesh;
+  hp: number;
+  alive: boolean;
+  update(dt: number, player: PlayerState): void;
+  eyePos(): THREE.Vector3;
+  die(part: HitZone): void;
+  spawnAtRandom(): void;
+}
+
+/** One transient impact puff tracked by effects.js. */
+export interface Impact {
+  mesh: THREE.Mesh;
+  /** Remaining lifetime in seconds. */
+  t: number;
+}
+
 // ---------- Shared collections ----------
 // Level geometry registries (`solids`, `colliders`) live in world.js, which
 // owns the one path by which geometry is registered.
 /** All Bot instances (see bots.js). */
-export const bots = [];
+export const bots: Bot[] = [];
 /** Short-lived bullet impact puffs (see effects.js). */
-export const impacts = [];
+export const impacts: Impact[] = [];
 /** Persistent wall decals (see effects.js); FIFO-capped, oldest recycled. */
-export const bulletHoles = [];
+export const bulletHoles: THREE.Mesh[] = [];
 
 // ---------- Shared mutable game state ----------
+/** Player entity shape — see `player` below for the live instance. */
+export interface PlayerState {
+  /** EYE position (not feet); physics uses eyeHeight as ground-rest y. */
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  onGround: boolean;
+  hp: number;
+  alive: boolean;
+  radius: number;
+  eyeHeight: number;
+}
+
 /**
  * Player entity. `pos` is the EYE position (not feet); physics uses
  * `eyeHeight` as the ground-rest y value. Crouch only offsets the camera,
  * not `pos` itself.
  */
-export const player = {
+export const player: PlayerState = {
   pos: new THREE.Vector3(0, 1.7, 48),
   vel: new THREE.Vector3(),
   onGround: true,
@@ -63,7 +140,7 @@ export const BASE_FOV = 75;
  * "iron sights" step); spreadMul is the ADS cone multiplier; inherent is the
  * weapon's resting shot cone in radians, before any stance/movement/spray.
  */
-export const WEAPONS = [
+export const WEAPONS: WeaponDef[] = [
   {
     name: 'SMG',
     magSize: 30, reserveMax: 90,
@@ -141,34 +218,106 @@ export const WEAPONS = [
 ];
 
 /** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
-export const ammoStore = WEAPONS.map(w => ({ mag: w.magSize, reserve: w.reserveMax }));
+export interface AmmoStore {
+  mag: number;
+  reserve: number;
+}
+
+/** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
+export const ammoStore: AmmoStore[] = WEAPONS.map(w => ({ mag: w.magSize, reserve: w.reserveMax }));
 
 /**
  * Live state of the ACTIVE weapon. Stat fields are copied from
  * WEAPONS[game.slot] by switchWeapon() in weapons.js; HUD/combat read this
- * object only. Initialized to slot 0.
+ * object only. A subset of WeaponDef plus mutable ammo/reload bookkeeping —
+ * deliberately NOT a WeaponDef, since Object.assign in switchWeapon copies
+ * only the fields listed here.
  */
-export const weapon = {
-  name: WEAPONS[0].name,
-  magSize: WEAPONS[0].magSize, mag: WEAPONS[0].magSize, reserve: WEAPONS[0].reserveMax,
-  fireRate: WEAPONS[0].fireRate,
+export interface LiveWeapon {
+  name: string;
+  magSize: number;
+  mag: number;
+  reserve: number;
+  fireRate: number;
+  lastShot: number;
+  reloading: boolean;
+  reloadTime: number;
+  reloadEnd: number;
+  damage: number;
+  headshotMult: number;
+  recoilRecover: number;
+}
+
+// The table is statically populated right above, so slot 0 always exists;
+// the assertions below are about THAT fact, not about runtime guarantees.
+// Dynamic reads (WEAPONS[game.slot] in consumers) get real guards instead.
+const SMG = WEAPONS[0]!;
+
+/** Live state of the ACTIVE weapon. Initialized to slot 0. */
+export const weapon: LiveWeapon = {
+  name: SMG.name,
+  magSize: SMG.magSize, mag: SMG.magSize, reserve: SMG.reserveMax,
+  fireRate: SMG.fireRate,
   lastShot: 0,
-  reloading: false, reloadTime: WEAPONS[0].reloadTime, reloadEnd: 0,
-  damage: WEAPONS[0].damage,
-  headshotMult: WEAPONS[0].headshotMult,
-  recoilRecover: WEAPONS[0].recoilRecover,
+  reloading: false, reloadTime: SMG.reloadTime, reloadEnd: 0,
+  damage: SMG.damage,
+  headshotMult: SMG.headshotMult,
+  recoilRecover: SMG.recoilRecover,
 };
 
 /** Reset both slots' ammo and mirror slot 0 into `weapon`. Used on respawn. */
-export function resetAmmo() {
-  WEAPONS.forEach((w, i) => { ammoStore[i].mag = w.magSize; ammoStore[i].reserve = w.reserveMax; });
-  const w = WEAPONS[0];
-  weapon.name = w.name;
-  weapon.magSize = w.magSize; weapon.mag = w.magSize; weapon.reserve = w.reserveMax;
-  weapon.fireRate = w.fireRate; weapon.reloadTime = w.reloadTime;
-  weapon.damage = w.damage; weapon.headshotMult = w.headshotMult;
-  weapon.recoilRecover = w.recoilRecover;
+export function resetAmmo(): void {
+  WEAPONS.forEach((w, i) => { ammoStore[i]!.mag = w.magSize; ammoStore[i]!.reserve = w.reserveMax; });
+  weapon.name = SMG.name;
+  weapon.magSize = SMG.magSize; weapon.mag = SMG.magSize; weapon.reserve = SMG.reserveMax;
+  weapon.fireRate = SMG.fireRate; weapon.reloadTime = SMG.reloadTime;
+  weapon.damage = SMG.damage; weapon.headshotMult = SMG.headshotMult;
+  weapon.recoilRecover = SMG.recoilRecover;
   weapon.reloading = false;
+}
+
+/** Maps selectable from the start menu (?map= URL param). */
+export type MapName = 'arena' | 'range';
+
+/** Misc per-frame / transient flags — see `game` below. */
+export interface GameState {
+  map: MapName;
+  /** Pointer lock active (Esc/menu releases it). */
+  locked: boolean;
+  /** First Play click happened; distinguishes pause from pre-game. */
+  started: boolean;
+  /** LMB held. */
+  shooting: boolean;
+  /** RMB held (iron sights). */
+  aiming: boolean;
+  /** Double-tapped W and still holding it (sprint). */
+  running: boolean;
+  /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
+  runLerp: number;
+  /** Look yaw; 0 = facing -z, Math.PI would face the arena's rear wall. */
+  yaw: number;
+  pitch: number;
+  /** CURRENT total shot cone (radians), recomputed each frame in weapons.js. */
+  spread: number;
+  /** Shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies). */
+  spray: number;
+  /** Smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5). */
+  moveLerp: number;
+  recoil: number;
+  recoilYaw: number;
+  crouchLerp: number;
+  airLerp: number;
+  adsLerp: number;
+  /** Active weapon index into WEAPONS (0 smg, 1 sniper). */
+  slot: number;
+  /** Scoped zoom step: index into WEAPONS[slot].zoomFovs. */
+  zoomLevel: number;
+  zoomScale: number;
+  stepTimer: number;
+  bobAmt: number;
+  scoreKills: number;
+  scoreDeaths: number;
+  roundTime: number;
 }
 
 /**
@@ -178,7 +327,7 @@ export function resetAmmo() {
  * Lerp values (`crouchLerp`, `adsLerp`) are smoothed 0..1 blends updated
  * every frame; never set them directly from input.
  */
-export const game = {
+export const game: GameState = {
   // Map is chosen at page load via ?map=range (start-menu buttons trigger a
   // full reload); there is deliberately no hot-swapping of scenes at runtime.
   // main.js overwrites this from the URL at startup — reading `location` here
@@ -227,4 +376,4 @@ export const game = {
 };
 
 /** Raw keyboard state by `event.code`. Written in main.js, read in player.js. */
-export const keys = {};
+export const keys: Record<string, boolean | undefined> = {};

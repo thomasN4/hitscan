@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { shotDirection, EULER_ORDER } from './ballistics';
 
 /** Forward vector of a camera posed like player.js does. */
-function cameraForward(pitch, yaw, order) {
+function cameraForward(pitch: number, yaw: number, order: THREE.EulerOrder) {
   const cam = new THREE.Object3D();
   cam.rotation.set(pitch, yaw, 0, order);
   cam.updateMatrixWorld(true);

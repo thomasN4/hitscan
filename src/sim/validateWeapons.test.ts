@@ -1,17 +1,27 @@
 import { describe, expect, test } from 'vitest';
 import { validateWeapons } from './validateWeapons';
-import { WEAPONS, RECOIL_CAP } from '../core/state';
+import { WEAPONS, RECOIL_CAP, type WeaponDef } from '../core/state';
 
-const SMG = WEAPONS[0];
-const SNIPER = WEAPONS[1];
+const SMG = WEAPONS[0]!;
+const SNIPER = WEAPONS[1]!;
+
+/** The numeric fields — exactly the ones a NaN can poison. */
+type NumericField = {
+  [K in keyof WeaponDef]-?: WeaponDef[K] extends number ? K : never;
+}[keyof WeaponDef];
 
 /** Clone a weapon def with mutations — the base for every synthetic case. */
-function tuned(muts, base = SMG) {
+function tuned(muts: Partial<WeaponDef>, base: WeaponDef = SMG): WeaponDef {
   return { ...base, ...muts };
 }
 
+/** Clone a weapon def with one numeric field poisoned. */
+function tunedNumeric(field: NumericField, value: number, base: WeaponDef = SMG): WeaponDef {
+  return tuned({ [field]: value }, base);
+}
+
 /** Violations that mention EVERY needle (weapon and field names). */
-function matching(defs, ...needles) {
+function matching(defs: readonly WeaponDef[], ...needles: string[]): string[] {
   return validateWeapons(defs).filter(m => needles.every(s => m.includes(s)));
 }
 
@@ -46,14 +56,17 @@ describe('NaN cannot slip through any bound', () => {
   // Every bound must test its valid case under a negation; a NaN constant
   // compares false against everything and would silently pass a direct
   // broken-case check.
-  test.each([
-    ['recoilRecover', 'recoilRecover'],
-    ['recoilKick', 'recoilKick'],
-    ['yawRecover', 'yawRecover'],
-    ['sprayRecover', 'sprayRecover'],
-    ['sprayKick', 'sprayRecover'], // a NaN kick surfaces as the spray rule's input figure
-  ])('%s = NaN is flagged', (field, needle) => {
-    expect(matching([tuned({ [field]: NaN })], needle)).toHaveLength(1);
+  test.each<NumericField>([
+    'recoilRecover',
+    'recoilKick',
+    'yawRecover',
+    'sprayRecover',
+  ])('%s = NaN is flagged', field => {
+    expect(matching([tunedNumeric(field, NaN)], field)).toHaveLength(1);
+  });
+
+  test('a NaN sprayKick surfaces as the spray rule input figure', () => {
+    expect(matching([tunedNumeric('sprayKick', NaN)], 'sprayRecover')).toHaveLength(1);
   });
 
   test('scopeGate = NaN is flagged', () => {
@@ -100,7 +113,7 @@ describe('static bounds', () => {
     expect(matching([tuned({ zoomFovs: [75] })], 'zoomFovs')).toHaveLength(1); // BASE_FOV itself
   });
 
-  test.each([
+  test.each<[NumericField, number]>([
     ['magSize', 0],
     ['reserveMax', -1],
     ['fireRate', 0],
@@ -108,7 +121,7 @@ describe('static bounds', () => {
     ['damage', 0],
     ['headshotMult', 0.99],
   ])('%s out of range is flagged by name', (field, value) => {
-    expect(matching([tuned({ [field]: value })], 'SMG', field)).toHaveLength(1);
+    expect(matching([tunedNumeric(field, value)], 'SMG', field)).toHaveLength(1);
   });
 
   test('scopeGate outside (0, RECOIL_CAP) is flagged', () => {

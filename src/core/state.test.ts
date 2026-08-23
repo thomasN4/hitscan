@@ -1,8 +1,8 @@
-// Proves core/state.js is importable WITHOUT a browser — no renderer, no
+// Proves core/state.ts is importable WITHOUT a browser — no renderer, no
 // DOM. The bare `import` below IS that assertion: this suite runs in plain
-// Node, so anything browser-only leaking back into state.js at module scope
+// Node, so anything browser-only leaking back into state.ts at module scope
 // makes every test here fail to even load, and the unit-test layer is lost.
-// (Browser globals inside a state.js *function* body are not caught here —
+// (Browser globals inside a state.ts *function* body are not caught here —
 // they are caught by review and by scripts/smoke-test.mjs.)
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, resetAmmo, game, player } from './state';
@@ -18,21 +18,21 @@ describe('state module purity', () => {
 describe('resetAmmo', () => {
   beforeEach(() => {
     // Dirty every field resetAmmo is responsible for restoring.
-    ammoStore[0].mag = 3; ammoStore[0].reserve = 7;
-    ammoStore[1].mag = 1; ammoStore[1].reserve = 2;
+    ammoStore[0]!.mag = 3; ammoStore[0]!.reserve = 7;
+    ammoStore[1]!.mag = 1; ammoStore[1]!.reserve = 2;
     Object.assign(weapon, { name: 'SNIPER', mag: 0, reserve: 0, reloading: true });
     resetAmmo();
   });
 
   test('refills every slot to its full loadout', () => {
     WEAPONS.forEach((def, i) => {
-      expect(ammoStore[i].mag).toBe(def.magSize);
-      expect(ammoStore[i].reserve).toBe(def.reserveMax);
+      expect(ammoStore[i]!.mag).toBe(def.magSize);
+      expect(ammoStore[i]!.reserve).toBe(def.reserveMax);
     });
   });
 
   test('mirrors slot 0 into the live weapon and clears an in-flight reload', () => {
-    const smg = WEAPONS[0];
+    const smg = WEAPONS[0]!;
     expect(weapon.name).toBe(smg.name);
     expect(weapon.mag).toBe(smg.magSize);
     expect(weapon.reserve).toBe(smg.reserveMax);

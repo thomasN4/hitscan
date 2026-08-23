@@ -1,13 +1,13 @@
-// sim/accuracy.js — the shot-cone model, as pure functions.
+// sim/accuracy.ts — the shot-cone model, as pure functions.
 //
-// Pure: no imports from engine.js, no DOM, no reads of shared state. Every
+// Pure: no imports from engine.ts, no DOM, no reads of shared state. Every
 // input is a parameter, so this file is unit-testable in plain Node and
 // converts to TypeScript without restructuring.
 //
 //   totalSpread = ((stance + movement + air) × spray + inherent) × ADS
 //
 //   stance:    CROUCH_FLOOR crouched, + STAND_EXTRA standing
-//   movement:  moveLerp is MEASURED speed ÷ walk (see sim/movement.js), scaled
+//   movement:  moveLerp is MEASURED speed ÷ walk (see sim/movement.ts), scaled
 //              CUBICALLY so sprinting diverges sharply from walking
 //   air:       a flat penalty blended by airLerp — mid-air beats even a
 //              standing sprint, so jump-shooting is never viable
@@ -40,19 +40,26 @@ export const AIR_PENALTY = 0.08;
 /** Floor: even a perfectly still scoped shot keeps this much cone. */
 export const MIN_SPREAD = 0.00005;
 
+/** Inputs to computeSpread — every field a situational spread term reads. */
+export interface SpreadInput {
+  /** 0..1 smoothed crouch blend. */
+  crouchLerp: number;
+  /** Measured speed ÷ walk speed (0 idle, 1 walk, 1.5 sprint). */
+  moveLerp: number;
+  /** 0..1 airborne blend. */
+  airLerp: number;
+  /** Cone multiplier, 1 at rest. */
+  spray: number;
+  /** The weapon's resting cone (radians). */
+  inherent: number;
+  /** 1 when hip-firing, else the weapon's spreadMul. */
+  adsMul: number;
+}
+
 /**
- * Total shot cone in radians (full angle, not half).
- *
- * @param {object} p
- * @param {number} p.crouchLerp 0..1 smoothed crouch blend
- * @param {number} p.moveLerp   measured speed ÷ walk speed (0 idle, 1 walk, 1.5 sprint)
- * @param {number} p.airLerp    0..1 airborne blend
- * @param {number} p.spray      cone multiplier, 1 at rest
- * @param {number} p.inherent   the weapon's resting cone (radians)
- * @param {number} p.adsMul     1 when hip-firing, else the weapon's spreadMul
- * @returns {number} cone in radians, never below MIN_SPREAD
+ * Total shot cone in radians (full angle, not half); never below MIN_SPREAD.
  */
-export function computeSpread({ crouchLerp, moveLerp, airLerp, spray, inherent, adsMul }) {
+export function computeSpread({ crouchLerp, moveLerp, airLerp, spray, inherent, adsMul }: SpreadInput): number {
   const stance = CROUCH_FLOOR + STAND_EXTRA * (1 - crouchLerp);
   const movement = MOVE_PENALTY * Math.pow(moveLerp, MOVE_EXPONENT)
     * (1 - CROUCH_MOVE_RELIEF * crouchLerp);
@@ -86,12 +93,8 @@ export const MAX_GAP_FRACTION = 0.2;
  *
  * Purely proportional — no additive floor. An earlier version added 3 px,
  * which buried the stance differences under a stance-independent baseline.
- *
- * @param {number} spread cone in radians, from computeSpread
- * @param {number} fovDeg live vertical camera FOV in degrees
- * @param {number} viewportHeight px
  */
-export function crosshairGapPx(spread, fovDeg, viewportHeight) {
+export function crosshairGapPx(spread: number, fovDeg: number, viewportHeight: number): number {
   const pxPerTan = viewportHeight / 2 / Math.tan(fovDeg * Math.PI / 360);
   return Math.min(Math.tan(spread / 2) * pxPerTan * CROSSHAIR_GAIN,
     MAX_GAP_FRACTION * viewportHeight);

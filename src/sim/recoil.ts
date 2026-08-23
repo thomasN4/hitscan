@@ -1,9 +1,9 @@
-// sim/recoil.js — recoil accumulation, decay, and the view punch.
+// sim/recoil.ts — recoil accumulation, decay, and the view punch.
 //
-// Pure: every input is a parameter. See sim/accuracy.js for the rationale.
+// Pure: every input is a parameter. See sim/accuracy.ts for the rationale.
 //
 // `recoil` is in abstract "recoil units" (capped at RECOIL_CAP in
-// core/state.js), converted to an aim angle only by aimPitch() via the
+// core/state.ts), converted to an aim angle only by aimPitch() via the
 // weapon's punchRad.
 
 /**
@@ -14,12 +14,8 @@
  * crosshair stops being truthful about where bullets go — that divergence
  * is what shipped as `351f772`/`ed96163`. Keeping it as one pure function
  * with explicit arguments makes the shared call structural.
- *
- * @param {number} pitch    look pitch in radians (game.pitch)
- * @param {number} recoil   accumulated recoil units (game.recoil)
- * @param {number} punchRad radians of climb per recoil unit (per-weapon)
  */
-export function aimPitch(pitch, recoil, punchRad) {
+export function aimPitch(pitch: number, recoil: number, punchRad: number): number {
   return pitch + recoil * punchRad;
 }
 
@@ -31,12 +27,8 @@ export function aimPitch(pitch, recoil, punchRad) {
  * both go through it, so screen center stays truthful horizontally as well as
  * vertically. Movement and mouse input deliberately stay on the BASE yaw: the
  * view punch must not steer the player's legs or fight the mouse.
- *
- * @param {number} yaw       look yaw in radians (game.yaw)
- * @param {number} recoilYaw signed horizontal recoil units (game.recoilYaw)
- * @param {number} punchRad  radians per recoil unit (per-weapon)
  */
-export function aimYaw(yaw, recoilYaw, punchRad) {
+export function aimYaw(yaw: number, recoilYaw: number, punchRad: number): number {
   return yaw + recoilYaw * punchRad;
 }
 
@@ -46,14 +38,14 @@ export function aimYaw(yaw, recoilYaw, punchRad) {
  * `rate` MUST stay below the weapon's sustained-fire input
  * (recoilKick ÷ fireRate), or the drain outpaces accumulation and the spray
  * never climbs — it just vibrates. That constraint has been fixed by hand
- * twice (`46900f7`, `b080350`) and enforced by sim/validateWeapons.js.
+ * twice (`46900f7`, `b080350`) and enforced by sim/validateWeapons.ts.
  *
- * @param {number} recoil current recoil units
- * @param {number} dt     frame delta in seconds
- * @param {number} rate   units/second (weapon.recoilRecover)
- * @returns {number} never negative
+ * @param recoil current recoil units
+ * @param dt     frame delta in seconds
+ * @param rate   units/second (weapon.recoilRecover)
+ * @returns never negative
  */
-export function decayRecoil(recoil, dt, rate) {
+export function decayRecoil(recoil: number, dt: number, rate: number): number {
   return Math.max(0, recoil - dt * rate);
 }
 
@@ -67,12 +59,12 @@ export function decayRecoil(recoil, dt, rate) {
  * Same sustained-fire constraint as decayRecoil: `rate` must stay below
  * sprayKick ÷ fireRate or sprays never bloom at all.
  *
- * @param {number} spray current multiplier (>= 1)
- * @param {number} dt    frame delta in seconds
- * @param {number} rate  multiplier units/second (per-weapon sprayRecover)
- * @returns {number} never below 1
+ * @param spray current multiplier (>= 1)
+ * @param dt    frame delta in seconds
+ * @param rate  multiplier units/second (per-weapon sprayRecover)
+ * @returns never below 1
  */
-export function decaySpray(spray, dt, rate) {
+export function decaySpray(spray: number, dt: number, rate: number): number {
   return Math.max(1, spray - dt * rate);
 }
 
@@ -90,12 +82,8 @@ export function decaySpray(spray, dt, rate) {
  * against the vertical climb instead (rate = recoilRecover) returns the walk to
  * exactly 0 before every shot, so bullets never leave off-centre and only the
  * camera twitches. That is how horizontal recoil first shipped.
- *
- * @param {number} value signed
- * @param {number} dt    frame delta in seconds
- * @param {number} rate  units/second (weapon.yawRecover for the horizontal walk)
  */
-export function decayToward(value, dt, rate) {
+export function decayToward(value: number, dt: number, rate: number): number {
   const step = dt * rate;
   return Math.abs(value) <= step ? 0 : value - Math.sign(value) * step;
 }

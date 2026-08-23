@@ -1,4 +1,4 @@
-// sim/ballistics.js — hitscan shot direction.
+// sim/ballistics.ts — hitscan shot direction.
 //
 // Pure apart from THREE's math classes (Vector3/Euler import fine in Node).
 //
@@ -22,15 +22,19 @@ export const EULER_ORDER = 'YXZ';
  * PRE-kick pitch: weapons.js:shoot builds the ray before adding this shot's
  * recoil, so the first round of a burst lands dead-on (`5e004a5`).
  *
- * @param {number} pitch  aim pitch in radians, INCLUDING the recoil punch
- *                        (i.e. the result of sim/recoil.js:aimPitch)
- * @param {number} yaw    aim yaw in radians (game.yaw)
- * @param {number} spread total cone in radians, from sim/accuracy.js
- * @param {() => number} [rng] uniform [0,1) source; injected so tests can
- *                        make the scatter deterministic
- * @returns {THREE.Vector3} normalized direction
+ * @param pitch  aim pitch in radians, INCLUDING the recoil punch
+ *               (i.e. the result of sim/recoil.ts:aimPitch)
+ * @param yaw    aim yaw in radians (game.yaw)
+ * @param spread total cone in radians, from sim/accuracy.ts
+ * @param rng    uniform [0,1) source; injected so tests can make the
+ *               scatter deterministic
  */
-export function shotDirection(pitch, yaw, spread, rng = Math.random) {
+export function shotDirection(
+  pitch: number,
+  yaw: number,
+  spread: number,
+  rng: () => number = Math.random,
+): THREE.Vector3 {
   return new THREE.Vector3(
     (rng() - 0.5) * spread,
     (rng() - 0.5) * spread,

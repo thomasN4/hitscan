@@ -1,4 +1,4 @@
-// sim/movement.js — speed tiers and the movement-accuracy input.
+// sim/movement.ts — speed tiers and the movement-accuracy input.
 //
 // Pure: every input is a parameter.
 
@@ -13,20 +13,23 @@ export const SPRINT_BONUS = 3.25;
 /** moveLerp ceiling — sprint is 1.5× walk. */
 export const MAX_MOVE_LERP = 1.5;
 
+/** Inputs to speedFor — the stance flags the caller resolves plus the sprint blend. */
+export interface SpeedInput {
+  crouching: boolean;
+  aiming: boolean;
+  running: boolean;
+  /** 0..1 sprint acceleration blend. */
+  runLerp: number;
+}
+
 /**
  * Movement speed for the current stance, in m/s.
  *
  * Precedence is deliberate: crouch and aim both beat sprint, so there is no
  * sprint-scoping and no sprint-crouching. The caller resolves `running` to
  * already exclude those (see player.js).
- *
- * @param {object} p
- * @param {boolean} p.crouching
- * @param {boolean} p.aiming
- * @param {boolean} p.running
- * @param {number}  p.runLerp 0..1 sprint acceleration blend
  */
-export function speedFor({ crouching, aiming, running, runLerp }) {
+export function speedFor({ crouching, aiming, running, runLerp }: SpeedInput): number {
   if (crouching) return CROUCH_SPEED;
   if (aiming) return ADS_SPEED;
   if (running) return WALK_SPEED + SPRINT_BONUS * runLerp;
@@ -39,12 +42,12 @@ export function speedFor({ crouching, aiming, running, runLerp }) {
  * Measured, not intended: walking into a wall must not count as moving, or
  * the crosshair would bloom while the player is stuck in place.
  *
- * @param {number} dx    x displacement this frame (m)
- * @param {number} dz    z displacement this frame (m)
- * @param {number} dt    frame delta (s)
- * @returns {number} 0 idle, 1 walk, up to MAX_MOVE_LERP sprinting
+ * @param dx x displacement this frame (m)
+ * @param dz z displacement this frame (m)
+ * @param dt frame delta (s)
+ * @returns 0 idle, 1 walk, up to MAX_MOVE_LERP sprinting
  */
-export function measuredMoveLerp(dx, dz, dt) {
+export function measuredMoveLerp(dx: number, dz: number, dt: number): number {
   const speed = Math.hypot(dx, dz) / dt;
   return Math.min(speed / WALK_SPEED, MAX_MOVE_LERP);
 }

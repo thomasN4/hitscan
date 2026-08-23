@@ -4,7 +4,7 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone } from './core/state';
-import { player, session, aim, wpn, motion, game, bots, gameTime, resetAmmo } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
@@ -21,7 +21,7 @@ export function damagePlayer(dmg: number): void {
   updateHUD();
   if (player.hp <= 0) {
     player.alive = false;
-    game.scoreDeaths++;
+    score.scoreDeaths++;
     addKillfeed('Bot killed You');
     updateScore();
     document.exitPointerLock();

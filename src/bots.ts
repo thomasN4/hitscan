@@ -12,7 +12,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, game, gameTime, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
+import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
 import { solids, colliders } from './world';
 import { collidesAt, hasLineOfSight } from './collision';
 import { damagePlayer, checkRoundEnd } from './combat';
@@ -157,7 +157,7 @@ export class Bot implements BotShape {
   die(killerPart: HitZone): void {
     this.alive = false;
     this.mesh.visible = false;
-    game.scoreKills++;
+    score.scoreKills++;
     updateScore();
     addKillfeed(`You ${killerPart === 'head' ? '☠ headshot' : 'killed'} Bot`);
     checkRoundEnd();

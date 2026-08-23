@@ -10,9 +10,10 @@
 //
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
-import type { GameState, LiveWeapon, PlayerState } from './core/state';
+import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
+              MapName, WeaponSlot, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -194,9 +195,9 @@ function animate(): void {
 
     // Round timer: arena only — meaningless on the range, so freeze it there
     if (!RANGE) {
-      game.roundTime -= dt;
-      if (game.roundTime <= 0) game.roundTime = 115;
-      setTimer(game.roundTime);
+      score.roundTime -= dt;
+      if (score.roundTime <= 0) score.roundTime = 115;
+      setTimer(score.roundTime);
     }
 
     updateHUD();
@@ -210,10 +211,47 @@ animate();
 
 // Debug/testing hook: inspect live state from devtools (`__cs.game`, ...)
 // or from scripts/smoke-test.mjs.
+//
+// `game` below is a delegation-only FACADE over the owner-scoped slices from
+// core/state.ts (session/input/aim/wpn/motion/score). It exists purely to
+// keep this hook's historical flat shape — the AGENTS.md invariant and the
+// smoke test both read `__cs.game.x` — and holds no state of its own:
+// every access round-trips to a slice. Gameplay code imports the slices
+// directly; do not route logic through this object.
+type DebugGame = SessionState & InputState & AimState & WeaponDynamics & MotionState & ScoreState;
+
+const game: DebugGame = {
+  get map() { return session.map; }, set map(v: MapName) { session.map = v; },
+  get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
+  get started() { return session.started; }, set started(v: boolean) { session.started = v; },
+  get shooting() { return input.shooting; }, set shooting(v: boolean) { input.shooting = v; },
+  get aiming() { return input.aiming; }, set aiming(v: boolean) { input.aiming = v; },
+  get running() { return input.running; }, set running(v: boolean) { input.running = v; },
+  get yaw() { return aim.yaw; }, set yaw(v: number) { aim.yaw = v; },
+  get pitch() { return aim.pitch; }, set pitch(v: number) { aim.pitch = v; },
+  get spread() { return wpn.spread; }, set spread(v: number) { wpn.spread = v; },
+  get spray() { return wpn.spray; }, set spray(v: number) { wpn.spray = v; },
+  get recoil() { return wpn.recoil; }, set recoil(v: number) { wpn.recoil = v; },
+  get recoilYaw() { return wpn.recoilYaw; }, set recoilYaw(v: number) { wpn.recoilYaw = v; },
+  get adsLerp() { return wpn.adsLerp; }, set adsLerp(v: number) { wpn.adsLerp = v; },
+  get slot() { return wpn.slot; }, set slot(v: WeaponSlot) { wpn.slot = v; },
+  get zoomLevel() { return wpn.zoomLevel; }, set zoomLevel(v: number) { wpn.zoomLevel = v; },
+  get zoomScale() { return wpn.zoomScale; }, set zoomScale(v: number) { wpn.zoomScale = v; },
+  get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },
+  get moveLerp() { return motion.moveLerp; }, set moveLerp(v: number) { motion.moveLerp = v; },
+  get crouchLerp() { return motion.crouchLerp; }, set crouchLerp(v: number) { motion.crouchLerp = v; },
+  get airLerp() { return motion.airLerp; }, set airLerp(v: number) { motion.airLerp = v; },
+  get stepTimer() { return motion.stepTimer; }, set stepTimer(v: number) { motion.stepTimer = v; },
+  get bobAmt() { return motion.bobAmt; }, set bobAmt(v: number) { motion.bobAmt = v; },
+  get scoreKills() { return score.scoreKills; }, set scoreKills(v: number) { score.scoreKills = v; },
+  get scoreDeaths() { return score.scoreDeaths; }, set scoreDeaths(v: number) { score.scoreDeaths = v; },
+  get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
+};
+
 declare global {
   interface Window {
     __cs: {
-      game: GameState;
+      game: DebugGame;
       weapon: LiveWeapon;
       player: PlayerState;
       bulletHoles: typeof bulletHoles;

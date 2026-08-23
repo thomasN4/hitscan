@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, game, WEAPONS, BASE_FOV } from './core/state';
+import { player, weapon, input, wpn, score, WEAPONS, BASE_FOV } from './core/state';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -96,10 +96,10 @@ export function addKillfeed(text: string): void {
   setTimeout(() => entry.remove(), 4500);
 }
 
-/** Refresh CT/T round score from game.scoreKills / game.scoreDeaths. */
+/** Refresh CT/T round score from score.scoreKills / score.scoreDeaths. */
 export function updateScore(): void {
-  requireEl('scoreCT').textContent = 'CT ' + game.scoreKills;
-  requireEl('scoreT').textContent = 'T ' + game.scoreDeaths;
+  requireEl('scoreCT').textContent = 'CT ' + score.scoreKills;
+  requireEl('scoreT').textContent = 'T ' + score.scoreDeaths;
 }
 
 /** Format remaining seconds as m:ss in the top-bar timer. */

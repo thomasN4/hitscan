@@ -460,24 +460,24 @@ export const wpn: WeaponDynamics = {
                    // doesn't get twitchy at 12x (computed in weapons.ts)
 };
 
-/** Misc per-frame / transient flags — see the slices above/below. */
-export interface GameState {
+/**
+ * Match bookkeeping. Three writers, one field each: bots.ts increments
+ * scoreKills on a kill, combat.ts increments scoreDeaths when the player
+ * dies, main.ts's loop counts roundTime down (arena only). hud.ts renders.
+ */
+export interface ScoreState {
+  /** Shown as the CT score. */
   scoreKills: number;
+  /** Shown as the T score. */
   scoreDeaths: number;
+  /** Seconds left in the round; resets to 1:55 when it expires. */
   roundTime: number;
 }
 
-/**
- * Remaining unowned-yet fields of the old `game` bag — shrinks as each slice
- * (see above) absorbs its fields. Deleted when the last one leaves.
- *
- * Lerp values (`crouchLerp`, `adsLerp`) are smoothed 0..1 blends updated
- * every frame; never set them directly from input.
- */
-export const game: GameState = {
-  scoreKills: 0,   // shown as "CT" score
-  scoreDeaths: 0,  // shown as "T" score
-  roundTime: 115,  // seconds; resets to 1:55 when it expires
+export const score: ScoreState = {
+  scoreKills: 0,
+  scoreDeaths: 0,
+  roundTime: 115,
 };
 
 /** Raw keyboard state by `event.code`. Written in main.ts, read in player.ts. */

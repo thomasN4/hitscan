@@ -19,8 +19,11 @@
 //   ADS:       the weapon's spreadMul
 //
 // The value this returns is consumed by BOTH the bullet direction
-// (weapons.js:shoot) and the crosshair gap (crosshairGapPx below), which is
-// what keeps the reticle honest about where bullets can land.
+// (weapons.js:shoot) and the crosshair gap (crosshairGapPx below), so the
+// reticle tracks every change in the real cone. It does not draw the cone's
+// literal edge: crosshairGapPx exaggerates by CROSSHAIR_GAIN, so bullets land
+// well inside the arms. What the shared value buys is that the reticle can
+// never disagree with the scatter about DIRECTION or RATIO, only scale.
 
 /** Cone floor at a full crouch, before movement/spray/inherent (radians). */
 export const CROUCH_FLOOR = 0.0006;
@@ -65,8 +68,18 @@ export function computeSpread({ crouchLerp, moveLerp, airLerp, spray, inherent, 
  * the ratios between stances stay truthful while the differences are visible.
  */
 export const CROSSHAIR_GAIN = 6;
-/** Largest crosshair half-gap in px; only extreme sprint/spray cones reach it. */
-export const MAX_GAP_PX = 120;
+/**
+ * Largest crosshair half-gap, as a FRACTION of viewport height.
+ *
+ * Relative because the projection below is: an absolute pixel cap (this was
+ * 120 px) saturates at ordinary states on tall viewports — a standing sprint
+ * projects ~0.131 h and airborne ~0.167 h, so at 1080p and up both clamped to
+ * the same arms despite a 17% difference in cone, defeating the whole reason
+ * CROSSHAIR_GAIN scales uniformly. 0.2 leaves every single-cause state
+ * unclamped at any viewport size; only compounded sprint+air+spray saturates,
+ * and there the arms are off toward the screen edge anyway.
+ */
+export const MAX_GAP_FRACTION = 0.2;
 
 /**
  * Project a shot cone onto the screen as a crosshair half-gap in pixels.
@@ -80,5 +93,6 @@ export const MAX_GAP_PX = 120;
  */
 export function crosshairGapPx(spread, fovDeg, viewportHeight) {
   const pxPerTan = viewportHeight / 2 / Math.tan(fovDeg * Math.PI / 360);
-  return Math.min(Math.tan(spread / 2) * pxPerTan * CROSSHAIR_GAIN, MAX_GAP_PX);
+  return Math.min(Math.tan(spread / 2) * pxPerTan * CROSSHAIR_GAIN,
+    MAX_GAP_FRACTION * viewportHeight);
 }

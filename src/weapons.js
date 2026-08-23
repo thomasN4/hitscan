@@ -22,7 +22,7 @@ import { approach } from './sim/smoothing.js';
 
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the
-// view transform. One group per slot (rifle / sniper); visibility follows
+// view transform. One group per slot (smg / sniper); visibility follows
 // game.slot every frame. Position is animated each frame in
 // updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.js).
@@ -31,18 +31,18 @@ import { approach } from './sim/smoothing.js';
 // initEngine() to have run first — see initWeaponViewmodels().
 export const gunGroup = new THREE.Group();
 
-const rifleGroup = new THREE.Group();
-let rifleMag; // kept for the reload animation (mag drop/reseat)
+const smgGroup = new THREE.Group();
+let smgMag; // kept for the reload animation (mag drop/reseat)
 {
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b2b2b });
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.5), dark);
   body.position.set(0.25, -0.22, -0.45); // lower-right of the view
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
   barrel.position.set(0.25, -0.19, -0.82);
-  rifleMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
-  rifleMag.position.set(0.25, -0.31, -0.42);
-  rifleMag.userData.baseY = -0.31;
-  rifleGroup.add(body, barrel, rifleMag);
+  smgMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
+  smgMag.position.set(0.25, -0.31, -0.42);
+  smgMag.userData.baseY = -0.31;
+  smgGroup.add(body, barrel, smgMag);
 }
 
 const sniperGroup = new THREE.Group();
@@ -67,7 +67,7 @@ let sniperMag; // kept for the reload animation (mag drop/reseat)
   sniperGroup.add(body, barrel, stock, scope, mag);
 }
 
-gunGroup.add(rifleGroup, sniperGroup);
+gunGroup.add(smgGroup, sniperGroup);
 
 const raycaster = new THREE.Raycaster();
 const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
@@ -148,15 +148,34 @@ export function tryReload() {
 }
 
 /**
- * Switch to slot `slot` (0 rifle, 1 sniper). Saves the current mag/reserve
+ * Switch to slot `slot` (0 smg, 1 sniper). Saves the current mag/reserve
  * back into ammoStore so mugs don't refill on swap, copies the new slot's
- * stats into the live `weapon` object, and resets scope zoom. Blocked while
- * reloading to avoid mid-mag-swap state corruption.
+ * stats into the live `weapon` object, converts the live recoil/spray state to
+ * the incoming weapon's terms, and resets scope zoom. Blocked while reloading
+ * to avoid mid-mag-swap state corruption.
  */
 export function switchWeapon(slot) {
   if (slot === game.slot || !game.started || !player.alive || weapon.reloading) return;
   ammoStore[game.slot].mag = weapon.mag;
   ammoStore[game.slot].reserve = weapon.reserve;
+
+  // Recoil/spray state is weapon-RELATIVE, so the swap converts it instead of
+  // carrying the raw numbers across. `recoil`/`recoilYaw` are abstract units
+  // that only become an angle via punchRad, so rescaling by the punchRad ratio
+  // is what keeps the view punch continuous — otherwise the sniper's 0.02
+  // renders the smg's stored units as a different angle and the aim snaps.
+  // `spray` is weapon-agnostic but bounded per weapon, so it re-clamps: without
+  // this the sniper's 2.7 followed a swap onto an smg that cannot generate past
+  // ~1.9, widening its cone ~75% for seconds.
+  // Converting rather than zeroing also matters because switching costs no time
+  // here: a reset would make 1-2-1 a free recoil cancel and would let a swap
+  // dodge the sniper's scopeGate.
+  const punchRatio = WEAPONS[game.slot].punchRad / WEAPONS[slot].punchRad;
+  game.recoil = Math.min(game.recoil * punchRatio, RECOIL_CAP);
+  game.recoilYaw = THREE.MathUtils.clamp(
+    game.recoilYaw * punchRatio, -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
+  game.spray = Math.min(game.spray, WEAPONS[slot].sprayCap);
+
   game.slot = slot;
   game.zoomLevel = 0; // always re-enter the scope at its lowest step
   const def = WEAPONS[slot];
@@ -175,9 +194,9 @@ export function switchWeapon(slot) {
 }
 
 /**
- * Fire one shot: consume ammo, apply recoil/spread bloom, then hitscan.
- * The spread cone widens with consecutive fire (`game.spread`) and shrinks
- * to the weapon's spreadMul while aiming. Nearest hit across solids + live
+ * Fire one shot: consume ammo, kick recoil and spray, then hitscan.
+ * The spread cone widens with consecutive fire (via the `game.spray`
+ * multiplier) and shrinks to the weapon's spreadMul while aiming. Nearest hit across solids + live
  * bot parts decides the outcome — bot hit -> damage by zone, wall hit ->
  * impact puff only.
  */
@@ -274,7 +293,7 @@ export function updateWeapon(dt) {
   game.recoilYaw = decayToward(game.recoilYaw, dt, def.yawRecover);
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
-  // rifle has a single iron-sights step; the sniper cycles its wheel-chosen
+  // the smg has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules).
   if (!game.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
@@ -291,7 +310,7 @@ export function updateWeapon(dt) {
 
   // Viewmodel visibility: per-slot group swap; the sniper disappears
   // entirely once the full-screen scope reticle takes over.
-  rifleGroup.visible = game.slot === 0;
+  smgGroup.visible = game.slot === 0;
   sniperGroup.visible = game.slot === 1;
   gunGroup.visible = !(def.scopedOverlay && game.adsLerp > 0.85);
 
@@ -304,7 +323,7 @@ export function updateWeapon(dt) {
   const reloadT = weapon.reloading
     ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - nowS) / weapon.reloadTime, 0, 1)
     : 0;
-  if (game.slot === 0) poseReload(rifleGroup, rifleMag, reloadT);
+  if (game.slot === 0) poseReload(smgGroup, smgMag, reloadT);
   else poseReload(sniperGroup, sniperMag, reloadT);
 
   // Reload finish: top the mag back up from reserve (partial reloads allowed).
@@ -318,7 +337,7 @@ export function updateWeapon(dt) {
     weapon.reloading = false;
   }
 
-  // Trigger: rifle is full-auto while LMB held; semi-autos (sniper) fire
+  // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire
   // once per press — the latch blocks repeats until the button is released.
   if (!game.shooting) triggerLatch = false;
   else if (!def.semiAuto || !triggerLatch) {
@@ -330,9 +349,10 @@ export function updateWeapon(dt) {
 
   // ---- Accuracy model -------------------------------------------------
   // The model itself (and its tuning constants) lives in sim/accuracy.js;
-  // this just feeds it live state. game.spread is consumed by shoot(), and
-  // the crosshair gap derives from the SAME value, keeping what you see in
-  // sync with where bullets go.
+  // this just feeds it live state. game.spread is consumed by shoot(), and the
+  // crosshair gap derives from the SAME value, so the arms move with every
+  // change in the real cone — deliberately exaggerated by CROSSHAIR_GAIN, so
+  // they read as a proportional indicator, not the edge of the group.
   game.spread = computeSpread({
     crouchLerp: game.crouchLerp,
     moveLerp: game.moveLerp,

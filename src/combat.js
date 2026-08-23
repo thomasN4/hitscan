@@ -55,6 +55,12 @@ export function respawn() {
   game.recoil = 0;    // else the view punch would spawn the camera mid-climb
   game.recoilYaw = 0; // and mid-wander, off to one side
   game.spray = 1;     // resting multiplier, NOT 0 — see core/state.js
+  // Same class: the accuracy/pose blends are smoothed toward their target over
+  // ~100-200 ms, so dying mid-air respawns you inside the full AIR_PENALTY
+  // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
+  game.airLerp = 0;
+  game.crouchLerp = 0;
+  game.adsLerp = 0;
   resetAmmo();    // refills both slots and mirrors the smg into `weapon`
   game.slot = 0;
   game.zoomLevel = 0;

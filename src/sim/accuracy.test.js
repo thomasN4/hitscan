@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   computeSpread, crosshairGapPx,
-  MIN_SPREAD, MAX_GAP_PX, AIR_PENALTY, MOVE_EXPONENT,
+  MIN_SPREAD, MAX_GAP_FRACTION, AIR_PENALTY, MOVE_EXPONENT,
 } from './accuracy.js';
 import { WEAPONS } from '../core/state.js';
 
@@ -147,6 +147,17 @@ describe('crosshairGapPx', () => {
   });
 
   test('saturates rather than pushing arms off screen', () => {
-    expect(crosshairGapPx(AIR_PENALTY * 2, 6.25, 800)).toBe(MAX_GAP_PX);
+    expect(crosshairGapPx(AIR_PENALTY * 2, 6.25, 800)).toBe(MAX_GAP_FRACTION * 800);
+  });
+
+  test('the cap scales with the viewport, so ratios survive a tall screen', () => {
+    // An absolute pixel cap clamped a standing sprint and a jump-shot to the
+    // same arms at 1080p, hiding a 17% difference in cone.
+    const sprint = 0.073, airborne = 0.0855; // standing sprint / mid-air cones
+    for (const h of [800, 1000, 1440]) {
+      expect(crosshairGapPx(airborne, 75, h)).toBeLessThan(MAX_GAP_FRACTION * h);
+      expect(crosshairGapPx(airborne, 75, h))
+        .toBeGreaterThan(crosshairGapPx(sprint, 80, h));
+    }
   });
 });

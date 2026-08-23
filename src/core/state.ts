@@ -403,6 +403,38 @@ export interface WeaponDynamics {
   zoomScale: number;
 }
 
+/**
+ * Movement/stance blends and feedback timers. Written by player.ts's
+ * updateMovement (stage 1); combat.ts's respawn() resets the stance blends
+ * so you don't respawn mid-air or mid-crouch; weapons.ts reads them to feed
+ * the accuracy model and the sprint FOV kick.
+ *
+ * Every `*Lerp` here is a smoothed 0..1 blend updated each frame — never set
+ * one directly from input.
+ */
+export interface MotionState {
+  /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
+  runLerp: number;
+  /** Smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5). */
+  moveLerp: number;
+  crouchLerp: number;
+  /** 0..1 airborne blend; see updateMovement for why it is written in stage 1. */
+  airLerp: number;
+  stepTimer: number;
+  bobAmt: number;
+}
+
+export const motion: MotionState = {
+  runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
+  moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
+                   // drives the movement accuracy penalty
+  crouchLerp: 0,
+  airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
+                   // out over ~100-200 ms so it doesn't snap on takeoff/landing
+  stepTimer: 0.2,  // countdown to next footstep sound
+  bobAmt: 0,       // current view-bob amplitude, computed in player.ts
+};
+
 export const wpn: WeaponDynamics = {
   spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
                    // in weapons.ts from (stance + movement + air) × spray,
@@ -430,13 +462,6 @@ export const wpn: WeaponDynamics = {
 
 /** Misc per-frame / transient flags — see the slices above/below. */
 export interface GameState {
-  /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
-  runLerp: number;
-  moveLerp: number;
-  crouchLerp: number;
-  airLerp: number;
-  stepTimer: number;
-  bobAmt: number;
   scoreKills: number;
   scoreDeaths: number;
   roundTime: number;
@@ -450,14 +475,6 @@ export interface GameState {
  * every frame; never set them directly from input.
  */
 export const game: GameState = {
-  runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
-  moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
-                   // drives the movement accuracy penalty
-  crouchLerp: 0,
-  airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
-                   // out over ~100-200 ms so it doesn't snap on takeoff/landing
-  stepTimer: 0.2,  // countdown to next footstep sound
-  bobAmt: 0,       // current view-bob amplitude, computed in player.ts
   scoreKills: 0,   // shown as "CT" score
   scoreDeaths: 0,  // shown as "T" score
   roundTime: 115,  // seconds; resets to 1:55 when it expires

@@ -4,7 +4,7 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone } from './core/state';
-import { player, session, aim, wpn, game, bots, gameTime, resetAmmo } from './core/state';
+import { player, session, aim, wpn, motion, game, bots, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
@@ -62,8 +62,8 @@ export function respawn(): void {
   // Same class: the accuracy/pose blends are smoothed toward their target over
   // ~100-200 ms, so dying mid-air respawns you inside the full AIR_PENALTY
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
-  game.airLerp = 0;
-  game.crouchLerp = 0;
+  motion.airLerp = 0;
+  motion.crouchLerp = 0;
   wpn.adsLerp = 0;
   resetAmmo();    // refills both slots and mirrors the smg into `weapon`
   wpn.slot = 0;

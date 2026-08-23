@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, input, aim, wpn, game, player, gameTime, WEAPONS, ammoStore,
+import { bots, weapon, session, input, aim, wpn, motion, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          type WeaponDef, type WeaponSlot } from './core/state';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
@@ -337,7 +337,7 @@ export function updateWeapon(dt: number): void {
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
   // usable; main.ts multiplies mouse deltas by this.
   wpn.zoomScale = 1 - (1 - aimFov / BASE_FOV) * wpn.adsLerp;
-  const targetFov = BASE_FOV + 5 * game.runLerp - (BASE_FOV - aimFov) * wpn.adsLerp;
+  const targetFov = BASE_FOV + 5 * motion.runLerp - (BASE_FOV - aimFov) * wpn.adsLerp;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov = approach(camera.fov, targetFov, dt, ADS_RATE);
     camera.updateProjectionMatrix();
@@ -390,9 +390,9 @@ export function updateWeapon(dt: number): void {
   // change in the real cone — deliberately exaggerated by CROSSHAIR_GAIN, so
   // they read as a proportional indicator, not the edge of the group.
   wpn.spread = computeSpread({
-    crouchLerp: game.crouchLerp,
-    moveLerp: game.moveLerp,
-    airLerp: game.airLerp,
+    crouchLerp: motion.crouchLerp,
+    moveLerp: motion.moveLerp,
+    airLerp: motion.airLerp,
     spray: wpn.spray,
     inherent: def.inherent,
     adsMul: input.aiming ? def.spreadMul : 1,

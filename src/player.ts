@@ -14,7 +14,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, aim, wpn, game, keys, gameTime } from './core/state';
+import { player, input, aim, wpn, motion, keys, gameTime } from './core/state';
 import { collidesAt } from './collision';
 import { colliders } from './world';
 import { sfxFootstep } from './audio';
@@ -65,7 +65,7 @@ export function updateMovement(dt: number): void {
   // can't crouch mid-air to shrink the camera.
   const crouching = key('ShiftLeft') && player.onGround;
   const running = input.running && !crouching && !input.aiming;
-  const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: game.runLerp });
+  const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: motion.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(aim.yaw), 0, -Math.cos(aim.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)
@@ -93,7 +93,7 @@ export function updateMovement(dt: number): void {
   // wall doesn't count as moving. Smoothed ~100 ms for gradual crosshair
   // transitions.
   const target = measuredMoveLerp(player.pos.x - preX, player.pos.z - preZ, dt);
-  game.moveLerp = deadZone(approach(game.moveLerp, target, dt, BLEND_RATE));
+  motion.moveLerp = deadZone(approach(motion.moveLerp, target, dt, BLEND_RATE));
 
   // Jump / gravity
   if (key('Space') && player.onGround) { player.vel.y = JUMP_VEL; player.onGround = false; }
@@ -106,35 +106,35 @@ export function updateMovement(dt: number): void {
 
   // Sprint acceleration ramp: ~0.2 s to full speed (exponential ease-in).
   // Decays when not running so releasing W eases out the same way.
-  game.runLerp = deadZone(
-    approach(game.runLerp, running && moving ? 1 : 0, dt, 1 / SPRINT_RAMP));
+  motion.runLerp = deadZone(
+    approach(motion.runLerp, running && moving ? 1 : 0, dt, 1 / SPRINT_RAMP));
 
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
-  game.crouchLerp = approach(game.crouchLerp, crouching ? 1 : 0, dt, BLEND_RATE);
+  motion.crouchLerp = approach(motion.crouchLerp, crouching ? 1 : 0, dt, BLEND_RATE);
 
   // Airborne blend for the accuracy model. Written HERE, in stage 1, because
   // updateWeapon reads it to compute spread — deferring it to a later stage
   // would price every mid-air shot off the previous frame's stance. It also
   // has to follow the gravity block above, which is what sets player.onGround.
-  game.airLerp = deadZone(
-    approach(game.airLerp, player.onGround ? 0 : 1, dt, AIR_BLEND_RATE));
+  motion.airLerp = deadZone(
+    approach(motion.airLerp, player.onGround ? 0 : 1, dt, AIR_BLEND_RATE));
 
   camera.position.copy(player.pos);
-  camera.position.y -= CROUCH_DROP * game.crouchLerp;
+  camera.position.y -= CROUCH_DROP * motion.crouchLerp;
 
   // Footsteps: timed by distance-run (stepTimer), silent while crouching or
   // airborne. Timer is pre-charged when stopping so the first step after a
   // pause comes quickly but not instantly.
   if (moving && !crouching) {
-    game.stepTimer -= dt;
-    if (game.stepTimer <= 0) { sfxFootstep(); game.stepTimer = speed > 8 ? 0.3 : speed > 5 ? 0.38 : 0.55; }
+    motion.stepTimer -= dt;
+    if (motion.stepTimer <= 0) { sfxFootstep(); motion.stepTimer = speed > 8 ? 0.3 : speed > 5 ? 0.38 : 0.55; }
   } else {
-    game.stepTimer = Math.min(game.stepTimer, 0.2);
+    motion.stepTimer = Math.min(motion.stepTimer, 0.2);
   }
 
   // View bob (applied to the weapon viewmodel); heavier while sprinting
-  game.bobAmt = moving ? (crouching ? 0.008 : 0.02 + 0.01 * game.runLerp) : 0;
+  motion.bobAmt = moving ? (crouching ? 0.008 : 0.02 + 0.01 * motion.runLerp) : 0;
 }
 
 /**
@@ -170,7 +170,7 @@ export function updateViewmodel(): void {
   gunGroup.position.x = -0.25 * wpn.adsLerp;
   // Bob phase runs on game time so a pause doesn't snap the weapon to an
   // arbitrary point of the cycle on resume.
-  gunGroup.position.y = 0.14 * wpn.adsLerp + Math.sin(gameTime.now() * 10) * game.bobAmt;
+  gunGroup.position.y = 0.14 * wpn.adsLerp + Math.sin(gameTime.now() * 10) * motion.bobAmt;
   gunGroup.position.z = wpn.recoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
   gunGroup.rotation.x = wpn.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
                                              // so a full climb must stay a nudge, not a tilt

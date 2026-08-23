@@ -46,7 +46,7 @@ export function aimYaw(yaw, recoilYaw, punchRad) {
  * `rate` MUST stay below the weapon's sustained-fire input
  * (recoilKick ÷ fireRate), or the drain outpaces accumulation and the spray
  * never climbs — it just vibrates. That constraint has been fixed by hand
- * twice (`46900f7`, `b080350`); PR 4's sim/validateWeapons.js will enforce it.
+ * twice (`46900f7`, `b080350`) and enforced by sim/validateWeapons.js.
  *
  * @param {number} recoil current recoil units
  * @param {number} dt     frame delta in seconds

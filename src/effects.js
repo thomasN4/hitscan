@@ -5,8 +5,8 @@
 // updateEffects. Bullet holes are static decals tracked in core.bulletHoles
 // with a FIFO cap — they need no per-frame update.
 import * as THREE from 'three';
-import { scene } from './core/engine.js';
-import { impacts, bulletHoles } from './core/state.js';
+import { scene } from './core/engine';
+import { impacts, bulletHoles } from './core/state';
 
 /**
  * Spawn a small bright sphere at `point` that swells and fades over 0.25s.

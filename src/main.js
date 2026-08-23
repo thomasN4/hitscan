@@ -7,19 +7,19 @@
 //
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
-import { initEngine, renderer, scene, camera, clock } from './core/engine.js';
-import { game, keys, player, weapon, bulletHoles, WEAPONS } from './core/state.js';
-import { colliders } from './world.js';
-import { buildMap } from './map.js';
-import { buildRange } from './range.js';
-import { updateMovement, updateCamera, updateViewmodel } from './player.js';
-import { spawnBots, updateBots } from './bots.js';
-import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons.js';
-import { updateEffects } from './effects.js';
-import { respawn } from './combat.js';
-import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud.js';
-import { sfxZoom } from './audio.js';
-import { validateWeapons } from './sim/validateWeapons.js';
+import { initEngine, renderer, scene, camera, clock } from './core/engine';
+import { game, keys, player, weapon, bulletHoles, WEAPONS } from './core/state';
+import { colliders } from './world';
+import { buildMap } from './map';
+import { buildRange } from './range';
+import { updateMovement, updateCamera, updateViewmodel } from './player';
+import { spawnBots, updateBots } from './bots';
+import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons';
+import { updateEffects } from './effects';
+import { respawn } from './combat';
+import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
+import { sfxZoom } from './audio';
+import { validateWeapons } from './sim/validateWeapons';
 
 // ---------- Startup ----------
 // Order matters and is deliberately explicit: initEngine() creates the

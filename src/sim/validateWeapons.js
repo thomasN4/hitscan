@@ -17,7 +17,7 @@
 // exemption flags shipped-correct tuning, and the obvious "fix" breaks the
 // scope gate.
 
-import { RECOIL_CAP, BASE_FOV } from '../core/state.js';
+import { RECOIL_CAP, BASE_FOV } from '../core/state';
 
 /** View climb at RECOIL_CAP beyond which pulling down can't track the kick. */
 const MAX_CLIMB_DEG = 10;

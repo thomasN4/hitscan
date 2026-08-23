@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { speedFor, measuredMoveLerp, WALK_SPEED, MAX_MOVE_LERP } from './movement.js';
-import { approach, deadZone } from './smoothing.js';
+import { speedFor, measuredMoveLerp, WALK_SPEED, MAX_MOVE_LERP } from './movement';
+import { approach, deadZone } from './smoothing';
 
 const still = { crouching: false, aiming: false, running: false, runLerp: 0 };
 

@@ -3,9 +3,9 @@
 // This module is the single place where HP crosses 0: bots call
 // damagePlayer, weapons.js calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
-import { player, game, bots, resetAmmo } from './core/state.js';
-import { sfxHurt } from './audio.js';
-import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud.js';
+import { player, game, bots, resetAmmo } from './core/state';
+import { sfxHurt } from './audio';
+import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud';
 
 /**
  * Apply damage to the player. On death: awards the bot-side score,

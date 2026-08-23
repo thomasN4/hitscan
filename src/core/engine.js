@@ -13,7 +13,7 @@
 // modules expose their own init* functions rather than wiring things up on
 // import. See main.js for the required init order.
 import * as THREE from 'three';
-import { BASE_FOV } from './state.js';
+import { BASE_FOV } from './state';
 
 /** @type {THREE.WebGLRenderer} */ export let renderer;
 /** @type {THREE.Scene} */        export let scene;

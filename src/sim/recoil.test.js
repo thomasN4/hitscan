@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './recoil.js';
-import { WEAPONS, RECOIL_CAP, RECOIL_YAW_CAP } from '../core/state.js';
+import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './recoil';
+import { WEAPONS, RECOIL_CAP, RECOIL_YAW_CAP } from '../core/state';
 
 describe('aimPitch', () => {
   test('at rest is exactly the look pitch', () => {

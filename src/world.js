@@ -15,7 +15,7 @@
 // core/engine.js has no module-scope side effects, so importing this file
 // outside a browser is safe.
 import * as THREE from 'three';
-import { scene } from './core/engine.js';
+import { scene } from './core/engine';
 
 /** Meshes that block bullets AND bot line-of-sight. */
 export const solids = [];

@@ -4,8 +4,8 @@
 // raycast target and a movement AABB. Do not add meshes to the scene
 // directly: that is how you get walk-through / shoot-through bugs.
 import * as THREE from 'three';
-import { scene } from './core/engine.js';
-import { addSolidBox, registerSolid } from './world.js';
+import { scene } from './core/engine';
+import { addSolidBox, registerSolid } from './world';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xc9a86c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });

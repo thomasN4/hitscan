@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { shotDirection, EULER_ORDER } from './ballistics.js';
+import { shotDirection, EULER_ORDER } from './ballistics';
 
 /** Forward vector of a camera posed like player.js does. */
 function cameraForward(pitch, yaw, order) {

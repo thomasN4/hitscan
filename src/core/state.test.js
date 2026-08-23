@@ -5,7 +5,7 @@
 // (Browser globals inside a state.js *function* body are not caught here —
 // they are caught by review and by scripts/smoke-test.mjs.)
 import { describe, expect, test, beforeEach } from 'vitest';
-import { WEAPONS, ammoStore, weapon, resetAmmo, game, player } from './state.js';
+import { WEAPONS, ammoStore, weapon, resetAmmo, game, player } from './state';
 
 describe('state module purity', () => {
   // main.js overwrites game.map from ?map= at startup; the pure default the

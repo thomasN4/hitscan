@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { validateWeapons } from './validateWeapons.js';
-import { WEAPONS, RECOIL_CAP } from '../core/state.js';
+import { validateWeapons } from './validateWeapons';
+import { WEAPONS, RECOIL_CAP } from '../core/state';
 
 const SMG = WEAPONS[0];
 const SNIPER = WEAPONS[1];

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { damageForPart, partForMesh } from './damage.js';
-import { WEAPONS } from '../core/state.js';
+import { damageForPart, partForMesh } from './damage';
+import { WEAPONS } from '../core/state';
 
 const bot = { head: { id: 'h' }, torso: { id: 't' }, legs: { id: 'l' } };
 

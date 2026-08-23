@@ -11,14 +11,14 @@
 // this instance — weapons.js raycasts against head/torso/legs directly and
 // multiplies damage by zone.
 import * as THREE from 'three';
-import { scene, camera } from './core/engine.js';
-import { bots, game } from './core/state.js';
-import { solids, colliders } from './world.js';
-import { collidesAt, hasLineOfSight } from './collision.js';
-import { damagePlayer, checkRoundEnd } from './combat.js';
-import { sfxEnemyShoot } from './audio.js';
-import { spawnImpact } from './effects.js';
-import { addKillfeed, updateScore } from './hud.js';
+import { scene, camera } from './core/engine';
+import { bots, game } from './core/state';
+import { solids, colliders } from './world';
+import { collidesAt, hasLineOfSight } from './collision';
+import { damagePlayer, checkRoundEnd } from './combat';
+import { sfxEnemyShoot } from './audio';
+import { spawnImpact } from './effects';
+import { addKillfeed, updateScore } from './hud';
 
 const BOT_COUNT = 6;
 // Shared geometries/materials — one allocation for all bots.

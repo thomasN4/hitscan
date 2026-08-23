@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest';
 import {
   computeSpread, crosshairGapPx,
   MIN_SPREAD, MAX_GAP_FRACTION, AIR_PENALTY, MOVE_EXPONENT,
-} from './accuracy.js';
-import { WEAPONS } from '../core/state.js';
+} from './accuracy';
+import { WEAPONS } from '../core/state';
 
 /** Rested, standing, hip-firing, no inherent cone — isolates one term at a time. */
 const still = { crouchLerp: 0, moveLerp: 0, airLerp: 0, spray: 1, inherent: 0, adsMul: 1 };

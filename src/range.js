@@ -12,8 +12,8 @@
 // the whole range map was no-clip (`431ac6e`). There is now one
 // implementation to get wrong.
 import * as THREE from 'three';
-import { scene } from './core/engine.js';
-import { addSolidBox, registerSolid, registerGroupParts } from './world.js';
+import { scene } from './core/engine';
+import { addSolidBox, registerSolid, registerGroupParts } from './world';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });

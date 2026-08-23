@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core.js state directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, game, WEAPONS, BASE_FOV } from './core/state.js';
+import { player, weapon, game, WEAPONS, BASE_FOV } from './core/state';
 
 // Element refs are resolved by initHUD() rather than at module scope, so
 // importing this module does not require a DOM. main.js calls initHUD()

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {
   solids, colliders, resetWorld,
   createSolidBox, registerSolid, registerSolidBox, registerGroupParts,
-} from './world.js';
+} from './world';
 
 const box = (w = 1, h = 1, d = 1) =>
   new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial());

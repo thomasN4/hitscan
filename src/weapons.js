@@ -6,19 +6,19 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
-import { scene, camera, clock } from './core/engine.js';
-import { solids } from './world.js';
+import { scene, camera, clock } from './core/engine';
+import { solids } from './world';
 import { bots, weapon, game, player, WEAPONS, ammoStore,
-         RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV } from './core/state.js';
-import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
-import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';
-import { damageBot } from './combat.js';
-import { spawnImpact, spawnBulletHole } from './effects.js';
-import { computeSpread, crosshairGapPx } from './sim/accuracy.js';
-import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './sim/recoil.js';
-import { shotDirection } from './sim/ballistics.js';
-import { damageForPart, partForMesh } from './sim/damage.js';
-import { approach } from './sim/smoothing.js';
+         RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV } from './core/state';
+import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
+import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
+import { damageBot } from './combat';
+import { spawnImpact, spawnBulletHole } from './effects';
+import { computeSpread, crosshairGapPx } from './sim/accuracy';
+import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './sim/recoil';
+import { shotDirection } from './sim/ballistics';
+import { damageForPart, partForMesh } from './sim/damage';
+import { approach } from './sim/smoothing';
 
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the

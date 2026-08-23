@@ -13,15 +13,15 @@
 // AFTER it. Speed tiers and the moveLerp math live in sim/movement.js; the
 // blends use sim/smoothing.js.
 import * as THREE from 'three';
-import { camera, clock } from './core/engine.js';
-import { player, game, keys } from './core/state.js';
-import { collidesAt } from './collision.js';
-import { colliders } from './world.js';
-import { sfxFootstep } from './audio.js';
-import { gunGroup, currentAimPitch, currentAimYaw } from './weapons.js';
-import { crosshair } from './hud.js';
-import { speedFor, measuredMoveLerp } from './sim/movement.js';
-import { approach, deadZone } from './sim/smoothing.js';
+import { camera, clock } from './core/engine';
+import { player, game, keys } from './core/state';
+import { collidesAt } from './collision';
+import { colliders } from './world';
+import { sfxFootstep } from './audio';
+import { gunGroup, currentAimPitch, currentAimYaw } from './weapons';
+import { crosshair } from './hud';
+import { speedFor, measuredMoveLerp } from './sim/movement';
+import { approach, deadZone } from './sim/smoothing';
 
 const GRAVITY = 22;    // m/s^2; tuned so jump arc feels snappy at 60fps+
 const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex

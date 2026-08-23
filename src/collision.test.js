@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { collidesAt, TEST_BOX_MIN_Y, TEST_BOX_MAX_Y } from './collision.js';
+import { collidesAt, TEST_BOX_MIN_Y, TEST_BOX_MAX_Y } from './collision';
 
 /** AABB spanning y 0..height, centred on (x, z). */
 const wall = (x, z, halfW = 1, height = 4) => new THREE.Box3(

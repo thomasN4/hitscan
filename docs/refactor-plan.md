@@ -217,7 +217,7 @@ and inverting the drain guard into drain-everything).
 
 ### PR 9 — Owner-scoped state slices (`refactor/game-slices`)
 
-The flat 24-field `game` bag split by owning system, all slices still
+The flat 25-field `game` bag split by owning system, all slices still
 exported from `core/state.ts` (ownership clarity, not new module homes):
 
 | slice | fields | writer(s) |
@@ -251,8 +251,6 @@ against dev server (:5197) and `vite preview` (:5198). Behavior identical —
 a pure refactor with no declared changes. AGENTS.md/tsconfig comments were
 swept onto slice names; this file's PR 7-era `game.*` mentions are left as
 period records.
-
----
 
 ---
 

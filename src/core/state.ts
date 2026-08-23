@@ -381,9 +381,10 @@ export const aim: AimState = {
 
 /**
  * Weapon DYNAMICS — the live accuracy/recoil/ADS state driven by firing and
- * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, updateWeapon);
+ * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, updateWeapon)
+ * plus one main.ts write — its wheel handler steps zoomLevel while scoped;
  * combat.ts's respawn() resets it to round-start values; main.ts and hud.ts
- * read it (scope gate, wheel zoom, zoom label).
+ * read it (sensitivity scaling and scope gate, zoom label).
  *
  * Lerp values (`adsLerp`) are smoothed 0..1 blends updated every frame;
  * never set them directly from input.

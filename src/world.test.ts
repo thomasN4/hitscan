@@ -5,7 +5,7 @@ import {
   createSolidBox, registerSolid, registerSolidBox, registerGroupParts,
 } from './world';
 
-const box = (w = 1, h = 1, d = 1) =>
+const box = (w = 1, h = 1, d = 1): THREE.Mesh =>
   new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial());
 
 beforeEach(resetWorld);
@@ -23,7 +23,7 @@ describe('registerSolidBox', () => {
     const mesh = box(2, 2, 2);
     mesh.position.set(10, 0, -5);
     registerSolidBox(mesh);
-    const centre = colliders[0].getCenter(new THREE.Vector3());
+    const centre = colliders[0]!.getCenter(new THREE.Vector3());
     expect(centre.x).toBeCloseTo(10, 6);
     expect(centre.z).toBeCloseTo(-5, 6);
   });
@@ -47,7 +47,7 @@ describe('registerSolid', () => {
 
 describe('registerGroupParts', () => {
   /** A range-target-shaped group: parts positioned locally, group moved away. */
-  function target(x, z) {
+  function target(x: number, z: number) {
     const group = new THREE.Group();
     const post = box(0.15, 1, 0.15);
     const head = box(0.34, 0.34, 0.34);
@@ -103,8 +103,8 @@ describe('createSolidBox', () => {
     // by the ground they stand on, so a box of height 3 based at y=0 must
     // span 0..3 — not -1.5..1.5.
     registerSolidBox(createSolidBox(0, 0, 0, 2, 3, 2));
-    expect(colliders[0].min.y).toBeCloseTo(0, 6);
-    expect(colliders[0].max.y).toBeCloseTo(3, 6);
+    expect(colliders[0]!.min.y).toBeCloseTo(0, 6);
+    expect(colliders[0]!.max.y).toBeCloseTo(3, 6);
   });
 
   test('and that assertion is not vacuous — without the lift it straddles y=0', () => {
@@ -117,10 +117,10 @@ describe('createSolidBox', () => {
   });
 
   test('a raised box is based at `y`, so it clears the ground', () => {
-    // map.js stacks crates this way: addSolidBox(-9, 3, ..., 3, 3, 3).
+    // map.ts stacks crates this way: addSolidBox(-9, 3, ..., 3, 3, 3).
     registerSolidBox(createSolidBox(0, 3, 0, 3, 3, 3));
-    expect(colliders[0].min.y).toBeCloseTo(3, 6);
-    expect(colliders[0].max.y).toBeCloseTo(6, 6);
+    expect(colliders[0]!.min.y).toBeCloseTo(3, 6);
+    expect(colliders[0]!.max.y).toBeCloseTo(6, 6);
   });
 
   test('is pure — no scene, no registration', () => {

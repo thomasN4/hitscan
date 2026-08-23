@@ -5,7 +5,7 @@
 // Box3...) but must never touch `document`, `window`, `location`, or
 // construct a WebGLRenderer. Engine singletons live in core/engine.ts
 // instead — and browser-derived values (the ?map= param) are written in by
-// main.js at startup rather than read here.
+// main.ts at startup rather than read here.
 //
 // All mutable cross-module game state lives here: if you need to share new
 // state between systems (player, bots, weapons, HUD...), add it here rather
@@ -56,7 +56,7 @@ export interface WeaponDef {
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
 export type HitZone = 'head' | 'torso' | 'legs';
 
-/** Structural shape of one enemy (see bots.js for the concrete class). */
+/** Structural shape of one enemy (see bots.ts for the concrete class). */
 export interface Bot {
   mesh: THREE.Group;
   head: THREE.Mesh;
@@ -70,7 +70,7 @@ export interface Bot {
   spawnAtRandom(): void;
 }
 
-/** One transient impact puff tracked by effects.js. */
+/** One transient impact puff tracked by effects.ts. */
 export interface Impact {
   mesh: THREE.Mesh;
   /** Remaining lifetime in seconds. */
@@ -78,13 +78,13 @@ export interface Impact {
 }
 
 // ---------- Shared collections ----------
-// Level geometry registries (`solids`, `colliders`) live in world.js, which
+// Level geometry registries (`solids`, `colliders`) live in world.ts, which
 // owns the one path by which geometry is registered.
-/** All Bot instances (see bots.js). */
+/** All Bot instances (see bots.ts). */
 export const bots: Bot[] = [];
-/** Short-lived bullet impact puffs (see effects.js). */
+/** Short-lived bullet impact puffs (see effects.ts). */
 export const impacts: Impact[] = [];
-/** Persistent wall decals (see effects.js); FIFO-capped, oldest recycled. */
+/** Persistent wall decals (see effects.ts); FIFO-capped, oldest recycled. */
 export const bulletHoles: THREE.Mesh[] = [];
 
 // ---------- Shared mutable game state ----------
@@ -116,7 +116,7 @@ export const player: PlayerState = {
 };
 
 /**
- * Ceiling on accumulated recoil units, applied in `weapons.js:shoot()` when a
+ * Ceiling on accumulated recoil units, applied in `weapons.ts:shoot()` when a
  * shot adds its kick. Decay rate (`recoilRecover`) and scope gating
  * (`scopeGate`) are per-weapon and independent of this — the cap only bounds
  * the climb. Each weapon's `punchRad` comment quotes its max angle at this cap.
@@ -228,7 +228,7 @@ export const ammoStore: AmmoStore[] = WEAPONS.map(w => ({ mag: w.magSize, reserv
 
 /**
  * Live state of the ACTIVE weapon. Stat fields are copied from
- * WEAPONS[game.slot] by switchWeapon() in weapons.js; HUD/combat read this
+ * WEAPONS[game.slot] by switchWeapon() in weapons.ts; HUD/combat read this
  * object only. A subset of WeaponDef plus mutable ammo/reload bookkeeping —
  * deliberately NOT a WeaponDef, since Object.assign in switchWeapon copies
  * only the fields listed here.
@@ -297,7 +297,7 @@ export interface GameState {
   /** Look yaw; 0 = facing -z, Math.PI would face the arena's rear wall. */
   yaw: number;
   pitch: number;
-  /** CURRENT total shot cone (radians), recomputed each frame in weapons.js. */
+  /** CURRENT total shot cone (radians), recomputed each frame in weapons.ts. */
   spread: number;
   /** Shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies). */
   spray: number;
@@ -322,7 +322,7 @@ export interface GameState {
 
 /**
  * Misc per-frame / transient flags. Grouped here because they are touched
- * by several systems (input in main.js, consumed in player.js/weapons.js).
+ * by several systems (input in main.ts, consumed in player.ts/weapons.ts).
  *
  * Lerp values (`crouchLerp`, `adsLerp`) are smoothed 0..1 blends updated
  * every frame; never set them directly from input.
@@ -330,7 +330,7 @@ export interface GameState {
 export const game: GameState = {
   // Map is chosen at page load via ?map=range (start-menu buttons trigger a
   // full reload); there is deliberately no hot-swapping of scenes at runtime.
-  // main.js overwrites this from the URL at startup — reading `location` here
+  // main.ts overwrites this from the URL at startup — reading `location` here
   // would break this module's importability in Node.
   map: 'arena',
   locked: false,   // pointer lock active (Esc/menu releases it)
@@ -342,7 +342,7 @@ export const game: GameState = {
   yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
   pitch: 0,
   spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
-                   // in weapons.js from (stance + movement + air) × spray,
+                   // in weapons.ts from (stance + movement + air) × spray,
                    // plus the weapon's inherent cone, all × ADS. Do not add
                    // to it directly — kick `spray` instead.
   spray: 1,        // shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies).
@@ -353,7 +353,7 @@ export const game: GameState = {
                    // drives the movement accuracy penalty
   recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
                    // While above WEAPONS[slot].scopeGate, a new RMB press
-                   // can't enter the scope (main.js)
+                   // can't enter the scope (main.ts)
   recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot
                    // adds up to ±yawKick — a random walk, clamped to
                    // ±RECOIL_YAW_CAP, that the player steers against. Decays
@@ -367,13 +367,13 @@ export const game: GameState = {
   slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
-                   // doesn't get twitchy at 12x (computed in weapons.js)
+                   // doesn't get twitchy at 12x (computed in weapons.ts)
   stepTimer: 0.2,  // countdown to next footstep sound
-  bobAmt: 0,       // current view-bob amplitude, computed in player.js
+  bobAmt: 0,       // current view-bob amplitude, computed in player.ts
   scoreKills: 0,   // shown as "CT" score
   scoreDeaths: 0,  // shown as "T" score
   roundTime: 115,  // seconds; resets to 1:55 when it expires
 };
 
-/** Raw keyboard state by `event.code`. Written in main.js, read in player.js. */
+/** Raw keyboard state by `event.code`. Written in main.ts, read in player.ts. */
 export const keys: Record<string, boolean | undefined> = {};

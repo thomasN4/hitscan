@@ -115,7 +115,7 @@ describe('decaySpray', () => {
   });
 });
 
-/** Peak spray after emptying a magazine, kicking and decaying as weapons.js does. */
+/** Peak spray after emptying a magazine, kicking and decaying as weapons.ts does. */
 function magazineSprayPeak(def: WeaponDef) {
   const dt = 1 / 60;
   let spray = 1, t = 0, nextShot = 0, fired = 0;
@@ -160,14 +160,14 @@ describe('decayToward', () => {
   });
 });
 
-/** Deterministic uniform in [-1, 1) — the walk's Math.random lives in weapons.js. */
+/** Deterministic uniform in [-1, 1) — the walk's Math.random lives in weapons.ts. */
 function lcg(seed: number): () => number {
   let s = seed >>> 0;
   return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296 * 2 - 1; };
 }
 
 /**
- * Replay weapons.js's fire loop for one full magazine and return |recoilYaw|
+ * Replay weapons.ts's fire loop for one full magazine and return |recoilYaw|
  * AS SAMPLED AT EACH SHOT — the offset each bullet actually leaves with.
  *
  * Sampling at fire time is the whole point: the kick is applied after the
@@ -224,7 +224,7 @@ describe('yawRecover — the horizontal walk actually walks', () => {
     }
     worsts.sort((a, b) => a - b);
     const median = worsts[Math.floor(worsts.length / 2)]!;
-    // state.js documents ~0.6° worst-in-mag, ~1° in the tail.
+    // state.ts documents ~0.6° worst-in-mag, ~1° in the tail.
     expect(median).toBeGreaterThan(0.3);
     expect(median).toBeLessThan(1.0);
   });

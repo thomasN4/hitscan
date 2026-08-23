@@ -8,7 +8,7 @@
 // accumulator CAN grow, not that it grows to the figure its tuning comment
 // quotes: decay runs during fire, so sprayRecover 0.45 once cleared its bound
 // here and still peaked at 1.28 against a documented 2.8. The loop-replaying
-// simulations in sim/recoil.test.js are what pin actual numbers; this module
+// simulations in sim/recoil.test.ts are what pin actual numbers; this module
 // is only the floor on sanity.
 //
 // The semiAuto exemptions are deliberate, not gaps: the sniper over-drains
@@ -31,7 +31,7 @@ const MAX_CLIMB_DEG = 10;
  * Consumers:
  * - validateWeapons.test.ts gates the REAL WEAPONS table — a bad constant
  *   fails `npm test`.
- * - main.js logs each string via console.error behind import.meta.env.DEV.
+ * - main.ts logs each string via console.error behind import.meta.env.DEV.
  */
 export function validateWeapons(defs: readonly WeaponDef[]): string[] {
   const out: string[] = [];

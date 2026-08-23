@@ -8,7 +8,7 @@ import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, resetAmmo, game, player } from './state';
 
 describe('state module purity', () => {
-  // main.js overwrites game.map from ?map= at startup; the pure default the
+  // main.ts overwrites game.map from ?map= at startup; the pure default the
   // module ships with must be the arena.
   test('defaults to the arena map', () => {
     expect(game.map).toBe('arena');

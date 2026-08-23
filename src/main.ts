@@ -1,4 +1,4 @@
-// main.js — entry point: builds the world, wires all input, owns the game loop.
+// main.ts — entry point: builds the world, wires all input, owns the game loop.
 //
 // Flow: initEngine() (imports have no engine/DOM side effects) -> buildMap +
 // spawnBots -> register input/pointer-lock handlers -> start the render loop.
@@ -7,6 +7,7 @@
 //
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
+import type { GameState, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
 import { game, keys, player, weapon, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
@@ -17,7 +18,7 @@ import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons';
 import { updateEffects } from './effects';
 import { respawn } from './combat';
-import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
+import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, requireEl } from './hud';
 import { sfxZoom } from './audio';
 import { validateWeapons } from './sim/validateWeapons';
 
@@ -26,7 +27,7 @@ import { validateWeapons } from './sim/validateWeapons';
 // renderer/scene/camera that everything below reaches for, so nothing may
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
-// core/state.js stays free of browser globals, so the ?map= param is read
+// core/state.ts stays free of browser globals, so the ?map= param is read
 // here and written into the shared state before anything reads game.map.
 game.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
 const RANGE = game.map === 'range';
@@ -83,7 +84,7 @@ addEventListener('keyup', e => {
 const SENS = 0.0022; // radians per pixel of mouse movement
 document.addEventListener('mousemove', e => {
   if (!game.locked || !player.alive) return;
-  // zoomScale shrinks toward the FOV ratio while scoped (weapons.js), so
+  // zoomScale shrinks toward the FOV ratio while scoped (weapons.ts), so
   // aiming stays controllable at 12x instead of flinging across the sky.
   game.yaw -= e.movementX * SENS * game.zoomScale;
   game.pitch -= e.movementY * SENS * game.zoomScale;
@@ -95,7 +96,7 @@ document.addEventListener('mousemove', e => {
 // Scroll up zooms in, scroll down zooms out, wrapping through the levels.
 addEventListener('wheel', e => {
   if (!game.locked || !player.alive || game.slot !== 1 || !game.aiming) return;
-  const n = WEAPONS[1].zoomFovs.length;
+  const n = WEAPONS[1]!.zoomFovs.length; // slot 1 is statically populated
   game.zoomLevel = (game.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
   sfxZoom();
 });
@@ -107,7 +108,7 @@ addEventListener('mousedown', e => {
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
   if (e.button === 2 && game.locked && player.alive) {
-    const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (smg)
+    const gate = WEAPONS[game.slot]?.scopeGate; // undefined = no gate (smg)
     if (gate === undefined || game.recoil < gate) game.aiming = true;
   }
 });
@@ -118,19 +119,21 @@ addEventListener('mouseup', e => {
 addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 
 // ---------- Pointer lock / menus ----------
-const startMenu = document.getElementById('startMenu');
-const deathScreen = document.getElementById('deathScreen');
+const startMenu = requireEl('startMenu');
+const deathScreen = requireEl('deathScreen');
+const menuBlurb = startMenu.querySelector('p');
+if (!menuBlurb) throw new Error('missing <p> inside #startMenu — index.html markup changed?');
 
-function lock() { renderer.domElement.requestPointerLock(); }
-document.getElementById('playBtn').onclick = lock;
+function lock(): void { void renderer.domElement.requestPointerLock(); }
+requireEl('playBtn').onclick = lock;
 // Map switch is a full page reload (?map=...) — scenes are never hot-swapped.
-const rangeBtn = document.getElementById('rangeBtn');
+const rangeBtn = requireEl('rangeBtn');
 rangeBtn.textContent = RANGE ? 'Play Arena' : 'Shooting Range';
 rangeBtn.onclick = () => { location.search = RANGE ? '' : '?map=range'; };
 if (RANGE) {
-  document.querySelector('#startMenu p').textContent = 'Practice your aim — silhouettes with bullseyes at 10\u201360 m';
+  menuBlurb.textContent = 'Practice your aim \u2014 silhouettes with bullseyes at 10\u201360 m';
 }
-document.getElementById('respawnBtn').onclick = () => { deathScreen.style.display = 'none'; respawn(); lock(); };
+requireEl('respawnBtn').onclick = () => { deathScreen.style.display = 'none'; respawn(); lock(); };
 renderer.domElement.addEventListener('click', () => { if (!game.locked && player.alive && game.started) lock(); });
 
 document.addEventListener('pointerlockchange', () => {
@@ -146,8 +149,8 @@ document.addEventListener('pointerlockchange', () => {
   // Losing lock while alive means Esc was pressed -> show pause menu.
   // Losing lock while dead is handled by damagePlayer's death screen.
   if (!game.locked && game.started && player.alive) {
-    startMenu.querySelector('p').textContent = 'Paused — click Play to resume';
-    document.getElementById('playBtn').textContent = 'Resume';
+    menuBlurb.textContent = 'Paused \u2014 click Play to resume';
+    requireEl('playBtn').textContent = 'Resume';
     startMenu.style.display = 'flex';
   } else {
     startMenu.style.display = 'none';
@@ -155,7 +158,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 // ---------- Game loop ----------
-function animate() {
+function animate(): void {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05); // clamp: tab-switch spikes shouldn't teleport entities
 
@@ -196,4 +199,15 @@ animate();
 
 // Debug/testing hook: inspect live state from devtools (`__cs.game`, ...)
 // or from scripts/smoke-test.mjs.
+declare global {
+  interface Window {
+    __cs: {
+      game: GameState;
+      weapon: LiveWeapon;
+      player: PlayerState;
+      bulletHoles: typeof bulletHoles;
+      colliders: typeof colliders;
+    };
+  }
+}
 window.__cs = { game, weapon, player, bulletHoles, colliders };

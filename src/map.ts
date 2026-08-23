@@ -1,6 +1,6 @@
-// map.js — builds the arena geometry.
+// map.ts — builds the arena geometry.
 //
-// All geometry goes through world.js, which registers each solid as both a
+// All geometry goes through world.ts, which registers each solid as both a
 // raycast target and a movement AABB. Do not add meshes to the scene
 // directly: that is how you get walk-through / shoot-through bugs.
 import * as THREE from 'three';
@@ -12,8 +12,8 @@ const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });
 const matCrate  = new THREE.MeshLambertMaterial({ color: 0x8a6d3f });
 const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
 
-/** Build the de_dust-inspired arena. Called once from main.js. */
-export function buildMap() {
+/** Build the de_dust-inspired arena. Called once from main.ts. */
+export function buildMap(): void {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), matGround);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -40,7 +40,9 @@ export function buildMap() {
 
   // Crates for cover. Clusters of three are arranged so a crouching player
   // can hide behind the pair while using the stacked crate as a firing step.
-  const crateSpots = [
+  // Typed as pairs so the destructured x/z are numbers, not
+  // number | undefined under noUncheckedIndexedAccess.
+  const crateSpots: [number, number][] = [
     [-12,-20],[ -8,-23],[-10,-21.4], [15,-18], [18,-15],
     [ 25, 20],[ 28, 17],[ 26.5, 19], [-20, 25], [-24, 22],
     [ 5, 38], [ 8, 35], [ 6.5, 36.5], [-32,-8], [30,-30]

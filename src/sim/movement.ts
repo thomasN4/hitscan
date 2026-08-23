@@ -27,7 +27,7 @@ export interface SpeedInput {
  *
  * Precedence is deliberate: crouch and aim both beat sprint, so there is no
  * sprint-scoping and no sprint-crouching. The caller resolves `running` to
- * already exclude those (see player.js).
+ * already exclude those (see player.ts).
  */
 export function speedFor({ crouching, aiming, running, runLerp }: SpeedInput): number {
   if (crouching) return CROUCH_SPEED;

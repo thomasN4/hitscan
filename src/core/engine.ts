@@ -4,7 +4,7 @@
 // These used to be built at module scope, which made EVERY module in src/
 // unimportable outside a browser (constructing a WebGLRenderer and touching
 // document.body on import). They are now created by initEngine(), which
-// main.js calls first — so pure simulation code can be imported and unit
+// main.ts calls first — so pure simulation code can be imported and unit
 // tested in Node.
 //
 // The exported bindings are `let`, assigned by initEngine(). ES module live
@@ -14,7 +14,7 @@
 // import. They are deliberately declared at their non-optional type rather
 // than `T | undefined`: the module's documented contract is "read only after
 // initEngine()", and typing them optional would push a null check onto every
-// consumer for a violation the contract already rules out. See main.js for
+// consumer for a violation the contract already rules out. See main.ts for
 // the required init order.
 import * as THREE from 'three';
 import { BASE_FOV } from './state';
@@ -46,7 +46,7 @@ export function initEngine(): void {
   scene.background = new THREE.Color(0xbfae8f); // dusty haze
   scene.fog = new THREE.Fog(0xbfae8f, 40, 140);
 
-  // FOV is animated by weapons.js when aiming (BASE_FOV hip-fire -> per-weapon
+  // FOV is animated by weapons.ts when aiming (BASE_FOV hip-fire -> per-weapon
   // zoom targets, down to ~6° at full sniper zoom).
   camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.1, 300);
 

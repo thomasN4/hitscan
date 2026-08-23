@@ -9,8 +9,8 @@
 /**
  * Vertical aim angle including the recoil view punch.
  *
- * The camera (player.js:updateCamera) and the shot direction
- * (weapons.js:shoot) must BOTH derive pitch from this function, or the
+ * The camera (player.ts:updateCamera) and the shot direction
+ * (weapons.ts:shoot) must BOTH derive pitch from this function, or the
  * crosshair stops being truthful about where bullets go — that divergence
  * is what shipped as `351f772`/`ed96163`. Keeping it as one pure function
  * with explicit arguments makes the shared call structural.

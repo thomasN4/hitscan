@@ -19,7 +19,7 @@
 //   ADS:       the weapon's spreadMul
 //
 // The value this returns is consumed by BOTH the bullet direction
-// (weapons.js:shoot) and the crosshair gap (crosshairGapPx below), so the
+// (weapons.ts:shoot) and the crosshair gap (crosshairGapPx below), so the
 // reticle tracks every change in the real cone. It does not draw the cone's
 // literal edge: crosshairGapPx exaggerates by CROSSHAIR_GAIN, so bullets land
 // well inside the arms. What the shared value buys is that the reticle can

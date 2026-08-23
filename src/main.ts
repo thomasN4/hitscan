@@ -81,6 +81,15 @@ addEventListener('keyup', e => {
   // Only drop the run when no Shift remains held.
   if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !keys.ShiftLeft && !keys.ShiftRight) input.running = false;
 });
+// Losing focus can eat keyup/mouseup events, leaving a held input latched
+// across an alt-tab. Drop everything HELD; the crouch toggle is deliberate
+// state and persists, exactly like it does through pause.
+addEventListener('blur', () => {
+  for (const code of Object.keys(keys)) keys[code] = false;
+  input.running = false;
+  input.shooting = false;
+  input.aiming = false;
+});
 
 const SENS = 0.0022; // radians per pixel of mouse movement
 document.addEventListener('mousemove', e => {

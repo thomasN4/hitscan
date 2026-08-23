@@ -12,7 +12,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, game, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
+import { bots, game, gameTime, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
 import { solids, colliders } from './world';
 import { collidesAt, hasLineOfSight } from './collision';
 import { damagePlayer, checkRoundEnd } from './combat';
@@ -150,7 +150,8 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Death: hide, score for the player, then self-respawn after 6s.
+   * Death: hide, score for the player, then self-respawn after 6 s of GAME
+   * time — a paused match doesn't respawn bots behind the menu.
    * @param killerPart zone that landed the kill
    */
   die(killerPart: HitZone): void {
@@ -160,12 +161,12 @@ export class Bot implements BotShape {
     updateScore();
     addKillfeed(`You ${killerPart === 'head' ? '☠ headshot' : 'killed'} Bot`);
     checkRoundEnd();
-    setTimeout(() => {
+    gameTime.schedule(6, () => {
       this.hp = 100;
       this.alive = true;
       this.mesh.visible = true;
       this.spawnAtRandom();
-    }, 6000);
+    });
   }
 }
 

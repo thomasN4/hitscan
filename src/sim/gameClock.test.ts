@@ -20,7 +20,16 @@ describe('GameClock time base', () => {
 
   test('rejects negative dt (would rewind the epoch)', () => {
     const c = new GameClock();
-    expect(() => c.advance(-0.01)).toThrow(/negative dt/);
+    expect(() => c.advance(-0.01)).toThrow(/>= 0/);
+  });
+
+  test('rejects NaN dt (would corrupt the epoch and invert the drain guard)', () => {
+    const c = new GameClock();
+    let fired = 0;
+    c.schedule(10, () => fired++);
+    expect(() => c.advance(Number.NaN)).toThrow();
+    c.advance(11);
+    expect(fired).toBe(1); // the poisoned call must not have drained anything
   });
 });
 
@@ -127,6 +136,27 @@ describe('GameClock scheduler', () => {
     expect(order).toEqual(['first', 'chained-now']);
     c.advance(0.2);
     expect(order).toEqual(['first', 'chained-now', 'chained-later']);
+  });
+
+  test('a due-now chain fires in the SAME advance even when a LATER-due job is pending', () => {
+    // The adversarial queue state: after `mid` fires mid-drain, its zero-delay
+    // child is appended BEHIND the still-pending later-due `far`. A single
+    // up-front sort leaves that order, and a head check against `far` would
+    // skip `chained` for the rest of the advance. (An empty-queue chaining
+    // test cannot see this — there is nothing ahead of the child.)
+    const c = new GameClock();
+    const order: string[] = [];
+    c.schedule(6, () => order.push('far')); // due 6; never due during this test
+    c.advance(4);                           // t=4: far pending
+    c.schedule(0.5, () => {
+      order.push('mid');
+      c.schedule(0, () => order.push('chained')); // due NOW at t=5
+    });
+    c.advance(1);                           // t=5
+    expect(order).toEqual(['mid', 'chained']);
+    expect(c.now()).toBe(5);
+    c.advance(1); // t=6: only now does far come due
+    expect(order).toEqual(['mid', 'chained', 'far']);
   });
 
   test('a job may cancel a pending sibling within the same drain', () => {

@@ -47,16 +47,20 @@ export class GameClock {
 
   /**
    * Advance game time by `dt` seconds and fire every job whose due time has
-   * been reached, in order. dt must be >= 0 — a negative step means a caller
-   * is feeding unclamped or corrupted deltas and would rewind the epoch.
+   * been reached, in order. dt must be >= 0 AND finite — a negative step
+   * would rewind the epoch, and NaN would poison it (every later comparison
+   * against t is false, which inverts the drain guard into drain-everything).
    */
   advance(dt: number): void {
-    if (dt < 0) throw new Error(`GameClock.advance: negative dt ${dt}`);
+    if (!(dt >= 0)) throw new Error(`GameClock.advance: dt must be >= 0 and finite, got ${dt}`);
     this.t += dt;
-    // Re-sorted per call so jobs enqueued by earlier jobs land in order too;
-    // the queue holds at most a handful of entries.
-    this.jobs.sort((a, b) => a.at - b.at);
     while (this.jobs.length > 0) {
+      // Re-sorted EVERY iteration: a job may enqueue another job mid-drain,
+      // and that arrival can be due sooner than pending entries sitting ahead
+      // of it. Sorting once up front leaves those appended behind, where a
+      // head check against a later-due job would skip them for the rest of
+      // this advance. The queue holds at most a handful of entries.
+      this.jobs.sort((a, b) => a.at - b.at);
       const job = this.jobs[0];
       if (!job || job.at > this.t) break;
       this.jobs.shift();

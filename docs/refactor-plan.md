@@ -203,6 +203,18 @@ them — so it rests on the clock's unit-tested freeze semantics plus
 inspection of `Bot.die`'s one-line binding. Deferred with an issue (#17)
 rather than counted as manually verified.
 
+Review round: the reviewer reproduced a real drain-order bug against the
+scheduler's own documented contract — the job queue sorted once per
+`advance()`, but a job enqueued DURING the drain was appended behind pending
+entries, where a head check against a later-due job skipped it for the rest
+of that advance (a due-now chain fired one frame late). The code comment even
+claimed otherwise — lesson 11 applies to fresh code, not just moved code; and
+the existing chaining test couldn't see any of this because its queue was
+empty at chain time. Fixed by sorting every iteration, with the adversarial
+test written red first (lesson 7): pending later-due job + mid-drain zero-delay
+chain. Also hardened the dt guard against NaN (`< 0` passes it, poisoning `t`
+and inverting the drain guard into drain-everything).
+
 ---
 
 ## Review lessons

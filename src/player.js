@@ -18,7 +18,7 @@ import { player, game, keys } from './core/state.js';
 import { collidesAt } from './collision.js';
 import { colliders } from './world.js';
 import { sfxFootstep } from './audio.js';
-import { gunGroup, currentAimPitch } from './weapons.js';
+import { gunGroup, currentAimPitch, currentAimYaw } from './weapons.js';
 import { crosshair } from './hud.js';
 import { speedFor, measuredMoveLerp } from './sim/movement.js';
 import { approach, deadZone } from './sim/smoothing.js';
@@ -32,6 +32,8 @@ const BLEND_RATE = 10;
 const SPRINT_RAMP = 0.2;
 /** How far the camera drops at full crouch (m). */
 const CROUCH_DROP = 0.7;
+/** Airborne blend rate (1/s); ~100-200 ms to ease the jump penalty in and out. */
+const AIR_BLEND_RATE = 12;
 
 /**
  * Stage 1 — movement, stance, footsteps, camera position.
@@ -101,6 +103,14 @@ export function updateMovement(dt) {
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
   game.crouchLerp = approach(game.crouchLerp, crouching ? 1 : 0, dt, BLEND_RATE);
+
+  // Airborne blend for the accuracy model. Written HERE, in stage 1, because
+  // updateWeapon reads it to compute spread — deferring it to a later stage
+  // would price every mid-air shot off the previous frame's stance. It also
+  // has to follow the gravity block above, which is what sets player.onGround.
+  game.airLerp = deadZone(
+    approach(game.airLerp, player.onGround ? 0 : 1, dt, AIR_BLEND_RATE));
+
   camera.position.copy(player.pos);
   camera.position.y -= CROUCH_DROP * game.crouchLerp;
 
@@ -122,14 +132,19 @@ export function updateMovement(dt) {
  * Stage 3 — camera orientation. (Position is written in updateMovement, which
  * must run before updateWeapon; see that stage's note.)
  *
- * MUST run after updateWeapon: pitch comes from currentAimPitch(), the same
- * expression shoot() uses for bullet direction, so the crosshair (screen
- * center) always marks where bullets go on average. Reading it before the
- * frame's recoil decay would aim the camera a frame ahead of the bullets.
+ * MUST run after updateWeapon: pitch and yaw come from currentAimPitch() /
+ * currentAimYaw(), the same expressions shoot() uses for bullet direction, so
+ * the crosshair (screen center) always marks where bullets go on average —
+ * horizontally as well as vertically. Reading them before the frame's recoil
+ * decay would aim the camera a frame ahead of the bullets.
+ *
+ * Note this is the VIEW yaw only. Movement (updateMovement's forward vector)
+ * and mouse input stay on the base game.yaw, or the recoil walk would steer
+ * the player's legs and fight the mouse.
  */
 export function updateCamera() {
   if (!player.alive) return;
-  camera.rotation.set(currentAimPitch(), game.yaw, 0, 'YXZ');
+  camera.rotation.set(currentAimPitch(), currentAimYaw(), 0, 'YXZ');
 }
 
 /**
@@ -148,6 +163,7 @@ export function updateViewmodel() {
   gunGroup.position.z = game.recoil * 0.012 + 0.06 * game.adsLerp; // ADS pulls gun slightly closer
   gunGroup.rotation.x = game.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
                                              // so a full climb must stay a nudge, not a tilt
+  gunGroup.rotation.y = -game.recoilYaw * 0.01; // subtle sideways pull matching the walk
 
   // Crosshair tightens/fades when aiming (sight picture takes over);
   // arm gap itself is driven by the accuracy model in weapons.js

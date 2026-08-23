@@ -9,13 +9,13 @@ import * as THREE from 'three';
 import { scene, camera, clock } from './core/engine.js';
 import { solids } from './world.js';
 import { bots, weapon, game, player, WEAPONS, ammoStore,
-         RECOIL_CAP, BLOOM_CAP, BASE_FOV } from './core/state.js';
+         RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV } from './core/state.js';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio.js';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud.js';
 import { damageBot } from './combat.js';
 import { spawnImpact, spawnBulletHole } from './effects.js';
 import { computeSpread, crosshairGapPx } from './sim/accuracy.js';
-import { aimPitch, decayRecoil, decayBloom } from './sim/recoil.js';
+import { aimPitch, aimYaw, decayRecoil, decaySpray, decayToward } from './sim/recoil.js';
 import { shotDirection } from './sim/ballistics.js';
 import { damageForPart, partForMesh } from './sim/damage.js';
 import { approach } from './sim/smoothing.js';
@@ -93,6 +93,18 @@ export function initWeaponViewmodels() {
  */
 export function currentAimPitch() {
   return aimPitch(game.pitch, game.recoil, WEAPONS[game.slot].punchRad);
+}
+
+/**
+ * Horizontal aim angle for the CURRENT weapon and recoil state — the
+ * counterpart of currentAimPitch(), over sim/recoil.js:aimYaw.
+ *
+ * Same contract: the camera (player.js:updateCamera) and the shot direction
+ * (shoot()) must BOTH go through it, or the crosshair stops being truthful
+ * about horizontal drift the way it once did about vertical climb.
+ */
+export function currentAimYaw() {
+  return aimYaw(game.yaw, game.recoilYaw, WEAPONS[game.slot].punchRad);
 }
 
 // ---------- Reload animation ----------
@@ -187,15 +199,21 @@ export function shoot() {
   // button is still held (mouseup will just re-clear it harmlessly).
   if (def.unscopeOnShot) game.aiming = false;
 
-  // Euler order and cone sampling live in sim/ballistics.js; the pitch
-  // includes the recoil punch so shots follow the climb the camera shows.
-  const dir = shotDirection(currentAimPitch(), game.yaw, game.spread);
+  // Euler order and cone sampling live in sim/ballistics.js; pitch and yaw
+  // both carry their recoil punch, so shots follow exactly what the camera
+  // shows — vertically via currentAimPitch, horizontally via currentAimYaw.
+  const dir = shotDirection(currentAimPitch(), currentAimYaw(), game.spread);
 
-  // Recoil/bloom kicks are applied only AFTER this shot's ray is built:
+  // Recoil/spray kicks are applied only AFTER this shot's ray is built:
   // a bullet leaves from the pre-kick aim point (first round is dead-on),
   // and its own kick steers the FOLLOWING shots.
   game.recoil = Math.min(game.recoil + def.recoilKick, RECOIL_CAP);
-  game.bloom = Math.min(game.bloom + def.bloomKick, BLOOM_CAP);
+  // Horizontal noise: a signed random walk, so sprays wander sideways
+  // unpredictably and have to be steered back rather than just pulled down.
+  game.recoilYaw = THREE.MathUtils.clamp(
+    game.recoilYaw + (Math.random() * 2 - 1) * def.yawKick,
+    -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
+  game.spray = Math.min(game.spray + def.sprayKick, def.sprayCap);
 
   raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
   raycaster.far = 200;
@@ -247,9 +265,12 @@ export function updateWeapon(dt) {
 
   const def = WEAPONS[game.slot];
 
-  // Recoil kick decay — rate is per-weapon (rifle resets fast for full-auto,
-  // the sniper settles slowly for bolt-action feel; see core/state.js WEAPONS)
+  // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
+  // the sniper settles slowly for bolt-action feel; see core/state.js WEAPONS).
+  // The horizontal walk drains at the SAME rate, so wander and climb settle
+  // together rather than leaving the crosshair off to one side.
   game.recoil = decayRecoil(game.recoil, dt, weapon.recoilRecover);
+  game.recoilYaw = decayToward(game.recoilYaw, dt, weapon.recoilRecover);
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // rifle has a single iron-sights step; the sniper cycles its wheel-chosen
@@ -314,9 +335,11 @@ export function updateWeapon(dt) {
   game.spread = computeSpread({
     crouchLerp: game.crouchLerp,
     moveLerp: game.moveLerp,
-    bloom: game.bloom,
+    airLerp: game.airLerp,
+    spray: game.spray,
+    inherent: def.inherent,
     adsMul: game.aiming ? def.spreadMul : 1,
   });
-  game.bloom = decayBloom(game.bloom, dt, def.bloomRecover);
+  game.spray = decaySpray(game.spray, dt, def.sprayRecover);
   setCrosshairGap(crosshairGapPx(game.spread, camera.fov, window.innerHeight));
 }

@@ -107,24 +107,31 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         cs.game.pitch = 0;
         cs.player.pos.set(0, 1.7, 8);
         await wait(400); // let moveLerp/crouchLerp settle
-        cs.game.bloom = 0; // isolate stance/movement layers from prior phases
-        await wait(150);   // let the frame loop recompute spread from bloom=0
+        cs.game.spray = 1; // isolate stance/movement layers from prior phases
+        await wait(150);   // let the frame loop recompute spread from spray=1
         const standing = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
         await wait(400); // crouchLerp -> 1
-        cs.game.bloom = 0;
+        cs.game.spray = 1;
         const crouched = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
         await wait(400);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         await wait(600); // walk long enough for moveLerp to settle near 1
-        cs.game.bloom = 0;
+        cs.game.spray = 1;
         const walking = cs.game.spread;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
-        return { standing, crouched, walking };
+        await wait(400); // let moveLerp settle back down before jumping
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }));
+        await wait(250); // reach apex-ish; airLerp -> ~0.95
+        cs.game.spray = 1;
+        const airborne = cs.game.spread;
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space' }));
+        return { standing, crouched, walking, airborne };
       });
       if (spreads.crouched >= spreads.standing) throw new Error(`crouch should tighten spread: ${JSON.stringify(spreads)}`);
       if (spreads.walking < spreads.standing * 3) throw new Error(`walking should open spread 3x+: ${JSON.stringify(spreads)}`);
+      if (spreads.airborne <= spreads.walking) throw new Error(`jumping should be worse than walking: ${JSON.stringify(spreads)}`);
       console.log(`[accuracy] OK`, JSON.stringify(spreads));
 
       // 5) No-clip regression: walking into the backstop must stop the
@@ -219,7 +226,7 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       if (sniper.shot.aimingAfter !== false) throw new Error(`shot should exit the scope: ${JSON.stringify(sniper.shot)}`);
       if (sniper.gated.aiming !== false || sniper.gated.overlay !== 'none') throw new Error(`re-scope during recoil settle must stay blocked: ${JSON.stringify(sniper.gated)}`);
       if (sniper.rescope.aiming !== true || sniper.rescope.overlay !== 'block') throw new Error(`re-scope after settle failed: ${JSON.stringify(sniper.rescope)}`);
-      if (sniper.backTo !== 0) throw new Error(`switch back to rifle failed: slot ${sniper.backTo}`);
+      if (sniper.backTo !== 0) throw new Error(`switch back to smg failed: slot ${sniper.backTo}`);
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }
 

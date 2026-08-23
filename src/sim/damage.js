@@ -3,7 +3,7 @@
 // Pure: every input is a parameter.
 //
 // Zone multipliers are the game's core balance contract — head ×4 makes the
-// rifle a one-tap (26 × 4 = 104) and the sniper a guaranteed one
+// smg a one-tap (26 × 4 = 104) and the sniper a guaranteed one
 // (60 × 4 = 240); legs ×0.75 punishes low aim. PR 4's sim/validateWeapons.js
 // will pin those design intents against the real WEAPONS table.
 

@@ -45,38 +45,49 @@ export const player = {
  * the climb. Each weapon's `punchRad` comment quotes its max angle at this cap.
  */
 export const RECOIL_CAP = 6;
-/** Ceiling on accumulated spread bloom (radians), applied alongside RECOIL_CAP. */
-export const BLOOM_CAP = 0.25;
+/**
+ * Ceiling on the horizontal recoil random walk, in the same units as
+ * RECOIL_CAP. Symmetric: `recoilYaw` lives in [-RECOIL_YAW_CAP, +RECOIL_YAW_CAP].
+ * At the smg's punchRad that is roughly ±2° of sideways wander.
+ */
+export const RECOIL_YAW_CAP = 3;
 /** Base (hip-fire) vertical FOV in degrees; every zoom target sits below this. */
 export const BASE_FOV = 75;
 
 /**
  * Weapon definitions (slot order = switch order via keys 1/2). Static stats
  * only — the live mutable copy is `weapon` below. zoomFovs are the scoped
- * FOV targets cycled with the mouse wheel while aiming (rifle has one
- * "iron sights" step); spreadMul is the ADS cone multiplier.
+ * FOV targets cycled with the mouse wheel while aiming (the smg has one
+ * "iron sights" step); spreadMul is the ADS cone multiplier; inherent is the
+ * weapon's resting shot cone in radians, before any stance/movement/spray.
  */
 export const WEAPONS = [
   {
-    name: 'RIFLE',
+    name: 'SMG',
     magSize: 30, reserveMax: 90,
-    fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, rifle-like)
+    fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, smg-like)
     reloadTime: 2.2,
     damage: 26,      // per body shot; legs x0.75, head x4 -> one-tap kill
     headshotMult: 4,
     zoomFovs: [55],  // iron sights
     spreadMul: 0.3,
-    bloomKick: 0.02, recoilKick: 1,
+    inherent: 0.0031, // rest-cone rad — ADS crouched ≈ 2" @ 50 m; hip ≈ 6.7"
+    sprayKick: 0.06, recoilKick: 1,
+    sprayCap: 4,       // max spray multiplier (rested = 1) after a long burst
+    sprayRecover: 0.45, // multiplier units/s — MUST stay below sustained-fire input
+                        // (~9.5 shots/s × sprayKick = 0.57/s), or the drain outpaces
+                        // accumulation and sprays never bloom at all.
+                        // 0.45 clears a full-mag spray (30×0.06 = 1.8) in ~4 s
     recoilRecover: 6, // recoil units/s — MUST stay below the sustained-fire input
                       // (~9.5 shots/s × recoilKick = 9.5/s), or the drain outpaces
                       // accumulation and spray never climbs (it just vibrates).
                       // 6 → full 6-unit climb in ~1.3 s, ~1 s settle-back
-    bloomRecover: 0.13, // spread bloom units/s — MUST stay below the sustained-fire
-                        // input (~9.5 shots/s × bloomKick ≈ 0.19/s), or the drain
-                        // outpaces accumulation and sprays never bloom at all.
-                        // 0.13 clears full bloom ~2 s after stopping (was 0.06 → ~4 s)
+                      // (also decays the horizontal component, see recoilYaw)
     punchRad: 0.012,   // radians of aim climb per recoil unit — sustained spray
                        // climbs toward ~4° at RECOIL_CAP, pull down to compensate
+    yawKick: 0.4,      // ± horizontal recoil units per shot (random walk, capped at
+                       // RECOIL_YAW_CAP): typical full-mag drift ~1-1.5° via
+                       // punchRad, compensable
     scopedOverlay: false,
   },
   {
@@ -87,12 +98,16 @@ export const WEAPONS = [
     damage: 60,      // two torso shots to kill; head x4 = one-tap, legs x0.75
     headshotMult: 4,
     zoomFovs: [25, 12.5, 6.25], // ≈ 3x / 6x / 12x on the 75° BASE_FOV
-    spreadMul: 0.05, // near-laser when scoped and still
-    bloomKick: 0.09, recoilKick: 4,
+    spreadMul: 0.03, // near-laser when scoped and still (~0.19" @ 50 m crouched)
+    inherent: 0.0029, // rest-cone rad — hip-fire ≈ 6.3" @ 50 m, like the smg's
+    sprayKick: 0.25, recoilKick: 4,
+    sprayCap: 3,
     recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
     punchRad: 0.02,    // radians of aim climb per recoil unit — one meaty ~4.6°
                        // kick per shot that settles slowly with the recoil
-    bloomRecover: 0.06, // spread bloom units/s — slow settle matches the bolt-action feel
+    yawKick: 0.8,      // ± horizontal recoil units per shot — up to ~±0.55° of
+                       // sideways jump on the big punch, real guns kick crooked
+    sprayRecover: 0.08, // slow settle matches the bolt-action feel (input ≈ 0.9 shots/s × 0.25)
     scopeGate: 0.5,    // RMB re-scope is blocked until recoil decays below this
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
     semiAuto: true,      // one shot per LMB press; holding does nothing
@@ -153,17 +168,27 @@ export const game = {
   yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
   pitch: 0,
   spread: 0.001,   // CURRENT total shot cone (radians); recomputed each frame
-                   // in weapons.js from stance + movement + bloom. Do not add
-                   // to it directly — kick `bloom` instead.
-  bloom: 0,        // recoil spread kick: +0.02 per shot, decays ~0.06/s
+                   // in weapons.js from (stance + movement + air) × spray,
+                   // plus the weapon's inherent cone, all × ADS. Do not add
+                   // to it directly — kick `spray` instead.
+  spray: 1,        // shot-cone MULTIPLIER, 1 at rest (not 0 — it multiplies).
+                   // +sprayKick per shot up to the weapon's sprayCap, decaying
+                   // back toward 1 at sprayRecover/s. Scales only the
+                   // situational terms; `inherent` is unaffected by it.
   moveLerp: 0,     // smoothed actual speed ÷ walk speed (idle 0, walk 1, run 1.5);
                    // drives the movement accuracy penalty
   recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
                    // While above WEAPONS[slot].scopeGate, a new RMB press
                    // can't enter the scope (main.js)
+  recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot
+                   // adds up to ±yawKick — a random walk, clamped to
+                   // ±RECOIL_YAW_CAP, that the player steers against. Decays
+                   // toward 0 at recoilRecover/s alongside the vertical climb.
   crouchLerp: 0,
+  airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
+                   // out over ~100-200 ms so it doesn't snap on takeoff/landing
   adsLerp: 0,
-  slot: 0,         // active weapon index into WEAPONS (0 rifle, 1 sniper)
+  slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                    // doesn't get twitchy at 12x (computed in weapons.js)

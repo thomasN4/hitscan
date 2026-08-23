@@ -124,11 +124,31 @@ Type design highlights:
   (`scopeGate`) or degrade gracefully (HUD zoom label), and no `?? fallback`
   was introduced anywhere.
 - `hud.ts:requireEl(id)` throws a named startup error for missing markup —
-  the migration's one deliberate behavior change, replacing distant
+  the migration's one *intended* behavior change, replacing distant
   null-property crashes.
 
 Verification: all six gates green, smoke test byte-for-byte unmodified against
-both dev server and `vite preview`, plus non-vacuity probes (lessons 15–17).
+both dev server and `vite preview`, plus non-vacuity probes (lessons 15–18).
+
+Review found a second behavior change that was not intended, and a gate the
+migration had silently disarmed:
+
+- **The swap conversion shipped inverted.** Extracting switchWeapon's operands
+  into `outgoing`/`incoming` locals flipped `punchRad` ÷ `punchRad`, scaling the
+  rendered view punch by ratio² instead of holding it: a ~2.8° aim snap on every
+  mid-spray swap, and 1-2-1 as a 40% free recoil cancel. All six gates were green
+  over it, because the arithmetic sat behind `sfxSwitch()`'s AudioContext where
+  the Node suite cannot reach. Fixed by lesson 2's remedy — a pure seam,
+  `sim/recoil.ts:convertOnSwap()` — with nine cases pinning it against the real
+  table, non-vacuity re-proven per lesson 7 (the inverted ratio fails 6 of 9).
+  Recorded as lesson 19.
+- **Unit-test purity went unguarded.** `no-undef` off for `.ts` disarmed the
+  lesson-10 `ignores` mechanism the moment the tests became TypeScript, and
+  `lib.es2022.full` gave tsc no reason to object either. Re-armed with
+  `no-restricted-globals` plus a `no-restricted-imports` ban on browser-side
+  modules, scoped to `src/**/*.test.ts`; re-proven per environment. Lesson 17
+  is about this class; that it recurred *here* is the point of lesson 19's
+  second half.
 
 ---
 
@@ -215,6 +235,55 @@ Ordered roughly by how easy they are to repeat.
 14. **Document the full public surface.** `registerSolidBox` was exported but
     unlisted, so a contributor with an already-positioned mesh would find no
     listed option and reach for the arrays directly.
+
+### On the TypeScript migration
+
+15. **Extension mapping is gated by the IMPORTER, not the target.** Vite
+    resolves `'./x.js'` onto `x.ts` only when the file doing the importing is
+    itself TypeScript, so no incremental rename order works while specifiers
+    still carry `.js`: renaming a leaf breaks every `.js` consumer, and renaming
+    a consumer first breaks nothing but buys nothing. Dropping the extensions
+    across `src/` in their own commit (`130f267`) is what made the conversion
+    orderable at all. Verified against vite 5.4.21's resolver and tsc's
+    `bundler` mode before the sweep, not after.
+16. **Vitest resolves through its own bundled Vite, not the workspace's.** The
+    suite ran against vite 8.2.2 while `npm run dev`/`build` used 5.4.21, so a
+    resolution edge has to hold under both — a specifier change proven green by
+    `npm test` alone is proven on the wrong resolver. This is also why `npm test`
+    passing says nothing about whether `npm run build` will.
+17. **When a gate's mechanism moves, re-prove the gate, not the mechanism.**
+    Turning `no-undef` off for `.ts` handed missing-import detection to tsc
+    (TS2304) — that half genuinely transferred, and deleting an import binding
+    proves it. But `no-undef` had a *second* job: with browser globals withheld
+    from test files it was what kept the unit suite Node-pure. Probing that the
+    globals were still Node-only confirmed the wrong thing; the globals were
+    never the mechanism. See lesson 19.
+18. **A typed signature can surface behavior nobody chose.** Writing
+    `partForMesh(bot: { head: object; legs: object }, mesh: object)` made it
+    explicit that torso is the *fallback*, not a match — a ray hitting nothing
+    recognizable still reads as a torso hit. The types did not change that; they
+    made it impossible to keep not noticing. Where a signature exposes an
+    unintended default, decide about it in the same PR rather than encoding it.
+
+### On refactoring under green gates
+
+19. **Naming an expression's operands can silently invert it, and "no behavior
+    change" is exactly when nobody looks.** `f5fcb6a` turned
+    `WEAPONS[game.slot].punchRad / WEAPONS[slot].punchRad` into
+    `incoming.punchRad / outgoing.punchRad` — a reciprocal — while converting
+    weapons.js to TypeScript. All six gates stayed green: the arithmetic was
+    pure, but it sat behind `sfxSwitch()`'s AudioContext, so lesson 2's failure
+    mode had been sitting there since before the migration and the migration is
+    merely what tripped it. Two consequences, both of them things the code's own
+    comment said the conversion existed to prevent (a mid-spray aim snap, and
+    1-2-1 as a free recoil cancel). Three rules fall out:
+    - A mechanical refactor needs its invariant pinned **before** the refactor,
+      not after. A test written afterwards pins whatever shipped.
+    - When the refactor is *what* moves logic across the browser boundary, apply
+      lesson 2 in the same commit — ask what pure logic is now unreachable.
+    - Prefer a signature where the mistake is a type error. `convertOnSwap` takes
+      the two weapons as objects, not four numbers, so transposing them fails to
+      compile: `incoming` needs a `sprayCap` and `outgoing` does not.
 
 ---
 

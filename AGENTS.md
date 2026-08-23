@@ -41,7 +41,8 @@ Direct pushes to `main` are the exception, only when the user asks (e.g., hotfix
 ```sh
 npm run dev                    # dev server (http://localhost:5173)
 npm run build                  # production build -> dist/
-npm run lint                   # ESLint (flat config); no-undef for .js, type-aware rules for .ts
+npm run lint                   # ESLint (flat config); no-undef for .js, type-aware rules for .ts,
+                               # browser globals/imports banned in src/**/*.test.ts
 npm run typecheck              # tsc --noEmit; strict + noUncheckedIndexedAccess
 npm test                       # Vitest unit tests (no browser, ~200 ms)
 node scripts/smoke-test.mjs    # headless E2E check (requires dev server running)
@@ -49,11 +50,11 @@ node scripts/smoke-test.mjs    # headless E2E check (requires dev server running
 
 Four static/sim layers, deliberately split:
 
-- **`npm run lint`** — static: unused bindings, the `any` ban (`no-explicit-any` + `no-unsafe-*` family), `@ts-ignore` ban. For `.js` files it still owns missing-import detection via `no-undef`; for `.ts` files `no-undef` is OFF and that job belongs to typecheck — though the type-aware rules independently flag unresolved names as error-typed values, so the class is double-covered.
+- **`npm run lint`** — static: unused bindings, the `any` ban (`no-explicit-any` + `no-unsafe-*` family), `@ts-ignore` ban. For `.js` files it still owns missing-import detection via `no-undef`; for `.ts` files `no-undef` is OFF and that job belongs to typecheck — though the type-aware rules independently flag unresolved names as error-typed values, so the class is double-covered. It also owns unit-test purity: `src/**/*.test.ts` gets `no-restricted-globals` (browser globals) and `no-restricted-imports` (browser-side modules). Do NOT assume withholding globals is what enforces that — `no-undef` is off for `.ts`, so the rules are the mechanism (review lessons 10, 17, 19).
 
 - **`npm run typecheck`** — the compiler as a gate: `strict`, and `noUncheckedIndexedAccess`, which makes every `WEAPONS[game.slot]`-style read prove what happens on a miss. This is now the primary missing-import catcher for `.ts` code (TS2304), which neither `npm run build` nor `npm test` can see.
 
-- **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit.
+- **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit. When a browser-side module holds pure logic the suite cannot reach, split out a seam rather than mocking — `sim/recoil.ts:convertOnSwap()` is the worked example, and lesson 19 is what it cost to learn twice.
 - **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, both maps. This is the layer that catches wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`. Note Vitest resolves through its own bundled Vite (8.x), not the workspace Vite 5 — a resolution edge must work under both.
 
 ## Architecture rules

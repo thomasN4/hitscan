@@ -78,6 +78,63 @@ export default tseslint.config(
     },
   },
 
+  // Unit-test purity, re-armed for TypeScript.
+  //
+  // The `ignores` up in the game-code block withholds browser globals from
+  // tests so that `no-undef` fires on `document` — but the block above turns
+  // `no-undef` OFF for every `.ts` file, tests included, so once the suite
+  // became TypeScript that gate went silently vacuous. Review lesson 10
+  // recurring in a new form: the globals were never the mechanism, the rule
+  // was. tsc cannot cover the handoff either, because `target: ES2022` with no
+  // `lib` pulls in lib.es2022.FULL — which includes DOM.
+  //
+  // Placement is the OPPOSITE constraint to lesson 10's: that fix had to sit
+  // in the first matching block because `ignores` is the only way to remove a
+  // merged global. This one ADDS rules, and flat config merges rules
+  // later-wins, so it must sit AFTER the block that switches `no-undef` off.
+  //
+  // A test-only tsconfig with `lib: ["ES2022"]` would be the more complete
+  // gate, and was rejected: `world.test.ts` legitimately reaches
+  // `core/engine.ts` through `world.ts`, so a DOM-free lib flags correct code.
+  // The import ban below buys back most of that reach without the false
+  // positive — it draws the line at the test's own import, which is where the
+  // architecture actually draws it (AGENTS.md).
+  {
+    files: ['src/**/*.test.ts'],
+    rules: {
+      // Not exhaustive, and cannot be — this is the set a simulation test
+      // would plausibly reach for. The import ban is what makes the gate
+      // structural rather than a denylist.
+      'no-restricted-globals': ['error',
+        { name: 'document', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'window', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'location', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'navigator', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'localStorage', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'sessionStorage', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'AudioContext', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'requestAnimationFrame', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'cancelAnimationFrame', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'getComputedStyle', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'innerWidth', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'innerHeight', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+        { name: 'devicePixelRatio', message: 'Unit tests run in plain Node — see AGENTS.md.' },
+      ],
+      // The pure-simulation layer is state / sim / world / collision, per
+      // AGENTS.md. A test that imports a renderer-side module has stopped
+      // being one, and drags that module's module-scope work into Node.
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: [
+            '**/core/engine', '**/audio', '**/hud', '**/effects', '**/weapons',
+            '**/bots', '**/combat', '**/player', '**/main', '**/map', '**/range',
+          ],
+          message: 'Browser-side module — unit tests cover the pure simulation layer only (AGENTS.md).',
+        }],
+      }],
+    },
+  },
+
   // Tooling: this config file.
   {
     files: ['eslint.config.js'],

@@ -12,7 +12,7 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { GameState, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
+import { session, input, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -76,13 +76,13 @@ addEventListener('keydown', e => {
   // e.repeat guards against OS key-repeat re-triggering the double tap
   if (e.code === 'KeyW' && !e.repeat) {
     const now = performance.now();
-    if (now - lastWTapTime < RUN_TAP_WINDOW_MS) game.running = true;
+    if (now - lastWTapTime < RUN_TAP_WINDOW_MS) input.running = true;
     lastWTapTime = now;
   }
 });
 addEventListener('keyup', e => {
   keys[e.code] = false;
-  if (e.code === 'KeyW') game.running = false; // sprint requires W held
+  if (e.code === 'KeyW') input.running = false; // sprint requires W held
 });
 
 const SENS = 0.0022; // radians per pixel of mouse movement
@@ -99,7 +99,7 @@ document.addEventListener('mousemove', e => {
 // Wheel = scope zoom steps, only while scoped with the sniper (slot 1).
 // Scroll up zooms in, scroll down zooms out, wrapping through the levels.
 addEventListener('wheel', e => {
-  if (!session.locked || !player.alive || game.slot !== 1 || !game.aiming) return;
+  if (!session.locked || !player.alive || game.slot !== 1 || !input.aiming) return;
   const n = WEAPONS[1].zoomFovs.length; // tuple index — slot 1 exists by type
   game.zoomLevel = (game.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
   sfxZoom();
@@ -108,17 +108,17 @@ addEventListener('wheel', e => {
 // LMB = fire (held), RMB = iron sights (held). Buttons are tracked as state
 // rather than one-shot events because firing is continuous in updateWeapon.
 addEventListener('mousedown', e => {
-  if (e.button === 0 && session.locked && player.alive) game.shooting = true;
+  if (e.button === 0 && session.locked && player.alive) input.shooting = true;
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
   if (e.button === 2 && session.locked && player.alive) {
     const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (smg)
-    if (gate === undefined || game.recoil < gate) game.aiming = true;
+    if (gate === undefined || game.recoil < gate) input.aiming = true;
   }
 });
 addEventListener('mouseup', e => {
-  if (e.button === 0) game.shooting = false;
-  if (e.button === 2) game.aiming = false;
+  if (e.button === 0) input.shooting = false;
+  if (e.button === 2) input.aiming = false;
 });
 addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 

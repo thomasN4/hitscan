@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, game, WEAPONS, BASE_FOV } from './core/state';
+import { player, weapon, input, game, WEAPONS, BASE_FOV } from './core/state';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -160,7 +160,7 @@ export function updateHUD(): void {
   // must never throw mid-frame over a cosmetic string. Both are unreachable in
   // play — zoomLevel is wheel-wrapped mod n and reset to 0 on swap — but they
   // are deliberately different answers to the same miss, so change them together.
-  const zoomFov = game.aiming && game.slot === 1 ? WEAPONS[game.slot].zoomFovs[game.zoomLevel] : undefined;
+  const zoomFov = input.aiming && game.slot === 1 ? WEAPONS[game.slot].zoomFovs[game.zoomLevel] : undefined;
   const zoomLabel = zoomFov !== undefined ? Math.round(BASE_FOV / zoomFov) + 'x' : '';
   if (zoomLabel !== lastZoomLabel) {
     lastZoomLabel = zoomLabel;

@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, game, player, gameTime, WEAPONS, ammoStore,
+import { bots, weapon, session, input, game, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          type WeaponDef, type WeaponSlot } from './core/state';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
@@ -246,9 +246,9 @@ export function shoot(): void {
   (game.slot === 1 ? sfxSniper : sfxShoot)();
 
   // Bolt-action feel: firing kicks you out of the scope. Clearing
-  // game.aiming means a fresh RMB press is needed to re-scope even if the
+  // input.aiming means a fresh RMB press is needed to re-scope even if the
   // button is still held (mouseup will just re-clear it harmlessly).
-  if (def.unscopeOnShot) game.aiming = false;
+  if (def.unscopeOnShot) input.aiming = false;
 
   // Euler order and cone sampling live in sim/ballistics.ts; pitch and yaw
   // both carry their recoil punch, so shots follow exactly what the camera
@@ -331,9 +331,9 @@ export function updateWeapon(dt: number): void {
   // the smg has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules).
-  if (!game.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
+  if (!input.aiming) game.zoomLevel = 0; // every re-scope starts at lowest zoom
   const aimFov = aimFovFor(def);
-  game.adsLerp = approach(game.adsLerp, game.aiming ? 1 : 0, dt, ADS_RATE);
+  game.adsLerp = approach(game.adsLerp, input.aiming ? 1 : 0, dt, ADS_RATE);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
   // usable; main.ts multiplies mouse deltas by this.
   game.zoomScale = 1 - (1 - aimFov / BASE_FOV) * game.adsLerp;
@@ -375,7 +375,7 @@ export function updateWeapon(dt: number): void {
 
   // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire
   // once per press — the latch blocks repeats until the button is released.
-  if (!game.shooting) triggerLatch = false;
+  if (!input.shooting) triggerLatch = false;
   else if (!def.semiAuto || !triggerLatch) {
     if (gameTime.now() - weapon.lastShot >= weapon.fireRate) {
       shoot();
@@ -395,7 +395,7 @@ export function updateWeapon(dt: number): void {
     airLerp: game.airLerp,
     spray: game.spray,
     inherent: def.inherent,
-    adsMul: game.aiming ? def.spreadMul : 1,
+    adsMul: input.aiming ? def.spreadMul : 1,
   });
   game.spray = decaySpray(game.spray, dt, def.sprayRecover);
   setCrosshairGap(crosshairGapPx(game.spread, camera.fov, window.innerHeight));

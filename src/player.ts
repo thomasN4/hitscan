@@ -14,7 +14,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, game, keys, gameTime } from './core/state';
+import { player, input, game, keys, gameTime } from './core/state';
 import { collidesAt } from './collision';
 import { colliders } from './world';
 import { sfxFootstep } from './audio';
@@ -64,8 +64,8 @@ export function updateMovement(dt: number): void {
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
   const crouching = key('ShiftLeft') && player.onGround;
-  const running = game.running && !crouching && !game.aiming;
-  const speed = speedFor({ crouching, aiming: game.aiming, running, runLerp: game.runLerp });
+  const running = input.running && !crouching && !input.aiming;
+  const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: game.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(game.yaw), 0, -Math.cos(game.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)

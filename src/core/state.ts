@@ -337,14 +337,29 @@ export const session: SessionState = {
   started: false,
 };
 
-/** Misc per-frame / transient flags — see the slices above/below. */
-export interface GameState {
+/**
+ * Raw button state (LMB/RMB/sprint). Written by main.ts's event handlers —
+ * plus one weapons.ts write (`shoot()` clears `aiming` on unscopeOnShot) —
+ * and read by player/weapons/hud. Tracked as state rather than one-shot
+ * events because firing is continuous in updateWeapon.
+ */
+export interface InputState {
   /** LMB held. */
   shooting: boolean;
   /** RMB held (iron sights). */
   aiming: boolean;
   /** Double-tapped W and still holding it (sprint). */
   running: boolean;
+}
+
+export const input: InputState = {
+  shooting: false,
+  aiming: false,
+  running: false,
+};
+
+/** Misc per-frame / transient flags — see the slices above/below. */
+export interface GameState {
   /** 0..1 sprint acceleration blend; ~0.2 s ramp to full speed. */
   runLerp: number;
   /** Look yaw; 0 = facing -z, Math.PI would face the arena's rear wall. */
@@ -381,9 +396,6 @@ export interface GameState {
  * every frame; never set them directly from input.
  */
 export const game: GameState = {
-  shooting: false, // LMB held
-  aiming: false,   // RMB held (iron sights)
-  running: false,  // double-tapped W and still holding it (sprint)
   runLerp: 0,      // 0..1 sprint acceleration blend; ~0.2 s ramp to full speed
   yaw: 0,          // 0 = facing -z; Math.PI would face the arena's rear wall
   pitch: 0,

@@ -18,7 +18,12 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    ```
 
 3. **Implement** — on a feature branch cut from `main` (inside its worktree):
-   - `feat/<short-slug>` for features, `fix/<short-slug>` for bug fixes
+   - Branch prefix, `<prefix>/<short-slug>` — the set is these four, no others:
+     `feat/` new gameplay or behavior · `fix/` bug fixes · `refactor/` structure
+     and tooling with no behavior change (the maintainability tranche: #5, #6,
+     #7) · `docs/` documentation only. Take the prefix from this list rather
+     than from habit: `chore/` is the Conventional Commits default for tooling
+     and is NOT used here.
    - As many WIP commits as sensible while working; commit messages: short imperative summary, optionally `;`-joined clauses, e.g.
 
    ```

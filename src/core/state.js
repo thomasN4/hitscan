@@ -76,8 +76,9 @@ export const WEAPONS = [
     inherent: 0.0031, // rest-cone rad — ADS crouched ≈ 2" @ 50 m; hip ≈ 6.7"
     sprayKick: 0.06, recoilKick: 1,
     sprayCap: 4,       // hard ceiling on the multiplier (rested = 1). Sustained
-                       // fire alone tops out near 1.9 (see sprayRecover), so this
-                       // only binds on spray carried in from the other slot
+                       // fire alone tops out near 1.9 (see sprayRecover), so in
+                       // practice this only ever bites via switchWeapon's
+                       // re-clamp of spray carried in from the other slot
     sprayRecover: 0.29, // multiplier units/s — MUST stay below sustained-fire input
                         // (~9.5 shots/s × sprayKick = 0.57/s), or the drain outpaces
                         // accumulation and sprays never bloom at all. Necessary but

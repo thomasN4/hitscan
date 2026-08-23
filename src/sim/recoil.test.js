@@ -222,7 +222,7 @@ describe('yawRecover — the horizontal walk actually walks', () => {
       worsts.push(deg(Math.max(...magazineYawAtShots(smg, seed * 7919))));
     }
     worsts.sort((a, b) => a - b);
-    const median = worsts[worsts.length / 2];
+    const median = worsts[Math.floor(worsts.length / 2)];
     // state.js documents ~0.6° worst-in-mag, ~1° in the tail.
     expect(median).toBeGreaterThan(0.3);
     expect(median).toBeLessThan(1.0);

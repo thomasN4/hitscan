@@ -42,6 +42,31 @@ describe('sustained-fire bounds', () => {
   });
 });
 
+describe('NaN cannot slip through any bound', () => {
+  // Every bound must test its valid case under a negation; a NaN constant
+  // compares false against everything and would silently pass a direct
+  // broken-case check.
+  test.each([
+    ['recoilRecover', 'recoilRecover'],
+    ['recoilKick', 'recoilKick'],
+    ['yawRecover', 'yawRecover'],
+    ['sprayRecover', 'sprayRecover'],
+    ['sprayKick', 'sprayRecover'], // a NaN kick surfaces as the spray rule's input figure
+  ])('%s = NaN is flagged', (field, needle) => {
+    expect(matching([tuned({ [field]: NaN })], needle)).toHaveLength(1);
+  });
+
+  test('scopeGate = NaN is flagged', () => {
+    expect(matching([tuned({ scopeGate: NaN }, SNIPER)], 'SNIPER', 'scopeGate')).toHaveLength(1);
+  });
+
+  test('zero recoilKick on an exempted semiAuto weapon is still flagged', () => {
+    // The sustained-fire rules skip semiAuto weapons; the static kick floor
+    // must not.
+    expect(matching([tuned({ recoilKick: 0 }, SNIPER)], 'SNIPER', 'recoilKick')).toHaveLength(1);
+  });
+});
+
 describe('the semiAuto exemption is a live branch, not a disabled rule', () => {
   test('a full-auto clone of the sniper IS flagged on both rates', () => {
     const fullAutoSniper = tuned({ semiAuto: false }, SNIPER);

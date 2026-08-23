@@ -50,24 +50,29 @@ export function validateWeapons(defs) {
     // apply only while the weapon actually sustains fire: a semiAuto weapon
     // fires once per press, and the sniper's full settle inside the bolt
     // cycle is deliberate (see header).
-    if (!def.semiAuto && def.recoilRecover >= def.recoilKick / def.fireRate) {
+    if (!def.semiAuto && !(def.recoilRecover < def.recoilKick / def.fireRate)) {
       out.push(`${name}: recoilRecover ${num(def.recoilRecover)} exceeds sustained-fire input ${num(def.recoilKick / def.fireRate)} (kick ${num(def.recoilKick)} per ${def.fireRate}s) — recoil never climbs, it just vibrates`);
     }
-    if (!def.semiAuto && def.yawRecover * def.fireRate >= def.yawKick / 2) {
+    if (!def.semiAuto && !(def.yawRecover * def.fireRate < def.yawKick / 2)) {
       out.push(`${name}: yawRecover ${num(def.yawRecover)} drains more per shot interval than the MEAN kick (${num(def.yawKick / 2)}) — the walk returns to 0 before every shot and no bullet is displaced`);
     }
-    if (def.sprayRecover >= def.sprayKick / def.fireRate) {
+    if (!(def.sprayRecover < def.sprayKick / def.fireRate)) {
       out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds sustained-fire input ${num(def.sprayKick / def.fireRate)} — sprays will not bloom`);
     }
 
     // ---------- Static sanity ----------
-    // `!(x > bound)` rather than `x <= bound` so NaN is flagged instead of
-    // silently passing.
+    // Every bound tests its own VALID case under a negation (`if (!(ok))`),
+    // never the broken case directly: NaN compares false against everything,
+    // so only the negated shape can flag it. The sustained-fire rules above
+    // use the same pattern.
     if (!(def.sprayCap > 1)) {
       out.push(`${name}: sprayCap ${num(def.sprayCap)} must exceed 1 — rested spray IS 1, so a cap at/below it means spray never accumulates`);
     }
     if (!(def.inherent > 0)) {
       out.push(`${name}: inherent ${num(def.inherent)} must be > 0 — the rest cone is the weapon's floor accuracy cost`);
+    }
+    if (!(def.recoilKick > 0)) {
+      out.push(`${name}: recoilKick ${num(def.recoilKick)} must be > 0 — a zero kick means vertical recoil does nothing`);
     }
     if (!(def.yawKick > 0)) {
       out.push(`${name}: yawKick ${num(def.yawKick)} must be > 0 — a zero kick means horizontal recoil does nothing`);
@@ -82,7 +87,7 @@ export function validateWeapons(defs) {
           out.push(`${name}: zoomFovs[${i}] ${num(fov)} must sit below BASE_FOV (${BASE_FOV}) — a step at/above hip FOV widens the view instead of zooming`);
         }
         if (i > 0 && !(fov < def.zoomFovs[i - 1])) {
-          out.push(`${name}: zoomFovs must strictly decrease (${def.zoomFovs[i - 1]} then ${fov}) — a flat/rising step zooms nothing`);
+          out.push(`${name}: zoomFovs must strictly decrease (${num(def.zoomFovs[i - 1])} then ${num(fov)}) — a flat/rising step zooms nothing`);
         }
       }
     }
@@ -107,7 +112,7 @@ export function validateWeapons(defs) {
     }
 
     if (def.scopeGate !== undefined &&
-        (def.scopeGate <= 0 || def.scopeGate >= RECOIL_CAP)) {
+        !(def.scopeGate > 0 && def.scopeGate < RECOIL_CAP)) {
       out.push(`${name}: scopeGate ${num(def.scopeGate)} must lie in (0, RECOIL_CAP = ${RECOIL_CAP}) — a gate at/below 0 never blocks, at/above the cap it never opens`);
     }
 

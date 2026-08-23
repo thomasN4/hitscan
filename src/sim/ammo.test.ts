@@ -20,8 +20,8 @@ describe('isLowAmmo', () => {
     expect(isLowAmmo(11, WEAPONS[0].magSize)).toBe(false);
   });
 
-  test('sniper prompts below a third of its 10-round mag (ceil → <=4)', () => {
-    expect(isLowAmmo(4, WEAPONS[1].magSize)).toBe(true);
-    expect(isLowAmmo(5, WEAPONS[1].magSize)).toBe(false);
+  test('sniper prompts below a third of its 10-round mag (floor → <=3)', () => {
+    expect(isLowAmmo(3, WEAPONS[1].magSize)).toBe(true);
+    expect(isLowAmmo(4, WEAPONS[1].magSize)).toBe(false);
   });
 });

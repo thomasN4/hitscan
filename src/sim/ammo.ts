@@ -7,5 +7,5 @@
 
 /** True when `mag` rounds left counts as "think about reloading" for this weapon. */
 export function isLowAmmo(mag: number, magSize: number): boolean {
-  return mag <= Math.ceil(magSize / 3);
+  return mag <= Math.floor(magSize / 3);
 }

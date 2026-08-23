@@ -310,13 +310,35 @@ export function resetAmmo(): void {
 /** Maps selectable from the start menu (?map= URL param). */
 export type MapName = 'arena' | 'range';
 
-/** Misc per-frame / transient flags — see `game` below. */
-export interface GameState {
+// ---------- Owner-scoped slices ----------
+// The old single `game` bag, split by owning system. Each slice documents its
+// WRITER(S); every other module reads. The slices still live here in the
+// shared-state home — the split is about ownership clarity, not new module
+// homes. window.__cs.game keeps its historical flat shape through a
+// delegation-only facade built at the debug hook in main.ts; gameplay code
+// imports slices directly.
+
+/** Session-level flags. Written by main.ts (startup ?map= read, pointer-lock events). */
+export interface SessionState {
+  // Map is chosen at page load via ?map=range (start-menu buttons trigger a
+  // full reload); there is deliberately no hot-swapping of scenes at runtime.
+  // main.ts overwrites this from the URL at startup — reading `location` here
+  // would break this module's importability in Node.
   map: MapName;
   /** Pointer lock active (Esc/menu releases it). */
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */
   started: boolean;
+}
+
+export const session: SessionState = {
+  map: 'arena',
+  locked: false,
+  started: false,
+};
+
+/** Misc per-frame / transient flags — see the slices above/below. */
+export interface GameState {
   /** LMB held. */
   shooting: boolean;
   /** RMB held (iron sights). */
@@ -352,20 +374,13 @@ export interface GameState {
 }
 
 /**
- * Misc per-frame / transient flags. Grouped here because they are touched
- * by several systems (input in main.ts, consumed in player.ts/weapons.ts).
+ * Remaining unowned-yet fields of the old `game` bag — shrinks as each slice
+ * (see above) absorbs its fields. Deleted when the last one leaves.
  *
  * Lerp values (`crouchLerp`, `adsLerp`) are smoothed 0..1 blends updated
  * every frame; never set them directly from input.
  */
 export const game: GameState = {
-  // Map is chosen at page load via ?map=range (start-menu buttons trigger a
-  // full reload); there is deliberately no hot-swapping of scenes at runtime.
-  // main.ts overwrites this from the URL at startup — reading `location` here
-  // would break this module's importability in Node.
-  map: 'arena',
-  locked: false,   // pointer lock active (Esc/menu releases it)
-  started: false,  // first Play click happened; distinguishes pause from pre-game
   shooting: false, // LMB held
   aiming: false,   // RMB held (iron sights)
   running: false,  // double-tapped W and still holding it (sprint)

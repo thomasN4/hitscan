@@ -12,7 +12,7 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { GameState, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
+import { session, game, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -31,9 +31,9 @@ import { validateWeapons } from './sim/validateWeapons';
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
 // core/state.ts stays free of browser globals, so the ?map= param is read
-// here and written into the shared state before anything reads game.map.
-game.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
-const RANGE = game.map === 'range';
+// here and written into the shared state before anything reads session.map.
+session.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
+const RANGE = session.map === 'range';
 
 // Loud, not fatal: this runs before initEngine(), so throwing would blank
 // the page and hide the message behind a broken app. A violation is a
@@ -87,7 +87,7 @@ addEventListener('keyup', e => {
 
 const SENS = 0.0022; // radians per pixel of mouse movement
 document.addEventListener('mousemove', e => {
-  if (!game.locked || !player.alive) return;
+  if (!session.locked || !player.alive) return;
   // zoomScale shrinks toward the FOV ratio while scoped (weapons.ts), so
   // aiming stays controllable at 12x instead of flinging across the sky.
   game.yaw -= e.movementX * SENS * game.zoomScale;
@@ -99,7 +99,7 @@ document.addEventListener('mousemove', e => {
 // Wheel = scope zoom steps, only while scoped with the sniper (slot 1).
 // Scroll up zooms in, scroll down zooms out, wrapping through the levels.
 addEventListener('wheel', e => {
-  if (!game.locked || !player.alive || game.slot !== 1 || !game.aiming) return;
+  if (!session.locked || !player.alive || game.slot !== 1 || !game.aiming) return;
   const n = WEAPONS[1].zoomFovs.length; // tuple index — slot 1 exists by type
   game.zoomLevel = (game.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
   sfxZoom();
@@ -108,10 +108,10 @@ addEventListener('wheel', e => {
 // LMB = fire (held), RMB = iron sights (held). Buttons are tracked as state
 // rather than one-shot events because firing is continuous in updateWeapon.
 addEventListener('mousedown', e => {
-  if (e.button === 0 && game.locked && player.alive) game.shooting = true;
+  if (e.button === 0 && session.locked && player.alive) game.shooting = true;
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
-  if (e.button === 2 && game.locked && player.alive) {
+  if (e.button === 2 && session.locked && player.alive) {
     const gate = WEAPONS[game.slot].scopeGate; // undefined = no gate (smg)
     if (gate === undefined || game.recoil < gate) game.aiming = true;
   }
@@ -138,21 +138,21 @@ if (RANGE) {
   menuBlurb.textContent = 'Practice your aim \u2014 silhouettes with bullseyes at 10\u201360 m';
 }
 requireEl('respawnBtn').onclick = () => { deathScreen.style.display = 'none'; respawn(); lock(); };
-renderer.domElement.addEventListener('click', () => { if (!game.locked && player.alive && game.started) lock(); });
+renderer.domElement.addEventListener('click', () => { if (!session.locked && player.alive && session.started) lock(); });
 
 document.addEventListener('pointerlockchange', () => {
-  game.locked = document.pointerLockElement === renderer.domElement;
-  hudEl.style.display = game.locked ? 'block' : 'none';
+  session.locked = document.pointerLockElement === renderer.domElement;
+  hudEl.style.display = session.locked ? 'block' : 'none';
   // updateWeapon stops running when the loop pauses; make sure a held scope
   // can't stay stuck on screen across pause/death.
-  if (!game.locked) setScopeOverlay(false);
-  if (game.locked) {
-    game.started = true;
+  if (!session.locked) setScopeOverlay(false);
+  if (session.locked) {
+    session.started = true;
     deathScreen.style.display = 'none';
   }
   // Losing lock while alive means Esc was pressed -> show pause menu.
   // Losing lock while dead is handled by damagePlayer's death screen.
-  if (!game.locked && game.started && player.alive) {
+  if (!session.locked && session.started && player.alive) {
     menuBlurb.textContent = 'Paused \u2014 click Play to resume';
     requireEl('playBtn').textContent = 'Resume';
     startMenu.style.display = 'flex';
@@ -166,7 +166,7 @@ function animate(): void {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05); // clamp: tab-switch spikes shouldn't teleport entities
 
-  if (game.locked && game.started) {
+  if (session.locked && session.started) {
     // Stage 0 — advance game time. Every stage below measures against this
     // epoch (fire-rate gates, reloads, respawn timers), and keeping the
     // advance inside the sim block is what makes them all pausable. dt is

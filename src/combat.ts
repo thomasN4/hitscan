@@ -4,7 +4,7 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone } from './core/state';
-import { player, game, bots, gameTime, resetAmmo } from './core/state';
+import { player, session, game, bots, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
 
@@ -49,7 +49,7 @@ export function damageBot(bot: BotShape, dmg: number, part: HitZone): void {
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
 export function respawn(): void {
-  const spawnZ = game.map === 'range' ? 8 : 48; // range: behind the firing line
+  const spawnZ = session.map === 'range' ? 8 : 48; // range: behind the firing line
   player.pos.set(0, player.eyeHeight, spawnZ);
   player.vel.set(0, 0, 0);
   player.hp = 100;

@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, game, player, gameTime, WEAPONS, ammoStore,
+import { bots, weapon, session, game, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          type WeaponDef, type WeaponSlot } from './core/state';
 import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
@@ -160,7 +160,7 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
 
 /** Start reloading if possible. Bound to R and to firing an empty mag. */
 export function tryReload(): void {
-  if (!game.started || !player.alive || weapon.reloading || weapon.mag === weapon.magSize || weapon.reserve <= 0) return;
+  if (!session.started || !player.alive || weapon.reloading || weapon.mag === weapon.magSize || weapon.reserve <= 0) return;
   weapon.reloading = true;
   weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
   sfxReload();
@@ -174,7 +174,7 @@ export function tryReload(): void {
  * to avoid mid-mag-swap state corruption.
  */
 export function switchWeapon(slot: WeaponSlot): void {
-  if (slot === game.slot || !game.started || !player.alive || weapon.reloading) return;
+  if (slot === game.slot || !session.started || !player.alive || weapon.reloading) return;
   const saved = ammoStore[game.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;
@@ -369,7 +369,7 @@ export function updateWeapon(dt: number): void {
     const need = weapon.magSize - weapon.mag;
     const take = Math.min(need, weapon.reserve);
     weapon.mag += take;
-    if (game.map !== 'range') weapon.reserve -= take;
+    if (session.map !== 'range') weapon.reserve -= take;
     weapon.reloading = false;
   }
 

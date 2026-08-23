@@ -124,9 +124,88 @@ describe('decayToward', () => {
     let elapsed = 0;
     const dt = 1 / 60;
     while (yaw !== 0 && elapsed < 3) {
-      yaw = decayToward(yaw, dt, sniper.recoilRecover);
+      yaw = decayToward(yaw, dt, sniper.yawRecover);
       elapsed += dt;
     }
     expect(elapsed).toBeLessThan(0.5);
+  });
+});
+
+/** Deterministic uniform in [-1, 1) — the walk's Math.random lives in weapons.js. */
+function lcg(seed) {
+  let s = seed >>> 0;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296 * 2 - 1; };
+}
+
+/**
+ * Replay weapons.js's fire loop for one full magazine and return |recoilYaw|
+ * AS SAMPLED AT EACH SHOT — the offset each bullet actually leaves with.
+ *
+ * Sampling at fire time is the whole point: the kick is applied after the
+ * shot's ray is built, so a rate that drains the walk back to 0 between shots
+ * still shows a lively recoilYaw mid-interval while displacing nothing.
+ */
+function magazineYawAtShots(def, seed) {
+  const rand = lcg(seed);
+  const dt = 1 / 60;
+  let yaw = 0, t = 0, nextShot = 0, fired = 0;
+  const atShots = [];
+  while (fired < def.magSize) {
+    if (t >= nextShot) {
+      atShots.push(Math.abs(yaw));
+      yaw = Math.max(-RECOIL_YAW_CAP,
+        Math.min(RECOIL_YAW_CAP, yaw + rand() * def.yawKick));
+      nextShot += def.fireRate;
+      fired++;
+    }
+    yaw = decayToward(yaw, dt, def.yawRecover);
+    t += dt;
+  }
+  return atShots;
+}
+
+describe('yawRecover — the horizontal walk actually walks', () => {
+  const smg = WEAPONS[0];
+  const deg = units => units * smg.punchRad * 180 / Math.PI;
+
+  test('the drain per shot stays under the MEAN kick, not the max', () => {
+    // The walk is zero-mean, so this is NOT decayRecoil's constraint: sizing
+    // yawRecover against recoilKick/fireRate (or against recoilRecover, which
+    // is how this shipped) drains 0.63 per shot against a 0.4 max kick and
+    // returns recoilYaw to exactly 0 before every shot.
+    expect(smg.yawRecover * smg.fireRate).toBeLessThan(smg.yawKick / 2);
+  });
+
+  test('most shots in a magazine leave off-centre', () => {
+    let offCentre = 0, total = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+      const shots = magazineYawAtShots(smg, seed * 7919);
+      offCentre += shots.filter(v => v !== 0).length;
+      total += shots.length;
+    }
+    // ~88% at the shipped tuning; 0% if the walk drains at recoilRecover.
+    // (The first round is always dead-on by design, so this cannot reach 100.)
+    expect(offCentre / total).toBeGreaterThan(0.75);
+  });
+
+  test('the worst offset in a magazine lands in the documented band', () => {
+    const worsts = [];
+    for (let seed = 1; seed <= 200; seed++) {
+      worsts.push(deg(Math.max(...magazineYawAtShots(smg, seed * 7919))));
+    }
+    worsts.sort((a, b) => a - b);
+    const median = worsts[worsts.length / 2];
+    // state.js documents ~0.6° worst-in-mag, ~1° in the tail.
+    expect(median).toBeGreaterThan(0.3);
+    expect(median).toBeLessThan(1.0);
+  });
+
+  test('the sniper deliberately settles between shots — every shot dead-on', () => {
+    // The semiAuto exemption AGENTS.md records for recoilRecover applies here
+    // too: a 1.1 s bolt cycle against a 13/s drain means the jolt is visual
+    // only. Pinned as intent so it reads as a choice, not the bug above.
+    const sniper = WEAPONS[1];
+    expect(sniper.yawRecover * sniper.fireRate).toBeGreaterThan(sniper.yawKick);
+    expect(magazineYawAtShots(sniper, 12345).every(v => v === 0)).toBe(true);
   });
 });

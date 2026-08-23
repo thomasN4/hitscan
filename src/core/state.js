@@ -48,7 +48,9 @@ export const RECOIL_CAP = 6;
 /**
  * Ceiling on the horizontal recoil random walk, in the same units as
  * RECOIL_CAP. Symmetric: `recoilYaw` lives in [-RECOIL_YAW_CAP, +RECOIL_YAW_CAP].
- * At the smg's punchRad that is roughly ±2° of sideways wander.
+ * At the smg's punchRad that is roughly ±2° of sideways wander — a safety bound,
+ * not a tuning knob: the mean-zero walk peaks around a third of it in play, so
+ * `yawRecover` is what actually shapes the wander.
  */
 export const RECOIL_YAW_CAP = 3;
 /** Base (hip-fire) vertical FOV in degrees; every zoom target sits below this. */
@@ -82,12 +84,22 @@ export const WEAPONS = [
                       // (~9.5 shots/s × recoilKick = 9.5/s), or the drain outpaces
                       // accumulation and spray never climbs (it just vibrates).
                       // 6 → full 6-unit climb in ~1.3 s, ~1 s settle-back
-                      // (also decays the horizontal component, see recoilYaw)
+                      // (vertical only; the horizontal walk has its own
+                      // yawRecover — draining it at THIS rate zeroed it between
+                      // every shot, which is how horizontal recoil shipped inert)
     punchRad: 0.012,   // radians of aim climb per recoil unit — sustained spray
                        // climbs toward ~4° at RECOIL_CAP, pull down to compensate
-    yawKick: 0.4,      // ± horizontal recoil units per shot (random walk, capped at
-                       // RECOIL_YAW_CAP): typical full-mag drift ~1-1.5° via
-                       // punchRad, compensable
+    yawKick: 0.4,      // ± horizontal recoil units per shot — a ZERO-MEAN random
+                       // walk (capped at RECOIL_YAW_CAP), so its drift grows with
+                       // √shots, not shots: simulated over a mag the offset at
+                       // fire time is ~0.22° typical, ~0.6° worst, ~1° in the tail
+    yawRecover: 0.5,   // horizontal units/s — separate from recoilRecover because
+                       // the walk is mean-zero: what must stay below the input is
+                       // the drain per shot interval (0.5 × 0.105 = 0.053) vs the
+                       // MEAN kick (yawKick/2 = 0.2). Draining faster than that
+                       // returns recoilYaw to 0 before the next shot and no bullet
+                       // is ever displaced — only the camera twitches.
+                       // 0.5 → a typical mag-end walk clears in well under a second
     scopedOverlay: false,
   },
   {
@@ -105,8 +117,13 @@ export const WEAPONS = [
     recoilRecover: 13, // slow settle (~0.3 s) — bolt-action feel; also gates re-scoping
     punchRad: 0.02,    // radians of aim climb per recoil unit — one meaty ~4.6°
                        // kick per shot that settles slowly with the recoil
-    yawKick: 0.8,      // ± horizontal recoil units per shot — up to ~±0.55° of
+    yawKick: 0.8,      // ± horizontal recoil units per shot — up to ~±0.92° of
                        // sideways jump on the big punch, real guns kick crooked
+    yawRecover: 13,    // matches recoilRecover: like the vertical climb, the walk
+                       // settles FULLY inside the 1.1 s bolt cycle, so every shot
+                       // leaves from a centred aim point. Deliberate over-drain —
+                       // the same semiAuto exemption AGENTS.md records for
+                       // recoilRecover; the kick is a per-shot jolt, not a walk.
     sprayRecover: 0.08, // slow settle matches the bolt-action feel (input ≈ 0.9 shots/s × 0.25)
     scopeGate: 0.5,    // RMB re-scope is blocked until recoil decays below this
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
@@ -183,7 +200,9 @@ export const game = {
   recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot
                    // adds up to ±yawKick — a random walk, clamped to
                    // ±RECOIL_YAW_CAP, that the player steers against. Decays
-                   // toward 0 at recoilRecover/s alongside the vertical climb.
+                   // toward 0 at the weapon's own yawRecover/s — NOT at
+                   // recoilRecover, which drains fast enough to zero the walk
+                   // between shots.
   crouchLerp: 0,
   airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
                    // out over ~100-200 ms so it doesn't snap on takeoff/landing

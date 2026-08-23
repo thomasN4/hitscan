@@ -84,9 +84,16 @@ export function decaySpray(spray, dt, rate) {
  * Overshoot lands exactly on 0 rather than crossing into the opposite sign and
  * oscillating.
  *
+ * Sustained-fire constraint, and it is NOT the one on decayRecoil/decaySpray:
+ * the walk is mean-zero, so what matters is the drain per shot interval against
+ * the MEAN kick — `rate × fireRate` must stay below `yawKick / 2`. Sizing it
+ * against the vertical climb instead (rate = recoilRecover) returns the walk to
+ * exactly 0 before every shot, so bullets never leave off-centre and only the
+ * camera twitches. That is how horizontal recoil first shipped.
+ *
  * @param {number} value signed
  * @param {number} dt    frame delta in seconds
- * @param {number} rate  units/second
+ * @param {number} rate  units/second (weapon.yawRecover for the horizontal walk)
  */
 export function decayToward(value, dt, rate) {
   const step = dt * rate;

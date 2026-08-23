@@ -267,10 +267,11 @@ export function updateWeapon(dt) {
 
   // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
   // the sniper settles slowly for bolt-action feel; see core/state.js WEAPONS).
-  // The horizontal walk drains at the SAME rate, so wander and climb settle
-  // together rather than leaving the crosshair off to one side.
+  // The horizontal walk drains at its OWN, much slower rate: it is mean-zero, so
+  // a drain sized against the vertical climb outruns it and zeroes the wander
+  // before the next shot leaves.
   game.recoil = decayRecoil(game.recoil, dt, weapon.recoilRecover);
-  game.recoilYaw = decayToward(game.recoilYaw, dt, weapon.recoilRecover);
+  game.recoilYaw = decayToward(game.recoilYaw, dt, def.yawRecover);
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // rifle has a single iron-sights step; the sniper cycles its wheel-chosen

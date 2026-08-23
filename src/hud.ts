@@ -8,6 +8,7 @@
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
 import { player, weapon, input, wpn, score, WEAPONS, BASE_FOV } from './core/state';
+import { isLowAmmo } from './sim/ammo';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -144,7 +145,7 @@ export function updateHUD(): void {
   healthFill.style.background = player.hp > 60 ? '#4caf50' : player.hp > 25 ? '#ffab40' : '#ff5252';
   magText.textContent = String(weapon.mag);
   ammoReserve.textContent = String(weapon.reserve);
-  reloadHint.style.visibility = (weapon.mag <= 10 && !weapon.reloading) ? 'visible' : 'hidden';
+  reloadHint.style.visibility = (!weapon.reloading && isLowAmmo(weapon.mag, weapon.magSize)) ? 'visible' : 'hidden';
   if (weapon.reloading) reloadHint.textContent = 'RELOADING...';
   else reloadHint.textContent = 'PRESS [R] TO RELOAD';
   // Weapon name + scope zoom label; cached so unchanged values don't touch

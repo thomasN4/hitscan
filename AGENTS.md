@@ -47,7 +47,7 @@ Two test layers, deliberately split:
 
 ## Architecture rules
 
-- **All shared mutable state lives in `src/core/state.js`** (`player`, `weapon`, `game`, `keys`, collections). Do not create new cross-module mutable globals elsewhere.
+- **All shared mutable state lives in `src/core/state.js`** (`player`, `weapon`, `game`, `keys`, `bots`, effects collections) — except the level-geometry registries `solids`/`colliders`, which `world.js` owns so registration has exactly one path. Do not create new cross-module mutable globals elsewhere.
 - **`core/state.js` must stay importable in plain Node.** It may use THREE's math classes (`Vector3`, `Box3`), but never `document`, `window`, `location`, or a `WebGLRenderer`. This is what makes the simulation unit-testable: `src/core/state.test.js` runs in plain Node, so a browser global at module scope breaks every test in it on import. Browser-derived values are written IN by `main.js` at startup (see `game.map`) rather than read here. Anything browser-only belongs in `core/engine.js` or behind an `init*()` function.
 - **Engine singletons (`renderer`, `scene`, `camera`, `clock`) live in `src/core/engine.js`** and are created by `initEngine()`, not at module scope. They are `export let` live bindings: reading them at module scope (before init) yields `undefined`.
 - **No module-scope side effects that touch the engine or the DOM.** A module needing either exposes an `init*()` function that `main.js` calls in order. Current order, which `main.js` documents inline:
@@ -65,8 +65,21 @@ Two test layers, deliberately split:
   ```
 
   `updateWeapon` consumes the blends `updateMovement` writes and decays `game.recoil`; `updateCamera` and `updateViewmodel` then read that post-decay recoil, so camera, viewmodel and bullets agree within a frame. Reordering aims the camera a frame ahead of the shots (`5e004a5`). The pin runs the other way too: `updateMovement` writes `camera.position`, and `shoot()` — reached from inside `updateWeapon` — rays from `camera.getWorldPosition()`, so that write cannot be deferred to `updateCamera` without firing every shot from the previous frame's eye. Keep the sequence flat in `animate()` — do not nest one stage inside another.
-- **Dependency direction:** everything may import from `core/state.js` and `sim/`; browser-side modules also import `core/engine.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons...} → {sim, core}.
-- **Level geometry must go through `map.js:addBox`**, which registers both the movement AABB (`colliders`) and the raycast target (`solids`). Adding meshes directly to the scene creates walk-through/shoot-through bugs.
+- **Dependency direction:** everything may import from `core/state.js` and `sim/`; browser-side modules also import `core/engine.js` and `world.js`. Modules must not import each other in cycles. Current flow: `main` → {player, bots, weapons, map, range} → {world, sim, core}. `world.js` sits between the map builders and `core/`: unlike `sim/` it is not engine-free — it imports `scene` from `core/engine.js` — but it reads `scene` only inside `addSolidBox`, which is what keeps the module importable in plain Node.
+- **Level geometry must go through `src/world.js`**, which owns `solids` (raycast targets: bullets, decals, bot LOS) and `colliders` (world-space AABBs for movement). Adding meshes to the scene directly creates walk-through/shoot-through bugs. That is the whole public surface — if none of these fits, add a function here rather than pushing to the arrays yourself:
+
+  | | |
+  |---|---|
+  | `addSolidBox(x,y,z,w,h,d,mat)` | Create + `scene.add` + register both. **The default** for walls and crates. Browser-only. |
+  | `createSolidBox(x,y,z,w,h,d,mat)` | Same construction, but no scene and no registration. Pure; the seam `addSolidBox` is built from, and where `y` = BASE is unit-tested. |
+  | `registerSolidBox(mesh)` | Both registries, for a mesh you positioned yourself. Pure. |
+  | `registerSolid(mesh)` | Raycast target, **no** AABB — flat ground planes only. Pure. |
+  | `registerGroupParts(group, {shootable, blocking})` | Parts under a transformed parent. Flushes the group's world matrix before measuring, and takes two lists because they legitimately differ (a range target's post blocks walking but not bullets). Pure. |
+  | `resetWorld()` | Clears both registries. Tests only. |
+
+  `registerSolid` is narrower than it looks: it is right for the ground planes because a flat `PlaneGeometry` measures to a **zero-height** box at y ≈ 0, below `TEST_BOX_MIN_Y`, so an AABB there would do nothing at all — movement is bounded by the perimeter/lane walls instead. Geometry with real height (a floor slab, a raised platform, a ramp) is **not** this case and must go through `addSolidBox`/`registerSolidBox`, or you ship a walk-through floor.
+
+  Only `addSolidBox` touches the scene; the rest are pure and unit-tested, because both bugs this has caused (`431ac6e` no-clip, `faa52c5` AABBs at the origin) live in the scene-free half — as does the base-vs-centre offset, which has not bitten yet but had no test until `createSolidBox` gave it a seam.
 - **Map switching is a full page reload** driven by the `?map=` URL param (read once by `main.js` at startup into `game.map`). Never hot-swap scene contents at runtime — map builders (`map.js`, `range.js`) assume a fresh scene. Any new map needs: a builder registered in main.js, spawn handling in `combat.js:respawn()`, and a smoke-test pass.
 - **Damage flows through `combat.js`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
 - DOM writes only in `hud.js`. Sound synthesis only in `audio.js`.
@@ -92,7 +105,7 @@ Maintainability tranche 1 (in progress) — see the plan for full rationale:
 
 - **PR 1 (done):** split `core.js` into pure `core/state.js` + browser-only `core/engine.js`; explicit init order; Vitest.
 - **PR 2 (done):** extract pure sim math into `src/sim/` (`accuracy`, `recoil`, `ballistics`, `damage`, `movement`, `smoothing`) with unit tests; hoist the frame pipeline into `main.js` so intra-frame ordering is visible.
-- **PR 3:** single geometry-registration path in `src/world.js` (`addSolidBox`, `registerGroupParts`), replacing the duplicated `addBox` in `map.js`/`range.js`; make `collidesAt` take `colliders` as a parameter.
+- **PR 3 (done):** single geometry-registration path in `src/world.js` (`addSolidBox`, `registerSolid`, `registerGroupParts`), replacing the duplicated `addBox` in `map.js`/`range.js`; `collidesAt` now takes `colliders` as a parameter, matching `hasLineOfSight`.
 - **PR 4:** `sim/validateWeapons.js` enforcing the `recoilRecover < recoilKick / fireRate` class of constraint that has now been fixed twice by hand.
 
 Deferred to a later tranche:

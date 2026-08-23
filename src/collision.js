@@ -1,10 +1,15 @@
 // collision.js — movement collision and line-of-sight queries.
 //
-// Two independent mechanisms:
-//   collidesAt      -> AABB overlap test against core.colliders (cheap, per-frame)
-//   hasLineOfSight  -> raycast against core.solids (used by bots before firing)
+// Two independent mechanisms, both PURE: each takes the registry it queries
+// as a parameter (from world.js) rather than importing it, so this module
+// stays unit-testable in plain Node.
+//   collidesAt      -> AABB overlap test against `colliders` (cheap, per-frame)
+//   hasLineOfSight  -> raycast against `solids` (used by bots before firing)
 import * as THREE from 'three';
-import { colliders } from './core/state.js';
+
+/** Entity test box spans this y range regardless of crouch — see collidesAt. */
+export const TEST_BOX_MIN_Y = 0.1;
+export const TEST_BOX_MAX_Y = 2.0;
 
 /**
  * Test whether an entity capsule (approximated as a box) at `pos` would
@@ -15,11 +20,12 @@ import { colliders } from './core/state.js';
  *
  * @param {THREE.Vector3} pos - entity position (y is ignored by this test)
  * @param {number} radius - half-width of the entity (player: 0.45, bot: 0.5)
+ * @param {THREE.Box3[]} colliders - registry from world.js
  */
-export function collidesAt(pos, radius) {
+export function collidesAt(pos, radius, colliders) {
   const box = new THREE.Box3(
-    new THREE.Vector3(pos.x - radius, 0.1, pos.z - radius),
-    new THREE.Vector3(pos.x + radius, 2.0, pos.z + radius)
+    new THREE.Vector3(pos.x - radius, TEST_BOX_MIN_Y, pos.z - radius),
+    new THREE.Vector3(pos.x + radius, TEST_BOX_MAX_Y, pos.z + radius)
   );
   for (const c of colliders) if (c.intersectsBox(box)) return true;
   return false;

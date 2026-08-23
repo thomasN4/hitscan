@@ -77,6 +77,21 @@ a Vitest hard gate over the real `WEAPONS` table, and a dev-gated
 fatal). The module docs state the bounds are necessary, not sufficient; the
 loop-replaying tests in `sim/recoil.test.js` pin actual numbers.
 
+### PR 6 — ESLint gate (#TBD)
+
+`eslint.config.js` (flat), `npm run lint`, no TypeScript — the piece the
+"later tranche" section below flagged as worth pulling forward on its own.
+Three `files` blocks, because the globals are the whole point: browser for
+`src/**`, Node for `src/**/*.test.js` (a test reaching for `document` has
+stopped being a pure-simulation test) and for this config, and **both** for
+`scripts/smoke-test.mjs` — it runs in Node but every `page.evaluate()`
+callback executes in the browser, so declaring only Node flags 75 correct
+references.
+
+`src/` was already clean. Non-vacuity was proven the way review lesson 7
+prescribes: deleting `player` from `weapons.js`'s state import reproduces
+`730d9cc` and lint reports three `no-undef` errors.
+
 ---
 
 ## Review lessons
@@ -175,9 +190,9 @@ Two `tsconfig` flags matter as much: `strict`, and **`noUncheckedIndexedAccess`*
 — `WEAPONS[game.slot]` and `zoomFovs[game.zoomLevel]` are unchecked index reads
 on input-mutated state. Wire `npm run lint` into the verification set.
 
-**Worth pulling forward:** `no-undef` needs no TypeScript. A flat ESLint config
-with `languageOptions.globals.browser` would catch the repo's most-cited trap
-today, in roughly a 20-line PR.
+**Pulled forward and landed** as PR 6 above: `no-undef` needs no TypeScript,
+so the flat config and `npm run lint` shipped ahead of the migration. The
+typescript-eslint rules in the table layer onto that config.
 
 **Also deferred:** unifying the two time bases (`clock.elapsedTime` vs
 `performance.now()`) behind one game clock plus a pausable scheduler; splitting
@@ -194,16 +209,17 @@ Each PR needs its own worktree off current `origin/main` with its own
 `npm install` — symlinking the primary checkout's `node_modules` writes shared
 state the other worktrees read.
 
-All four must pass:
+All five must pass:
 
-1. `npm test`
-2. `npm run build`
-3. `node scripts/smoke-test.mjs`, against **both** the dev server and
+1. `npm run lint`
+2. `npm test`
+3. `npm run build`
+4. `node scripts/smoke-test.mjs`, against **both** the dev server and
    `vite preview`. Pick a port no other worktree is using
    (`ss -ltnp | grep 517`), start with `--port <n> --strictPort`, confirm the
    port from its log, and pass `CS_SMOKE_BASE=http://localhost:<n>`. An orphaned
    server silently serves stale code.
-4. Manual check of both maps (`/` and `/?map=range`).
+5. Manual check of both maps (`/` and `/?map=range`).
 
 **Invariants that must survive:** `window.__cs` keeps exporting
 `{ game, weapon, player, bulletHoles, colliders }`. `scripts/smoke-test.mjs`

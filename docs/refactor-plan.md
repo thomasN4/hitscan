@@ -204,6 +204,14 @@ them — so it rests on the clock's unit-tested freeze semantics plus
 inspection of `Bot.die`'s one-line binding. Deferred with an issue (#17)
 rather than counted as manually verified.
 
+**Resolved by PR #24 (2026-08-24); issue #17 is closed.** Each of the three
+blockers named above was removed rather than worked around: bots got stable
+ids and names (so a specific bot can be identified across a kill), `__cs` now
+exposes `bots` and `gameTime`, and the smoke test gained an automated
+kill→pause→assert phase that proves the respawn timer freezes behind the menu.
+The paragraph above stands as the period record of what PR 8 actually shipped
+with — see the archival policy in Working agreement.
+
 Review round: the reviewer reproduced a real drain-order bug against the
 scheduler's own documented contract — the job queue sorted once per
 `advance()`, but a job enqueued DURING the drain was appended behind pending
@@ -257,7 +265,26 @@ period records.
 
 ## Review lessons
 
-Ordered roughly by how easy they are to repeat.
+**Lesson numbers are permanent IDs.** They are assigned in order of recording,
+never reordered and never reused. A lesson may be moved between categories or
+annotated in place, but its number travels with it — code comments cite bare
+`lesson N` (`weapons.ts`, `recoil.test.ts`, `gameClock.test.ts`,
+`botBrains.test.ts`, `AGENTS.md`), and those citations have no other anchor.
+
+One counter is shared across **every** plan document in `docs/`, so a bare
+`lesson N` stays unambiguous no matter which tranche recorded it: new lessons
+are appended at the end of the list in whichever `docs/*-plan.md` owns the
+current tranche, continuing from the highest number already used. The next free
+number is **21**.
+
+`scripts/lessonNumbering.test.mjs` enforces all of this in `npm test` — numbers
+unique and gapless across documents, every citation resolving, and the
+number→title mapping pinned so a renumber that stays well-formed still turns
+the suite red. It is a gate rather than a review habit on purpose; that is
+lesson 19's own rule.
+
+The category grouping below is presentation only. Within it, entries are
+ordered roughly by how easy they are to repeat.
 
 ### On extraction
 
@@ -410,10 +437,31 @@ Ordered roughly by how easy they are to repeat.
 
 ## Later tranche — what remains
 
-**Nothing — the maintainability tranche is complete (PRs 1–9).** Two items
-remain tracked OUTSIDE it as deliberate behavior work, not refactoring:
+**Nothing — the maintainability tranche is complete (PRs 1–9).** One item
+remains tracked OUTSIDE it as deliberate behavior work, not refactoring:
 issue #15 (weapon switching should cost time; pinned as behavior in
-`sim/recoil.test.ts`) and issue #17 (bot-respawn observability).
+`sim/recoil.test.ts`).
+
+Issue #17 (bot-respawn observability) was also listed here until PR #24 closed
+it; see the resolution note in the PR 8 section.
+
+---
+
+## After this tranche
+
+Work that came after PR 9 belongs to the AI-augmentation tranche and is
+recorded in its own plan document, not appended here. Listed so this file does
+not read as though nothing has happened since:
+
+- **PR #24 — bot respawn observability** (closes #17). Stable bot ids/names,
+  `__cs.bots` + `__cs.gameTime`, and a kill→pause→assert smoke phase that
+  verifies the respawn freeze PR 8 could only argue for.
+- **PR #25 — the `BotBrain` seam.** Bot decision policy extracted into
+  `sim/botBrains.ts` behind an interface; `Bot` executes intents. The one
+  sanctioned stateful class in `sim/` (see AGENTS.md).
+
+Their full write-ups, and the AI tranche's own review lessons, land with the
+CT-bots work in a `docs/<tranche>-plan.md` of its own.
 
 ---
 
@@ -421,6 +469,16 @@ issue #15 (weapon switching should cost time; pinned as behavior in
 
 Per `AGENTS.md`: plan → worktree → implement → **draft** PR. The user merges in
 the GitHub UI; do not run `gh pr merge` or `gh pr ready` unprompted.
+
+**Archival policy for this file and every other `docs/*-plan.md`: append and
+annotate, never renumber.** A closed tranche's record is not rewritten to match
+what later turned out to be true — a claim that has since been resolved,
+corrected or overtaken keeps its original wording and gains an annotation
+beside it saying what changed and which PR changed it. Rewriting reads as
+though the mistake was never made, and it costs the one thing these documents
+are for: knowing what was actually believed at the time. The corollary is the
+numbering rule above — lesson numbers are IDs, so a new lesson is appended
+rather than inserted where it thematically belongs.
 
 Each PR needs its own worktree off current `origin/main` with its own
 `npm install` — symlinking the primary checkout's `node_modules` writes shared

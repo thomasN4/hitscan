@@ -117,7 +117,7 @@ describe('createSolidBox', () => {
   });
 
   test('a raised box is based at `y`, so it clears the ground', () => {
-    // map.ts stacks crates this way: addSolidBox(-9, 3, ..., 3, 3, 3).
+    // maps/arena.ts stacks crates this way: addSolidBox(-9, 3, ..., 3, 3, 3).
     registerSolidBox(createSolidBox(0, 3, 0, 3, 3, 3));
     expect(colliders[0]!.min.y).toBeCloseTo(3, 6);
     expect(colliders[0]!.max.y).toBeCloseTo(6, 6);

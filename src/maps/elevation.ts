@@ -1,6 +1,6 @@
 // elevation.ts — a playtest map for watching how bots cope with height.
 //
-// Unlike map.ts (a place to fight) this is an INSTRUMENT: every feature exists
+// Unlike arena.ts (a place to fight) this is an INSTRUMENT: every feature exists
 // to make one bot behavior observable. Bot navigation is reactive steering with
 // no pathfinding (sim/botBrains.ts) — a bot beelines at its target, backs off
 // inside nearBand, drifts perpendicular, and reverses that drift when geometry
@@ -20,8 +20,8 @@
 // comments on each section before moving anything. Geometry goes through
 // world.ts, as always — never scene.add a solid here.
 import * as THREE from 'three';
-import { scene } from './core/engine';
-import { addSolidBox, addStairs, registerSolid } from './world';
+import { scene } from '../core/engine';
+import { addSolidBox, addStairs, registerSolid } from '../world';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xc9a86c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });
@@ -47,7 +47,7 @@ const DECK_Y = 3.6;
 /** Slab thickness; DECK_Y - SLAB_T = 3.2 m of headroom underneath, well over collision.ts:HEAD_HEIGHT (2.0). */
 const SLAB_T = 0.4;
 
-/** Build the elevation playtest map. Called once from main.ts. */
+/** Build the elevation playtest map. Called once, via the maps/index.ts registry. */
 export function buildElevation(): void {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), matGround);
   ground.rotation.x = -Math.PI / 2;
@@ -161,7 +161,7 @@ function buildJumpOnlyRoute(): void {
 // ---------- E. Cover ----------
 function buildCover(): void {
   // Typed as pairs so the destructured x/z are numbers, not number | undefined
-  // under noUncheckedIndexedAccess (same reason as map.ts).
+  // under noUncheckedIndexedAccess (same reason as arena.ts).
   const crateSpots: [number, number][] = [
     [-22, -14], [-25, -11], [-23.5, -12.5],
     [ 24, -18], [ 27, -21],

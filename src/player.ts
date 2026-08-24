@@ -1,8 +1,13 @@
 // player.ts — first-person controller: movement, crouch, footsteps, camera.
 //
 // The player is a capsule-ish box (core/state.ts `player`) moved on the XZ
-// plane with axis-separated collision tests so sliding along walls feels
-// smooth; Y is only gravity/jump. Crouch and aim modify speed; crouch also
+// plane with a shared axis-separated slide gate (collision.ts:slideMoveXZ),
+// so sliding along walls feels smooth; Y is gravity/jump resolved against
+// the support surface beneath the player (collision.ts:resolveVertical),
+// which is what makes stairs climbable and platforms stand-on-able: risers
+// up to STEP_HEIGHT read as floor, not wall. Physics snaps to support
+// instantly; the CAMERA rides an eased blend of it (motion.groundSmoothY)
+// so climbing doesn't jitter. Crouch and aim modify speed; crouch also
 // lowers the camera and silences footsteps.
 //
 // The three exports here are ORDERED stages of one frame, sequenced by
@@ -15,15 +20,14 @@
 import * as THREE from 'three';
 import { camera } from './core/engine';
 import { player, input, aim, wpn, motion, keys, gameTime } from './core/state';
-import { collidesAt } from './collision';
+import { slideMoveXZ, resolveVertical } from './collision';
 import { colliders } from './world';
 import { sfxFootstep } from './audio';
 import { gunGroup, currentAimPitch, currentAimYaw } from './weapons';
 import { crosshair } from './hud';
-import { speedFor, measuredMoveLerp } from './sim/movement';
+import { speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
 import { approach, deadZone } from './sim/smoothing';
 
-const GRAVITY = 22;    // m/s^2; tuned so jump arc feels snappy at 60fps+
 const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex
 
 /** Blend rate (1/s) for moveLerp and crouchLerp; ~100 ms to settle. */
@@ -34,6 +38,12 @@ const SPRINT_RAMP = 0.2;
 const CROUCH_DROP = 0.7;
 /** Airborne blend rate (1/s); ~100-200 ms to ease the jump penalty in and out. */
 const AIR_BLEND_RATE = 12;
+/**
+ * Camera ground-height blend rate (1/s) — ~80 ms to settle onto a new
+ * support height. Fast enough that stairs read as one continuous climb,
+ * slow enough to hide the per-riser physics snap.
+ */
+const GROUND_BLEND_RATE = 12;
 
 /**
  * Read one keyboard slot as a plain boolean. `keys` is
@@ -78,16 +88,13 @@ export function updateMovement(dt: number): void {
   if (key('KeyA')) move.sub(right);
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
 
-  // Horizontal movement with slide-along-walls: test each axis separately,
-  // so moving into a wall while pressing along it keeps you sliding instead
-  // of sticking.
+  // Horizontal movement: the shared slide-along-walls gate (collision.ts),
+  // shared with bots so both entity types handle geometry identically.
+  // Risers within STEP_HEIGHT of the feet do not block — resolveVertical
+  // below lifts the feet onto them this same frame.
+  const feetY = player.pos.y - player.eyeHeight;
   const preX = player.pos.x, preZ = player.pos.z;
-  const nx = player.pos.x + move.x;
-  const testX = new THREE.Vector3(nx, player.eyeHeight, player.pos.z);
-  if (!collidesAt(testX, player.radius, colliders)) player.pos.x = nx;
-  const nz = player.pos.z + move.z;
-  const testZ = new THREE.Vector3(player.pos.x, player.eyeHeight, nz);
-  if (!collidesAt(testZ, player.radius, colliders)) player.pos.z = nz;
+  slideMoveXZ(player.pos, move.x, move.z, player.radius, feetY, colliders);
 
   // Movement-accuracy input: MEASURED displacement, so being blocked by a
   // wall doesn't count as moving. Smoothed ~100 ms for gradual crosshair
@@ -95,11 +102,19 @@ export function updateMovement(dt: number): void {
   const target = measuredMoveLerp(player.pos.x - preX, player.pos.z - preZ, dt);
   motion.moveLerp = deadZone(approach(motion.moveLerp, target, dt, BLEND_RATE));
 
-  // Jump / gravity
-  if (key('Space') && player.onGround) { player.vel.y = JUMP_VEL; player.onGround = false; }
+  // Jump / gravity / support. resolveVertical owns onGround: rising frames
+  // are airborne, falling frames land on the highest swept surface (which is
+  // also how step-up works — the riser ahead is within STEP_HEIGHT of the
+  // feet, so its top catches them as the feet dip a hair below it). The
+  // last-argument grounded flag lets descents stick to stairs instead of
+  // free-falling each tread.
+  if (key('Space') && player.onGround) player.vel.y = JUMP_VEL;
   player.vel.y -= GRAVITY * dt;
-  player.pos.y += player.vel.y * dt;
-  if (player.pos.y <= player.eyeHeight) { player.pos.y = player.eyeHeight; player.vel.y = 0; player.onGround = true; }
+  const vert = resolveVertical(feetY, player.vel.y, dt, player.pos.x, player.pos.z,
+    player.radius, colliders, player.onGround);
+  player.pos.y = vert.feetY + player.eyeHeight;
+  player.vel.y = vert.velY;
+  player.onGround = vert.onGround;
 
   const pressingMove = move.lengthSq() > 0;
   // Grounded motion only: gates footsteps and view bob.
@@ -124,8 +139,14 @@ export function updateMovement(dt: number): void {
   motion.airLerp = deadZone(
     approach(motion.airLerp, player.onGround ? 0 : 1, dt, AIR_BLEND_RATE));
 
-  camera.position.copy(player.pos);
-  camera.position.y -= CROUCH_DROP * motion.crouchLerp;
+  motion.groundSmoothY = approach(motion.groundSmoothY, vert.feetY, dt, GROUND_BLEND_RATE);
+  camera.position.set(
+    player.pos.x,
+    // The eased ground height, not the physics one: stairs snap the feet up
+    // to 0.3 m per riser; the camera blends across them instead.
+    motion.groundSmoothY + player.eyeHeight - CROUCH_DROP * motion.crouchLerp,
+    player.pos.z,
+  );
 
   // Footsteps: timed by distance-run (stepTimer), silent while crouching or
   // airborne. Timer is pre-charged when stopping so the first step after a

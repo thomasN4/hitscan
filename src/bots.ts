@@ -7,9 +7,11 @@
 // builds a passive BrainView around it (planar vector/distance, a lazy LOS
 // thunk, last frame's collision outcome), hands it to decide(), then
 // realizes the BrainIntent: attempt the returned step against world
-// geometry (reporting rejection back as moveBlocked) and loose a shot if
-// asked. All tuning of behavior lives in BrainParams / brain classes; this
-// file holds no policy numbers.
+// geometry through the SAME feet-aware gates the player uses (slideMoveXZ +
+// resolveVertical, so bots climb stairs and land off edges), reporting
+// rejection back as moveBlocked, and looses a shot if asked. All tuning of
+// behavior lives in BrainParams / brain classes; this file holds no policy
+// numbers.
 //
 // Shot gating contract (realized by the default brain): fire only when a
 // cooldown expires AND line of sight passes; without sight it retries on a
@@ -22,7 +24,8 @@ import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders } from './world';
-import { collidesAt, hasLineOfSight, findFreeSpawn } from './collision';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
+import { GRAVITY } from './sim/movement';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
@@ -107,6 +110,10 @@ export class Bot implements BotShape {
   private readonly brain = new DefaultBrain();
   /** Whether last frame's intended step was rejected by world collision. */
   private moveBlocked = false;
+  /** Vertical velocity — bots resolve support like the player does (stairs). */
+  vy = 0;
+  /** Grounded state fed back to resolveVertical so stair descents stick. */
+  onGround = true;
 
   constructor(team: Team = 'T') {
     // Plain assignments, not a parameter property: the `name` derivation must
@@ -149,6 +156,10 @@ export class Bot implements BotShape {
     );
     this.respawnPoint.copy(p);
     this.mesh.position.copy(p);
+    // Spawns are on open ground: clear vertical state carried from the life
+    // that just ended rather than relying on resolveVertical to self-heal it.
+    this.vy = 0;
+    this.onGround = true;
   }
 
   /**
@@ -179,7 +190,7 @@ export class Bot implements BotShape {
     }
 
     const toTarget = new THREE.Vector3().subVectors(target.pos, this.mesh.position);
-    toTarget.y = 0; // planar distance; Y handled implicitly since everything is ground-locked
+    toTarget.y = 0; // planar chase distance; elevation is handled by the gates below
     const dist = toTarget.length();
 
     // Face the target
@@ -203,12 +214,33 @@ export class Bot implements BotShape {
       dt,
     );
 
-    const nextPos = this.mesh.position.clone().add(intent.step);
-    nextPos.y = 0;
-    this.moveBlocked = collidesAt(nextPos, BOT_RADIUS, colliders);
-    if (!this.moveBlocked) this.mesh.position.copy(nextPos);
+    // Horizontal gate: the SAME axis-separated slide the player uses, with
+    // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
+    const prevFeet = this.mesh.position.y;
+    const preX = this.mesh.position.x, preZ = this.mesh.position.z;
+    const intended = intent.step.length();
+    slideMoveXZ(this.mesh.position, intent.step.x, intent.step.z, BOT_RADIUS, prevFeet, colliders);
+    // Pinned against geometry: report rejection so NEXT frame's brain
+    // reverses its drift (DefaultBrain.decide consumes this).
+    this.moveBlocked =
+      Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ) < intended * 0.25;
 
-    if (intent.wantShoot) this.shoot(dist, target);
+    // Vertical: same swept support resolution as the player, so bots climb
+    // stairs mid-chase and land when they walk off an edge.
+    this.vy -= GRAVITY * dt;
+    const vert = resolveVertical(prevFeet, this.vy, dt,
+      this.mesh.position.x, this.mesh.position.z, BOT_RADIUS, colliders, this.onGround);
+    this.mesh.position.y = vert.feetY;
+    this.vy = vert.velY;
+    this.onGround = vert.onGround;
+
+    if (intent.wantShoot) {
+      // The hit die rolls on true eye-to-eye range: elevation is now real,
+      // so a bot firing down from the platform shoots farther than the
+      // planar chase distance suggests (see botBrains.ts:botHitChance).
+      const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
+      this.shoot(this.eyePos().distanceTo(targetEye), target);
+    }
   }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -218,10 +250,11 @@ export class Bot implements BotShape {
 
   /**
    * Realize a shot the brain ordered. Hits are probabilistic (no
-   * projectile): chance falls off linearly with distance so distant bots
-   * are mostly noise; a hit routes damage by target kind — the player
-   * through damagePlayer, a bot through damageBot as a flat torso hit.
-   * Both dice (hit and damage) come from the brain's rng stream.
+   * projectile): chance falls off linearly with the eye-to-eye distance to
+   * the target so distant bots are mostly noise; a hit routes damage by
+   * target kind — the player through damagePlayer, a bot through damageBot
+   * as a flat torso hit. Both dice (hit and damage) come from the brain's
+   * rng stream.
    */
   private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);

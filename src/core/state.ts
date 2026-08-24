@@ -118,7 +118,12 @@ export const gameTime = new GameClock();
 // ---------- Shared mutable game state ----------
 /** Player entity shape — see `player` below for the live instance. */
 export interface PlayerState {
-  /** EYE position (not feet); physics uses eyeHeight as ground-rest y. */
+  /**
+   * EYE position (not feet); feet height = pos.y − eyeHeight. Feet rest on
+   * the support surface beneath them (collision.ts:supportHeightAt) — only
+   * flat y = 0 away from elevated geometry. Crouch offsets the camera,
+   * not `pos` itself.
+   */
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   onGround: boolean;
@@ -129,9 +134,10 @@ export interface PlayerState {
 }
 
 /**
- * Player entity. `pos` is the EYE position (not feet); physics uses
- * `eyeHeight` as the ground-rest y value. Crouch only offsets the camera,
- * not `pos` itself.
+ * Player entity. `pos` is the EYE position (not feet); the feet ride at
+ * pos.y − eyeHeight and rest on whatever surface is beneath them — on open
+ * ground exactly y = 0, on stairs/platforms higher. Crouch only offsets the
+ * camera, not `pos` itself.
  */
 export const player: PlayerState = {
   pos: new THREE.Vector3(0, 1.7, 48),
@@ -490,6 +496,13 @@ export interface MotionState {
   crouchLerp: number;
   /** 0..1 airborne blend; see updateMovement for why it is written in stage 1. */
   airLerp: number;
+  /**
+   * Smoothed ground height the CAMERA rides (m). Physics snaps the feet to
+   * support instantly — including 0.3 m step-ups on stairs — so the view
+   * eases toward the true feet height instead of jittering per riser.
+   * Camera y = groundSmoothY + eyeHeight − crouch drop.
+   */
+  groundSmoothY: number;
   stepTimer: number;
   bobAmt: number;
 }
@@ -501,6 +514,8 @@ export const motion: MotionState = {
   crouchLerp: 0,
   airLerp: 0,      // 0..1 airborne blend; eases the jump accuracy penalty in and
                    // out over ~100-200 ms so it doesn't snap on takeoff/landing
+  groundSmoothY: 0, // camera's eased ground height; physics feet snap instantly,
+                    // this blend hides the per-riser steps (see player.ts)
   stepTimer: 0.2,  // countdown to next footstep sound
   bobAmt: 0,       // current view-bob amplitude, computed in player.ts
 };

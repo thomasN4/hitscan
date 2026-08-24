@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { collidesAt, findFreeSpawn, TEST_BOX_MIN_Y, TEST_BOX_MAX_Y } from './collision';
+import {
+  collidesAt, supportHeightAt, slideMoveXZ, resolveVertical, findFreeSpawn,
+  STEP_HEIGHT, HEAD_HEIGHT,
+} from './collision';
 
 /** AABB spanning y 0..height, centred on (x, z). */
 const wall = (x: number, z: number, halfW = 1, height = 4): THREE.Box3 => new THREE.Box3(
@@ -8,63 +11,298 @@ const wall = (x: number, z: number, halfW = 1, height = 4): THREE.Box3 => new TH
   new THREE.Vector3(x + halfW, height, z + halfW),
 );
 
+/** AABB spanning yBottom..yTop, centred on (x, z) — for slabs and steps. */
+const slab = (x: number, z: number, yBottom: number, yTop: number, halfW = 1): THREE.Box3 => new THREE.Box3(
+  new THREE.Vector3(x - halfW, yBottom, z - halfW),
+  new THREE.Vector3(x + halfW, yTop, z + halfW),
+);
+
 const at = (x: number, z: number): THREE.Vector3 => new THREE.Vector3(x, 1.7, z);
 const PLAYER_RADIUS = 0.45;
 
 describe('collidesAt', () => {
   test('blocks inside a collider', () => {
-    expect(collidesAt(at(0, 0), PLAYER_RADIUS, [wall(0, 0)])).toBe(true);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [wall(0, 0)])).toBe(true);
   });
 
   test('clears well outside', () => {
-    expect(collidesAt(at(10, 10), PLAYER_RADIUS, [wall(0, 0)])).toBe(false);
+    expect(collidesAt(at(10, 10), PLAYER_RADIUS, 0, [wall(0, 0)])).toBe(false);
   });
 
   test('an empty registry never blocks', () => {
-    expect(collidesAt(at(0, 0), PLAYER_RADIUS, [])).toBe(false);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [])).toBe(false);
   });
 
   test('the entity radius is what makes contact, not its centre', () => {
     // Wall spans x -1..1. A centre at 1.3 is outside, but radius 0.45 reaches
     // to 0.85 — inside. This is why walking into a wall stops you short of it.
     const colliders = [wall(0, 0)];
-    expect(collidesAt(at(1.3, 0), PLAYER_RADIUS, colliders)).toBe(true);
-    expect(collidesAt(at(1.6, 0), PLAYER_RADIUS, colliders)).toBe(false);
+    expect(collidesAt(at(1.3, 0), PLAYER_RADIUS, 0, colliders)).toBe(true);
+    expect(collidesAt(at(1.6, 0), PLAYER_RADIUS, 0, colliders)).toBe(false);
   });
 
   test('tests every collider, not just the first', () => {
     const colliders = [wall(-20, -20), wall(0, 0)];
-    expect(collidesAt(at(0, 0), PLAYER_RADIUS, colliders)).toBe(true);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, colliders)).toBe(true);
   });
 });
 
-describe('collidesAt — the y span is fixed', () => {
-  test('a knee-high crate blocks even though the eye is above it', () => {
-    // The test box spans 0.1..2.0 regardless of crouch, so entities cannot
-    // pass under obstacles. pos.y is ignored entirely.
-    const crate = new THREE.Box3(
-      new THREE.Vector3(-1.5, 0, -1.5),
-      new THREE.Vector3(1.5, 0.5, 1.5),
-    );
-    expect(collidesAt(new THREE.Vector3(0, 1.7, 0), PLAYER_RADIUS, [crate])).toBe(true);
-    expect(collidesAt(new THREE.Vector3(0, 1.0, 0), PLAYER_RADIUS, [crate])).toBe(true);
+describe('collidesAt — blocking is relative to the feet', () => {
+  test(`geometry up to ${STEP_HEIGHT} above the feet never blocks (a step)`, () => {
+    // Top at exactly STEP_HEIGHT sits below the query span's floor
+    // (feet + STEP_HEIGHT), so stairs read as floor, not wall.
+    const step = slab(0, 0, 0, STEP_HEIGHT);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [step])).toBe(false);
+    // ...but one hair taller than the step budget blocks again.
+    const curb = slab(0, 0, 0, STEP_HEIGHT + 0.01);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [curb])).toBe(true);
   });
 
-  test('geometry entirely below the span does not block', () => {
-    // A floor slab under TEST_BOX_MIN_Y is walked on, not walked into.
-    const floor = new THREE.Box3(
-      new THREE.Vector3(-50, -1, -50),
-      new THREE.Vector3(50, TEST_BOX_MIN_Y - 0.01, 50),
+  test('float32-noisy tops still count as steppable and supportive', () => {
+    // What Box3.setFromObject ACTUALLY yields for a tread built as exactly
+    // 0.3 tall: mesh vertices are float32, inflating max.y to
+    // 0.3000000059604645 (and dropping min.y to -5.96e-9). Without
+    // COLLISION_EPSILON this walls off every real flight — caught live by
+    // the smoke test's stairs phase.
+    const noisyStep = new THREE.Box3(
+      new THREE.Vector3(-1, -5.960464483090178e-9, -1),
+      new THREE.Vector3(1, 0.3000000059604645, 1),
     );
-    expect(collidesAt(at(0, 0), PLAYER_RADIUS, [floor])).toBe(false);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [noisyStep])).toBe(false);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 0.3, [noisyStep])).toBe(0.3000000059604645);
   });
 
-  test('geometry entirely above the span does not block', () => {
-    const overhang = new THREE.Box3(
-      new THREE.Vector3(-5, TEST_BOX_MAX_Y + 0.01, -5),
-      new THREE.Vector3(5, 6, 5),
+  test('a knee-high crate blocks at ground feet', () => {
+    const crate = slab(0, 0, 0, 0.5);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [crate])).toBe(true);
+  });
+
+  test('the same crate does not block feet standing on top of it', () => {
+    // Feet at the crate's top: its top is BELOW the feet, the span starts
+    // above it — this is what makes standing on boxes walkable.
+    const crate = slab(0, 0, 0, 0.5);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0.5, [crate])).toBe(false);
+  });
+
+  test('a wall still blocks feet elevated alongside it', () => {
+    // Feet at 3 next to a 4-high wall: the wall's body spans the entity.
+    expect(collidesAt(new THREE.Vector3(1.3, 4.7, 0), PLAYER_RADIUS, 3, [wall(0, 0, 1, 4)])).toBe(true);
+    // ...but a 2m wall does not, once your feet are above ITS top + step.
+    expect(collidesAt(new THREE.Vector3(1.3, 4.7, 0), PLAYER_RADIUS, 3, [wall(0, 0, 1, 2)])).toBe(false);
+  });
+
+  test('geometry entirely below the feet does not block', () => {
+    const floorSlab = slab(0, 0, -1, -0.01);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [floorSlab])).toBe(false);
+  });
+
+  test(`geometry entirely above head height (${HEAD_HEIGHT}) does not block`, () => {
+    // Elevated tier crates must be walkable-under at ground level.
+    const tier = slab(0, 0, 3, 6);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [tier])).toBe(false);
+  });
+
+  test('overhead cover built at exactly head height stays walkable-under', () => {
+    // A slab whose bottom is designed at HEAD_HEIGHT stores one float32 ULP
+    // LOW (1.9999997615814209); the overhead bound takes COLLISION_EPSILON
+    // slack like the steppable bound does, or exact-height cover walls you in.
+    const bottom = 1.9999997615814209;
+    const cover = slab(0, 0, bottom, 3);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [cover])).toBe(false);
+    // One hair genuinely lower is real cover and still blocks.
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [slab(0, 0, bottom - 0.01, 3)])).toBe(true);
+  });
+});
+
+describe('supportHeightAt', () => {
+  test('open ground supports at y = 0', () => {
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 5, [])).toBe(0);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 5, [wall(-30, -30)])).toBe(0);
+  });
+
+  test('returns the top of a surface under the footprint', () => {
+    const platform = slab(0, 0, 0, 2.4, 5);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 5, [platform])).toBe(2.4);
+  });
+
+  test('ignores surfaces above the ceiling', () => {
+    const platform = slab(0, 0, 0, 2.4, 5);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 2.0, [platform])).toBe(0);
+  });
+
+  test('a ceiling exactly at the top still counts', () => {
+    const platform = slab(0, 0, 0, 2.4, 5);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 2.4, [platform])).toBe(2.4);
+  });
+
+  test('picks the highest eligible surface, not the first or last', () => {
+    const low = slab(-20, -20, 0, 1, 2);
+    const high = slab(0, 0, 0, 3, 5);
+    const higherStill = slab(20, 20, 0, 2, 2);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 4, [low, higherStill, high])).toBe(3);
+  });
+
+  test('mere boundary contact is not support', () => {
+    // Footprint edge exactly at the platform edge: strict overlap required,
+    // else entities stand on air at exact AABB boundaries.
+    const platform = slab(0, 0, 0, 2.4, 5); // spans x -5..5
+    expect(supportHeightAt(5 + PLAYER_RADIUS, 0, PLAYER_RADIUS, 5, [platform])).toBe(0);
+    expect(supportHeightAt(5 + PLAYER_RADIUS - 0.01, 0, PLAYER_RADIUS, 5, [platform])).toBe(2.4);
+  });
+});
+
+describe('resolveVertical', () => {
+  test('resting on flat ground stays put with zeroed velocity', () => {
+    const r = resolveVertical(0, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, []);
+    expect(r.onGround).toBe(true);
+    expect(r.feetY).toBe(0);
+    expect(r.velY).toBe(0);
+  });
+
+  test('rising is never resolved as a landing', () => {
+    const r = resolveVertical(0.5, 8, 0.05, 0, 0, PLAYER_RADIUS, []);
+    expect(r.onGround).toBe(false);
+    expect(r.velY).toBe(8);
+    expect(r.feetY).toBeCloseTo(0.9);
+  });
+
+  test('walking into a riser lifts the feet onto it (step-up)', () => {
+    // Standing with footprint overlapping a 0.3 riser: gravity nudges the
+    // feet down a hair, support catches the riser top one STEP_HEIGHT up.
+    const riser = slab(2, 0, 0, STEP_HEIGHT, 1);
+    const r = resolveVertical(0, -22 * 0.016, 0.016, 2, 0, PLAYER_RADIUS, [riser]);
+    expect(r.onGround).toBe(true);
+    expect(r.feetY).toBe(STEP_HEIGHT);
+  });
+
+  test('landing is swept: fast falls cannot tunnel through a thin tread', () => {
+    // One clamped-dt frame drops the feet from 5.0 to 4.45, straight past a
+    // 0.3-thick tread whose top is 4.7. The support ceiling (prevFeet +
+    // STEP_HEIGHT) still contains the passed-through top, so the entity
+    // lands ON it instead of inside/below it.
+    const tread = slab(0, 0, 4.4, 4.7, 5);
+    const r = resolveVertical(5.0, -11, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(r.onGround).toBe(true);
+    expect(r.feetY).toBe(4.7);
+    expect(r.velY).toBe(0);
+  });
+
+  test('walking off an edge loses support and goes airborne', () => {
+    const platform = slab(0, 0, 0, 3, 5); // spans x -5..5
+    // Just inside the edge: supported.
+    const on = resolveVertical(3, -22 * 0.016, 0.016, 5 + PLAYER_RADIUS - 0.01, 0, PLAYER_RADIUS, [platform]);
+    expect(on.onGround).toBe(true);
+    expect(on.feetY).toBe(3);
+    // Past the edge (boundary contact excluded): falls.
+    const off = resolveVertical(3, -22 * 0.016, 0.016, 5 + PLAYER_RADIUS + 0.01, 0, PLAYER_RADIUS, [platform]);
+    expect(off.onGround).toBe(false);
+    expect(off.feetY).toBeLessThan(3);
+  });
+
+  test('falling beside a tall wall does not snap onto it', () => {
+    // Wall top far above the support ceiling: excluded, keep falling.
+    const r = resolveVertical(2, -10, 0.05, 1.3, 0, PLAYER_RADIUS, [wall(0, 0)]);
+    expect(r.onGround).toBe(false);
+    expect(r.feetY).toBeCloseTo(1.5);
+  });
+
+  test('descending one riser while grounded sticks to the lower tread', () => {
+    // The footprint just left the upper tread (top 0.6): support is the
+    // lower tread top 0.3, but gravity has only pulled the feet down a hair,
+    // so without the stick rule they free-fall ~0.29 m every tread.
+    const lower = slab(0, 0, 0, STEP_HEIGHT);
+    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower], true);
+    expect(r.onGround).toBe(true);
+    expect(r.feetY).toBe(STEP_HEIGHT);
+    expect(r.velY).toBe(0);
+  });
+
+  test('the same descent query without wasGrounded stays airborne', () => {
+    const lower = slab(0, 0, 0, STEP_HEIGHT);
+    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower]);
+    expect(r.onGround).toBe(false);
+    expect(r.feetY).toBeGreaterThan(STEP_HEIGHT);
+  });
+
+  test('grounded descent onto a float32-noisy tread still sticks', () => {
+    // The noise direction that matters here: a "0.3" riser measuring LOW
+    // puts its top a hair OVER one STEP_HEIGHT below the feet — exactly
+    // what COLLISION_EPSILON exists for on this comparison too.
+    const noisyTop = STEP_HEIGHT - 1.7881393432617188e-7; // float32 ULP below 0.3
+    const noisyLower = slab(0, 0, 0, noisyTop);
+    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [noisyLower], true);
+    expect(r.onGround).toBe(true);
+    expect(r.feetY).toBe(noisyTop);
+  });
+
+  test('the stick budget is exactly one STEP_HEIGHT plus epsilon', () => {
+    const deep = slab(0, 0, 0, 0.29);     // 0.31 below the feet: falls
+    const shallow = slab(0, 0, 0, 0.301); // 0.299 below: sticks
+    const deepR = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [deep], true);
+    const shallowR = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [shallow], true);
+    expect(deepR.onGround).toBe(false);
+    expect(shallowR.onGround).toBe(true);
+    expect(shallowR.feetY).toBe(0.301);
+  });
+
+  test('a drop deeper than one step still goes airborne (ledge)', () => {
+    // Past the platform edge over open ground: support (0) is more than
+    // STEP_HEIGHT below the feet, so even a grounded entity falls.
+    const platform = slab(0, 0, 0, 1.0, 5); // spans x -5..5
+    const r = resolveVertical(1.0, -22 * 0.016, 0.016,
+      5 + PLAYER_RADIUS + 0.01, 0, PLAYER_RADIUS, [platform], true);
+    expect(r.onGround).toBe(false);
+    expect(r.feetY).toBeLessThan(1.0);
+  });
+
+  test('jumping off a stair tread still rises (stick never blocks ascent)', () => {
+    const lower = slab(0, 0, 0, STEP_HEIGHT);
+    const r = resolveVertical(0.6, 8, 0.05, 0, 0, PLAYER_RADIUS, [lower], true);
+    expect(r.onGround).toBe(false);
+    expect(r.velY).toBe(8);
+    expect(r.feetY).toBeCloseTo(1.0);
+  });
+});
+
+describe('slideMoveXZ', () => {
+  test('an unobstructed move applies both axes', () => {
+    const pos = at(0, 0);
+    slideMoveXZ(pos, 1, 2, PLAYER_RADIUS, 0, []);
+    expect(pos.x).toBe(1);
+    expect(pos.z).toBe(2);
+  });
+
+  test('moving into a wall drops that axis but keeps the other (slide)', () => {
+    // Long wall body spanning x -1..1 (face plane at x = 1) across the whole
+    // z range of travel. Entity starts clear at x = 2 and presses diagonally
+    // (-1.2 x, +1 z): the x leg would penetrate the face, so it is dropped;
+    // the z leg proceeds — sliding along the wall.
+    const longWall = new THREE.Box3(
+      new THREE.Vector3(-1, 0, -10),
+      new THREE.Vector3(1, 4, 10),
     );
-    expect(collidesAt(at(0, 0), PLAYER_RADIUS, [overhang])).toBe(false);
+    const pos = at(2, 5);
+    slideMoveXZ(pos, -1.2, 1, PLAYER_RADIUS, 0, [longWall]);
+    expect(pos.x).toBe(2);
+    expect(pos.z).toBe(6);
+  });
+
+  test('a riser does NOT stop horizontal movement (climb happens vertically)', () => {
+    const riser = slab(2, 0, 0, STEP_HEIGHT, 1);
+    const pos = at(0, 0);
+    slideMoveXZ(pos, 2, 0, PLAYER_RADIUS, 0, [riser]);
+    expect(pos.x).toBe(2);
+  });
+
+  test('blocking follows the given feet height', () => {
+    // The same 2m wall blocks feet at 0 ...
+    const posA = at(0, 0);
+    slideMoveXZ(posA, 1.3, 0, PLAYER_RADIUS, 0, [wall(0, 0, 1, 2)]);
+    expect(posA.x).toBe(0);
+    // ...but not feet at 2.5, where its top is below feet + STEP_HEIGHT.
+    const posB = at(0, 0);
+    slideMoveXZ(posB, 1.3, 0, PLAYER_RADIUS, 2.5, [wall(0, 0, 1, 2)]);
+    expect(posB.x).toBe(1.3);
   });
 });
 
@@ -100,6 +338,6 @@ describe('findFreeSpawn', () => {
       PLAYER_RADIUS,
       [wall(0, 0)],
     );
-    expect(collidesAt(p, PLAYER_RADIUS, [wall(0, 0)])).toBe(false);
+    expect(collidesAt(p, PLAYER_RADIUS, 0, [wall(0, 0)])).toBe(false);
   });
 });

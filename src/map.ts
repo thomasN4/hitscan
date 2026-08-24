@@ -5,7 +5,7 @@
 // directly: that is how you get walk-through / shoot-through bugs.
 import * as THREE from 'three';
 import { scene } from './core/engine';
-import { addSolidBox, registerSolid } from './world';
+import { addSolidBox, addStairs, registerSolid } from './world';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xc9a86c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });
@@ -51,4 +51,13 @@ export function buildMap(): void {
   // Stacked crates (second tier, reachable by jump)
   addSolidBox(-9, 3, -21.4, 3, 3, 3, matCrate);
   addSolidBox(27, 3, 18.5, 3, 3, 3, matCrate);
+
+  // Raised platform with two access routes — the arena's elevation feature:
+  //   south face: an 8-step stair flight (8 × 0.3 = 2.4 top riser flush with
+  //     the platform top; collision.ts climbs each riser automatically)
+  //   west face: a 1.2 m jump-up ledge — above walk-step height, below the
+  //     ~1.45 m jump apex, so it is a second route for the mobile only
+  addSolidBox(26, 0, 35, 10, 2.4, 10, matWall2);          // platform x[21,31] z[30,40]
+  addStairs(26, 0, 24, 4, 0.3, 0.75, 8, matWall, 'z+');   // stairs x[24,28] z 24→30
+  addSolidBox(19.5, 0, 35, 3, 1.2, 3, matCrate);          // ledge x[18,21] z[33.5,36.5]
 }

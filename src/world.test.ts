@@ -37,8 +37,8 @@ describe('registerSolidBox', () => {
 describe('registerSolid', () => {
   test('adds a raycast target with NO movement AABB', () => {
     // Ground planes: bullets and decals need them, but an AABB would be a
-    // zero-height box at y ~ 0 — below TEST_BOX_MIN_Y, so it could never
-    // block anything. Geometry with real height must NOT come through here.
+    // zero-height box at y ~ 0 — always steppable, so it could never block
+    // anything. Geometry with real height must NOT come through here.
     registerSolid(box());
     expect(solids).toHaveLength(1);
     expect(colliders).toHaveLength(0);

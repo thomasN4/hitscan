@@ -254,6 +254,7 @@ const game: DebugGame = {
   get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },
   get moveLerp() { return motion.moveLerp; }, set moveLerp(v: number) { motion.moveLerp = v; },
   get crouchLerp() { return motion.crouchLerp; }, set crouchLerp(v: number) { motion.crouchLerp = v; },
+  get groundSmoothY() { return motion.groundSmoothY; }, set groundSmoothY(v: number) { motion.groundSmoothY = v; },
   get airLerp() { return motion.airLerp; }, set airLerp(v: number) { motion.airLerp = v; },
   get stepTimer() { return motion.stepTimer; }, set stepTimer(v: number) { motion.stepTimer = v; },
   get bobAmt() { return motion.bobAmt; }, set bobAmt(v: number) { motion.bobAmt = v; },

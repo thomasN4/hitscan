@@ -112,7 +112,7 @@ Four static/sim layers, deliberately split:
 - Pointer lock has a browser-enforced cooldown after `exitPointerLock()`; re-locking too soon silently fails. The canvas click handler recovers, keep that behavior when touching menus.
 - The game loop only simulates while pointer lock is held (`session.locked && session.started`) but always renders. Anything added to the loop should respect that split.
 - **Stale dev servers serve stale code.** An orphaned `vite` process holding port 5173 makes every smoke test validate an old build (new servers silently shift to 5174). Before testing: `fuser -k <port>/tcp`, start the server with `--port <n> --strictPort`, and confirm the port from its log. With parallel worktrees, parallel dev servers are expected — pick a distinct port per worktree and point the smoke test at it with `CS_SMOKE_BASE` (it defaults to 5173).
-- `window.__cs` in main.ts is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player, bots, bulletHoles, colliders }` (its shape is declared on `Window` in main.ts).
+- `window.__cs` in main.ts is a debug/testing hook relied on by the smoke test — keep it exporting `{ game, weapon, player, bots, bulletHoles, colliders, gameTime }` (its shape is declared on `Window` in main.ts).
 - **Euler rotation orders matter**: the camera and shot-direction math must both use `'YXZ'`. Default `'XYZ'` silently aims shots somewhere else (this caused bullets flying skyward once). The order now lives in one place — `sim/ballistics.ts:EULER_ORDER` — with a test pinning shot direction against a `'YXZ'` camera matrix, so the two can no longer drift apart silently.
 
 ## Conventions

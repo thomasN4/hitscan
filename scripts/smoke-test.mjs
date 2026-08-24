@@ -424,6 +424,11 @@ async function runConfigCheck() {
 // is stuck for life — see Bot.spawnAtRandom), and waits for evidence: any
 // bot below full HP or a named cross-team killfeed line. The player idles,
 // so only bot-vs-bot fire can produce either.
+// Contract: PROVE any cross-team engagement happens (an hp drop on either
+// side), not that a specific pair fights. The teleport loop below only
+// accelerates an encounter; with 4T/2CT loose on the map for ~15 s the
+// evidence may equally come from an unteleported pair wandering into range,
+// and that satisfies the assertion by design.
 async function runAllyCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });

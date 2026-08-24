@@ -54,6 +54,8 @@ const PINNED_TITLES = {
   18: 'A typed signature can surface',
   19: "Naming an expression's operands can",
   20: 'A pure-function test can be',
+  21: 'A flip scheduled "between frames"',
+  22: 'Pipes eat gate failures.',
 };
 
 const TITLE_WORDS = 5;

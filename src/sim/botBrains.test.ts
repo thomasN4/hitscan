@@ -248,6 +248,20 @@ describe('ballistic rolls', () => {
     expect(brain.hitChance(0)).toBe(DEFAULT_BRAIN_PARAMS.hitChanceNear);
     expect(brain.rollDamage()).toBeCloseTo(DEFAULT_BRAIN_PARAMS.damageMin + 0.25 * DEFAULT_BRAIN_PARAMS.damageSpan, 12);
   });
+
+  it('rollHit draws from the brain rng and thresholds against hitChance', () => {
+    // hitChance(0) = hitChanceNear = 0.65: a draw below lands, at/above misses.
+    const p = DEFAULT_BRAIN_PARAMS;
+    const brain = new DefaultBrain(p, queueRng([/* dir */ 0.9, /* cd */ 0.9, /* hit */ 0.649, /* hit */ 0.65, /* hit */ 0.9]));
+    expect(brain.rollHit(0)).toBe(true);
+    expect(brain.rollHit(0)).toBe(false);
+    expect(brain.rollHit(0)).toBe(false);
+    // hitChance never wins a draw the floor can't: at extreme range the same
+    // low draw that would land near still lands iff below hitChanceMin.
+    const far = new DefaultBrain(p, queueRng([0.9, 0.9, p.hitChanceMin - 0.001, p.hitChanceMin]));
+    expect(far.rollHit(800)).toBe(true);
+    expect(far.rollHit(800)).toBe(false);
+  });
 });
 
 describe('nearestOpposing', () => {

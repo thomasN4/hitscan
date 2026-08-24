@@ -145,6 +145,9 @@ export interface BotBrain {
   decide(view: BrainView, dt: number): BrainIntent;
   /** Hit probability for a shot at planar `dist` under this brain's accuracy. */
   hitChance(dist: number): number;
+  /** Draw one hit/miss outcome for a shot at planar `dist` from this brain's
+   *  rng stream — ALL of a bot's dice come from the brain, never a global. */
+  rollHit(dist: number): boolean;
   /** Draw one landed-shot damage from this brain's ballistic params. */
   rollDamage(): number;
 }
@@ -165,6 +168,10 @@ export class DefaultBrain implements BotBrain {
 
   hitChance(dist: number): number {
     return botHitChance(dist, this.params);
+  }
+
+  rollHit(dist: number): boolean {
+    return this.rng() < botHitChance(dist, this.params);
   }
 
   rollDamage(): number {

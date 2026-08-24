@@ -13,9 +13,11 @@ import { showDeathScreen } from './menu';
  * Apply damage to the player. On death: awards the bot-side score,
  * releases pointer lock (which pauses the loop) and shows the death screen.
  * @param dmg raw damage; caller decides falloff/accuracy
- * @param attackerName display name for the killfeed ('Bot' historically)
+ * @param attackerName display name for the killfeed — required so the
+ *   compiler flags any future caller that would revive the anonymous
+ *   'Bot killed You' wording
  */
-export function damagePlayer(dmg: number, attackerName = 'Bot'): void {
+export function damagePlayer(dmg: number, attackerName: string): void {
   if (!player.alive) return;
   player.hp -= dmg;
   flashDamageVignette(dmg);
@@ -86,7 +88,7 @@ export function respawn(): void {
 export function checkRoundEnd(): void {
   const ts = bots.filter(b => b.team === 'T');
   if (ts.length > 0 && ts.every(b => !b.alive)) {
-    addKillfeed('★ Round won! Respawning enemies...');
+    addKillfeed('★ Round won! Respawning all bots...');
     // Game time: the wave stays dead while paused.
     gameTime.schedule(2.5, () => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }));
   }

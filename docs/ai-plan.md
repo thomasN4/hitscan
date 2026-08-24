@@ -6,7 +6,10 @@ tranche closed. It deliberately does **not** grow
 tranche's record, and post-hoc edits to it are what issue #28 is about. New
 review lessons from THIS tranche land at the bottom of this file; the lessons
 in refactor-plan.md remain canonical history. How the two documents relate
-long-term is deferred to #28.
+was settled by #28 (PR #30): one lesson counter shared across every
+`docs/*-plan.md`, numbers are permanent IDs, append and annotate, never
+renumber — see AGENTS.md's Roadmap section and the gate
+`scripts/lessonNumbering.test.mjs`.
 
 ## Why this work exists
 
@@ -43,10 +46,19 @@ The arc, agreed up front as three tranches:
 - **Friendly fire off.** Ally bodies stop player bullets (impact puff, no
   hitmarker, no damage). Bot-vs-bot fire only ever flows cross-team by
   construction.
+- **Bot bullets ignore intervening bodies — chosen, not missed.** Player
+  rounds are real raycasts, so an ally body blocks them; a bot's shot is
+  realized as probability against world-geometry LOS only, so a T can hit
+  the player through a CT standing between them (and vice versa). Accepted:
+  bodies are transient cover at bot accuracy levels, and a per-shot
+  entity raycast buys realism nobody would notice. Revisit if bot accuracy
+  profiles ever get sniper-grade.
 - **Scoring.** `scoreKills` renders as the CT score and increments on any
-  CT-side kill — player or ally. A T killing a CT has no counter yet.
-  Rounds are won when all *Ts* are dead; dead CTs self-respawn on their own
-  half via the same pausable 6 s clock everyone uses.
+  CT-side kill — player or ally. `scoreDeaths` renders as the T score and
+  increments on any T-side kill — the player dying (combat.ts) or a T
+  downing a CT (bots.ts). Rounds are won when all *Ts* are dead; dead CTs
+  self-respawn on their own half via the same pausable 6 s clock everyone
+  uses.
 - **Identity.** Global `id` unique across teams for debugging; display names
   use per-team counters (`T-1…`, `CT-1…`) so killfeeds read naturally.
 
@@ -94,20 +106,25 @@ to the original (see lessons below).
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
   construct brains with different `BrainParams` per bot or team.
-- **T-side score display**: `scoreDeaths` doubles as the T score today; a
-  real T counter needs HUD work beyond this tranche.
+- **T-side score naming**: `scoreDeaths` doubles as the T score (it now
+  counts all T-side kills, not just player deaths — review finding, fixed
+  in-tranche); renaming the field pair to team-named counters is HUD/state
+  churn beyond this tranche.
 - **#28 reconciliation**: audit of `docs/refactor-plan.md` staleness and the
   archival policy between it and this file.
 
 ## Review lessons (AI tranche)
 
-1. **A flip scheduled "between frames" must not become a flip "within" one.**
+Numbering continues from refactor-plan.md's lesson 20 — one counter across
+all plan documents, so a bare `lesson N` in a code comment is unambiguous.
+
+21. **A flip scheduled "between frames" must not become a flip "within" one.**
    The seam's first draft processed collision feedback after computing the
    step; the original toggled direction after frame N's application, so
    frame N+1 must step with the flipped direction. The pre-wiring pin caught
    it — lesson 19's rule (pin the invariant before the refactor) paying for
    itself inside the same PR.
-2. **Pipes eat gate failures.** `npm run typecheck | tail` reports tail's
+22. **Pipes eat gate failures.** `npm run typecheck | tail` reports tail's
    exit status; a chained `&&` sequence ran straight through a red
    typecheck and briefly committed broken code. Use `set -o pipefail` (or
    run gates bare) whenever output is piped.

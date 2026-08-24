@@ -221,12 +221,13 @@ export class Bot implements BotShape {
    * projectile): chance falls off linearly with distance so distant bots
    * are mostly noise; a hit routes damage by target kind — the player
    * through damagePlayer, a bot through damageBot as a flat torso hit.
+   * Both dice (hit and damage) come from the brain's rng stream.
    */
   private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);
     spawnImpact(this.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0))); // cheap muzzle flash
 
-    if (Math.random() >= this.brain.hitChance(dist)) return;
+    if (!this.brain.rollHit(dist)) return;
     const dmg = this.brain.rollDamage();
     if (target.kind === 'player') damagePlayer(dmg, this.name);
     else damageBot(target.bot, dmg, 'torso', this.name);
@@ -242,12 +243,12 @@ export class Bot implements BotShape {
   die(killerPart: HitZone, killerName?: string): void {
     this.alive = false;
     this.mesh.visible = false;
-    // scoreKills is the CT score: player kills always count, and so does a
-    // CT ally downing a T. A T killing a CT has no counter (yet).
-    if (killerName === undefined || this.team === 'T') {
-      score.scoreKills++;
-      updateScore();
-    }
+    // scoreKills is the CT score (player kills and CT allies downing a T);
+    // scoreDeaths is the T score, so a T downing a CT counts there — the
+    // same counter combat.ts bumps when a T downs the player.
+    if (killerName === undefined || this.team === 'T') score.scoreKills++;
+    else score.scoreDeaths++;
+    updateScore();
     addKillfeed(killerName === undefined
       ? `You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`
       : `${killerName} killed ${this.name}`);

@@ -505,15 +505,15 @@ export const wpn: WeaponDynamics = {
 };
 
 /**
- * Match bookkeeping. Three writers, one field each: bots.ts increments
- * scoreKills on a CT-side kill (player or ally), combat.ts increments
- * scoreDeaths when the player dies, main.ts's loop counts roundTime down
- * (arena only). hud.ts renders.
+ * Match bookkeeping. Three writers: bots.ts increments scoreKills on a
+ * CT-side kill (player or ally) and scoreDeaths when a T downs a CT,
+ * combat.ts increments scoreDeaths when the player dies, main.ts's loop
+ * counts roundTime down (arena only). hud.ts renders.
  */
 export interface ScoreState {
   /** Shown as the CT score: player kills plus ally kills of Ts. */
   scoreKills: number;
-  /** Shown as the T score. */
+  /** Shown as the T score: T-side kills — the player's deaths plus CT allies'. */
   scoreDeaths: number;
   /** Seconds left in the round; initialized from session.roundSeconds by
    *  main.ts and reset there when it expires (expiry handling itself is a

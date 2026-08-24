@@ -34,8 +34,6 @@ export const BOTS_CT_LIMITS = { min: 0, max: 12 } as const;
 /** Round length in seconds; the menu edits minutes within [0.5, 30]. */
 export const TIME_LIMITS_S = { min: 30, max: 1800 } as const;
 
-const MAPS: readonly MapName[] = ['arena', 'range'];
-
 /** Minimal read-only view over a param bag. */
 export interface ParamSource {
   get(name: string): string | null;
@@ -56,20 +54,19 @@ function numParam(src: ParamSource, name: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Literal comparison narrows to MapName; anything else falls back. */
+function parseMap(raw: string | null): MapName {
+  return raw === 'arena' || raw === 'range' ? raw : SESSION_DEFAULTS.map;
+}
+
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
-  const mapRaw = src.get('map');
-  const map: MapName =
-    mapRaw !== null && (MAPS as readonly string[]).includes(mapRaw)
-      ? mapRaw
-      : SESSION_DEFAULTS.map;
-
   const botsTRaw = numParam(src, 'tbots');
   const botsCtRaw = numParam(src, 'ctbots');
   const timeRaw = numParam(src, 'time');
 
   return {
-    map,
+    map: parseMap(src.get('map')),
     botsT:
       botsTRaw === null
         ? SESSION_DEFAULTS.botsT

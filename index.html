@@ -65,6 +65,15 @@
   .keys { margin-top: 34px; font-size: 13px; color: #777; line-height: 1.9; text-align: center; }
   .keys b { color: #bbb; }
   #deathScreen h1 { color: #ff5252; }
+
+  /* Match-config form (start menu) */
+  .cfg { display: grid; grid-template-columns: auto 110px; gap: 12px 18px; align-items: center; margin-bottom: 30px; }
+  .cfg label { display: contents; }
+  .cfg .cfgName { text-align: right; color: #aaa; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; }
+  .cfg input, .cfg select { pointer-events: auto; background: #161a20; color: #eee; border: 1px solid #333a44; border-radius: 3px; padding: 8px 10px; font-size: 16px; width: 100%; box-sizing: border-box; }
+  .cfg input:focus, .cfg select:focus { outline: 1px solid #ffcc66; }
+  .cfg input:disabled, .cfg select:disabled { opacity: .35; cursor: not-allowed; }
+  .cfgNote { grid-column: 2; font-size: 11px; color: #667; margin-top: -8px; }
 </style>
 </head>
 <body>
@@ -85,7 +94,7 @@
   <div id="vignette"></div>
   <div id="topbar">
     <div class="score" id="scoreCT">CT 0</div>
-    <div class="score" id="timer">1:55</div>
+    <div class="score" id="timer">2:00</div>
     <div class="score" id="scoreT">T 0</div>
   </div>
   <div id="killfeed"></div>
@@ -108,14 +117,42 @@
 
 <div class="menu" id="startMenu">
   <h1>Counter<span>-Strike</span></h1>
-  <p>Clone Demo &mdash; eliminate all Ts to win the round</p>
-  <div style="display:flex;gap:14px">
-    <button id="playBtn">Play</button>
-    <button id="rangeBtn" style="background:#9db8d9">Shooting Range</button>
+  <p id="menuSubtitle">Clone Demo &mdash; eliminate all Ts to win the round</p>
+  <div class="cfg">
+    <label>
+      <span class="cfgName">Map</span>
+      <select id="cfgMap">
+        <option value="arena">Arena</option>
+        <option value="range">Shooting Range</option>
+      </select>
+    </label>
+    <label>
+      <span class="cfgName">Terrorist bots</span>
+      <input id="cfgBotsT" type="number" min="1" max="12" step="1">
+    </label>
+    <label>
+      <span class="cfgName">CT bots</span>
+      <input id="cfgBotsCt" type="number" min="0" max="12" step="1">
+    </label>
+    <div class="cfgNote">CT allies arrive in a future update</div>
+    <label>
+      <span class="cfgName">Match time (min)</span>
+      <input id="cfgTimeMin" type="number" min="0.5" max="30" step="0.5">
+    </label>
   </div>
+  <button id="playBtn">Play</button>
   <div class="keys">
     <b>WASD</b> move &nbsp;&middot;&nbsp; <b>Mouse</b> aim &nbsp;&middot;&nbsp; <b>LMB</b> fire &nbsp;&middot;&nbsp; <b>RMB</b> iron sights / scope &nbsp;&middot;&nbsp; <b>R</b> reload<br>
     <b>1/2</b> smg / sniper &nbsp;&middot;&nbsp; <b>Wheel</b> scope zoom (scoped) &nbsp;&middot;&nbsp; <b>Shift</b> run &nbsp;&middot;&nbsp; <b>Ctrl/C</b> crouch toggle (silent) &nbsp;&middot;&nbsp; <b>Space</b> jump &nbsp;&middot;&nbsp; <b>Esc</b> pause
+  </div>
+</div>
+
+<div class="menu" id="pauseMenu" style="display:none">
+  <h1 style="color:#66b2ff">Paused</h1>
+  <p>The match clock is frozen while you're here.</p>
+  <div style="display:flex;gap:14px">
+    <button id="resumeBtn">Resume</button>
+    <button id="quitBtn" style="background:#9db8d9">Quit to Menu</button>
   </div>
 </div>
 

@@ -1,7 +1,8 @@
 // main.ts — entry point: builds the world, wires all input, owns the game loop.
 //
-// Flow: initEngine() (imports have no engine/DOM side effects) -> buildMap +
-// spawnBots -> register input/pointer-lock handlers -> start the render loop.
+// Flow: parse config query -> initEngine() (imports have no engine/DOM side
+// effects) -> buildMap + spawnBots -> initMenus -> register input/pointer-lock
+// handlers -> start the render loop.
 // The loop only simulates (player, bots, timer) while pointer lock is held;
 // rendering and effect updates run always so pause screens stay visible.
 // Game time (core/state.ts:gameTime) advances only inside that simulated
@@ -11,9 +12,10 @@
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
 import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
-              MapName, WeaponSlot, LiveWeapon, PlayerState } from './core/state';
+               MapName, WeaponSlot, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots } from './core/state';
+import { parseSessionConfig } from './core/sessionConfig';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
@@ -23,6 +25,7 @@ import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './w
 import { updateEffects } from './effects';
 import { respawn } from './combat';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, requireEl } from './hud';
+import { initMenus, hideAllMenus, showPauseMenu } from './menu';
 import { sfxZoom } from './audio';
 import { validateWeapons } from './sim/validateWeapons';
 
@@ -31,9 +34,12 @@ import { validateWeapons } from './sim/validateWeapons';
 // renderer/scene/camera that everything below reaches for, so nothing may
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
-// core/state.ts stays free of browser globals, so the ?map= param is read
-// here and written into the shared state before anything reads session.map.
-session.map = new URLSearchParams(location.search).get('map') === 'range' ? 'range' : 'arena';
+// core/state.ts stays free of browser globals, so the committed match-config
+// query (?map=&tbots=&ctbots=&time=) is parsed here and written into the
+// shared state before anything reads session — initMenus initializes the
+// form from it.
+Object.assign(session, parseSessionConfig(new URLSearchParams(location.search)));
+score.roundTime = session.roundSeconds;
 const RANGE = session.map === 'range';
 
 // Loud, not fatal: this runs before initEngine(), so throwing would blank
@@ -51,9 +57,15 @@ if (RANGE) {
   buildRange();
 } else {
   buildMap();
-  spawnBots();
+  spawnBots(session.botsT);
 }
 respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
+initMenus({
+  onStart: lock,
+  onCommit: query => { location.href = location.pathname + query; },
+  onResume: lock,
+  onQuit: () => { location.reload(); },
+});
 
 // ---------- Input ----------
 addEventListener('resize', () => {
@@ -129,20 +141,9 @@ addEventListener('mouseup', e => {
 addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 
 // ---------- Pointer lock / menus ----------
-const startMenu = requireEl('startMenu');
 const deathScreen = requireEl('deathScreen');
-const menuBlurb = startMenu.querySelector('p');
-if (!menuBlurb) throw new Error('missing <p> inside #startMenu — index.html markup changed?');
 
 function lock(): void { void renderer.domElement.requestPointerLock(); }
-requireEl('playBtn').onclick = lock;
-// Map switch is a full page reload (?map=...) — scenes are never hot-swapped.
-const rangeBtn = requireEl('rangeBtn');
-rangeBtn.textContent = RANGE ? 'Play Arena' : 'Shooting Range';
-rangeBtn.onclick = () => { location.search = RANGE ? '' : '?map=range'; };
-if (RANGE) {
-  menuBlurb.textContent = 'Practice your aim \u2014 silhouettes with bullseyes at 10\u201360 m';
-}
 requireEl('respawnBtn').onclick = () => { deathScreen.style.display = 'none'; respawn(); lock(); };
 renderer.domElement.addEventListener('click', () => { if (!session.locked && player.alive && session.started) lock(); });
 
@@ -155,15 +156,13 @@ document.addEventListener('pointerlockchange', () => {
   if (session.locked) {
     session.started = true;
     deathScreen.style.display = 'none';
-  }
-  // Losing lock while alive means Esc was pressed -> show pause menu.
-  // Losing lock while dead is handled by damagePlayer's death screen.
-  if (!session.locked && session.started && player.alive) {
-    menuBlurb.textContent = 'Paused \u2014 click Play to resume';
-    requireEl('playBtn').textContent = 'Resume';
-    startMenu.style.display = 'flex';
+    hideAllMenus();
+  } else if (session.started && player.alive) {
+    // Losing lock while alive means Esc was pressed -> pause menu.
+    // Losing lock while dead is handled by damagePlayer's death screen.
+    showPauseMenu(true);
   } else {
-    startMenu.style.display = 'none';
+    showPauseMenu(false);
   }
 });
 
@@ -198,10 +197,12 @@ function animate(): void {
     updateViewmodel();
     if (!RANGE) updateBots(dt, player);
 
-    // Round timer: arena only — meaningless on the range, so freeze it there
+    // Round timer: arena only — meaningless on the range, so freeze it there.
+    // Expiry currently restarts the configured length; what a real round end
+    // looks like is deferred to a later PR (see roadmap).
     if (!RANGE) {
       score.roundTime -= dt;
-      if (score.roundTime <= 0) score.roundTime = 115;
+      if (score.roundTime <= 0) score.roundTime = session.roundSeconds;
       setTimer(score.roundTime);
     }
 
@@ -227,6 +228,9 @@ type DebugGame = SessionState & InputState & AimState & WeaponDynamics & MotionS
 
 const game: DebugGame = {
   get map() { return session.map; }, set map(v: MapName) { session.map = v; },
+  get botsT() { return session.botsT; }, set botsT(v: number) { session.botsT = v; },
+  get botsCt() { return session.botsCt; }, set botsCt(v: number) { session.botsCt = v; },
+  get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
   get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
   get started() { return session.started; }, set started(v: boolean) { session.started = v; },
   get shooting() { return input.shooting; }, set shooting(v: boolean) { input.shooting = v; },
@@ -260,9 +264,10 @@ declare global {
       game: DebugGame;
       weapon: LiveWeapon;
       player: PlayerState;
+      bots: typeof bots;
       bulletHoles: typeof bulletHoles;
       colliders: typeof colliders;
     };
   }
 }
-window.__cs = { game, weapon, player, bulletHoles, colliders };
+window.__cs = { game, weapon, player, bots, bulletHoles, colliders };

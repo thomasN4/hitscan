@@ -10,6 +10,11 @@
 // The parser NEVER throws: any absent, non-numeric or out-of-range param
 // falls back / clamps to a value in SESSION_DEFAULTS's shape. A hand-typed
 // garbage URL must still boot a playable match.
+//
+// The numeric plumbing here (numOr/clampTo below) is ALSO what the start
+// menu's candidateConfig() runs the form fields through, so the form and the
+// URL parser cannot drift apart — there is deliberately no second copy in
+// menu.ts.
 import type { MapName } from './state';
 import { SESSION_DEFAULTS } from './state';
 
@@ -39,19 +44,37 @@ export interface ParamSource {
   get(name: string): string | null;
 }
 
-function clamp(n: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, n));
+/** Numeric range to clamp into; the exported *LIMITS consts all fit this shape. */
+export interface Limits {
+  min: number;
+  max: number;
+}
+
+/** Clamp `n` into limits.min..limits.max. */
+export function clampTo(n: number, lim: Limits): number {
+  return Math.min(lim.max, Math.max(lim.min, n));
 }
 
 /**
- * Numeric param → finite number or null. Empty string counts as absent;
- * Number('') is 0, which would otherwise masquerade as a real choice.
+ * Raw field/param value → finite number, or `fallback` when absent, empty or
+ * non-numeric. Empty string counts as absent: Number('') is 0, which would
+ * otherwise masquerade as a real choice.
  */
-function numParam(src: ParamSource, name: string): number | null {
-  const raw = src.get(name);
-  if (raw === null || raw.trim() === '') return null;
+export function numOr(raw: string | null | undefined, fallback: number): number {
+  if (raw === null || raw === undefined || raw.trim() === '') return fallback;
   const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Seconds → minutes string for the menu's time input, float noise trimmed
+ * (115 s would otherwise render 1.9166666666666667). Two decimals keep the
+ * round-trip exact — round(label*60) === seconds for every integer second —
+ * so a prefilled form stays equal to the applied config and Play won't
+ * navigate.
+ */
+export function secondsToMinutesLabel(seconds: number): string {
+  return String(Math.round((seconds / 60) * 100) / 100);
 }
 
 /** Literal comparison narrows to MapName; anything else falls back. */
@@ -61,24 +84,13 @@ function parseMap(raw: string | null): MapName {
 
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
-  const botsTRaw = numParam(src, 'tbots');
-  const botsCtRaw = numParam(src, 'ctbots');
-  const timeRaw = numParam(src, 'time');
-
   return {
     map: parseMap(src.get('map')),
-    botsT:
-      botsTRaw === null
-        ? SESSION_DEFAULTS.botsT
-        : Math.round(clamp(botsTRaw, BOTS_T_LIMITS.min, BOTS_T_LIMITS.max)),
-    botsCt:
-      botsCtRaw === null
-        ? SESSION_DEFAULTS.botsCt
-        : Math.round(clamp(botsCtRaw, BOTS_CT_LIMITS.min, BOTS_CT_LIMITS.max)),
-    roundSeconds:
-      timeRaw === null
-        ? SESSION_DEFAULTS.roundSeconds
-        : Math.round(clamp(timeRaw, TIME_LIMITS_S.min, TIME_LIMITS_S.max)),
+    botsT: Math.round(clampTo(numOr(src.get('tbots'), SESSION_DEFAULTS.botsT), BOTS_T_LIMITS)),
+    botsCt: Math.round(clampTo(numOr(src.get('ctbots'), SESSION_DEFAULTS.botsCt), BOTS_CT_LIMITS)),
+    roundSeconds: Math.round(
+      clampTo(numOr(src.get('time'), SESSION_DEFAULTS.roundSeconds), TIME_LIMITS_S),
+    ),
   };
 }
 

@@ -6,9 +6,12 @@ import {
   BOTS_CT_LIMITS,
   BOTS_T_LIMITS,
   TIME_LIMITS_S,
+  clampTo,
   configsEqual,
   configToQuery,
+  numOr,
   parseSessionConfig,
+  secondsToMinutesLabel,
   type ParamSource,
   type SessionConfig,
 } from './sessionConfig';
@@ -127,5 +130,49 @@ describe('configsEqual', () => {
     expect(configsEqual(CFG, { ...CFG, map: 'arena' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botsCt: 0 })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, roundSeconds: 91 })).toBe(false);
+  });
+});
+
+describe('clampTo', () => {
+  it('passes in-range values through and clamps both ways', () => {
+    expect(clampTo(5, BOTS_T_LIMITS)).toBe(5);
+    expect(clampTo(-4, BOTS_T_LIMITS)).toBe(BOTS_T_LIMITS.min);
+    expect(clampTo(99, BOTS_T_LIMITS)).toBe(BOTS_T_LIMITS.max);
+    expect(clampTo(0.4, TIME_LIMITS_S)).toBe(TIME_LIMITS_S.min);
+  });
+});
+
+describe('numOr', () => {
+  it('parses finite numbers', () => {
+    expect(numOr('7', 0)).toBe(7);
+    expect(numOr('2.5', 0)).toBe(2.5);
+    expect(numOr('-3', 0)).toBe(-3);
+  });
+  it.each([null, undefined, '', '   ', 'abc', 'NaN', 'Infinity', '1e999', '30s'])(
+    'absent/garbage %j yields the fallback',
+    raw => {
+      expect(numOr(raw, 42)).toBe(42);
+    },
+  );
+});
+
+describe('secondsToMinutesLabel', () => {
+  it('formats clean values without noise', () => {
+    expect(secondsToMinutesLabel(120)).toBe('2');
+    expect(secondsToMinutesLabel(90)).toBe('1.5');
+    expect(secondsToMinutesLabel(30)).toBe('0.5');
+  });
+
+  it('trims float noise (115 s is not 1.9166666666666667)', () => {
+    expect(secondsToMinutesLabel(115)).toBe('1.92');
+  });
+
+  // The reason the label exists: a prefilled form must compare equal to the
+  // applied config so Play re-locks instead of navigating. Sweep every
+  // clamped-legal second value.
+  it('round-trips every legal second value exactly', () => {
+    for (let seconds = TIME_LIMITS_S.min; seconds <= TIME_LIMITS_S.max; seconds++) {
+      expect(Math.round(Number(secondsToMinutesLabel(seconds)) * 60)).toBe(seconds);
+    }
   });
 });

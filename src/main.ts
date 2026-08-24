@@ -24,8 +24,8 @@ import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons';
 import { updateEffects } from './effects';
 import { respawn } from './combat';
-import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, requireEl } from './hud';
-import { initMenus, hideAllMenus, showPauseMenu } from './menu';
+import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
+import { initMenus, hideAllMenus, showPauseMenu, showDeathScreen } from './menu';
 import { sfxZoom } from './audio';
 import { validateWeapons } from './sim/validateWeapons';
 
@@ -40,6 +40,10 @@ import { validateWeapons } from './sim/validateWeapons';
 // form from it.
 Object.assign(session, parseSessionConfig(new URLSearchParams(location.search)));
 score.roundTime = session.roundSeconds;
+// Render the configured length once at startup: setTimer otherwise only runs
+// inside the locked-only simulate branch, so a fresh load (and the range,
+// where it never runs) would show the stale markup default until Play.
+setTimer(score.roundTime);
 const RANGE = session.map === 'range';
 
 // Loud, not fatal: this runs before initEngine(), so throwing would blank
@@ -65,6 +69,7 @@ initMenus({
   onCommit: query => { location.href = location.pathname + query; },
   onResume: lock,
   onQuit: () => { location.reload(); },
+  onRespawn: () => { showDeathScreen(false); respawn(); lock(); },
 });
 
 // ---------- Input ----------
@@ -141,10 +146,7 @@ addEventListener('mouseup', e => {
 addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 
 // ---------- Pointer lock / menus ----------
-const deathScreen = requireEl('deathScreen');
-
 function lock(): void { void renderer.domElement.requestPointerLock(); }
-requireEl('respawnBtn').onclick = () => { deathScreen.style.display = 'none'; respawn(); lock(); };
 renderer.domElement.addEventListener('click', () => { if (!session.locked && player.alive && session.started) lock(); });
 
 document.addEventListener('pointerlockchange', () => {
@@ -155,7 +157,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!session.locked) setScopeOverlay(false);
   if (session.locked) {
     session.started = true;
-    deathScreen.style.display = 'none';
+    showDeathScreen(false);
     hideAllMenus();
   } else if (session.started && player.alive) {
     // Losing lock while alive means Esc was pressed -> pause menu.

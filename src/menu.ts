@@ -1,7 +1,8 @@
-// menu.ts — DOM for the pre-game match-config menu and the pause overlay.
+// menu.ts — DOM for the pre-game match-config menu and the pause/death overlays.
 //
 // Split out of main.ts alongside hud.ts's ownership rule: hud.ts writes the
-// in-game HUD, this module writes everything inside #startMenu / #pauseMenu.
+// in-game HUD, this module writes everything inside #startMenu / #pauseMenu /
+// #deathScreen.
 // Like hud.ts it grabs references through an init*() function called once by
 // main.ts (after the session config has been parsed into core/state), and a
 // missing id is a named startup error via hud.ts:requireEl.
@@ -18,8 +19,11 @@ import {
   BOTS_CT_LIMITS,
   BOTS_T_LIMITS,
   TIME_LIMITS_S,
+  clampTo,
   configsEqual,
   configToQuery,
+  numOr,
+  secondsToMinutesLabel,
   type SessionConfig,
 } from './core/sessionConfig';
 import { requireEl } from './hud';
@@ -39,22 +43,25 @@ export interface MenuHandlers {
   onResume(): void;
   /** Pause menu Quit to Menu: reload so the scene rebuilds fresh. */
   onQuit(): void;
+  /** Death screen Respawn button: hide the screen, respawn, re-lock. */
+  onRespawn(): void;
 }
 
 // Resolved by initMenus(); non-optional like hud.ts's refs — "read only after
 // init" is the documented contract.
-let startMenu: HTMLElement, pauseMenu: HTMLElement, subtitleEl: HTMLElement;
+let startMenu: HTMLElement, pauseMenu: HTMLElement, deathScreen: HTMLElement, subtitleEl: HTMLElement;
 let mapSel: HTMLSelectElement, botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
   timeMinIn: HTMLInputElement;
 
 /**
  * Resolve every menu element, initialize the form from the applied session
- * config, and wire Play/Resume/Quit. Call once at startup, AFTER main.ts has
- * written the parsed config into `session`.
+ * config, and wire Play/Resume/Quit/Respawn. Call once at startup, AFTER
+ * main.ts has written the parsed config into `session`.
  */
 export function initMenus(handlers: MenuHandlers): void {
   startMenu = requireEl('startMenu');
   pauseMenu = requireEl('pauseMenu');
+  deathScreen = requireEl('deathScreen');
   subtitleEl = requireEl('menuSubtitle');
   mapSel = requireEl('cfgMap') as HTMLSelectElement;
   botsTIn = requireEl('cfgBotsT') as HTMLInputElement;
@@ -64,7 +71,7 @@ export function initMenus(handlers: MenuHandlers): void {
   mapSel.value = session.map;
   botsTIn.value = String(session.botsT);
   botsCtIn.value = String(session.botsCt);
-  timeMinIn.value = String(session.roundSeconds / 60);
+  timeMinIn.value = secondsToMinutesLabel(session.roundSeconds);
   applyMapUi();
 
   mapSel.onchange = applyMapUi;
@@ -79,6 +86,7 @@ export function initMenus(handlers: MenuHandlers): void {
   };
   requireEl('resumeBtn').onclick = () => handlers.onResume();
   requireEl('quitBtn').onclick = () => handlers.onQuit();
+  requireEl('respawnBtn').onclick = () => handlers.onRespawn();
 }
 
 /** Range matches have no bots and no clock: gray those rows out live. */
@@ -101,22 +109,12 @@ function candidateConfig(): SessionConfig {
     map: mapSel.value === 'range' ? 'range' : 'arena',
     // A cleared/garbage field keeps the currently-applied value rather than
     // forcing a retype; Number('') is 0, so emptiness must be checked first.
-    botsT: Math.round(clamp(numOr(botsTIn, session.botsT), BOTS_T_LIMITS)),
-    botsCt: Math.round(clamp(numOr(botsCtIn, session.botsCt), BOTS_CT_LIMITS)),
+    botsT: Math.round(clampTo(numOr(botsTIn.value, session.botsT), BOTS_T_LIMITS)),
+    botsCt: Math.round(clampTo(numOr(botsCtIn.value, session.botsCt), BOTS_CT_LIMITS)),
     roundSeconds: Math.round(
-      clamp(numOr(timeMinIn, session.roundSeconds / 60) * 60, TIME_LIMITS_S),
+      clampTo(numOr(timeMinIn.value, session.roundSeconds / 60) * 60, TIME_LIMITS_S),
     ),
   };
-}
-
-function numOr(el: HTMLInputElement, fallback: number): number {
-  if (el.value.trim() === '') return fallback;
-  const n = Number(el.value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function clamp(n: number, lim: { min: number; max: number }): number {
-  return Math.min(lim.max, Math.max(lim.min, n));
 }
 
 // ---------- Visibility toggles (called from main.ts's pointerlockchange) ----------
@@ -128,4 +126,8 @@ export function hideAllMenus(): void {
 
 export function showPauseMenu(show: boolean): void {
   pauseMenu.style.display = show ? 'flex' : 'none';
+}
+
+export function showDeathScreen(show: boolean): void {
+  deathScreen.style.display = show ? 'flex' : 'none';
 }

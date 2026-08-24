@@ -106,7 +106,7 @@ export class DefaultBrain implements BotBrain {
   private cooldown: number;
 
   constructor(
-    private params: BrainParams = DEFAULT_BRAIN_PARAMS,
+    private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
     private rng: () => number = Math.random,
   ) {
     this.strafeDir = this.rng() < 0.5 ? -1 : 1;

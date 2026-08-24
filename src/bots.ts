@@ -1,33 +1,44 @@
-// bots.ts — enemy AI: movement, line-of-sight-gated shooting, death/respawn.
+// bots.ts — bot bodies and effectors: meshes, collision-gated movement,
+// probabilistic shots, death/respawn. Both teams (T enemies, CT allies) are
+// instances of this one class; behavior comes from sim/botBrains.ts.
 //
-// Bot behavior each frame (see Bot.update):
-//   1. face the player
-//   2. move: approach if far (>14m), back off if very close (<7m), else strafe
-//      — through the same geometry gates as the player (slideMoveXZ +
-//      resolveVertical), so bots climb stairs and fall off edges too
-//   3. shoot only when a fireCooldown expires AND hasLineOfSight passes;
-//      without LOS the check retries on a short 0.3s cooldown so bots keep
-//      hunting instead of shooting through walls
+// Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
+// Each frame update() picks the nearest opposing entity (player or bot),
+// builds a passive BrainView around it (planar vector/distance, a lazy LOS
+// thunk, last frame's collision outcome), hands it to decide(), then
+// realizes the BrainIntent: attempt the returned step against world
+// geometry through the SAME feet-aware gates the player uses (slideMoveXZ +
+// resolveVertical, so bots climb stairs and land off edges), reporting
+// rejection back as moveBlocked, and looses a shot if asked. All tuning of
+// behavior lives in BrainParams / brain classes; this file holds no policy
+// numbers.
+//
+// Shot gating contract (realized by the default brain): fire only when a
+// cooldown expires AND line of sight passes; without sight it retries on a
+// short 0.3s cooldown so bots keep hunting instead of shooting through walls.
 //
 // Hit zones: each body part is its own mesh with `userData.bot` pointing at
 // this instance — weapons.ts raycasts against head/torso/legs directly and
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
+import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
-import { damagePlayer, checkRoundEnd } from './combat';
+import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
+import { DefaultBrain, nearestOpposing } from './sim/botBrains';
 
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
 
-/** Serial source for Bot ids/names; 1-based per match. */
+/** Serial source for Bot ids; 1-based per match, unique across teams. */
 let nextBotId = 1;
+/** Per-team display-name counters: names are `T-1…` and `CT-1…` independently. */
+const teamSerials: Record<Team, number> = { T: 0, CT: 0 };
 
 /**
  * DEV-only lifecycle trace (issue #17): makes the pause-freeze of the
@@ -39,15 +50,25 @@ function debugLog(msg: string): void {
   if (import.meta.env.DEV) console.debug(`[bot] ${msg}`);
 }
 
-// Shared geometries/materials — one allocation for all bots.
+// Shared geometries/materials — one allocation for all bots. Two palettes:
+// T tan/brown, CT blue-gray, so sides read at a glance.
 const botGeo = {
   torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),
   head:  new THREE.BoxGeometry(0.34, 0.34, 0.34),
   legs:  new THREE.BoxGeometry(0.6, 0.9, 0.35),
 };
-const matBotBody = new THREE.MeshLambertMaterial({ color: 0x8a6b2e }); // T tan/brown
-const matBotHead = new THREE.MeshLambertMaterial({ color: 0xd8c39a });
-const matBotLegs = new THREE.MeshLambertMaterial({ color: 0x4d4436 });
+const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
+  T: {
+    body: new THREE.MeshLambertMaterial({ color: 0x8a6b2e }),
+    head: new THREE.MeshLambertMaterial({ color: 0xd8c39a }),
+    legs: new THREE.MeshLambertMaterial({ color: 0x4d4436 }),
+  },
+  CT: {
+    body: new THREE.MeshLambertMaterial({ color: 0x4a5a78 }),
+    head: new THREE.MeshLambertMaterial({ color: 0xc9d2df }),
+    legs: new THREE.MeshLambertMaterial({ color: 0x2f3646 }),
+  },
+};
 
 /**
  * The ONE cast bridging raycast hits back to the bot that owns a mesh.
@@ -61,6 +82,14 @@ export function botFor(obj: THREE.Object3D): BotShape | undefined {
   return obj.userData.bot as BotShape | undefined;
 }
 
+/**
+ * One entity this bot may fight. The player and bot targets differ in how
+ * their LOS endpoint is derived and where shot damage is routed.
+ */
+type Target =
+  | { kind: 'player'; pos: THREE.Vector3; alive: boolean }
+  | { kind: 'bot'; pos: THREE.Vector3; alive: boolean; bot: BotShape };
+
 /** Concrete Bot: implements the structural `Bot` shape core/state.ts declares for the registry. */
 export class Bot implements BotShape {
   mesh = new THREE.Group();
@@ -71,25 +100,36 @@ export class Bot implements BotShape {
   alive = true;
   /** Stable identity for debug logs and killfeed attribution. */
   id = nextBotId++;
-  name = `T-${this.id}`;
+  /** Which side this bot fights for; drives targeting, spawns and scoring. */
+  team: Team;
+  name: string;
   /** Varied per bot so they spread out. */
   speed = 3.2 + Math.random() * 1.4;
-  fireCooldown = 1 + Math.random() * 2; // staggered first shot
-  strafeDir = Math.random() < 0.5 ? 1 : -1;
   respawnPoint = new THREE.Vector3();
+  /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
+  private readonly brain = new DefaultBrain();
+  /** Whether last frame's intended step was rejected by world collision. */
+  private moveBlocked = false;
   /** Vertical velocity — bots resolve support like the player does (stairs). */
   vy = 0;
   /** Grounded state fed back to resolveVertical so stair descents stick. */
   onGround = true;
 
-  constructor() {
+  constructor(team: Team = 'T') {
+    // Plain assignments, not a parameter property: the `name` derivation must
+    // see the team, and field initializers run before constructor-body
+    // parameter-property writes would.
+    this.team = team;
+    this.name = `${team}-${++teamSerials[team]}`;
+
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
     // raycasts can distinguish hit zones. All parts share this group's transform.
-    this.torso = new THREE.Mesh(botGeo.torso, matBotBody);
+    const palette = palettes[team];
+    this.torso = new THREE.Mesh(botGeo.torso, palette.body);
     this.torso.position.y = 1.35;
-    this.head = new THREE.Mesh(botGeo.head, matBotHead);
+    this.head = new THREE.Mesh(botGeo.head, palette.head);
     this.head.position.y = 2.0;
-    this.legs = new THREE.Mesh(botGeo.legs, matBotLegs);
+    this.legs = new THREE.Mesh(botGeo.legs, palette.legs);
     this.legs.position.y = 0.45;
     [this.torso, this.head, this.legs].forEach(p => { p.castShadow = true; this.mesh.add(p); });
     const parts = { torso: this.torso, head: this.head, legs: this.legs };
@@ -101,14 +141,16 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Place in the far half of the map (-z side), away from player spawn.
+   * Place on this bot's own half: Ts in the far band (z ∈ [-55, -20], away
+   * from player spawn), CTs mirrored onto the player's half (z ∈ [20, 55]).
    * Rejection-sampled against `colliders` — a blind draw lands inside a
    * corner block or crate ~20% of the time, and a bot spawned inside
    * geometry is stuck there for life (the move gate only blocks entering).
    */
   spawnAtRandom(): void {
+    const zSign = this.team === 'T' ? -1 : 1;
     const p = findFreeSpawn(
-      () => new THREE.Vector3((Math.random() - 0.5) * 90, 0, -(20 + Math.random() * 35)),
+      () => new THREE.Vector3((Math.random() - 0.5) * 90, 0, zSign * (20 + Math.random() * 35)),
       BOT_RADIUS,
       colliders,
     );
@@ -121,38 +163,67 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Per-frame AI update.
+   * Per-frame executor pass: pick a target, build the view, take the
+   * brain's intent, realize it. No policy decisions live here.
    * @param dt delta time (s)
    * @param player the player entity
    */
   update(dt: number, player: PlayerState): void {
     if (!this.alive) return;
 
-    const toPlayer = new THREE.Vector3().subVectors(player.pos, this.mesh.position);
-    toPlayer.y = 0; // planar chase distance; elevation is handled by the gates below
-    const dist = toPlayer.length();
+    // Opposing entities: Ts fight the player and every CT; CTs fight every
+    // T. The player is listed even while dead — with ctbots=0 that keeps an
+    // enemy chasing the corpse position exactly as pre-team behavior did,
+    // while shooting stays gated off by targetAlive.
+    const enemies: Target[] = [];
+    if (this.team === 'T') enemies.push({ kind: 'player', pos: player.pos, alive: player.alive });
+    for (const b of bots) {
+      if (b === this || b.team === this.team) continue;
+      enemies.push({ kind: 'bot', pos: b.mesh.position, alive: b.alive, bot: b });
+    }
+    const target = nearestOpposing(this.mesh.position, enemies)
+      ?? enemies[0]; // no live opponent: Ts fall back to the inert player entry, CTs stand down
 
-    // Face the player
-    this.mesh.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+    if (!target) {
+      this.moveBlocked = false;
+      return;
+    }
 
-    // Movement blend: approach from afar, retreat when crowded, plus a
-    // perpendicular strafe component that randomly flips direction to make
-    // bots harder to track.
-    const move = new THREE.Vector3();
-    if (dist > 14) move.add(toPlayer.clone().normalize());
-    else if (dist < 7) move.sub(toPlayer.clone().normalize());
-    const strafe = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x).normalize().multiplyScalar(this.strafeDir * 0.7);
-    move.add(strafe).normalize().multiplyScalar(this.speed * dt);
+    const toTarget = new THREE.Vector3().subVectors(target.pos, this.mesh.position);
+    toTarget.y = 0; // planar chase distance; elevation is handled by the gates below
+    const dist = toTarget.length();
+
+    // Face the target
+    this.mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+
+    const losTo = target.kind === 'player'
+      ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
+      : () => hasLineOfSight(this.eyePos(), target.bot.eyePos(), solids);
+
+    const intent = this.brain.decide(
+      {
+        toTarget,
+        dist,
+        targetAlive: target.alive,
+        // Lazy on purpose: the raycast is only paid when the trigger is
+        // otherwise ready — see BrainView.seeTarget.
+        seeTarget: losTo,
+        selfSpeed: this.speed,
+        moveBlocked: this.moveBlocked,
+      },
+      dt,
+    );
 
     // Horizontal gate: the SAME axis-separated slide the player uses, with
     // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
     const prevFeet = this.mesh.position.y;
     const preX = this.mesh.position.x, preZ = this.mesh.position.z;
-    const intended = move.length();
-    slideMoveXZ(this.mesh.position, move.x, move.z, BOT_RADIUS, prevFeet, colliders);
-    if (Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ) < intended * 0.25) {
-      this.strafeDir *= -1; // pinned against geometry: reverse strafe
-    }
+    const intended = intent.step.length();
+    slideMoveXZ(this.mesh.position, intent.step.x, intent.step.z, BOT_RADIUS, prevFeet, colliders);
+    // Pinned against geometry: report rejection so NEXT frame's brain
+    // reverses its drift (DefaultBrain.decide consumes this).
+    this.moveBlocked =
+      Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ) < intended * 0.25;
 
     // Vertical: same swept support resolution as the player, so bots climb
     // stairs mid-chase and land when they walk off an edge.
@@ -163,20 +234,7 @@ export class Bot implements BotShape {
     this.vy = vert.velY;
     this.onGround = vert.onGround;
 
-    if (Math.random() < dt * 0.5) this.strafeDir *= -1; // ~50% chance/sec to juke
-
-    // Shoot at player — only with clear line of sight. When blocked, retry
-    // soon (0.3s) but do NOT fire; bullets must respect cover like the
-    // player's do.
-    this.fireCooldown -= dt;
-    if (this.fireCooldown <= 0 && dist < 45 && player.alive) {
-      if (hasLineOfSight(this.eyePos(), camera.position, solids)) {
-        this.fireCooldown = 0.7 + Math.random() * 1.2;
-        this.shoot(dist);
-      } else {
-        this.fireCooldown = 0.3;
-      }
-    }
+    if (intent.wantShoot) this.shoot(dist, target);
   }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -185,32 +243,41 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Fire at the player. Hits are probabilistic (no projectile): chance
-   * falls off linearly with distance so distant bots are mostly noise,
-   * and a hit deals 8-22 damage.
+   * Realize a shot the brain ordered. Hits are probabilistic (no
+   * projectile): chance falls off linearly with distance so distant bots
+   * are mostly noise; a hit routes damage by target kind — the player
+   * through damagePlayer, a bot through damageBot as a flat torso hit.
+   * Both dice (hit and damage) come from the brain's rng stream.
    */
-  private shoot(dist: number): void {
+  private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);
     spawnImpact(this.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0))); // cheap muzzle flash
 
-    const hitChance = Math.max(0.12, 0.65 - dist / 80);
-    if (Math.random() < hitChance) {
-      const dmg = 8 + Math.random() * 14;
-      damagePlayer(dmg);
-    }
+    if (!this.brain.rollHit(dist)) return;
+    const dmg = this.brain.rollDamage();
+    if (target.kind === 'player') damagePlayer(dmg, this.name);
+    else damageBot(target.bot, dmg, 'torso', this.name);
   }
 
   /**
-   * Death: hide, score for the player, then self-respawn after 6 s of GAME
+   * Death: hide, attribute the kill, then self-respawn after 6 s of GAME
    * time — a paused match doesn't respawn bots behind the menu.
    * @param killerPart zone that landed the kill
+   * @param killerName display name of the shooting bot; omitted when the
+   *   PLAYER pulled the trigger
    */
-  die(killerPart: HitZone): void {
+  die(killerPart: HitZone, killerName?: string): void {
     this.alive = false;
     this.mesh.visible = false;
-    score.scoreKills++;
+    // scoreKills is the CT score (player kills and CT allies downing a T);
+    // scoreDeaths is the T score, so a T downing a CT counts there — the
+    // same counter combat.ts bumps when a T downs the player.
+    if (killerName === undefined || this.team === 'T') score.scoreKills++;
+    else score.scoreDeaths++;
     updateScore();
-    addKillfeed(`You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`);
+    addKillfeed(killerName === undefined
+      ? `You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`
+      : `${killerName} killed ${this.name}`);
     debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();
     gameTime.schedule(6, () => {
@@ -223,9 +290,9 @@ export class Bot implements BotShape {
   }
 }
 
-/** Create the starting wave of bots. Called once from main.ts with the menu-configured enemy count (parser clamps it to >= 1). */
-export function spawnBots(count: number): void {
-  for (let i = 0; i < count; i++) bots.push(new Bot());
+/** Create a starting wave of one team. Called from main.ts with the menu-configured counts (parser clamps Ts to >= 1, CTs to >= 0). */
+export function spawnBots(count: number, team: Team): void {
+  for (let i = 0; i < count; i++) bots.push(new Bot(team));
 }
 
 /** Advance all bot AI. Called once per frame from the main loop. */

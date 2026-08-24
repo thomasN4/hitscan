@@ -57,12 +57,17 @@ export interface WeaponDef {
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
 export type HitZone = 'head' | 'torso' | 'legs';
 
-/** Structural shape of one enemy (see bots.ts for the concrete class). */
+/** Sides. The player is implicitly CT-side; Ts are the enemy wave. */
+export type Team = 'T' | 'CT';
+
+/** Structural shape of one bot (see bots.ts for the concrete class). */
 export interface Bot {
   /** Per-match serial (1-based), stamped at construction — stable across deaths. */
   id: number;
-  /** Debug-log/killfeed display name derived from id, e.g. 'T-3'. */
+  /** Debug-log/killfeed display name derived from team + per-team serial, e.g. 'T-3'. */
   name: string;
+  /** Which side this bot fights for; drives targeting, spawns and scoring. */
+  team: Team;
   mesh: THREE.Group;
   head: THREE.Mesh;
   torso: THREE.Mesh;
@@ -71,7 +76,8 @@ export interface Bot {
   alive: boolean;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
-  die(part: HitZone): void;
+  /** @param killerName display name of a bot killer; omitted for player kills */
+  die(part: HitZone, killerName?: string): void;
   spawnAtRandom(): void;
 }
 
@@ -162,25 +168,25 @@ export const RECOIL_YAW_CAP = 3;
 export const BASE_FOV = 75;
 
 /**
- * Weapon definitions (slot order = switch order via keys 1/2). Static stats
+ * Weapon definitions (slot order = switch order via keys 1/2/3). Static stats
  * only — the live mutable copy is `weapon` below. zoomFovs are the scoped
  * FOV targets cycled with the mouse wheel while aiming (the smg has one
  * "iron sights" step); spreadMul is the ADS cone multiplier; inherent is the
  * weapon's resting shot cone in radians, before any stance/movement/spray.
  */
 /**
- * Which weapon slot is live. A two-entry union, not `number`, because the
+ * Which weapon slot is live. A three-entry union, not `number`, because the
  * table below is statically populated and every consumer already branches on
- * `=== 0` / `=== 1`. Indexing a TUPLE by this union is exempt from
+ * `=== 0` / `=== 1` / `=== 2`. Indexing a TUPLE by this union is exempt from
  * noUncheckedIndexedAccess, so `WEAPONS[wpn.slot]` is a plain WeaponDef and
  * the misses simply cannot happen rather than being guarded for.
  */
-export type WeaponSlot = 0 | 1;
+export type WeaponSlot = 0 | 1 | 2;
 
-/** The slots, for iterating both without widening the index back to `number`. */
-export const SLOTS: readonly WeaponSlot[] = [0, 1];
+/** The slots, for iterating all without widening the index back to `number`. */
+export const SLOTS: readonly WeaponSlot[] = [0, 1, 2];
 
-export const WEAPONS: readonly [WeaponDef, WeaponDef] = [
+export const WEAPONS: readonly [WeaponDef, WeaponDef, WeaponDef] = [
   {
     name: 'SMG',
     magSize: 30, reserveMax: 90,
@@ -255,6 +261,31 @@ export const WEAPONS: readonly [WeaponDef, WeaponDef] = [
     semiAuto: true,      // one shot per LMB press; holding does nothing
     unscopeOnShot: true, // firing kicks you out of the scope (re-press RMB)
   },
+  {
+    name: 'PISTOL',
+    magSize: 12, reserveMax: 36,
+    fireRate: 0.17,  // semi-auto pacing (~5.9 shots/sec click ceiling)
+    reloadTime: 1.8,
+    damage: 34,      // three torso shots to kill; head x4 = one-tap
+    headshotMult: 4,
+    zoomFovs: [58],  // iron sights
+    spreadMul: 0.35,
+    inherent: 0.0033, // rest-cone rad — a touch looser than the smg's; hip ≈ 7.1" @ 50 m
+    sprayKick: 0.08, recoilKick: 2,
+    sprayCap: 3,
+    sprayRecover: 0.15, // input ≈ 5.9 shots/s × 0.08 = 0.47/s — clears the sustained-fire
+                        // bound (the ONLY accumulator rule semiAuto does NOT exempt); net
+                        // ≈ +0.054/shot so a full 12-round mag peaks near spray 1.65
+    recoilRecover: 8,   // fast settle suits tap-fire; exempt from the sustained-fire bound
+                        // as a semiAuto weapon (see validateWeapons header)
+    punchRad: 0.016,    // rad of aim climb per unit — a snappy ~2° jolt per shot that
+                        // settles in ~0.25 s; ~5.5° over the full RECOIL_CAP climb
+    yawKick: 0.5,
+    yawRecover: 6,      // same semiAuto exemption as recoilRecover — per-shot jolts, not
+                        // a walk, and tap-fire pacing lets each settle before the next
+    scopedOverlay: false,
+    semiAuto: true,     // one shot per LMB press; holding does nothing
+  },
 ];
 
 /** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
@@ -264,9 +295,10 @@ export interface AmmoStore {
 }
 
 /** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
-export const ammoStore: [AmmoStore, AmmoStore] = [
+export const ammoStore: [AmmoStore, AmmoStore, AmmoStore] = [
   { mag: WEAPONS[0].magSize, reserve: WEAPONS[0].reserveMax },
   { mag: WEAPONS[1].magSize, reserve: WEAPONS[1].reserveMax },
+  { mag: WEAPONS[2].magSize, reserve: WEAPONS[2].reserveMax },
 ];
 
 /**
@@ -507,21 +539,22 @@ export const wpn: WeaponDynamics = {
                    // recoilRecover, which drains fast enough to zero the walk
                    // between shots.
   adsLerp: 0,
-  slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper)
+  slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper, 2 pistol)
   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                    // doesn't get twitchy at 12x (computed in weapons.ts)
 };
 
 /**
- * Match bookkeeping. Three writers, one field each: bots.ts increments
- * scoreKills on a kill, combat.ts increments scoreDeaths when the player
- * dies, main.ts's loop counts roundTime down (arena only). hud.ts renders.
+ * Match bookkeeping. Three writers: bots.ts increments scoreKills on a
+ * CT-side kill (player or ally) and scoreDeaths when a T downs a CT,
+ * combat.ts increments scoreDeaths when the player dies, main.ts's loop
+ * counts roundTime down (arena only). hud.ts renders.
  */
 export interface ScoreState {
-  /** Shown as the CT score. */
+  /** Shown as the CT score: player kills plus ally kills of Ts. */
   scoreKills: number;
-  /** Shown as the T score. */
+  /** Shown as the T score: T-side kills — the player's deaths plus CT allies'. */
   scoreDeaths: number;
   /** Seconds left in the round; initialized from session.roundSeconds by
    *  main.ts and reset there when it expires (expiry handling itself is a

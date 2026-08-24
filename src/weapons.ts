@@ -11,7 +11,7 @@ import { solids } from './world';
 import { bots, weapon, session, input, aim, wpn, motion, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          type WeaponDef, type WeaponSlot } from './core/state';
-import { sfxShoot, sfxSniper, sfxReload, sfxSwitch } from './audio';
+import { sfxShoot, sfxSniper, sfxPistol, sfxReload, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
@@ -44,7 +44,8 @@ function magBaseY(mag: THREE.Mesh): number {
 
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the
-// view transform. One group per slot (smg / sniper); visibility follows
+// view transform. One group per slot (smg / sniper / pistol); visibility
+// follows
 // wpn.slot every frame. Position is animated each frame in
 // updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.ts).
@@ -89,7 +90,26 @@ let sniperMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
   sniperGroup.add(body, barrel, stock, scope, mag);
 }
 
-gunGroup.add(smgGroup, sniperGroup);
+const pistolGroup = new THREE.Group();
+let pistolMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
+{
+  const dark = new THREE.MeshLambertMaterial({ color: 0x33322f });
+  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.30), dark);
+  slide.position.set(0.24, -0.20, -0.38);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.15, 0.09), dark);
+  grip.position.set(0.24, -0.30, -0.27);
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.13, 0.07), dark);
+  mag.position.set(0.24, -0.31, -0.28);
+  mag.userData.baseY = -0.31;
+  pistolMag = mag;
+  pistolGroup.add(slide, grip, mag);
+}
+
+gunGroup.add(smgGroup, sniperGroup, pistolGroup);
+
+// Per-slot shot sound; indexed by WeaponSlot so no slot can miss.
+const SHOT_SFX: readonly [() => void, () => void, () => void] =
+  [sfxShoot, sfxSniper, sfxPistol];
 
 const raycaster = new THREE.Raycaster();
 const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
@@ -167,7 +187,7 @@ export function tryReload(): void {
 }
 
 /**
- * Switch to slot `slot` (0 smg, 1 sniper). Saves the current mag/reserve
+ * Switch to slot `slot` (0 smg, 1 sniper, 2 pistol). Saves the current mag/reserve
  * back into ammoStore so mugs don't refill on swap, copies the new slot's
  * stats into the live `weapon` object, converts the live recoil/spray state to
  * the incoming weapon's terms, and resets scope zoom. Blocked while reloading
@@ -243,7 +263,7 @@ export function shoot(): void {
   // pause means a shot fired on the same frame as Esc can't leave the light
   // stuck on behind the menu.
   setTimeout(() => muzzleFlashLight.intensity = 0, 50);
-  (wpn.slot === 1 ? sfxSniper : sfxShoot)();
+  (SHOT_SFX[wpn.slot])();
 
   // Bolt-action feel: firing kicks you out of the scope. Clearing
   // input.aiming means a fresh RMB press is needed to re-scope even if the
@@ -281,7 +301,11 @@ export function shoot(): void {
     // length checked above; the assertion only records that fact
     const hit = hits[0]!;
     const bot = botFor(hit.object); // stamped onto each part in Bot's constructor
-    if (bot) {
+    if (bot && bot.team === 'CT') {
+      // Friendly fire is OFF: ally bodies stop the bullet (visible impact,
+      // no hitmarker, no damage) but never bleed CT score.
+      spawnImpact(hit.point);
+    } else if (bot) {
       const part = partForMesh(bot, hit.object);
       showHitmarker(part === 'head');
       damageBot(bot, damageForPart(weapon, part), part);
@@ -347,6 +371,7 @@ export function updateWeapon(dt: number): void {
   // entirely once the full-screen scope reticle takes over.
   smgGroup.visible = wpn.slot === 0;
   sniperGroup.visible = wpn.slot === 1;
+  pistolGroup.visible = wpn.slot === 2;
   gunGroup.visible = !(def.scopedOverlay && wpn.adsLerp > 0.85);
 
   // Scope reticle is DOM (hud.ts); only touch it on state flips.
@@ -360,7 +385,8 @@ export function updateWeapon(dt: number): void {
     ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - now) / weapon.reloadTime, 0, 1)
     : 0;
   if (wpn.slot === 0) poseReload(smgGroup, smgMag, reloadT);
-  else poseReload(sniperGroup, sniperMag, reloadT);
+  else if (wpn.slot === 1) poseReload(sniperGroup, sniperMag, reloadT);
+  else poseReload(pistolGroup, pistolMag, reloadT);
 
   // Reload finish: top the mag back up from reserve (partial reloads allowed).
   // Range mode: reserve is not deducted — R always restores a full loadout

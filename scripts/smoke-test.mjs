@@ -350,6 +350,41 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }
 
+    // 6) Pistol: third-slot switch + semi-auto trigger latch (range only)
+    if (sprintCheck) {
+      const pistol = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit3' }));
+        await wait(150);
+        const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize };
+        cs.game.pitch = -1.2; // into the floor so shots land somewhere safe
+        // Semi-auto: holding LMB must fire exactly once (trigger latch),
+        // even held far past the 0.17 s fireRate.
+        const magBeforeShot = cs.weapon.mag;
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+        await wait(300);
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+        await wait(100);
+        const held = { fired: magBeforeShot - cs.weapon.mag };
+        // A fresh press after release may fire once more (latch reset).
+        const magBeforeSecond = cs.weapon.mag;
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+        await wait(300);
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+        const second = { fired: magBeforeSecond - cs.weapon.mag, reserve: cs.weapon.reserve };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        return { switched, held, second, backTo: cs.game.slot };
+      });
+      if (pistol.switched.slot !== 2 || pistol.switched.name !== 'PISTOL' || pistol.switched.mag !== pistol.switched.magSize) throw new Error(`switch to pistol failed: ${JSON.stringify(pistol.switched)}`);
+      if (pistol.held.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(pistol.held)}`);
+      if (pistol.second.fired !== 1) throw new Error(`second press should fire exactly once more: ${JSON.stringify(pistol.second)}`);
+      if (pistol.second.reserve !== 36) throw new Error(`firing must not touch reserve: ${JSON.stringify(pistol.second)}`);
+      if (pistol.backTo !== 0) throw new Error(`switch back to smg failed: slot ${pistol.backTo}`);
+      console.log(`[pistol] OK`, JSON.stringify(pistol));
+    }
+
     // 7) Dead players don't shoot. exitPointerLock() dispatches
     //    pointerlockchange asynchronously, so frames still run with
     //    alive === false and locked === true; a held LMB must not spend
@@ -454,7 +489,8 @@ async function runConfigCheck() {
     if (applied.botsT !== 10 || applied.botsCt !== 3 || applied.roundSeconds !== 90) {
       throw new Error(`config not parsed from query: ${JSON.stringify(applied)}`);
     }
-    if (applied.botCount !== 10) throw new Error(`expected 10 spawned bots, got ${applied.botCount}`);
+    // 10 T + 3 CT since allied bots became real spawns.
+    if (applied.botCount !== 13) throw new Error(`expected 13 spawned bots, got ${applied.botCount}`);
     if (applied.form.map !== 'arena' || applied.form.botsT !== '10' || applied.form.botsCt !== '3' || applied.form.timeMin !== '1.5') {
       throw new Error(`menu form not initialized from config: ${JSON.stringify(applied.form)}`);
     }
@@ -472,7 +508,7 @@ async function runConfigCheck() {
       throw new Error(`Play with changed settings navigated wrong: ${url}`);
     }
     const recommitted = await page.evaluate(() => ({ botsT: window.__cs.game.botsT, botCount: window.__cs.bots.length }));
-    if (recommitted.botsT !== 12 || recommitted.botCount !== 12) {
+    if (recommitted.botsT !== 12 || recommitted.botCount !== 15) { // 12 T + 3 CT
       throw new Error(`reloaded page did not apply committed config: ${JSON.stringify(recommitted)}`);
     }
 
@@ -494,9 +530,83 @@ async function runConfigCheck() {
   await page.close();
 }
 
+// Two-sided combat: a CT and a T must actually fight. Headless bots converge
+// slowly from their spawn halves, so the phase TELEPORTS one of each side
+// adjacent to each other, at collider-free mid-field spots (an embedded bot
+// is stuck for life — see Bot.spawnAtRandom), and waits for evidence: any
+// bot below full HP or a named cross-team killfeed line. The player idles,
+// so only bot-vs-bot fire can produce either.
+// Contract: PROVE any cross-team engagement happens (an hp drop on either
+// side), not that a specific pair fights. The teleport loop below only
+// accelerates an encounter; with 4T/2CT loose on the map for ~15 s the
+// evidence may equally come from an unteleported pair wandering into range,
+// and that satisfies the assertion by design.
+async function runAllyCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=4&ctbots=2', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      cs.game.started = true;
+      cs.game.locked = true;
+
+      // Per-team name counters, globally unique across both teams.
+      const names = cs.bots.map(b => b.name);
+      if (!names.every(n => /^(T|CT)-\d+$/.test(n))) return { fail: 'bad names: ' + names.join(',') };
+      if (new Set(names).size !== names.length) return { fail: 'duplicate names: ' + names.join(',') };
+
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      const spots = [[8, 8], [-8, 8], [8, -14], [-14, -8], [20, 20], [0, -30]]
+        .filter(([x, z]) => !blocked(x, z) && !blocked(x + 2.5, z));
+      if (spots.length === 0) return { fail: 'no free meeting spots' };
+
+      const t = cs.bots.find(b => b.team === 'T' && b.alive);
+      const ct = cs.bots.find(b => b.team === 'CT' && b.alive);
+      if (!t || !ct) return { fail: 'missing live bots of both teams' };
+
+      for (const [x, z] of spots) {
+        t.mesh.position.set(x, 0, z);
+        ct.mesh.position.set(x + 2.5, 0, z);
+        const deadline = performance.now() + 2500;
+        while (performance.now() < deadline) {
+          await wait(200);
+          const feed = document.getElementById('killfeed').textContent;
+          const evidence = {
+            spot: [x, z],
+            tHpDrop: cs.bots.some(b => b.team === 'T' && b.hp < 100),
+            ctHpDrop: cs.bots.some(b => b.team === 'CT' && b.hp < 100),
+            crossKill: /(T|CT)-\d+ killed (T|CT)-\d+/.test(feed),
+          };
+          if (evidence.tHpDrop || evidence.ctHpDrop || evidence.crossKill) {
+            evidence.tHp = t.hp;
+            evidence.ctHp = ct.hp;
+            return evidence;
+          }
+        }
+      }
+      return { fail: 'no cross-team engagement observed at any meeting spot' };
+    });
+    if (result.fail) throw new Error(result.fail);
+    console.log('[allies] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[allies] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[allies] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: true });
   await runConfigCheck();
+  await runAllyCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {
   await browser.close();

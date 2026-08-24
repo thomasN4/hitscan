@@ -43,7 +43,7 @@ npm run build                  # production build -> dist/
 npm run lint                   # ESLint (flat config); no-undef for .js, type-aware rules for .ts,
                                # browser globals/imports banned in src/**/*.test.ts
 npm run typecheck              # tsc --noEmit; strict + noUncheckedIndexedAccess
-npm test                       # Vitest unit tests (no browser, ~200 ms)
+npm test                       # Vitest: unit tests + the doc gate (no browser, ~200 ms)
 node scripts/smoke-test.mjs    # headless E2E check (requires dev server running)
 ```
 
@@ -53,7 +53,7 @@ Four static/sim layers, deliberately split:
 
 - **`npm run typecheck`** — the compiler as a gate: `strict`, and `noUncheckedIndexedAccess`, which makes every `WEAPONS[wpn.slot]`-style read prove what happens on a miss. This is now the primary missing-import catcher for `.ts` code (TS2304), which neither `npm run build` nor `npm test` can see.
 
-- **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit. When a browser-side module holds pure logic the suite cannot reach, split out a seam rather than mocking — `sim/recoil.ts:convertOnSwap()` is the worked example, and lesson 19 is what it cost to learn twice.
+- **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit. When a browser-side module holds pure logic the suite cannot reach, split out a seam rather than mocking — `sim/recoil.ts:convertOnSwap()` is the worked example, and lesson 19 is what it cost to learn twice. The suite also carries one repo-hygiene check that is not simulation logic: `scripts/lessonNumbering.test.mjs`, which reads `docs/*-plan.md` off disk and fails if a review-lesson number moves out from under the comments citing it (see Roadmap).
 - **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, both maps. This is the layer that catches wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`. Note Vitest resolves through its own bundled Vite (8.x), not the workspace Vite 5 — a resolution edge must work under both.
 
 ## Architecture rules
@@ -67,7 +67,7 @@ Four static/sim layers, deliberately split:
   initEngine() → initHUD() → initWeaponViewmodels() → buildMap()/buildRange() → respawn() → initMenus() → loop
   ```
 
-- **Gameplay math lives in `src/sim/`, as pure functions.** Accuracy, recoil, ballistics, damage zones, speed tiers and blend easing take every input as a parameter — no engine imports, no DOM, no reads of shared state. That is what makes them unit-testable in plain Node (`npm test`), and it is where new gameplay math belongs. Modules like `weapons.ts` are thin bindings that feed live state in.
+- **Gameplay math lives in `src/sim/`, as pure functions.** Accuracy, recoil, ballistics, damage zones, speed tiers and blend easing take every input as a parameter — no engine imports, no DOM, no reads of shared state. That is what makes them unit-testable in plain Node (`npm test`), and it is where new gameplay math belongs. Modules like `weapons.ts` are thin bindings that feed live state in. One sanctioned exception: a stateful policy class (`sim/botBrains.ts:DefaultBrain`) keeps per-bot state across `decide()` calls — still engine-free, DOM-free and shared-state-free, with every frame's world knowledge arriving via the `BrainView` parameter.
 - **The accuracy model** (`sim/accuracy.ts`) is:
 
   ```
@@ -125,11 +125,27 @@ Four static/sim layers, deliberately split:
 
 ## Roadmap / deferred ideas
 
-**Full plan, rationale and the running list of review lessons:
-[`docs/refactor-plan.md`](docs/refactor-plan.md)** — read its review-lessons
-section before picking work up; it records traps that have already cost a
-cycle each. Completed work is archived there, not summarized here — this
-section only tracks what is still open.
+**Plans, rationale and the running list of review lessons live in
+`docs/<tranche>-plan.md`, one per tranche** — the maintainability tranche's is
+[`docs/refactor-plan.md`](docs/refactor-plan.md), and later tranches get their
+own rather than growing it. Read the review-lessons section before picking work
+up; it records traps that have already cost a cycle each. Completed work is
+archived in those documents, not summarized here — this section only tracks
+what is still open.
+
+Three rules govern them, enforced by `scripts/lessonNumbering.test.mjs` in
+`npm test`:
+
+- **Review lessons share one counter across all plan documents.** A new lesson
+  continues from the highest number already used anywhere in `docs/*-plan.md`,
+  so a bare `lesson N` in a code comment is unambiguous.
+- **Lesson numbers are permanent IDs** — assigned in order of recording, never
+  reordered, never reused. A lesson may move between categories or be annotated
+  in place; its number goes with it. Append new ones at the end of the list, not
+  where they thematically belong.
+- **Append and annotate, never renumber.** A closed tranche's record keeps its
+  original wording; corrections land as annotations beside the claim, naming
+  what changed and which PR changed it.
 
 Deferred to a later tranche:
 

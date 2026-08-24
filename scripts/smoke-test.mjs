@@ -41,6 +41,11 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
       window.__cs.weapon.mag = 10;
     });
 
+    // 0) Low-ammo hint shows at the SMG's threshold (10 of 30)
+    await page.evaluate(async () => { await new Promise(r => requestAnimationFrame(r)); });
+    const hintLow = await page.evaluate(() => document.getElementById('reloadHint').style.visibility);
+    if (hintLow !== 'visible') throw new Error(`reload hint hidden at smg mag 10/30: ${hintLow}`);
+
     // 1) Reload works
     await page.keyboard.press('KeyR');
     await new Promise(r => setTimeout(r, 2600));
@@ -184,6 +189,12 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
         await wait(150);
         const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag };
+        // Issue #10: a FULL sniper mag (10) must not advertise a reload
+        const hintFull = {
+          mag: cs.weapon.mag,
+          magSize: cs.weapon.magSize,
+          vis: document.getElementById('reloadHint').style.visibility,
+        };
         // Hold "RMB" to raise the scope, then scroll through the zoom levels
         window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
         await wait(800); // let adsLerp settle onto the first zoom step
@@ -218,9 +229,10 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
         window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
-        return { switched, zoomed, shot, gated, rescope, backTo: cs.game.slot };
+        return { switched, hintFull, zoomed, shot, gated, rescope, backTo: cs.game.slot };
       });
       if (sniper.switched.slot !== 1 || sniper.switched.name !== 'SNIPER') throw new Error(`switch to sniper failed: ${JSON.stringify(sniper.switched)}`);
+      if (sniper.hintFull.mag !== sniper.hintFull.magSize || sniper.hintFull.vis !== 'hidden') throw new Error(`reload hint shown with a FULL mag (issue #10): ${JSON.stringify(sniper.hintFull)}`);
       if (sniper.zoomed.level !== 2 || sniper.zoomed.overlay !== 'block') throw new Error(`zoom steps failed: ${JSON.stringify(sniper.zoomed)}`);
       if (sniper.shot.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(sniper.shot)}`);
       if (sniper.shot.aimingAfter !== false) throw new Error(`shot should exit the scope: ${JSON.stringify(sniper.shot)}`);

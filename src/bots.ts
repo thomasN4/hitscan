@@ -234,7 +234,13 @@ export class Bot implements BotShape {
     this.vy = vert.velY;
     this.onGround = vert.onGround;
 
-    if (intent.wantShoot) this.shoot(dist, target);
+    if (intent.wantShoot) {
+      // The hit die rolls on true eye-to-eye range: elevation is now real,
+      // so a bot firing down from the platform shoots farther than the
+      // planar chase distance suggests (see botBrains.ts:botHitChance).
+      const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
+      this.shoot(this.eyePos().distanceTo(targetEye), target);
+    }
   }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -244,10 +250,11 @@ export class Bot implements BotShape {
 
   /**
    * Realize a shot the brain ordered. Hits are probabilistic (no
-   * projectile): chance falls off linearly with distance so distant bots
-   * are mostly noise; a hit routes damage by target kind — the player
-   * through damagePlayer, a bot through damageBot as a flat torso hit.
-   * Both dice (hit and damage) come from the brain's rng stream.
+   * projectile): chance falls off linearly with the eye-to-eye distance to
+   * the target so distant bots are mostly noise; a hit routes damage by
+   * target kind — the player through damagePlayer, a bot through damageBot
+   * as a flat torso hit. Both dice (hit and damage) come from the brain's
+   * rng stream.
    */
   private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);

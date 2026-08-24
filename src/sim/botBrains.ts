@@ -70,8 +70,8 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
 };
 
 /**
- * Hit chance of a bot bullet at planar `dist`: linear falloff from close
- * range clamped to a floor, so distant bots are mostly noise.
+ * Hit chance of a bot bullet at eye-to-eye 3D `dist`: linear falloff from
+ * close range clamped to a floor, so distant bots are mostly noise.
  */
 export function botHitChance(dist: number, params: BrainParams): number {
   return Math.max(params.hitChanceMin, params.hitChanceNear - dist / params.hitChanceDivisor);
@@ -143,10 +143,11 @@ export interface BrainIntent {
 /** The decision half of a bot. Instances own per-bot state; executors are stateless shells. */
 export interface BotBrain {
   decide(view: BrainView, dt: number): BrainIntent;
-  /** Hit probability for a shot at planar `dist` under this brain's accuracy. */
+  /** Hit probability for a shot at eye-to-eye 3D `dist` under this brain's accuracy. */
   hitChance(dist: number): number;
-  /** Draw one hit/miss outcome for a shot at planar `dist` from this brain's
-   *  rng stream — ALL of a bot's dice come from the brain, never a global. */
+  /** Draw one hit/miss outcome for a shot at eye-to-eye 3D `dist` from this
+   *  brain's rng stream — ALL of a bot's dice come from the brain, never a
+   *  global. */
   rollHit(dist: number): boolean;
   /** Draw one landed-shot damage from this brain's ballistic params. */
   rollDamage(): number;

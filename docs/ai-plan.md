@@ -102,6 +102,83 @@ to the original (see lessons below).
   `[allies]` phase teleports a T beside a CT at collider-free spots and
   asserts cross-team engagement evidence within a generous window.
 
+### Tranche 4 — a brain with height (in flight)
+
+The seam's default policy was planar in every dimension that mattered: it
+steered planar (correct — a step only moves in x/z), but it also RANGED
+planar, and that is what `maps/elevation.ts` was built to expose. A target on
+the deck overhead read as `dist ~ 0`, so the near band pushed bots away from
+the flight that reaches it.
+
+Split the two ideas rather than blanket-replacing `dist`:
+
+- `BrainView` keeps planar `toTarget`/`dist` as the STEERING basis, and gains
+  `dist3` (true eye-to-eye), `rise` (target feet − own feet), `selfFeetY` and
+  `onGround`.
+- The chase bands and `engageRange` read `dist3`. The engage gate now agrees
+  with the die `rollHit` rolls on, which it never did before — a bot on a
+  tower could open up on something its own accuracy curve had written off.
+- The near-band back-off is **suppressed while `rise > climbThreshold`**
+  (1.5 m, well clear of `STEP_HEIGHT`). You cannot reverse away from something
+  overhead; trying only widens the gap to the stairs.
+- Target choice became policy: `nearestOpposing` takes a scorer, `BotBrain`
+  supplies `targetScore`, and `DefaultBrain` weights height at
+  `verticalWeight` (2) because a metre up costs a detour that a metre along
+  the ground does not. The scorer defaults to the old planar ranking.
+- Executor fix found while wiring it: `bots.ts` listed the player candidate at
+  `player.pos`, which is the EYE, while bot candidates are FEET. Invisible
+  while y was stripped; 1.7 m of phantom rise the moment anything read it.
+- Bots now pitch their heads at the target, so firing up at a deck reads.
+
+**What this did NOT fix, and the mis-diagnosis it corrected.** Bots still do
+not reach the deck on the elevation map, and the reason in the smoke test's
+`[botClimb]` comment was wrong. It blamed planar band steering — "once inside
+farBand the radial term drops out and it circles at constant radius". Tracing
+the bot showed it does not circle, it WEDGES: it drifts east until its radius
+overlaps the `x >= 6` second-floor slab, and at feet 1.5 that slab's underside
+sits below its head, so `collidesAt` blocks every direction — including the
+ones that reduce the overlap, since the test is binary on footprint overlap
+with no depenetration. It freezes at one coordinate with `moveBlocked` set,
+permanently.
+
+**This traps the PLAYER identically** (verified: all four cardinals plus jump,
+zero displacement, at feet 1.5 on riser 5 of the internal flight). Feet
+anywhere in [1.2, 3.3] inside that footprint are stuck; below 1.2 the slab is
+overhead cover and you walk under freely. It is a collision-model soft-lock,
+not an AI bug, and no amount of navigation fixes it — a bot that pathfinds
+perfectly onto that flight still wedges. Tranche 3's stair navigation is
+blocked behind it.
+
+#### Playtest (elevation + arena, collision fix and 3D brain together)
+
+What held: the soft-lock is gone and walls stayed solid everywhere — no leak,
+which is the escape behaving as designed (it only ever fires outward). Overall
+lethality felt unchanged. No bot was ever seen on the jump-only crates or the
+bridge, so the map's control case survives.
+
+What it surfaced:
+
+- **Bots rarely, but not never, try the stairs.** Consistent with the
+  climbThreshold dead zone below.
+- **A bot pins against geometry and frees itself only once the PLAYER moves
+  far enough.** Not a wedge — collision permits the move. The intended *step*
+  keeps pointing into the obstacle, and `moveBlocked` flips `strafeDir` every
+  frame, so the bot alternates between two mirror-image steps that are both
+  refused. Lesson 21's ordering is right; the per-frame flip RATE is not. This
+  was the strongest complaint and is now its own piece of work.
+- **Bots crowd underneath a deck player** — approach works, arrival does not.
+- **A deck player draws more fire than before.** Expected rather than a
+  regression: bots now close in instead of retreating, and `botHitChance`
+  falls off with distance, so a shorter range is a better roll.
+- **The head pitch was invisible.** See lesson 25; replaced with a barrel.
+
+Measured, with both changes in: a bot climbs to feet **2.4** (was 1.5), then
+orbits. At 2.4 the rise is 1.2, under `climbThreshold`, so the overhead
+suppression switches off and the band holds it one step short. 3D ranging moved
+where the stall happens, not that it happens — stair navigation is what closes
+it, because a bot must head for the TOP OF THE FLIGHT and keep heading there
+until the level changes, which no band around the target can express.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
@@ -154,3 +231,14 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
    deleting it would have thrown away a real finding. Trace before
    attributing — and when a trace refutes an explanation, check whether it is
    describing something further along the same path rather than nothing.
+25. **A cosmetic cue that cannot read is not a cue.** Bots were given head
+   pitch so that one firing up at a deck would visibly look up. The math was
+   right — correct formula, correct sign, correct three.js rotation
+   convention — and a reviewer checked it and agreed. The playtest saw
+   nothing at all. The head is a 0.34 m featureless cube rotating about its
+   own centre, and a shape with no surface detail and no asymmetry cannot
+   show direction by spinning in place; there was never anything to see. The
+   fix was not to the maths but to the geometry: a barrel on a hinge, which
+   swings. Confirming that a presentation change is CORRECT is not the same
+   as confirming it is VISIBLE, and only one of those can be done by reading
+   code. Look at it.

@@ -2,31 +2,37 @@
 //
 // Division of labor with the concrete Bot (bots.ts): a BotBrain DECIDES,
 // the Bot EXECUTES. Each frame the executor builds a passive BrainView
-// (positions, distance, a lazy line-of-sight thunk, collision feedback),
+// (positions, distances, a lazy line-of-sight thunk, collision feedback),
 // hands it to decide(), then realizes the returned BrainIntent: applies
 // the movement step under world collision and fires if told to. Nothing in
 // here may import the engine, world, audio or DOM — that is what keeps the
 // policies unit-testable in plain Node (botBrains.test.ts), the same seam
 // pattern as recoil.ts:convertOnSwap.
 //
-// The default policy is a faithful port of the original inline behavior:
-// approach beyond farBand, back off inside nearBand, always drift
-// perpendicular at strafeFactor weight with random jukes; fire only when a
-// cooldown expires AND seeTarget() passes, retrying soon when sight is
-// blocked so bullets respect cover like the player's do.
+// The default policy: approach beyond farBand, back off inside nearBand,
+// always drift perpendicular at strafeFactor weight with random jukes; fire
+// only when a cooldown expires AND seeTarget() passes, retrying soon when
+// sight is blocked so bullets respect cover like the player's do.
+//
+// STEERING IS PLANAR, RANGING IS NOT. `toTarget`/`dist` are y-stripped
+// because a step only ever moves in x/z — the executor's shared vertical
+// resolver owns height. But every RANGE decision (the bands, engageRange,
+// which candidate to chase) reads the true 3D numbers, `dist3` and `rise`.
+// Mixing those up is what made a target on a deck overhead read as "in my
+// face at dist ~ 0" and pushed bots away from the stairs that reach it.
 import * as THREE from 'three';
 
 /** Tunables of a reactive policy. Lengths in metres, times in seconds. */
 export interface BrainParams {
-  /** Closer than this: back off. */
+  /** Closer than this (3D): back off. */
   nearBand: number;
-  /** Farther than this: approach. */
+  /** Farther than this (3D): approach. */
   farBand: number;
   /** Perpendicular drift weight vs the radial band blend. */
   strafeFactor: number;
   /** Mean strafe-direction flips per second (the juke). */
   jukeRate: number;
-  /** Never shoot beyond this range. */
+  /** Never shoot beyond this 3D range. */
   engageRange: number;
   /** Cooldown while sight is blocked — a soon re-check, not a shot. */
   retryCooldown: number;
@@ -38,6 +44,19 @@ export interface BrainParams {
   firstDelayMin: number;
   /** Spawn stagger random span added to firstDelayMin. */
   firstDelaySpan: number;
+  /**
+   * Rise (m) above which a target counts as on ANOTHER LEVEL rather than
+   * merely up a kerb — above what the executor's feet-aware step-up
+   * (collision.ts:STEP_HEIGHT) resolves by walking into it. Gates the
+   * back-off suppression below.
+   */
+  climbThreshold: number;
+  /**
+   * How much a metre of height counts against a metre of ground when
+   * ranking targets. Above 1 because height is not distance: reaching it
+   * costs a detour to whatever flight serves that level.
+   */
+  verticalWeight: number;
   /** Hit chance at point-blank. */
   hitChanceNear: number;
   /** Hit-chance falloff divisor: chance = near − dist / this. */
@@ -50,7 +69,7 @@ export interface BrainParams {
   damageSpan: number;
 }
 
-/** The shipped bot behavior, verbatim from the pre-seam inline numbers. */
+/** The shipped bot behavior. */
 export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   nearBand: 7,
   farBand: 14,
@@ -62,6 +81,8 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   cooldownSpan: 1.2,
   firstDelayMin: 1,
   firstDelaySpan: 2,
+  climbThreshold: 1.5, // ≈ 5 risers; well clear of STEP_HEIGHT's 0.3
+  verticalWeight: 2,   // a deck 3.6 m up ranks like 7.2 m of extra ground
   hitChanceNear: 0.65,
   hitChanceDivisor: 80,
   hitChanceMin: 0.12,
@@ -84,29 +105,42 @@ export function botDamageRoll(rng: () => number, params: BrainParams): number {
 
 /** A targetable entity as the executor presents it: position + liveness. */
 export interface OpposingCandidate {
-  /** World-space position to chase and ray at (y ignored — ground-locked sim). */
+  /**
+   * World-space FEET position to chase and range against. Feet, not eyes:
+   * `pos.y` is compared against the bot's own feet to derive rise, so an
+   * executor handing over an eye position injects phantom height.
+   */
   pos: THREE.Vector3;
   alive: boolean;
 }
 
+/** How a brain ranks candidate targets; lower wins. Squared units. */
+export type TargetScorer = (dx: number, dy: number, dz: number) => number;
+
+/** Ground-only ranking: the pre-3D behavior, and the default here. */
+const planarScore: TargetScorer = (dx, _dy, dz) => dx * dx + dz * dz;
+
 /**
- * Nearest ALIVE candidate by planar distance from `origin`, or undefined
- * when nothing is alive. Corpses never draw fire; y is ignored so height
- * differences can't outrank ground positioning.
+ * Best ALIVE candidate from `origin` under `score`, or undefined when
+ * nothing is alive. Corpses never draw fire.
+ *
+ * The scorer is a parameter because "which enemy is worth chasing" is
+ * policy, and policy lives in brains — see BotBrain.targetScore. It
+ * defaults to flat ground distance so callers with no opinion (and the
+ * pre-3D tests) get the original behavior.
  */
 export function nearestOpposing<T extends OpposingCandidate>(
   origin: THREE.Vector3,
   candidates: readonly T[],
+  score: TargetScorer = planarScore,
 ): T | undefined {
   let best: T | undefined;
-  let bestD2 = Infinity;
+  let bestScore = Infinity;
   for (const c of candidates) {
     if (!c.alive) continue;
-    const dx = c.pos.x - origin.x;
-    const dz = c.pos.z - origin.z;
-    const d2 = dx * dx + dz * dz;
-    if (d2 < bestD2) {
-      bestD2 = d2;
+    const s = score(c.pos.x - origin.x, c.pos.y - origin.y, c.pos.z - origin.z);
+    if (s < bestScore) {
+      bestScore = s;
       best = c;
     }
   }
@@ -115,10 +149,25 @@ export function nearestOpposing<T extends OpposingCandidate>(
 
 /** What a brain may know about the world this frame — all executor-supplied. */
 export interface BrainView {
-  /** Planar vector from the bot to its target (y stripped; ground-locked sim). */
+  /**
+   * Planar vector from the bot to its target (y stripped). The STEERING
+   * basis: a step only moves in x/z, and both the approach direction and the
+   * perpendicular drift are derived from this vector. Ranging uses
+   * dist3/rise instead.
+   */
   toTarget: THREE.Vector3;
-  /** Planar distance to the target (=== toTarget.length()). */
+  /**
+   * Planar distance to the target (=== toTarget.length()). Ground distance,
+   * NOT the steering basis (that is the vector above) and no longer what the
+   * bands read — they moved to dist3. Kept because ground distance is the
+   * right measure of whether a bot is making headway toward its target, which
+   * is what stuck detection needs.
+   */
   dist: number;
+  /** True eye-to-eye 3D distance — the same range the hit die rolls on. */
+  dist3: number;
+  /** Target feet minus this bot's feet (m). Positive: the target is above. */
+  rise: number;
   targetAlive: boolean;
   /**
    * Line-of-sight probe to the target. A THUNK on purpose: the raycast
@@ -143,6 +192,8 @@ export interface BrainIntent {
 /** The decision half of a bot. Instances own per-bot state; executors are stateless shells. */
 export interface BotBrain {
   decide(view: BrainView, dt: number): BrainIntent;
+  /** Rank a candidate target by its offset from this bot; lower wins. */
+  targetScore: TargetScorer;
   /** Hit probability for a shot at eye-to-eye 3D `dist` under this brain's accuracy. */
   hitChance(dist: number): number;
   /** Draw one hit/miss outcome for a shot at eye-to-eye 3D `dist` from this
@@ -153,7 +204,7 @@ export interface BotBrain {
   rollDamage(): number;
 }
 
-/** The original inline bot policy, parameterized for future variants. */
+/** The shipped bot policy, parameterized for future variants. */
 export class DefaultBrain implements BotBrain {
   private strafeDir: 1 | -1;
   private cooldown: number;
@@ -166,6 +217,15 @@ export class DefaultBrain implements BotBrain {
     // Staggered first shot so a fresh wave doesn't volley in unison.
     this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
   }
+
+  /**
+   * Bound so the executor can hand it straight to nearestOpposing without
+   * losing `this` (and without allocating a closure every frame).
+   */
+  targetScore: TargetScorer = (dx, dy, dz) => {
+    const weighted = this.params.verticalWeight * dy;
+    return dx * dx + dz * dz + weighted * weighted;
+  };
 
   hitChance(dist: number): number {
     return botHitChance(dist, this.params);
@@ -189,9 +249,17 @@ export class DefaultBrain implements BotBrain {
 
     // Movement blend: radial band preference plus a perpendicular drift
     // component, normalized and scaled to the realized speed.
+    //
+    // The band reads dist3, not the planar dist: a target on a deck 3.6 m up
+    // is 3.6 m away even when standing on your head, and ranging it as 0
+    // is what made bots retreat from the building they needed to enter.
+    // Back-off is suppressed outright while the target is a level above —
+    // you cannot reverse away from something overhead, and trying only
+    // widens the gap to whatever flight reaches it.
     const step = new THREE.Vector3();
-    if (view.dist > this.params.farBand) step.add(dir);
-    else if (view.dist < this.params.nearBand) step.sub(dir);
+    const overhead = view.rise > this.params.climbThreshold;
+    if (view.dist3 > this.params.farBand || overhead) step.add(dir);
+    else if (view.dist3 < this.params.nearBand) step.sub(dir);
     const strafe = new THREE.Vector3(-view.toTarget.z, 0, view.toTarget.x)
       .normalize()
       .multiplyScalar(this.strafeDir * this.params.strafeFactor);
@@ -201,11 +269,14 @@ export class DefaultBrain implements BotBrain {
     // original statement order, so it steers from the NEXT frame on.
     if (this.rng() < dt * this.params.jukeRate) this.strafeDir = this.strafeDir === 1 ? -1 : 1;
 
-    // Trigger: cooldown-gated, range-gated, target-gated, LOS-gated. Blocked
-    // sight retries on the short retryCooldown instead of firing through cover.
+    // Trigger: cooldown-gated, range-gated, target-gated, LOS-gated. The
+    // range gate reads dist3 so it agrees with the die rollHit rolls on;
+    // gating on planar distance let a bot on a tower open up on something
+    // its own accuracy curve had already written off. Blocked sight retries
+    // on the short retryCooldown instead of firing through cover.
     let wantShoot = false;
     this.cooldown -= dt;
-    if (this.cooldown <= 0 && view.dist < this.params.engageRange && view.targetAlive) {
+    if (this.cooldown <= 0 && view.dist3 < this.params.engageRange && view.targetAlive) {
       if (view.seeTarget()) {
         this.cooldown = this.params.cooldownMin + this.rng() * this.params.cooldownSpan;
         wantShoot = true;

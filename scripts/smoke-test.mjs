@@ -709,16 +709,23 @@ async function runAllyCheck() {
 //      [wedge] phase pins the escape.
 //
 //   2. ORBITING AT CONSTANT RADIUS, still live and steering-level. With the
-//      wedge gone the bot slides freely and climbs to feet 1.5, then holds
-//      planarDist ~ 13.98 against a farBand of 14 while sweeping x across the
-//      flight: inside the band the radial term drops out, so it circles instead
-//      of climbing. This is what the comment here always described. It was not
-//      wrong — it was right about a stall nobody could see yet, because the
-//      wedge stopped the bot before it ever got there.
+//      wedge gone the bot slides freely and climbs, then stops gaining ground
+//      and sweeps across the flight instead: inside the band the radial term
+//      drops out, so it circles rather than climbing. This is what the comment
+//      here always described. It was not wrong — it was right about a stall
+//      nobody could see yet, because the wedge stopped the bot before it ever
+//      got there.
 //
-// Fixing 2 is steering policy, not geometry, and belongs with the bot-AI work
-// (feat/bot-3d-brain and the stair navigation after it). Report the number
-// here; assert it once bots are actually meant to arrive.
+//      3D ranging moved where it stalls but not that it stalls: the bot now
+//      reaches feet 2.4 instead of 1.5, because the overhead suppression keeps
+//      the radial term alive while the target is a level up. At 2.4 the rise
+//      is 1.2 — under climbThreshold — the suppression switches off, and the
+//      band holds it one step short of the deck.
+//
+// Fixing 2 for good is stair navigation: a bot has to head for the TOP OF THE
+// FLIGHT and keep heading there until the level actually changes, which no
+// band around the target can express. Report the number here; assert it once
+// bots are actually meant to arrive.
 async function runBotClimbCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });

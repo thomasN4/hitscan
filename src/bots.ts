@@ -3,9 +3,10 @@
 // instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
-// Each frame update() picks the nearest opposing entity (player or bot),
-// builds a passive BrainView around it (planar vector/distance, a lazy LOS
-// thunk, last frame's collision outcome), hands it to decide(), then
+// Each frame update() picks the best opposing entity (player or bot) under
+// the brain's own ranking, builds a passive BrainView around it (planar
+// steering vector, 3D range and rise, a lazy LOS thunk, last frame's
+// collision outcome), hands it to decide(), then
 // realizes the BrainIntent: attempt the returned step against world
 // geometry through the SAME feet-aware gates the player uses (slideMoveXZ +
 // resolveVertical, so bots climb stairs and land off edges), reporting
@@ -35,6 +36,17 @@ import { DefaultBrain, nearestOpposing } from './sim/botBrains';
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
 
+/** Length of the aim barrel (m); the muzzle sits at half this along its +z. */
+const BARREL_LEN = 0.6;
+
+/**
+ * Ceiling on how far a bot's aim tips to track a target (rad, ~69°).
+ * Presentation only — a bot's shot is probability, not a ray from the muzzle.
+ * Wide enough to read as "aiming up at the deck" from underneath, short of
+ * vertical so the barrel never disappears into the bot's own silhouette.
+ */
+const MAX_AIM_PITCH = 1.2;
+
 /** Serial source for Bot ids; 1-based per match, unique across teams. */
 let nextBotId = 1;
 /** Per-team display-name counters: names are `T-1…` and `CT-1…` independently. */
@@ -53,10 +65,13 @@ function debugLog(msg: string): void {
 // Shared geometries/materials — one allocation for all bots. Two palettes:
 // T tan/brown, CT blue-gray, so sides read at a glance.
 const botGeo = {
-  torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),
-  head:  new THREE.BoxGeometry(0.34, 0.34, 0.34),
-  legs:  new THREE.BoxGeometry(0.6, 0.9, 0.35),
+  torso:  new THREE.BoxGeometry(0.7, 0.9, 0.4),
+  head:   new THREE.BoxGeometry(0.34, 0.34, 0.34),
+  legs:   new THREE.BoxGeometry(0.6, 0.9, 0.35),
+  barrel: new THREE.BoxGeometry(0.08, 0.08, BARREL_LEN),
 };
+/** Gunmetal, shared by both teams — a weapon reads as a weapon, not as a side. */
+const matBarrel = new THREE.MeshLambertMaterial({ color: 0x23262b });
 const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
   T: {
     body: new THREE.MeshLambertMaterial({ color: 0x8a6b2e }),
@@ -85,6 +100,10 @@ export function botFor(obj: THREE.Object3D): BotShape | undefined {
 /**
  * One entity this bot may fight. The player and bot targets differ in how
  * their LOS endpoint is derived and where shot damage is routed.
+ *
+ * `pos` is the target's FEET on both arms — see OpposingCandidate. The
+ * player's own `pos` is its EYE (core/state.ts), so the player arm has to
+ * drop eyeHeight rather than pass the state vector straight through.
  */
 type Target =
   | { kind: 'player'; pos: THREE.Vector3; alive: boolean }
@@ -96,6 +115,8 @@ export class Bot implements BotShape {
   torso: THREE.Mesh;
   head: THREE.Mesh;
   legs: THREE.Mesh;
+  /** Hinge carrying the aim barrel; pitched at the target each frame. */
+  readonly aim = new THREE.Group();
   hp = 100;
   alive = true;
   /** Stable identity for debug logs and killfeed attribution. */
@@ -108,6 +129,12 @@ export class Bot implements BotShape {
   respawnPoint = new THREE.Vector3();
   /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
   private readonly brain = new DefaultBrain();
+  /**
+   * The brain's target ranking, bound once. Which enemy is worth chasing is
+   * policy, so it comes from the brain; hoisting it to a field keeps
+   * nearestOpposing from allocating a fresh closure per bot per frame.
+   */
+  private readonly targetScore = this.brain.targetScore;
   /**
    * Whether last frame's intended step was rejected by world collision.
    *
@@ -142,6 +169,25 @@ export class Bot implements BotShape {
     const parts = { torso: this.torso, head: this.head, legs: this.legs };
     // Tag every part with its owner so bullet raycasts can attribute hits.
     for (const part of Object.values(parts)) part.userData.bot = this;
+
+    // Aim pivot: a barrel on a shoulder-height hinge, so PITCH is visible.
+    // Rotating the head cube in place was not — a featureless box turning
+    // about its own centre shows nothing, which a playtest confirmed
+    // (docs/ai-plan.md, lesson 25). A barrel that swings has a direction.
+    //
+    // Deliberately NOT tagged with userData.bot, and deliberately not a field
+    // weapons.ts knows about: its raycast targets are an explicit allowlist
+    // (`bot.head, bot.torso, bot.legs`), so this stays decorative by
+    // construction. It has to — sim/damage.ts:partForMesh falls through to
+    // 'torso' for any mesh it does not recognize, so a barrel that ever
+    // reached that list would silently become a torso hit rather than error.
+    // Bot LOS rays against `solids` only, so it never blocks sight either.
+    this.aim.position.set(0.16, 1.5, 0);
+    const barrel = new THREE.Mesh(botGeo.barrel, matBarrel);
+    barrel.position.z = BARREL_LEN / 2;
+    barrel.castShadow = true;
+    this.aim.add(barrel);
+    this.mesh.add(this.aim);
 
     this.spawnAtRandom();
     scene.add(this.mesh);
@@ -183,12 +229,21 @@ export class Bot implements BotShape {
     // enemy chasing the corpse position exactly as pre-team behavior did,
     // while shooting stays gated off by targetAlive.
     const enemies: Target[] = [];
-    if (this.team === 'T') enemies.push({ kind: 'player', pos: player.pos, alive: player.alive });
+    if (this.team === 'T') {
+      enemies.push({
+        kind: 'player',
+        // Feet, not the eye that `player.pos` holds: `rise` and the brain's
+        // target ranking both compare this against bot feet, and passing
+        // the eye through would hand every bot 1.7 m of phantom height.
+        pos: new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z),
+        alive: player.alive,
+      });
+    }
     for (const b of bots) {
       if (b === this || b.team === this.team) continue;
       enemies.push({ kind: 'bot', pos: b.mesh.position, alive: b.alive, bot: b });
     }
-    const target = nearestOpposing(this.mesh.position, enemies)
+    const target = nearestOpposing(this.mesh.position, enemies, this.targetScore)
       ?? enemies[0]; // no live opponent: Ts fall back to the inert player entry, CTs stand down
 
     if (!target) {
@@ -197,11 +252,23 @@ export class Bot implements BotShape {
     }
 
     const toTarget = new THREE.Vector3().subVectors(target.pos, this.mesh.position);
-    toTarget.y = 0; // planar chase distance; elevation is handled by the gates below
+    const rise = toTarget.y; // target feet minus own feet, before y is stripped
+    toTarget.y = 0; // STEERING is planar — a step only ever moves in x/z
     const dist = toTarget.length();
 
-    // Face the target
+    // RANGING is not. The eye-to-eye distance the hit die already rolled on
+    // is what the brain's bands and engage gate read too, so a target on a
+    // deck overhead stops reading as point-blank.
+    const selfEye = this.eyePos();
+    const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
+    const dist3 = selfEye.distanceTo(targetEye);
+
+    // Face the target, and tip the aim barrel at it so a bot firing up at a
+    // deck visibly aims up. The mesh yaw puts local +z on the target, and a
+    // positive x-rotation tips that forward axis DOWN — hence the negation.
     this.mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+    const pitch = Math.atan2(targetEye.y - selfEye.y, Math.max(dist, 1e-6));
+    this.aim.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_AIM_PITCH, MAX_AIM_PITCH);
 
     const losTo = target.kind === 'player'
       ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
@@ -211,6 +278,8 @@ export class Bot implements BotShape {
       {
         toTarget,
         dist,
+        dist3,
+        rise,
         targetAlive: target.alive,
         // Lazy on purpose: the raycast is only paid when the trigger is
         // otherwise ready — see BrainView.seeTarget.
@@ -242,10 +311,9 @@ export class Bot implements BotShape {
     this.onGround = vert.onGround;
 
     if (intent.wantShoot) {
-      // The hit die rolls on true eye-to-eye range: elevation is now real,
-      // so a bot firing down from the platform shoots farther than the
-      // planar chase distance suggests (see botBrains.ts:botHitChance).
-      const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
+      // Re-measured AFTER the move, unlike the view's dist3: the bot has
+      // stepped since, and the die should roll from where it is actually
+      // shooting (see botBrains.ts:botHitChance).
       this.shoot(this.eyePos().distanceTo(targetEye), target);
     }
   }
@@ -253,6 +321,19 @@ export class Bot implements BotShape {
   /** World-space eye position used for LOS checks (~head height). */
   eyePos(): THREE.Vector3 {
     return new THREE.Vector3(this.mesh.position.x, this.mesh.position.y + 1.9, this.mesh.position.z);
+  }
+
+  /**
+   * World-space barrel tip, for the muzzle flash.
+   *
+   * Flushes the group's world matrix first: update() has already written this
+   * frame's yaw and pitch, but nothing has composed them yet — the renderer
+   * does that later. Called only on firing frames, so the flush is paid at
+   * the bot's cooldown rate rather than per frame.
+   */
+  private muzzlePos(): THREE.Vector3 {
+    this.mesh.updateMatrixWorld(true);
+    return this.aim.localToWorld(new THREE.Vector3(0, 0, BARREL_LEN));
   }
 
   /**
@@ -265,7 +346,7 @@ export class Bot implements BotShape {
    */
   private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);
-    spawnImpact(this.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0))); // cheap muzzle flash
+    spawnImpact(this.muzzlePos()); // cheap muzzle flash, from the barrel tip
 
     if (!this.brain.rollHit(dist)) return;
     const dmg = this.brain.rollDamage();

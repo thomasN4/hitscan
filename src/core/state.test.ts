@@ -34,7 +34,7 @@ describe('armLoadout', () => {
     setLoadout('smg', 'pistol');
     ammoStore[0].mag = 3; ammoStore[0].reserve = 7;
     ammoStore[1].mag = 1; ammoStore[1].reserve = 2;
-    Object.assign(weapon, { name: 'SNIPER', mag: 0, reserve: 0, reloading: true });
+    Object.assign(weapon, { name: 'SNIPER', mag: 0, reserve: 0, reloading: true, nextRoundAt: 42 });
     armLoadout();
   });
 
@@ -53,6 +53,12 @@ describe('armLoadout', () => {
     expect(weapon.damage).toBe(primary.damage);
     expect(weapon.recoilRecover).toBe(primary.recoilRecover);
     expect(weapon.reloading).toBe(false);
+    expect(weapon.nextRoundAt).toBe(0); // the per-round transfer schedule resets with the reload flag
+  });
+
+  test('only shotgun and revolver reload per round', () => {
+    const perRound = Object.values(WEAPONS).filter(d => d.perRound).map(d => d.name).sort();
+    expect(perRound).toEqual(['REVOLVER', 'SHOTGUN']);
   });
 
   test('follows a changed loadout', () => {

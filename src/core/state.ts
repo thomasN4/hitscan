@@ -68,6 +68,14 @@ export interface WeaponDef {
    * the pattern itself. Required whenever `pellets` is present; shotgun only.
    */
   pelletCone?: number;
+  /**
+   * Reload spends `reloadTime` moving rounds ONE AT A TIME (shotgun shells,
+   * revolver chambers): one round transfers every reloadTime/magSize seconds,
+   * and firing cancels the remainder CS-style — you shoot whatever is already
+   * chambered. Absent means the classic whole-mag swap: nothing moves until
+   * the timer completes.
+   */
+  perRound?: boolean;
   /** Recoil below which a fresh RMB press may enter the scope. Sniper only. */
   scopeGate?: number;
   /** One shot per LMB press; holding does nothing. Sniper only. */
@@ -302,9 +310,11 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                      // pellets off target; legs x0.75, head x4 = 52/pellet
     headshotMult: 4,
     pellets: 8,      // independent hitscan rays per trigger pull
-    pelletCone: 0.02, // rad — THE fixed pattern (the choke): sampled the same in
+    pelletCone: 0.06, // rad — THE fixed pattern (the choke): sampled the same in
                       // every stance, so ADS/crouch steady WHERE the pattern
-                      // points without shrinking it. ~40 cm group at 20 m.
+                      // points without shrinking it. Playtest round 2 balance:
+                      // 3x the shipped 0.02 — ~1.2 m group at 20 m (half-angle
+                      // 0.03 rad), so mid-range pulls whiff hard.
     zoomFovs: [60],  // bead sight
     spreadMul: 0.6,  // steadies the AIM layer only — see pelletCone for why the
                      // pattern itself must not tighten
@@ -325,12 +335,15 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                         // not a walk — settled before the next pump stroke lands
     scopedOverlay: false,
     semiAuto: true,     // one trigger pull = one shell; holding does nothing
+    perRound: true,     // shell-by-shell reload; firing cancels the rest (playtest round 2)
   },
   pistol: {
     name: 'PISTOL',
     class: 'secondary',
     magSize: 12, reserveMax: 36,
-    fireRate: 0.17,  // semi-auto pacing (~5.9 shots/sec click ceiling)
+    fireRate: 0.1,   // semi-auto pacing — 600 RPM click ceiling (playtest round 2:
+                     // the old 0.17 capped clickers near 350 RPM; nothing else
+                     // gates refire, so this constant IS the ceiling)
     reloadTime: 1.8,
     damage: 34,      // three torso shots to kill; legs x0.75
     headshotMult: 2, // head x2 -> TWO headshots to kill (playtest round 1,
@@ -340,9 +353,9 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     inherent: 0.0033, // rest-cone rad — a touch looser than the smg's; hip ≈ 7.1" @ 50 m
     sprayKick: 0.08, recoilKick: 2,
     sprayCap: 3,
-    sprayRecover: 0.15, // input ≈ 5.9 shots/s × 0.08 = 0.47/s — clears the sustained-fire
-                        // bound (the ONLY accumulator rule semiAuto does NOT exempt); net
-                        // ≈ +0.054/shot so a full 12-round mag peaks near spray 1.65
+    sprayRecover: 0.15, // input ≈ 10 shots/s × 0.08 = 0.8/s at the new ceiling — clears the
+                        // sustained-fire bound (the ONLY accumulator rule semiAuto does NOT
+                        // exempt); net ≈ +0.065/shot so a full 12-round mag peaks near spray 1.75
     recoilRecover: 8,   // fast settle suits tap-fire; exempt from the sustained-fire bound
                         // as a semiAuto weapon (see validateWeapons header)
     punchRad: 0.016,    // rad of aim climb per unit — a snappy ~2° jolt per shot that
@@ -376,6 +389,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                         // not a walk, and the slow pacing lets each settle
     scopedOverlay: false,
     semiAuto: true,     // one shot per LMB press; holding does nothing
+    perRound: true,     // chamber-by-chamber reload; firing cancels the rest (playtest round 2)
   },
 };
 
@@ -412,6 +426,13 @@ export interface LiveWeapon {
   reloading: boolean;
   reloadTime: number;
   reloadEnd: number;
+  /**
+   * Game time the NEXT per-round reload transfer lands at (perRound weapons
+   * only; inert while not reloading). Advanced by weapons.ts:updateWeapon per
+   * transferred round — unlike reloadEnd it has no completion meaning, it is
+   * purely the shell/chamber scheduler.
+   */
+  nextRoundAt: number;
   damage: number;
   headshotMult: number;
   recoilRecover: number;
@@ -444,7 +465,7 @@ export const weapon: LiveWeapon = {
   magSize: WEAPONS.smg.magSize, mag: WEAPONS.smg.magSize, reserve: WEAPONS.smg.reserveMax,
   fireRate: WEAPONS.smg.fireRate,
   lastShot: 0,
-  reloading: false, reloadTime: WEAPONS.smg.reloadTime, reloadEnd: 0,
+  reloading: false, reloadTime: WEAPONS.smg.reloadTime, reloadEnd: 0, nextRoundAt: 0,
   damage: WEAPONS.smg.damage,
   headshotMult: WEAPONS.smg.headshotMult,
   recoilRecover: WEAPONS.smg.recoilRecover,
@@ -469,6 +490,7 @@ export function armLoadout(): void {
     damage: primary.damage, headshotMult: primary.headshotMult,
     recoilRecover: primary.recoilRecover,
     reloading: false,
+    nextRoundAt: 0,
   });
 }
 

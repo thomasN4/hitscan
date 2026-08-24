@@ -798,7 +798,9 @@ async function runBotClimbCheck() {
 
 // Shotgun: the picker-deployed pump gun fires MULTIPLE hitscan rays per
 // trigger pull. One shell straight into the floor must punch roughly one
-// hole per pellet and consume exactly one round (semi-auto latch).
+// hole per pellet and consume exactly one round (semi-auto latch). Also pins
+// the per-round reload (playtest round 2): shells transfer one at a time and
+// an LMB pull cancels the remainder CS-style.
 async function runShotgunCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -828,18 +830,44 @@ async function runShotgunCheck() {
       window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
       await new Promise(r => setTimeout(r, 300));
       window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+      const magAfterFirstShot = cs.weapon.mag;
+      const holesAfterFirstShot = cs.bulletHoles.length;
+      // Per-round reload: start R two shells down, let ~2 intervals elapse,
+      // then fire mid-reload — the shot must cancel the rest and go out.
+      cs.weapon.mag = 2;
+      const reserveBefore = cs.weapon.reserve;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+      await new Promise(r => setTimeout(r, 1500)); // shotgun interval = 3.2s / 7 ≈ 0.46s
+      const mid = {
+        mag: cs.weapon.mag,
+        reserve: cs.weapon.reserve,
+        reloading: cs.weapon.reloading,
+      };
+      window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+      await new Promise(r => setTimeout(r, 300));
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
       return {
         primary: cs.game.primary,
         secondary: cs.game.secondary,
         name: cs.weapon.name,
-        fired: magBefore - cs.weapon.mag,
-        newHoles: cs.bulletHoles.length - holesBefore,
+        fired: magAfterFirstShot === magBefore - 1,
+        newHoles: holesAfterFirstShot - holesBefore,
+        reloadMid: mid,
+        loaded: mid.mag - 2,
+        reserveUntouched: mid.reserve === reserveBefore, // range mode never drains the reserve
+        shotMag: cs.weapon.mag,
+        shotCancelledReload: !cs.weapon.reloading,
       };
     });
     if (result.fail) throw new Error(result.fail);
     if (result.primary !== 'shotgun' || result.secondary !== 'pistol' || result.name !== 'SHOTGUN') throw new Error(`deploy did not commit the loadout: ${JSON.stringify(result)}`);
-    if (result.fired !== 1) throw new Error(`one trigger pull must consume exactly one shell: ${JSON.stringify(result)}`);
+    if (!result.fired) throw new Error(`one trigger pull must consume exactly one shell: ${JSON.stringify(result)}`);
     if (result.newHoles < 5 || result.newHoles > 8) throw new Error(`expected 5-8 pellet holes from one shell, got ${result.newHoles}`);
+    // Per-round reload assertions.
+    if (!result.reloadMid.reloading) throw new Error(`reload not in progress after 1.5s: ${JSON.stringify(result.reloadMid)}`);
+    if (result.loaded < 1 || result.loaded > 4) throw new Error(`expected 1-4 shells loaded mid-reload, got ${result.loaded}: ${JSON.stringify(result.reloadMid)}`);
+    if (!result.reserveUntouched) throw new Error(`range-mode reload drained the reserve: ${JSON.stringify(result.reloadMid)}`);
+    if (result.shotMag !== result.reloadMid.mag - 1 || !result.shotCancelledReload) throw new Error(`firing must cancel the per-round reload and consume the chambered shell: ${JSON.stringify(result)}`);
     console.log('[shotgun] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

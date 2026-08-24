@@ -12,12 +12,13 @@ import { bots, weapon, session, input, aim, wpn, motion, player, gameTime, WEAPO
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId,
          type WeaponDef, type WeaponSlot, type WeaponId } from './core/state';
-import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxReload, sfxSwitch } from './audio';
+import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxReload, sfxShell, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
+import { roundInterval, roundTransfer } from './sim/ammo';
 import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
@@ -174,7 +175,7 @@ interface ViewModel {
 const VIEWMODELS: Record<WeaponId, ViewModel> = {
   smg:     { group: smgGroup,     mag: smgMag,     aimOffset: { x: -0.25, y: 0.14 } },  // the baseline every sight line matches
   sniper:  { group: sniperGroup,  mag: sniperMag,  aimOffset: { x: -0.26, y: 0.12 } },  // scope tube centered (overlay takes over at full ADS)
-  shotgun: { group: shotgunGroup, mag: shotgunMag, aimOffset: { x: -0.25, y: 0.15 } },  // barrel top line converges on center
+  shotgun: { group: shotgunGroup, mag: shotgunMag, aimOffset: { x: -0.25, y: 0.105 } },  // bead line rides ~30% lower than the others' sight lines (playtest round 2)
   pistol:  { group: pistolGroup,  mag: pistolMag,  aimOffset: { x: -0.24, y: 0.15 } },  // slide-top sight line at the smg's height
   revolver:{ group: revolverGroup,mag: revolverMag,aimOffset: { x: -0.24, y: 0.147 } }, // frame-top sight line at the smg's height
 };
@@ -237,8 +238,10 @@ export function currentAimYaw(): number {
 // ---------- Reload animation ----------
 // Procedural viewmodel reload: the gun dips away from the camera and tilts
 // while the magazine drops out and slides back in. Everything is driven by
-// reload progress (0..1 over weapon.reloadTime), so calling with t = 0
-// restores the rest pose — offsets self-reset when `weapon.reloading` clears.
+// reload progress (0..1 over weapon.reloadTime — or over ONE shell/chamber
+// interval for perRound weapons, which loop this cycle per round), so calling
+// with t = 0 restores the rest pose — offsets self-reset when `weapon.reloading`
+// clears.
 const MAG_TRAVEL = 0.22; // how far the magazine drops, view units
 
 /** Smooth 0→1→0 hold envelope: eases in over [0,inFrac], out over [1-outFrac,1]. */
@@ -263,12 +266,25 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
   mag.position.y = magBaseY(mag) - MAG_TRAVEL * drop * (1 - seat);
 }
 
-/** Start reloading if possible. Bound to R and to firing an empty mag. */
+/**
+ * Start reloading if possible. Bound to R and to firing an empty mag.
+ *
+ * Whole-mag weapons (no `perRound`): one timer, the mag refills once at
+ * reloadEnd. Per-round weapons (shotgun/revolver): reloadTime is spread
+ * evenly across the mag — one round transfers every interval, so
+ * empty-to-full time is unchanged and the weapon becomes shootable mid-load
+ * with whatever has already chambered (see shoot()'s interrupt).
+ */
 export function tryReload(): void {
   if (!session.started || !player.alive || weapon.reloading || weapon.mag === weapon.magSize || weapon.reserve <= 0) return;
   weapon.reloading = true;
-  weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
-  sfxReload();
+  if (currentDef().perRound) {
+    weapon.nextRoundAt = gameTime.now() + roundInterval(weapon.reloadTime, weapon.magSize);
+    sfxShell(); // tactile feedback on the keypress; each transfer clicks too
+  } else {
+    weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
+    sfxReload();
+  }
 }
 
 /**
@@ -337,6 +353,7 @@ export function switchWeapon(slot: WeaponSlot): void {
     damage: def.damage,
     headshotMult: def.headshotMult,
     recoilRecover: def.recoilRecover,
+    nextRoundAt: 0,
   });
   sfxSwitch();
 }
@@ -359,13 +376,21 @@ export function switchToLast(): void {
  * ray's outcome — bot hit -> damage by zone, wall hit -> impact puff only.
  */
 export function shoot(): void {
+  const def = currentDef();
+  // Per-round reloads are INTERRUPTIBLE CS-style: a trigger pull cancels the
+  // remaining shells/chambers and fires whatever has already transferred.
+  // Whole-mag weapons keep the hard block — no rounds exist until the timer
+  // completes, so there is nothing to fire out of.
+  if (weapon.reloading && def.perRound && weapon.mag > 0) {
+    weapon.reloading = false;
+    weapon.nextRoundAt = 0;
+  }
   if (weapon.reloading || weapon.mag <= 0) {
     if (weapon.mag <= 0) tryReload(); // auto-reload on dry fire
     return;
   }
   weapon.mag--;
   weapon.lastShot = gameTime.now();
-  const def = currentDef();
   const pellets = def.pellets ?? 1; // documented default: a single hitscan ray
 
   muzzleFlashLight.intensity = 3;
@@ -506,19 +531,48 @@ export function updateWeapon(dt: number): void {
   setScopeOverlay(def.scopedOverlay && wpn.adsLerp > 0.85);
 
   // Reload animation: progress through the active reload (0 when idle so
-  // the pose resets). Uses game time to match weapon.reloadEnd, so a paused
-  // reload freezes mid-animation instead of finishing behind the menu.
+  // the pose resets). Uses game time to match weapon.reloadEnd / the per-round
+  // transfer schedule, so a paused reload freezes mid-animation instead of
+  // finishing behind the menu. Per-round weapons loop the SAME drop/seat cycle
+  // once per shell/chamber — the phase runs 0..1 between transfers rather than
+  // once across the whole mag.
   const now = gameTime.now();
-  const reloadT = weapon.reloading
-    ? THREE.MathUtils.clamp(1 - (weapon.reloadEnd - now) / weapon.reloadTime, 0, 1)
-    : 0;
+  let reloadT = 0;
+  if (weapon.reloading) {
+    reloadT = def.perRound
+      ? 1 - THREE.MathUtils.clamp((weapon.nextRoundAt - now) / roundInterval(weapon.reloadTime, weapon.magSize), 0, 1)
+      : THREE.MathUtils.clamp(1 - (weapon.reloadEnd - now) / weapon.reloadTime, 0, 1);
+  }
   const liveVm = VIEWMODELS[liveId];
   poseReload(liveVm.group, liveVm.mag, reloadT);
 
-  // Reload finish: top the mag back up from reserve (partial reloads allowed).
-  // Range mode: reserve is not deducted — R always restores a full loadout
-  // so accuracy/recoil practice never pauses for ammo runs.
-  if (weapon.reloading && gameTime.now() >= weapon.reloadEnd) {
+  // Reload progress. Whole-mag: nothing moves until reloadEnd, then the mag
+  // tops up at once (partial reloads allowed). Per-round: one transfer per
+  // interval until full or dry — every landed round is immediately live ammo,
+  // because shoot() cancels the remainder on the next trigger pull.
+  // Range mode: reserve is not deducted under EITHER model — R always restores
+  // a full loadout so accuracy/recoil practice never pauses for ammo runs.
+  if (weapon.reloading && def.perRound) {
+    const interval = roundInterval(weapon.reloadTime, weapon.magSize);
+    // A bottomless pool stands in for the reserve on the range, where the
+    // reserve is never touched: done is then decided by the full mag alone.
+    const pool = session.map === 'range' ? Number.MAX_SAFE_INTEGER : weapon.reserve;
+    let transferred = false;
+    let done = false;
+    while (!done && now >= weapon.nextRoundAt) {
+      const t = roundTransfer(weapon.mag, weapon.magSize, pool);
+      weapon.mag = t.mag;
+      if (session.map !== 'range') weapon.reserve = t.reserve;
+      weapon.nextRoundAt += interval;
+      transferred = true;
+      done = t.done;
+    }
+    if (transferred) sfxShell(); // one click per frame-batch, not per shell
+    if (done) {
+      weapon.reloading = false;
+      weapon.nextRoundAt = 0;
+    }
+  } else if (weapon.reloading && gameTime.now() >= weapon.reloadEnd) {
     const need = weapon.magSize - weapon.mag;
     const take = Math.min(need, weapon.reserve);
     weapon.mag += take;

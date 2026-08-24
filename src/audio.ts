@@ -86,6 +86,11 @@ export function sfxReload(): void {
   gameTime.schedule(1.1, () => playGunshot(0.15, 1000, 0.08));  // final clack (~halfway through 2.2s reload)
 }
 
+/** One shell/chamber seating home — the per-round reload's transfer click. */
+export function sfxShell(): void {
+  playGunshot(0.13, 900, 0.05);
+}
+
 /** Soft footstep; randomized pitch/level so repeats don't sound mechanical. */
 export function sfxFootstep(): void {
   const ctx = ac();

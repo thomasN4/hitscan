@@ -84,6 +84,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
+  if (e.code === 'Digit3') switchWeapon(2);
   // Stance keys only count during live play — same gate as the mouse
   // handlers — so nothing toggled pre-lock or behind the pause menu leaks
   // into the session. Sprint is hold-Shift; crouch is a Ctrl/C tap toggle

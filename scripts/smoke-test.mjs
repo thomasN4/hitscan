@@ -273,6 +273,41 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }
 
+    // 6) Pistol: third-slot switch + semi-auto trigger latch (range only)
+    if (sprintCheck) {
+      const pistol = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit3' }));
+        await wait(150);
+        const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize };
+        cs.game.pitch = -1.2; // into the floor so shots land somewhere safe
+        // Semi-auto: holding LMB must fire exactly once (trigger latch),
+        // even held far past the 0.17 s fireRate.
+        const magBeforeShot = cs.weapon.mag;
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+        await wait(300);
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+        await wait(100);
+        const held = { fired: magBeforeShot - cs.weapon.mag };
+        // A fresh press after release may fire once more (latch reset).
+        const magBeforeSecond = cs.weapon.mag;
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+        await wait(300);
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+        const second = { fired: magBeforeSecond - cs.weapon.mag, reserve: cs.weapon.reserve };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        return { switched, held, second, backTo: cs.game.slot };
+      });
+      if (pistol.switched.slot !== 2 || pistol.switched.name !== 'PISTOL' || pistol.switched.mag !== pistol.switched.magSize) throw new Error(`switch to pistol failed: ${JSON.stringify(pistol.switched)}`);
+      if (pistol.held.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(pistol.held)}`);
+      if (pistol.second.fired !== 1) throw new Error(`second press should fire exactly once more: ${JSON.stringify(pistol.second)}`);
+      if (pistol.second.reserve !== 36) throw new Error(`firing must not touch reserve: ${JSON.stringify(pistol.second)}`);
+      if (pistol.backTo !== 0) throw new Error(`switch back to smg failed: slot ${pistol.backTo}`);
+      console.log(`[pistol] OK`, JSON.stringify(pistol));
+    }
+
     // 7) Dead players don't shoot. exitPointerLock() dispatches
     //    pointerlockchange asynchronously, so frames still run with
     //    alive === false and locked === true; a held LMB must not spend

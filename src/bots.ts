@@ -1,11 +1,17 @@
-// bots.ts — enemy AI: movement, line-of-sight-gated shooting, death/respawn.
+// bots.ts — enemy bodies and effectors: meshes, collision-gated movement,
+// probabilistic shots, death/respawn.
 //
-// Bot behavior each frame (see Bot.update):
-//   1. face the player
-//   2. move: approach if far (>14m), back off if very close (<7m), else strafe
-//   3. shoot only when a fireCooldown expires AND hasLineOfSight passes;
-//      without LOS the check retries on a short 0.3s cooldown so bots keep
-//      hunting instead of shooting through walls
+// Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
+// Each frame update() builds a passive BrainView (planar vector/distance to
+// the player, a lazy LOS thunk, last frame's collision outcome), hands it to
+// decide(), then realizes the BrainIntent: attempt the returned step against
+// world geometry (reporting rejection back as moveBlocked) and loose a shot
+// if asked. All tuning of behavior lives in BrainParams / brain classes;
+// this file holds no policy numbers.
+//
+// Shot gating contract (realized by the default brain): fire only when a
+// cooldown expires AND line of sight passes; without sight it retries on a
+// short 0.3s cooldown so bots keep hunting instead of shooting through walls.
 //
 // Hit zones: each body part is its own mesh with `userData.bot` pointing at
 // this instance — weapons.ts raycasts against head/torso/legs directly and
@@ -19,6 +25,7 @@ import { damagePlayer, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
+import { DefaultBrain, botDamageRoll, botHitChance } from './sim/botBrains';
 
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
@@ -71,9 +78,11 @@ export class Bot implements BotShape {
   name = `T-${this.id}`;
   /** Varied per bot so they spread out. */
   speed = 3.2 + Math.random() * 1.4;
-  fireCooldown = 1 + Math.random() * 2; // staggered first shot
-  strafeDir = Math.random() < 0.5 ? 1 : -1;
   respawnPoint = new THREE.Vector3();
+  /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
+  private readonly brain = new DefaultBrain();
+  /** Whether last frame's intended step was rejected by world collision. */
+  private moveBlocked = false;
 
   constructor() {
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
@@ -110,7 +119,8 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Per-frame AI update.
+   * Per-frame executor pass: build the view, take the brain's intent,
+   * realize it. No policy decisions live here.
    * @param dt delta time (s)
    * @param player the player entity
    */
@@ -124,34 +134,26 @@ export class Bot implements BotShape {
     // Face the player
     this.mesh.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
 
-    // Movement blend: approach from afar, retreat when crowded, plus a
-    // perpendicular strafe component that randomly flips direction to make
-    // bots harder to track.
-    const move = new THREE.Vector3();
-    if (dist > 14) move.add(toPlayer.clone().normalize());
-    else if (dist < 7) move.sub(toPlayer.clone().normalize());
-    const strafe = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x).normalize().multiplyScalar(this.strafeDir * 0.7);
-    move.add(strafe).normalize().multiplyScalar(this.speed * dt);
+    const intent = this.brain.decide(
+      {
+        toTarget: toPlayer,
+        dist,
+        targetAlive: player.alive,
+        // Lazy on purpose: the raycast is only paid when the trigger is
+        // otherwise ready — see BrainView.seeTarget.
+        seeTarget: () => hasLineOfSight(this.eyePos(), camera.position, solids),
+        selfSpeed: this.speed,
+        moveBlocked: this.moveBlocked,
+      },
+      dt,
+    );
 
-    const nextPos = this.mesh.position.clone().add(move);
+    const nextPos = this.mesh.position.clone().add(intent.step);
     nextPos.y = 0;
-    if (!collidesAt(nextPos, BOT_RADIUS, colliders)) this.mesh.position.copy(nextPos);
-    else this.strafeDir *= -1; // bumped into geometry: reverse strafe
+    this.moveBlocked = collidesAt(nextPos, BOT_RADIUS, colliders);
+    if (!this.moveBlocked) this.mesh.position.copy(nextPos);
 
-    if (Math.random() < dt * 0.5) this.strafeDir *= -1; // ~50% chance/sec to juke
-
-    // Shoot at player — only with clear line of sight. When blocked, retry
-    // soon (0.3s) but do NOT fire; bullets must respect cover like the
-    // player's do.
-    this.fireCooldown -= dt;
-    if (this.fireCooldown <= 0 && dist < 45 && player.alive) {
-      if (hasLineOfSight(this.eyePos(), camera.position, solids)) {
-        this.fireCooldown = 0.7 + Math.random() * 1.2;
-        this.shoot(dist);
-      } else {
-        this.fireCooldown = 0.3;
-      }
-    }
+    if (intent.wantShoot) this.shoot(dist);
   }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -160,18 +162,16 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Fire at the player. Hits are probabilistic (no projectile): chance
-   * falls off linearly with distance so distant bots are mostly noise,
-   * and a hit deals 8-22 damage.
+   * Realize a shot the brain ordered. Hits are probabilistic (no
+   * projectile): chance falls off linearly with distance so distant bots
+   * are mostly noise, and a hit deals 8-22 damage.
    */
   private shoot(dist: number): void {
     sfxEnemyShoot(this.mesh.position);
     spawnImpact(this.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0))); // cheap muzzle flash
 
-    const hitChance = Math.max(0.12, 0.65 - dist / 80);
-    if (Math.random() < hitChance) {
-      const dmg = 8 + Math.random() * 14;
-      damagePlayer(dmg);
+    if (Math.random() < botHitChance(dist)) {
+      damagePlayer(botDamageRoll(Math.random));
     }
   }
 

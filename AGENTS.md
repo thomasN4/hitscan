@@ -67,7 +67,7 @@ Four static/sim layers, deliberately split:
   initEngine() → initHUD() → initWeaponViewmodels() → buildMap()/buildRange() → respawn() → initMenus() → loop
   ```
 
-- **Gameplay math lives in `src/sim/`, as pure functions.** Accuracy, recoil, ballistics, damage zones, speed tiers and blend easing take every input as a parameter — no engine imports, no DOM, no reads of shared state. That is what makes them unit-testable in plain Node (`npm test`), and it is where new gameplay math belongs. Modules like `weapons.ts` are thin bindings that feed live state in.
+- **Gameplay math lives in `src/sim/`, as pure functions.** Accuracy, recoil, ballistics, damage zones, speed tiers and blend easing take every input as a parameter — no engine imports, no DOM, no reads of shared state. That is what makes them unit-testable in plain Node (`npm test`), and it is where new gameplay math belongs. Modules like `weapons.ts` are thin bindings that feed live state in. One sanctioned exception: a stateful policy class (`sim/botBrains.ts:DefaultBrain`) keeps per-bot state across `decide()` calls — still engine-free, DOM-free and shared-state-free, with every frame's world knowledge arriving via the `BrainView` parameter.
 - **The accuracy model** (`sim/accuracy.ts`) is:
 
   ```

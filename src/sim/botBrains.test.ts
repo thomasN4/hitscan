@@ -252,6 +252,33 @@ describe('DefaultBrain trigger', () => {
     expect(probes).toBe(0);
   });
 
+  it('re-arms the staggered first shot on respawn', () => {
+    // Brains outlive their bodies. Without onRespawn a revived bot keeps
+    // counting down whatever cooldown its corpse carried — here 1.3 s from
+    // the shot it just took — instead of starting a fresh stagger.
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
+      0.9, 0,                                  // dir+, stagger = firstDelayMin = 1.0 s
+      /* F1 */ 0.9, /* F2 */ 0.9, /* F3 */ 0.9,
+      /* F4 */ 0.9, 0.5,                       // juke, post-shot reroll -> cd 1.3
+      /* respawn */ 0,                         // fresh stagger -> 1.0 s again
+    ]));
+    const v = view({ dist: 10 });
+    const first: number[] = [];
+    for (let f = 1; f <= 4; f++) {
+      if (brain.decide(v, CADENCE_DT).wantShoot) first.push(f);
+    }
+    expect(first).toEqual([4]); // 1.0 s at 0.25 s frames
+
+    brain.onRespawn();
+    const second: number[] = [];
+    for (let f = 1; f <= 6; f++) {
+      if (brain.decide(v, CADENCE_DT).wantShoot) second.push(f);
+    }
+    // Re-armed to 1.0 s, so the fourth frame again. The 1.3 s the corpse was
+    // carrying would have held fire until the sixth.
+    expect(second).toEqual([4]);
+  });
+
   it('does not shoot a dead target even with sight and range', () => {
     const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
     let probes = 0;

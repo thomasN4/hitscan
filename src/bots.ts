@@ -380,6 +380,9 @@ export class Bot implements BotShape {
       this.alive = true;
       this.mesh.visible = true;
       this.spawnAtRandom();
+      // The brain outlived the body: re-arm its spawn stagger so a revived
+      // bot does not open fire on whatever cooldown its corpse was carrying.
+      this.brain.onRespawn();
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }

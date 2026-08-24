@@ -192,6 +192,16 @@ export interface BrainIntent {
 /** The decision half of a bot. Instances own per-bot state; executors are stateless shells. */
 export interface BotBrain {
   decide(view: BrainView, dt: number): BrainIntent;
+  /**
+   * Clear per-life policy state.
+   *
+   * Brains outlive their bodies: the executor holds ONE brain per bot and
+   * revives the mesh around it, so without this a respawned bot inherits
+   * whatever shot cooldown its corpse was carrying. The staggered first shot
+   * — the thing that stops a wave volleying in unison — then applies exactly
+   * once per match, at construction, and never again.
+   */
+  onRespawn(): void;
   /** Rank a candidate target by its offset from this bot; lower wins. */
   targetScore: TargetScorer;
   /** Hit probability for a shot at eye-to-eye 3D `dist` under this brain's accuracy. */
@@ -226,6 +236,15 @@ export class DefaultBrain implements BotBrain {
     const weighted = this.params.verticalWeight * dy;
     return dx * dx + dz * dz + weighted * weighted;
   };
+
+  /**
+    * Re-arm the spawn stagger from this brain's own rng, like the constructor
+    * does. One draw, taken outside decide() so the per-frame draw sequence
+    * the tests script against is untouched.
+    */
+  onRespawn(): void {
+    this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
+  }
 
   hitChance(dist: number): number {
     return botHitChance(dist, this.params);

@@ -62,28 +62,33 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// Double-tap-W sprint detector: two W presses within 300 ms start a run;
-// the run lasts only while W stays held. Timestamp is module-local — it is
-// input-layer state, not shared game state — and WALL-clock on purpose:
-// keydowns arrive before lock and during pause, where game time is frozen.
-const RUN_TAP_WINDOW_MS = 300;
-let lastWTapTime = -Infinity;
-
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') tryReload();
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
-  // e.repeat guards against OS key-repeat re-triggering the double tap
-  if (e.code === 'KeyW' && !e.repeat) {
-    const now = performance.now();
-    if (now - lastWTapTime < RUN_TAP_WINDOW_MS) input.running = true;
-    lastWTapTime = now;
-  }
+  // Stance keys only count during live play — same gate as the mouse
+  // handlers — so nothing toggled pre-lock or behind the pause menu leaks
+  // into the session. Sprint is hold-Shift; crouch is a Ctrl/C tap toggle
+  // (either side of both), and e.repeat guards against OS key-repeat
+  // re-toggling it.
+  if (!session.locked || !player.alive) return;
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.running = true;
+  if ((e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyC') && !e.repeat) input.crouching = !input.crouching;
 });
 addEventListener('keyup', e => {
   keys[e.code] = false;
-  if (e.code === 'KeyW') input.running = false; // sprint requires W held
+  // Only drop the run when no Shift remains held.
+  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !keys.ShiftLeft && !keys.ShiftRight) input.running = false;
+});
+// Losing focus can eat keyup/mouseup events, leaving a held input latched
+// across an alt-tab. Drop everything HELD; the crouch toggle is deliberate
+// state and persists, exactly like it does through pause.
+addEventListener('blur', () => {
+  for (const code of Object.keys(keys)) keys[code] = false;
+  input.running = false;
+  input.shooting = false;
+  input.aiming = false;
 });
 
 const SENS = 0.0022; // radians per pixel of mouse movement
@@ -227,6 +232,7 @@ const game: DebugGame = {
   get shooting() { return input.shooting; }, set shooting(v: boolean) { input.shooting = v; },
   get aiming() { return input.aiming; }, set aiming(v: boolean) { input.aiming = v; },
   get running() { return input.running; }, set running(v: boolean) { input.running = v; },
+  get crouching() { return input.crouching; }, set crouching(v: boolean) { input.crouching = v; },
   get yaw() { return aim.yaw; }, set yaw(v: number) { aim.yaw = v; },
   get pitch() { return aim.pitch; }, set pitch(v: number) { aim.pitch = v; },
   get spread() { return wpn.spread; }, set spread(v: number) { wpn.spread = v; },

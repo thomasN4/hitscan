@@ -63,7 +63,7 @@ export function updateMovement(dt: number): void {
   // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
-  const crouching = key('ShiftLeft') && player.onGround;
+  const crouching = input.crouching && player.onGround;
   const running = input.running && !crouching && !input.aiming;
   const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: motion.runLerp });
 
@@ -101,13 +101,17 @@ export function updateMovement(dt: number): void {
   player.pos.y += player.vel.y * dt;
   if (player.pos.y <= player.eyeHeight) { player.pos.y = player.eyeHeight; player.vel.y = 0; player.onGround = true; }
 
-  // "Actually moving" gate for sprint ramp/footsteps/bob
-  const moving = move.lengthSq() > 0 && player.onGround;
+  const pressingMove = move.lengthSq() > 0;
+  // Grounded motion only: gates footsteps and view bob.
+  const moving = pressingMove && player.onGround;
 
   // Sprint acceleration ramp: ~0.2 s to full speed (exponential ease-in).
-  // Decays when not running so releasing W eases out the same way.
+  // Decays when not running so releasing W eases out the same way. The
+  // target ignores ground contact: a sprint-jump must carry its speed
+  // through the arc (~0.73 s airtime drains runLerp ~97% otherwise), not
+  // land at walk pace and rebuild the ramp from zero.
   motion.runLerp = deadZone(
-    approach(motion.runLerp, running && moving ? 1 : 0, dt, 1 / SPRINT_RAMP));
+    approach(motion.runLerp, running && pressingMove ? 1 : 0, dt, 1 / SPRINT_RAMP));
 
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.

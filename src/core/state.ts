@@ -99,9 +99,9 @@ export const bulletHoles: THREE.Mesh[] = [];
  * Gameplay timestamps MUST read gameTime.now(), never clock.elapsedTime or
  * performance.now(): those bases keep running through pause (THREE.Clock's
  * getDelta is called even for render-only frames) and disagree on their zero
- * point besides. Wall-clock time stays correct only for input-layer state
- * that must work before lock (main.ts's double-tap-W window) and cosmetic
- * DOM fades (hud.ts).
+ * point besides. Wall-clock time stays correct only for cosmetics that run
+ * behind menus (hud fades, muzzle-flash cleanup) and combat.ts's
+ * death-screen delay, which fires DURING pause.
  */
 export const gameTime = new GameClock();
 
@@ -338,24 +338,27 @@ export const session: SessionState = {
 };
 
 /**
- * Raw button state (LMB/RMB/sprint). Written by main.ts's event handlers —
- * plus one weapons.ts write (`shoot()` clears `aiming` on unscopeOnShot) —
- * and read by player/weapons/hud. Tracked as state rather than one-shot
- * events because firing is continuous in updateWeapon.
+ * Raw button state (LMB/RMB/sprint/crouch). Written by main.ts's event
+ * handlers — plus one weapons.ts write (`shoot()` clears `aiming` on
+ * unscopeOnShot) — and read by player/weapons/hud. Tracked as state rather
+ * than one-shot events because firing is continuous in updateWeapon.
  */
 export interface InputState {
   /** LMB held. */
   shooting: boolean;
   /** RMB held (iron sights). */
   aiming: boolean;
-  /** Double-tapped W and still holding it (sprint). */
+  /** Shift held, either side (sprint). */
   running: boolean;
+  /** Crouch toggled by a Ctrl/C tap; effective only on ground. */
+  crouching: boolean;
 }
 
 export const input: InputState = {
   shooting: false,
   aiming: false,
   running: false,
+  crouching: false,
 };
 
 /**

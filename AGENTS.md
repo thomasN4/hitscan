@@ -20,10 +20,9 @@ Default loop for every non-trivial change: **plan → worktree → implement →
 3. **Implement** — on a feature branch cut from `main` (inside its worktree):
    - Branch prefix, `<prefix>/<short-slug>` — the set is these four, no others:
      `feat/` new gameplay or behavior · `fix/` bug fixes · `refactor/` structure
-     and tooling with no behavior change (the maintainability tranche: #5, #6,
-     #7) · `docs/` documentation only. Take the prefix from this list rather
-     than from habit: `chore/` is the Conventional Commits default for tooling
-     and is NOT used here.
+     and tooling with no behavior change · `docs/` documentation only. Take the
+     prefix from this list rather than from habit: `chore/` is the Conventional
+     Commits default for tooling and is NOT used here.
    - As many WIP commits as sensible while working; commit messages: short imperative summary, optionally `;`-joined clauses, e.g.
 
    ```
@@ -124,30 +123,14 @@ Four static/sim layers, deliberately split:
 
 ## Roadmap / deferred ideas
 
-Maintainability tranche 1 (complete through the TS migration). **Full plan,
-rationale and the running list of review lessons:
-[`docs/refactor-plan.md`](docs/refactor-plan.md)** — read it before picking
-work up, especially the review-lessons section, which records traps that have
-already cost a cycle each.
-
-- **PR 1 (done):** split `core.js` into pure `core/state.js` + browser-only `core/engine.js`; explicit init order; Vitest.
-- **PR 2 (done):** extract pure sim math into `src/sim/` (`accuracy`, `recoil`, `ballistics`, `damage`, `movement`, `smoothing`) with unit tests; hoist the frame pipeline into `main.js` so intra-frame ordering is visible.
-- **PR 3 (done):** single geometry-registration path in `src/world.js` (`addSolidBox`, `registerSolid`, `registerGroupParts`), replacing the duplicated `addBox` in `map.js`/`range.js`; `collidesAt` now takes `colliders` as a parameter, matching `hasLineOfSight`.
-- **PR 4 (done):** port the `feat/smg-tuning` gameplay work onto the refactored tree — rifle→SMG, the `spray`/`inherent`/airborne accuracy model, and horizontal recoil (`recoilYaw`, `aimYaw`).
-- **PR 5 (done, #12):** `sim/validateWeapons.js` enforcing the `recoilRecover < recoilKick / fireRate` class of constraint that had been fixed twice by hand. The rule exempts `semiAuto` weapons: the sniper over-drains deliberately (13/s against a 3.64/s input) because full settle between shots is the bolt-action feel and is what makes `scopeGate` work. The `sprayRecover < sprayKick / fireRate` counterpart applies to every weapon.
-
-  Two lessons from PR 4, which shipped both failure modes green, are enforced by that validator:
-  - **The horizontal walk needs its own rule.** `recoilYaw` is zero-mean, so the bound is `yawRecover × fireRate < yawKick / 2` (the MEAN kick) — not the vertical form. PR 4 drained it at `recoilRecover`, which zeroed the walk before every shot: no bullet was ever displaced. Same `semiAuto` exemption as above.
-  - **These bounds are necessary, not sufficient.** `sprayRecover: 0.45` satisfied `< sprayKick / fireRate` and still only reached spray 1.28 against a documented 2.8, because decay runs *during* fire. Where a comment quotes a number, pin it with a test that simulates the fire loop (`sim/recoil.test.js`), not one that hand-seeds the end state.
-
-- **PR 6 (done, #13):** the ESLint gate, no TypeScript — pulled forward exactly as flagged above.
-- **PR 7 (done):** full `.ts` migration under `strict`/`noUncheckedIndexedAccess`, with the typescript-eslint rules from this section layered onto PR 6's flat config. One deviation from the original note: "start with `src/sim/*`" was unworkable as written (Vite maps `'./x.js'` specifiers onto `.ts` files only for TS importers), solved by extensionless intra-src imports instead of top-down forced ordering.
-- **PR 8 (done):** one gameplay clock — pure `sim/gameClock.ts` GameClock, shared instance `core/state.ts:gameTime`, advanced only from main.ts's sim block, with a scheduler drained from inside `advance()`. All gameplay timestamps (lastShot/fireRate, reload bookkeeping, view bob) and world respawn timers measure against it; the death-screen delay, cosmetic fades and the double-tap window stay wall-clock by documented exception. See the PR 8 section of `docs/refactor-plan.md` before adding any new timer.
-
-- **PR 9 (done):** split the flat `game` bag into owner-scoped slices in `core/state.ts` — `session`, `input`, `aim`, `wpn` (dynamics), `motion`, `score` — one slice per commit with `GameState` shrinking each time so tsc enforced completeness. The flat shape survives only as main.ts's delegation-only `__cs.game` facade (debug hook / smoke test compat); no importable `game` exists for gameplay code.
+**Full plan, rationale and the running list of review lessons:
+[`docs/refactor-plan.md`](docs/refactor-plan.md)** — read its review-lessons
+section before picking work up; it records traps that have already cost a
+cycle each. Completed work is archived there, not summarized here — this
+section only tracks what is still open.
 
 Deferred to a later tranche:
 
-- Making weapon switching cost time (a draw/holster delay, ideally with a viewmodel animation on `poseReload`'s model). Switching is instant today, so `1-2-1` is a free recoil cancel — the conversion in `switchWeapon` is lossless, but the incoming weapon's `recoilRecover` then drains the carried units, and the sniper's 13/s clears a full smg climb in 0.277 s. The same zero-cost window also lets a swap dodge `scopeGate` and re-clamp `spray`. Tracked as **issue #15** (not a PR number — the `#N` elsewhere in this file means PR). Pre-existing, not a migration regression; pinned as behavior in `sim/recoil.test.ts` so a fix has to update the test deliberately.
+- Making weapon switching cost time (a draw/holster delay, ideally with a viewmodel animation on `poseReload`'s model). Switching is instant today, so `1-2-1` is a free recoil cancel — the conversion in `switchWeapon` is lossless, but the incoming weapon's `recoilRecover` then drains the carried units, and the sniper's 13/s clears a full smg climb in 0.277 s. The same zero-cost window also lets a swap dodge `scopeGate` and re-clamp `spray`. Tracked as **issue #15**; pre-existing behavior, pinned in `sim/recoil.test.ts` so a fix has to update the test deliberately.
 
 Dropped: unifying Bot and the player under a shared entity base class. It addresses none of the regression classes this codebase has actually hit, and would couple a probabilistic AI to a physics-driven controller.

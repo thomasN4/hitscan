@@ -55,8 +55,6 @@ function view(overrides: Partial<BrainView> = {}): BrainView {
     // meaning exactly what it meant before the brain learned about height.
     dist3: dist,
     rise: 0,
-    selfFeetY: 0,
-    onGround: true,
     targetAlive: true,
     seeTarget: () => true,
     selfSpeed: 4,

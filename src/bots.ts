@@ -36,13 +36,16 @@ import { DefaultBrain, nearestOpposing } from './sim/botBrains';
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
 
+/** Length of the aim barrel (m); the muzzle sits at half this along its +z. */
+const BARREL_LEN = 0.6;
+
 /**
- * Ceiling on how far a bot's head tips to track a target (rad, ~57°).
- * Presentation only — a bot's shot is probability, not a ray from the
- * muzzle — but without it a bot standing under a deck folds its head
- * through its own torso.
+ * Ceiling on how far a bot's aim tips to track a target (rad, ~69°).
+ * Presentation only — a bot's shot is probability, not a ray from the muzzle.
+ * Wide enough to read as "aiming up at the deck" from underneath, short of
+ * vertical so the barrel never disappears into the bot's own silhouette.
  */
-const MAX_HEAD_PITCH = 1.0;
+const MAX_AIM_PITCH = 1.2;
 
 /** Serial source for Bot ids; 1-based per match, unique across teams. */
 let nextBotId = 1;
@@ -62,10 +65,13 @@ function debugLog(msg: string): void {
 // Shared geometries/materials — one allocation for all bots. Two palettes:
 // T tan/brown, CT blue-gray, so sides read at a glance.
 const botGeo = {
-  torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),
-  head:  new THREE.BoxGeometry(0.34, 0.34, 0.34),
-  legs:  new THREE.BoxGeometry(0.6, 0.9, 0.35),
+  torso:  new THREE.BoxGeometry(0.7, 0.9, 0.4),
+  head:   new THREE.BoxGeometry(0.34, 0.34, 0.34),
+  legs:   new THREE.BoxGeometry(0.6, 0.9, 0.35),
+  barrel: new THREE.BoxGeometry(0.08, 0.08, BARREL_LEN),
 };
+/** Gunmetal, shared by both teams — a weapon reads as a weapon, not as a side. */
+const matBarrel = new THREE.MeshLambertMaterial({ color: 0x23262b });
 const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
   T: {
     body: new THREE.MeshLambertMaterial({ color: 0x8a6b2e }),
@@ -109,6 +115,8 @@ export class Bot implements BotShape {
   torso: THREE.Mesh;
   head: THREE.Mesh;
   legs: THREE.Mesh;
+  /** Hinge carrying the aim barrel; pitched at the target each frame. */
+  readonly aim = new THREE.Group();
   hp = 100;
   alive = true;
   /** Stable identity for debug logs and killfeed attribution. */
@@ -161,6 +169,25 @@ export class Bot implements BotShape {
     const parts = { torso: this.torso, head: this.head, legs: this.legs };
     // Tag every part with its owner so bullet raycasts can attribute hits.
     for (const part of Object.values(parts)) part.userData.bot = this;
+
+    // Aim pivot: a barrel on a shoulder-height hinge, so PITCH is visible.
+    // Rotating the head cube in place was not — a featureless box turning
+    // about its own centre shows nothing, which a playtest confirmed
+    // (docs/ai-plan.md, lesson 25). A barrel that swings has a direction.
+    //
+    // Deliberately NOT tagged with userData.bot, and deliberately not a field
+    // weapons.ts knows about: its raycast targets are an explicit allowlist
+    // (`bot.head, bot.torso, bot.legs`), so this stays decorative by
+    // construction. It has to — sim/damage.ts:partForMesh falls through to
+    // 'torso' for any mesh it does not recognize, so a barrel that ever
+    // reached that list would silently become a torso hit rather than error.
+    // Bot LOS rays against `solids` only, so it never blocks sight either.
+    this.aim.position.set(0.16, 1.5, 0);
+    const barrel = new THREE.Mesh(botGeo.barrel, matBarrel);
+    barrel.position.z = BARREL_LEN / 2;
+    barrel.castShadow = true;
+    this.aim.add(barrel);
+    this.mesh.add(this.aim);
 
     this.spawnAtRandom();
     scene.add(this.mesh);
@@ -236,12 +263,12 @@ export class Bot implements BotShape {
     const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
     const dist3 = selfEye.distanceTo(targetEye);
 
-    // Face the target, and tip the head at it so a bot firing up at a deck
-    // visibly looks up. The mesh yaw puts local +z on the target, and a
+    // Face the target, and tip the aim barrel at it so a bot firing up at a
+    // deck visibly aims up. The mesh yaw puts local +z on the target, and a
     // positive x-rotation tips that forward axis DOWN — hence the negation.
     this.mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
     const pitch = Math.atan2(targetEye.y - selfEye.y, Math.max(dist, 1e-6));
-    this.head.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_HEAD_PITCH, MAX_HEAD_PITCH);
+    this.aim.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_AIM_PITCH, MAX_AIM_PITCH);
 
     const losTo = target.kind === 'player'
       ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
@@ -253,8 +280,6 @@ export class Bot implements BotShape {
         dist,
         dist3,
         rise,
-        selfFeetY: this.mesh.position.y,
-        onGround: this.onGround,
         targetAlive: target.alive,
         // Lazy on purpose: the raycast is only paid when the trigger is
         // otherwise ready — see BrainView.seeTarget.
@@ -299,6 +324,19 @@ export class Bot implements BotShape {
   }
 
   /**
+   * World-space barrel tip, for the muzzle flash.
+   *
+   * Flushes the group's world matrix first: update() has already written this
+   * frame's yaw and pitch, but nothing has composed them yet — the renderer
+   * does that later. Called only on firing frames, so the flush is paid at
+   * the bot's cooldown rate rather than per frame.
+   */
+  private muzzlePos(): THREE.Vector3 {
+    this.mesh.updateMatrixWorld(true);
+    return this.aim.localToWorld(new THREE.Vector3(0, 0, BARREL_LEN));
+  }
+
+  /**
    * Realize a shot the brain ordered. Hits are probabilistic (no
    * projectile): chance falls off linearly with the eye-to-eye distance to
    * the target so distant bots are mostly noise; a hit routes damage by
@@ -308,7 +346,7 @@ export class Bot implements BotShape {
    */
   private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);
-    spawnImpact(this.eyePos()); // cheap muzzle flash, from the head that is aiming
+    spawnImpact(this.muzzlePos()); // cheap muzzle flash, from the barrel tip
 
     if (!this.brain.rollHit(dist)) return;
     const dmg = this.brain.rollDamage();

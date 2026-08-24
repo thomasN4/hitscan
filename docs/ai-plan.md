@@ -149,6 +149,36 @@ not an AI bug, and no amount of navigation fixes it — a bot that pathfinds
 perfectly onto that flight still wedges. Tranche 3's stair navigation is
 blocked behind it.
 
+#### Playtest (elevation + arena, collision fix and 3D brain together)
+
+What held: the soft-lock is gone and walls stayed solid everywhere — no leak,
+which is the escape behaving as designed (it only ever fires outward). Overall
+lethality felt unchanged. No bot was ever seen on the jump-only crates or the
+bridge, so the map's control case survives.
+
+What it surfaced:
+
+- **Bots rarely, but not never, try the stairs.** Consistent with the
+  climbThreshold dead zone below.
+- **A bot pins against geometry and frees itself only once the PLAYER moves
+  far enough.** Not a wedge — collision permits the move. The intended *step*
+  keeps pointing into the obstacle, and `moveBlocked` flips `strafeDir` every
+  frame, so the bot alternates between two mirror-image steps that are both
+  refused. Lesson 21's ordering is right; the per-frame flip RATE is not. This
+  was the strongest complaint and is now its own piece of work.
+- **Bots crowd underneath a deck player** — approach works, arrival does not.
+- **A deck player draws more fire than before.** Expected rather than a
+  regression: bots now close in instead of retreating, and `botHitChance`
+  falls off with distance, so a shorter range is a better roll.
+- **The head pitch was invisible.** See lesson 25; replaced with a barrel.
+
+Measured, with both changes in: a bot climbs to feet **2.4** (was 1.5), then
+orbits. At 2.4 the rise is 1.2, under `climbThreshold`, so the overhead
+suppression switches off and the band holds it one step short. 3D ranging moved
+where the stall happens, not that it happens — stair navigation is what closes
+it, because a bot must head for the TOP OF THE FLIGHT and keep heading there
+until the level changes, which no band around the target can express.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
@@ -201,3 +231,14 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
    deleting it would have thrown away a real finding. Trace before
    attributing — and when a trace refutes an explanation, check whether it is
    describing something further along the same path rather than nothing.
+25. **A cosmetic cue that cannot read is not a cue.** Bots were given head
+   pitch so that one firing up at a deck would visibly look up. The math was
+   right — correct formula, correct sign, correct three.js rotation
+   convention — and a reviewer checked it and agreed. The playtest saw
+   nothing at all. The head is a 0.34 m featureless cube rotating about its
+   own centre, and a shape with no surface detail and no asymmetry cannot
+   show direction by spinning in place; there was never anything to see. The
+   fix was not to the maths but to the geometry: a barrel on a hinge, which
+   swings. Confirming that a presentation change is CORRECT is not the same
+   as confirming it is VISIBLE, and only one of those can be done by reading
+   code. Look at it.

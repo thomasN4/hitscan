@@ -151,19 +151,23 @@ export function nearestOpposing<T extends OpposingCandidate>(
 export interface BrainView {
   /**
    * Planar vector from the bot to its target (y stripped). The STEERING
-   * basis: a step only moves in x/z. Ranging uses dist3/rise instead.
+   * basis: a step only moves in x/z, and both the approach direction and the
+   * perpendicular drift are derived from this vector. Ranging uses
+   * dist3/rise instead.
    */
   toTarget: THREE.Vector3;
-  /** Planar distance to the target (=== toTarget.length()). */
+  /**
+   * Planar distance to the target (=== toTarget.length()). Ground distance,
+   * NOT the steering basis (that is the vector above) and no longer what the
+   * bands read — they moved to dist3. Kept because ground distance is the
+   * right measure of whether a bot is making headway toward its target, which
+   * is what stuck detection needs.
+   */
   dist: number;
   /** True eye-to-eye 3D distance — the same range the hit die rolls on. */
   dist3: number;
   /** Target feet minus this bot's feet (m). Positive: the target is above. */
   rise: number;
-  /** This bot's own feet height (m). */
-  selfFeetY: number;
-  /** Whether the bot is resting on support this frame (not falling). */
-  onGround: boolean;
   targetAlive: boolean;
   /**
    * Line-of-sight probe to the target. A THUNK on purpose: the raycast

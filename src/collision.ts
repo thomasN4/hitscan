@@ -22,6 +22,17 @@ import * as THREE from 'three';
 export const STEP_HEIGHT = 0.3;
 /** Top of the entity's collision span, relative to its feet. */
 export const HEAD_HEIGHT = 2.0;
+/**
+ * Slack for the elevation comparisons, in metres.
+ *
+ * Collider AABBs are measured from meshes whose vertices are stored as
+ * FLOAT32, so a tread built as exactly 0.3 tall measures
+ * 0.3000000059604645 — a few nanometres too tall. Without this slack every
+ * exact-height riser reads a hair above feet + STEP_HEIGHT and walls off
+ * the entire flight (the smoke test caught exactly that). Orders of
+ * magnitude: float32 noise ~5e-9, this epsilon 1e-6, STEP_HEIGHT 0.3.
+ */
+export const COLLISION_EPSILON = 1e-6;
 
 /**
  * Test whether an entity whose FEET are at `feetY`, at `pos` in XZ, would
@@ -38,14 +49,15 @@ export const HEAD_HEIGHT = 2.0;
  * @param colliders registry from world.ts
  */
 export function collidesAt(pos: THREE.Vector3, radius: number, feetY: number, colliders: THREE.Box3[]): boolean {
-  // Explicit strict comparisons, not Box3.intersectsBox: THREE treats mere
-  // EDGE CONTACT as intersecting, and stair risers sit EXACTLY one
-  // STEP_HEIGHT above the previous tread — an inclusive test would wall off
-  // every flight. Tops at or below feet + STEP_HEIGHT are steppable, bottoms
-  // at or above feet + HEAD_HEIGHT are overhead cover.
+  // Explicit comparisons, not Box3.intersectsBox, for two reasons: THREE
+  // treats mere EDGE CONTACT as intersecting, and stair risers sit EXACTLY
+  // one STEP_HEIGHT above the previous tread — an inclusive test would wall
+  // off every flight. Tops within STEP_HEIGHT of the feet are steppable,
+  // bottoms at or above head height are overhead cover; both bounds take
+  // COLLISION_EPSILON slack for float32-measured tops (see above).
   const minX = pos.x - radius, maxX = pos.x + radius;
   const minZ = pos.z - radius, maxZ = pos.z + radius;
-  const steppableBelow = feetY + STEP_HEIGHT;
+  const steppableBelow = feetY + STEP_HEIGHT + COLLISION_EPSILON;
   const overheadAbove = feetY + HEAD_HEIGHT;
   for (const c of colliders) {
     if (minX >= c.max.x || maxX <= c.min.x) continue;
@@ -76,7 +88,10 @@ export function collidesAt(pos: THREE.Vector3, radius: number, feetY: number, co
 export function supportHeightAt(x: number, z: number, radius: number, ceilingY: number, colliders: THREE.Box3[]): number {
   let best = 0; // the base ground plane supports everything
   for (const c of colliders) {
-    if (c.max.y <= best || c.max.y > ceilingY) continue;
+    // Ceiling takes COLLISION_EPSILON slack too: float32-noisy tops must
+    // still count as support, or the riser face lets you through
+    // (collidesAt) but the lift never fires (here).
+    if (c.max.y <= best || c.max.y > ceilingY + COLLISION_EPSILON) continue;
     if (x + radius <= c.min.x || x - radius >= c.max.x) continue;
     if (z + radius <= c.min.z || z - radius >= c.max.z) continue;
     best = c.max.y;

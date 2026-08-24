@@ -58,6 +58,20 @@ describe('collidesAt — blocking is relative to the feet', () => {
     expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [curb])).toBe(true);
   });
 
+  test('float32-noisy tops still count as steppable and supportive', () => {
+    // What Box3.setFromObject ACTUALLY yields for a tread built as exactly
+    // 0.3 tall: mesh vertices are float32, inflating max.y to
+    // 0.3000000059604645 (and dropping min.y to -5.96e-9). Without
+    // COLLISION_EPSILON this walls off every real flight — caught live by
+    // the smoke test's stairs phase.
+    const noisyStep = new THREE.Box3(
+      new THREE.Vector3(-1, -5.960464483090178e-9, -1),
+      new THREE.Vector3(1, 0.3000000059604645, 1),
+    );
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [noisyStep])).toBe(false);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 0.3, [noisyStep])).toBe(0.3000000059604645);
+  });
+
   test('a knee-high crate blocks at ground feet', () => {
     const crate = slab(0, 0, 0, 0.5);
     expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [crate])).toBe(true);

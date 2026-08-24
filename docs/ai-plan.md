@@ -128,3 +128,21 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
    exit status; a chained `&&` sequence ran straight through a red
    typecheck and briefly committed broken code. Use `set -o pipefail` (or
    run gates bare) whenever output is piped.
+23. **A binary "am I inside?" test is a trap unless something can walk back
+   out.** `collidesAt` answers overlap with no notion of depth, so
+   `slideMoveXZ` refused EVERY direction for an entity already inside
+   geometry — the way out included. That soft-locked the player permanently
+   on the elevation map's internal flight and froze bots there for whole
+   matches. Two things hid it for this long: the collision suite only ever
+   tested entities approaching from OUTSIDE, and the one fixture that did
+   start inside a wall (`blocking follows the given feet height`) asserted
+   the trap as correct behavior. Depenetration is not an optional refinement
+   of a solid-body test — without it the test has a state with no exit.
+24. **A plausible explanation written in a comment is not a diagnosis.** The
+   `[botClimb]` smoke phase explained bots never gaining the deck as planar
+   band steering: "once inside farBand the radial term drops out and it
+   circles at constant radius". Reasonable, consistent with the code, and
+   wrong. A single position trace showed the bot frozen at ONE coordinate
+   with `moveBlocked` set — wedged, not circling. The comment had been
+   believed long enough to shape a plan around it. Trace the behavior before
+   attributing it, especially when the attribution is already written down.

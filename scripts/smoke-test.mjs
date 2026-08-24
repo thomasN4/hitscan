@@ -752,12 +752,71 @@ async function runBotClimbCheck() {
   await page.close();
 }
 
+// The unwedge escape, end to end (collision.ts:slideMoveXZ).
+//
+// Stands the player at the exact coordinate that used to soft-lock: riser 5 of
+// the elevation map's internal flight, radius lapping the x >= 6 second-floor
+// slab whose underside sits below head height at feet 1.5. Before the escape
+// existed, every direction was refused here — all four cardinals plus jump,
+// zero displacement, forever. This asserts you can walk back out, and that the
+// directions INTO the slab are still solid, because an escape that let you
+// through geometry would be the worse bug.
+async function runWedgeCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=0&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      cs.game.started = true; cs.game.locked = true; cs.player.hp = 100000; cs.game.pitch = 0;
+      const TRAP = { x: 6.15, feet: 1.5, z: -6.42 };
+      const attempt = async (yaw) => {
+        cs.player.pos.set(TRAP.x, TRAP.feet + cs.player.eyeHeight, TRAP.z);
+        cs.player.vel.set(0, 0, 0);
+        cs.game.yaw = yaw;
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        for (let i = 0; i < 90; i++) await new Promise(r => requestAnimationFrame(r));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        return +Math.hypot(cs.player.pos.x - TRAP.x, cs.player.pos.z - TRAP.z).toFixed(2);
+      };
+      // Away from the slab (west) must free the player; into it (east) must not.
+      const out = await attempt(Math.PI / 2);
+      const into = await attempt(-Math.PI / 2);
+      // And the slab must still stop a clean approach from open ground.
+      cs.player.pos.set(5, TRAP.feet + cs.player.eyeHeight, TRAP.z);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = -Math.PI / 2;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      for (let i = 0; i < 90; i++) await new Promise(r => requestAnimationFrame(r));
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      const approachedTo = +cs.player.pos.x.toFixed(2);
+      cs.player.hp = 100;
+      return { out, into, approachedTo };
+    });
+    if (result.out < 1) throw new Error(`player still soft-locked in the slab wedge: ${JSON.stringify(result)}`);
+    if (result.into > 0.05) throw new Error(`escape leaked THROUGH the slab — walls must stay solid: ${JSON.stringify(result)}`);
+    if (result.approachedTo > 5.55) throw new Error(`player pushed past the slab's west face: ${JSON.stringify(result)}`);
+    console.log('[wedge] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[wedge] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[wedge] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
+  await runWedgeCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {
   await browser.close();

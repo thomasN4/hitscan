@@ -220,22 +220,30 @@ describe('DefaultBrain trigger', () => {
 });
 
 describe('ballistic rolls', () => {
-  it('hit chance falls off linearly and clamps to its floor', () => {
-    expect(botHitChance(0)).toBeCloseTo(0.65, 12);
-    expect(botHitChance(40)).toBeCloseTo(0.15, 12);
-    expect(botHitChance(80)).toBeCloseTo(0.12, 12);
-    expect(botHitChance(800)).toBeCloseTo(0.12, 12);
+  it('hit chance falls off linearly and clamps to its floor (default params)', () => {
+    const p = DEFAULT_BRAIN_PARAMS;
+    expect(botHitChance(0, p)).toBeCloseTo(p.hitChanceNear, 12);
+    expect(botHitChance(40, p)).toBeCloseTo(0.15, 12); // 0.65 − 40/80
+    expect(botHitChance(80, p)).toBeCloseTo(p.hitChanceMin, 12);
+    expect(botHitChance(800, p)).toBeCloseTo(p.hitChanceMin, 12);
     let prev = Infinity;
     for (let d = 0; d <= 100; d += 5) {
-      const c = botHitChance(d);
+      const c = botHitChance(d, p);
       expect(c).toBeLessThanOrEqual(prev);
       prev = c;
     }
   });
 
-  it('damage roll spans [8, 22]', () => {
-    expect(botDamageRoll(() => 0)).toBeCloseTo(8, 12);
-    expect(botDamageRoll(() => 0.5)).toBeCloseTo(15, 12);
-    expect(botDamageRoll(() => 1)).toBeCloseTo(22, 12);
+  it('damage roll spans [damageMin, damageMin + damageSpan] (default params)', () => {
+    const p = DEFAULT_BRAIN_PARAMS;
+    expect(botDamageRoll(() => 0, p)).toBeCloseTo(p.damageMin, 12);
+    expect(botDamageRoll(() => 0.5, p)).toBeCloseTo(15, 12);
+    expect(botDamageRoll(() => 1, p)).toBeCloseTo(p.damageMin + p.damageSpan, 12);
+  });
+
+  it('brain delegates consume the same rng stream and read the same params', () => {
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([/* dir */ 0.9, /* cd */ 0.9, /* dmg */ 0.25]));
+    expect(brain.hitChance(0)).toBe(DEFAULT_BRAIN_PARAMS.hitChanceNear);
+    expect(brain.rollDamage()).toBeCloseTo(DEFAULT_BRAIN_PARAMS.damageMin + 0.25 * DEFAULT_BRAIN_PARAMS.damageSpan, 12);
   });
 });

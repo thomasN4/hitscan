@@ -26,7 +26,7 @@ import { damagePlayer, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
-import { DefaultBrain, botDamageRoll, botHitChance } from './sim/botBrains';
+import { DefaultBrain } from './sim/botBrains';
 
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
@@ -194,8 +194,8 @@ export class Bot implements BotShape {
     sfxEnemyShoot(this.mesh.position);
     spawnImpact(this.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0))); // cheap muzzle flash
 
-    if (Math.random() < botHitChance(dist)) {
-      damagePlayer(botDamageRoll(Math.random));
+    if (Math.random() < this.brain.hitChance(dist)) {
+      damagePlayer(this.brain.rollDamage());
     }
   }
 

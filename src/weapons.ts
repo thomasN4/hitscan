@@ -200,6 +200,10 @@ export function switchWeapon(slot: WeaponSlot): void {
   saved.mag = weapon.mag;
   saved.reserve = weapon.reserve;
 
+  // Record the outgoing slot BEFORE re-pointing `slot`: this is what makes
+  // the Q quick-swap a two-weapon toggle (Q,Q returns you to where you were).
+  wpn.lastSlot = wpn.slot;
+
   // Recoil/spray state is weapon-RELATIVE, so the swap converts it instead of
   // carrying the raw numbers across: without this the sniper's punchRad renders
   // the smg's stored units as a different angle and the aim snaps mid-swap.
@@ -240,6 +244,16 @@ export function switchWeapon(slot: WeaponSlot): void {
     recoilRecover: def.recoilRecover,
   });
   sfxSwitch();
+}
+
+/**
+ * Quick-swap to the weapon held immediately before the current one (bound to
+ * Q). Just re-enters switchWeapon with wpn.lastSlot: when nothing has been
+ * swapped yet (or you're already holding that slot) switchWeapon's own gate
+ * no-ops, so no extra state to guard here.
+ */
+export function switchToLast(): void {
+  switchWeapon(wpn.lastSlot);
 }
 
 /**

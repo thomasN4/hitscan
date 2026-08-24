@@ -385,6 +385,32 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       console.log(`[pistol] OK`, JSON.stringify(pistol));
     }
 
+    // 6b) Q quick-swap: toggles between the two most recently held weapons.
+    //     Digit2 records the smg as lastSlot; each Q then flips slot/lastSlot
+    //     (so Q,Q returns you where you were), and Digit1 restores the smg
+    //     for the phases below. Range only, like the other switch phases.
+    if (sprintCheck) {
+      const qswap = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        await wait(150);
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
+        await wait(150);
+        const backToSmg = { slot: cs.game.slot, last: cs.game.lastSlot };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
+        await wait(150);
+        const backToSniper = { slot: cs.game.slot };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        return { backToSmg, backToSniper, restored: cs.game.slot };
+      });
+      if (qswap.backToSmg.slot !== 0 || qswap.backToSmg.last !== 1) throw new Error(`Q should return to the previous weapon: ${JSON.stringify(qswap.backToSmg)}`);
+      if (qswap.backToSniper.slot !== 1) throw new Error(`second Q should toggle back to the sniper: ${JSON.stringify(qswap.backToSniper)}`);
+      if (qswap.restored !== 0) throw new Error(`restore to smg failed: slot ${qswap.restored}`);
+      console.log(`[qswap] OK`, JSON.stringify(qswap));
+    }
+
     // 7) Dead players don't shoot. exitPointerLock() dispatches
     //    pointerlockchange asynchronously, so frames still run with
     //    alive === false and locked === true; a held LMB must not spend

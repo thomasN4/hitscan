@@ -474,6 +474,10 @@ export interface WeaponDynamics {
   adsLerp: number;
   /** Active weapon index into WEAPONS (0 smg, 1 sniper). */
   slot: WeaponSlot;
+  /** Slot held immediately before `slot`: the target of the Q quick-swap.
+   *  switchWeapon records the outgoing slot here; combat.ts's respawn()
+   *  resets it alongside `slot`. */
+  lastSlot: WeaponSlot;
   /** Scoped zoom step: index into WEAPONS[slot].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
@@ -540,6 +544,8 @@ export const wpn: WeaponDynamics = {
                    // between shots.
   adsLerp: 0,
   slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper, 2 pistol)
+  lastSlot: 0,     // slot held before `slot`, the Q swap target; respawn pins
+                   // both to the smg so Q can't yank you across a death
   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                    // doesn't get twitchy at 12x (computed in weapons.ts)

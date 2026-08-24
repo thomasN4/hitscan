@@ -77,6 +77,7 @@ export function respawn(): void {
   wpn.adsLerp = 0;
   resetAmmo();    // refills both slots and mirrors the smg into `weapon`
   wpn.slot = 0;
+  wpn.lastSlot = 0; // Q target resets with the slot: no swap has happened yet
   wpn.zoomLevel = 0;
   updateHUD();
   clearVignette();

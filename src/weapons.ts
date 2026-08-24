@@ -190,11 +190,20 @@ export function tryReload(): void {
  * Switch to slot `slot` (0 smg, 1 sniper, 2 pistol). Saves the current mag/reserve
  * back into ammoStore so mugs don't refill on swap, copies the new slot's
  * stats into the live `weapon` object, converts the live recoil/spray state to
- * the incoming weapon's terms, and resets scope zoom. Blocked while reloading
- * to avoid mid-mag-swap state corruption.
+ * the incoming weapon's terms, and resets scope zoom. Cancels an in-progress
+ * reload CS-style rather than being blocked by one (see below).
  */
 export function switchWeapon(slot: WeaponSlot): void {
-  if (slot === wpn.slot || !session.started || !player.alive || weapon.reloading) return;
+  if (slot === wpn.slot || !session.started || !player.alive) return;
+  // Switching cancels an in-progress reload instead of waiting it out. Safe
+  // because no rounds have moved yet — the mag is refilled from reserve only
+  // when the timer completes in updateWeapon — and the still-partial mag is
+  // saved back into ammoStore below, so the interrupted weapon keeps exactly
+  // what it had. This clear is also the real fix for the hazard the old
+  // blanket block guarded: a reloading flag riding across the swap would run
+  // that completion check against the INCOMING weapon's stats with the stale
+  // reloadEnd — an instant free reload.
+  weapon.reloading = false;
   const saved = ammoStore[wpn.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;

@@ -44,11 +44,19 @@ function moveParams(): BrainParams {
   return { ...DEFAULT_BRAIN_PARAMS, engageRange: 0 };
 }
 
-/** Canonical view: target due +x, mid-band, alive, visible, 4 m/s. */
+/** Canonical view: target due +x, mid-band, LEVEL, alive, visible, 4 m/s. */
 function view(overrides: Partial<BrainView> = {}): BrainView {
+  const dist = overrides.dist ?? 10;
   return {
     toTarget: new THREE.Vector3(1, 0, 0),
-    dist: 10,
+    dist,
+    // Level ground unless a test says otherwise: with rise 0 the eye-to-eye
+    // range IS the planar range, so every band test that drives `dist` keeps
+    // meaning exactly what it meant before the brain learned about height.
+    dist3: dist,
+    rise: 0,
+    selfFeetY: 0,
+    onGround: true,
     targetAlive: true,
     seeTarget: () => true,
     selfSpeed: 4,
@@ -97,6 +105,33 @@ describe('DefaultBrain movement blend', () => {
     // Just outside/inside: radial component appears.
     expect(brain.decide(view({ dist: 14.000001 }), DT).step.x).toBeGreaterThan(0);
     expect(brain.decide(view({ dist: 6.999999 }), DT).step.x).toBeLessThan(0);
+  });
+
+  it('bands read the 3D range, not the planar one', () => {
+    // Planar-close but 3D-far (a target up a tower): the radial term must
+    // come from dist3, so this APPROACHES where the old planar brain would
+    // have backed off.
+    const brain = calmBrain();
+    expect(brain.decide(view({ dist: 5, dist3: 20 }), DT).step.x).toBeGreaterThan(0);
+  });
+
+  it('approaches a target overhead instead of retreating from it', () => {
+    // Standing under a 3.6 m deck: 0.5 m of ground between them, eye-to-eye
+    // sqrt(0.5² + 3.6²) ≈ 3.634 — well inside nearBand. Backing off here is
+    // the bug maps/elevation.ts was built to expose: it widens the gap to
+    // the flight that reaches the deck.
+    const overhead = view({ dist: 0.5, dist3: 3.634, rise: 3.6 });
+    expect(calmBrain().decide(overhead, DT).step.x).toBeGreaterThan(0);
+    // Same range on the LEVEL is still a back-off — the suppression is
+    // rise-driven, not a blanket removal of the near band.
+    const level = view({ dist: 3.634, dist3: 3.634, rise: 0 });
+    expect(calmBrain().decide(level, DT).step.x).toBeLessThan(0);
+  });
+
+  it('climbThreshold is exclusive: a kerb still gets backed away from', () => {
+    const p = moveParams(); // climbThreshold 1.5
+    expect(calmBrain(p).decide(view({ dist: 3, dist3: 3, rise: 1.5 }), DT).step.x).toBeLessThan(0);
+    expect(calmBrain(p).decide(view({ dist: 3, dist3: 3, rise: 1.500001 }), DT).step.x).toBeGreaterThan(0);
   });
 
   it('respects overridden bands', () => {
@@ -206,6 +241,13 @@ describe('DefaultBrain trigger', () => {
     for (let f = 0; f < 8; f++) expect(ranged.decide(far, CADENCE_DT).wantShoot).toBe(false);
     expect(probes).toBe(0);
 
+    // The gate reads dist3, so a planar-close target high above is out of
+    // range too — and agrees with the die rollHit rolls on.
+    const below = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
+    const overhead = view({ dist: 2, dist3: 50, rise: 50, seeTarget: () => { probes++; return true; } });
+    for (let f = 0; f < 8; f++) expect(below.decide(overhead, CADENCE_DT).wantShoot).toBe(false);
+    expect(probes).toBe(0);
+
     // In range but inside the staggered first-shot delay: still cold.
     const fresh = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0.99])); // cd ≈ 2.98 s
     for (let f = 0; f < 4; f++) expect(fresh.decide(probing(), CADENCE_DT).wantShoot).toBe(false);
@@ -278,9 +320,9 @@ describe('nearestOpposing', () => {
     expect(nearestOpposing(origin, [cand(1, 1, false), cand(50, 50, false)])).toBeUndefined();
   });
 
-  it('picks the planar-nearest alive candidate; height cannot outrank ground distance', () => {
-    // The (2,0) entry is nearer in the GROUND plane even though the high one
-    // would win a 3D comparison.
+  it('defaults to planar ranking: height cannot outrank ground distance', () => {
+    // With no scorer the pre-3D behavior stands — the (2,0) entry is nearer
+    // in the GROUND plane even though the high one wins a 3D comparison.
     const near = cand(2, 0);
     const farButLowY = cand(5, 0, true, 100);
     expect(nearestOpposing(origin, [farButLowY, near])).toBe(near);
@@ -290,5 +332,21 @@ describe('nearestOpposing', () => {
     const corpseBetween = cand(1, 0, false);
     const prey = cand(4, 0);
     expect(nearestOpposing(origin, [corpseBetween, prey])).toBe(prey);
+  });
+
+  it('ranks by the supplied scorer, so the brain owns target choice', () => {
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, calmRng);
+    // verticalWeight 2: 3 m of height scores (2·3)² = 36, worse than 5 m of
+    // flat ground at 25 — reaching the high one costs a stair detour.
+    expect(brain.targetScore(5, 0, 0)).toBeCloseTo(25, 12);
+    expect(brain.targetScore(0, 3, 0)).toBeCloseTo(36, 12);
+    expect(brain.targetScore(0, -3, 0)).toBeCloseTo(36, 12); // below counts the same
+
+    const flat = cand(5, 0);
+    const high = cand(0, 0, true, 3);
+    // Default (planar) scoring still prefers the one overhead…
+    expect(nearestOpposing(origin, [flat, high])).toBe(high);
+    // …and the brain's weighted scoring sends the bot after the reachable one.
+    expect(nearestOpposing(origin, [flat, high], brain.targetScore)).toBe(flat);
   });
 });

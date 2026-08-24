@@ -102,6 +102,53 @@ to the original (see lessons below).
   `[allies]` phase teleports a T beside a CT at collider-free spots and
   asserts cross-team engagement evidence within a generous window.
 
+### Tranche 4 — a brain with height (in flight)
+
+The seam's default policy was planar in every dimension that mattered: it
+steered planar (correct — a step only moves in x/z), but it also RANGED
+planar, and that is what `maps/elevation.ts` was built to expose. A target on
+the deck overhead read as `dist ~ 0`, so the near band pushed bots away from
+the flight that reaches it.
+
+Split the two ideas rather than blanket-replacing `dist`:
+
+- `BrainView` keeps planar `toTarget`/`dist` as the STEERING basis, and gains
+  `dist3` (true eye-to-eye), `rise` (target feet − own feet), `selfFeetY` and
+  `onGround`.
+- The chase bands and `engageRange` read `dist3`. The engage gate now agrees
+  with the die `rollHit` rolls on, which it never did before — a bot on a
+  tower could open up on something its own accuracy curve had written off.
+- The near-band back-off is **suppressed while `rise > climbThreshold`**
+  (1.5 m, well clear of `STEP_HEIGHT`). You cannot reverse away from something
+  overhead; trying only widens the gap to the stairs.
+- Target choice became policy: `nearestOpposing` takes a scorer, `BotBrain`
+  supplies `targetScore`, and `DefaultBrain` weights height at
+  `verticalWeight` (2) because a metre up costs a detour that a metre along
+  the ground does not. The scorer defaults to the old planar ranking.
+- Executor fix found while wiring it: `bots.ts` listed the player candidate at
+  `player.pos`, which is the EYE, while bot candidates are FEET. Invisible
+  while y was stripped; 1.7 m of phantom rise the moment anything read it.
+- Bots now pitch their heads at the target, so firing up at a deck reads.
+
+**What this did NOT fix, and the mis-diagnosis it corrected.** Bots still do
+not reach the deck on the elevation map, and the reason in the smoke test's
+`[botClimb]` comment was wrong. It blamed planar band steering — "once inside
+farBand the radial term drops out and it circles at constant radius". Tracing
+the bot showed it does not circle, it WEDGES: it drifts east until its radius
+overlaps the `x >= 6` second-floor slab, and at feet 1.5 that slab's underside
+sits below its head, so `collidesAt` blocks every direction — including the
+ones that reduce the overlap, since the test is binary on footprint overlap
+with no depenetration. It freezes at one coordinate with `moveBlocked` set,
+permanently.
+
+**This traps the PLAYER identically** (verified: all four cardinals plus jump,
+zero displacement, at feet 1.5 on riser 5 of the internal flight). Feet
+anywhere in [1.2, 3.3] inside that footprint are stuck; below 1.2 the slab is
+overhead cover and you walk under freely. It is a collision-model soft-lock,
+not an AI bug, and no amount of navigation fixes it — a bot that pathfinds
+perfectly onto that flight still wedges. Tranche 3's stair navigation is
+blocked behind it.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —

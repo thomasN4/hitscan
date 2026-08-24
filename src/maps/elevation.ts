@@ -9,12 +9,16 @@
 // So the questions this map is built to answer are:
 //
 //   - does a bot ever find a staircase, and which one?
-//   - what does it do when its target is directly overhead? (BrainView.dist is
-//     PLANAR — bots.ts strips y — so "above me" reads as dist ~ 0 and the bot
-//     backs off instead of seeking stairs)
+//   - what does it do when its target is directly overhead? ANSWERED, and the
+//     answer used to be "the wrong thing": BrainView.dist is planar, so a
+//     target on the deck above read as dist ~ 0 and the near band pushed the
+//     bot AWAY from the flight it needed. Bands now range on dist3, and the
+//     back-off is suppressed outright while rise exceeds climbThreshold. Watch
+//     for the follow-on: approaching is not the same as arriving.
 //   - does it walk off unrailed edges, and does it survive?
 //   - the jump-only hops (section D) are the control: no bot can ever use them,
-//     so a bot ON the bridge proves it took a stair.
+//     so a bot ON the bridge proves it took a stair. This holds only while
+//     BrainIntent stays jumpless — adding a jump costs this map its proof.
 //
 // Every dimension below is pinned to a collision constant; see the header
 // comments on each section before moving anything. Geometry goes through

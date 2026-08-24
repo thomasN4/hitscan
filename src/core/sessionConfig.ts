@@ -87,9 +87,23 @@ export function secondsToMinutesLabel(seconds: number): string {
  * the form's <select> and the URL parser must agree on what counts as a map,
  * and a second literal comparison in menu.ts is how they would drift apart the
  * next time a map is added.
+ *
+ * Membership goes through an exhaustive Record rather than a literal chain so
+ * widening MapName fails to compile HERE too, not just at BUILDERS / SPAWN_Z /
+ * SUBTITLES. The cast is the unavoidable cost of runtime narrowing (`in` can't
+ * narrow a bare string); hasOwn rather than `in` keeps prototype keys like
+ * 'toString' from passing the guard and reaching the builder lookup.
  */
+const IS_MAP_NAME: Record<MapName, true> = {
+  arena: true,
+  range: true,
+  elevation: true,
+};
+
 export function asMapName(raw: string | null | undefined): MapName {
-  return raw === 'arena' || raw === 'range' || raw === 'elevation' ? raw : SESSION_DEFAULTS.map;
+  return typeof raw === 'string' && Object.hasOwn(IS_MAP_NAME, raw)
+    ? (raw as MapName)
+    : SESSION_DEFAULTS.map;
 }
 
 /** Parse the committed query into a fully-clamped SessionConfig. */

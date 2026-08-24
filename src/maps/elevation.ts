@@ -103,6 +103,10 @@ function buildTwoStoryBuilding(): void {
 
   // External flight up the south face, arriving at the parapet gap x [6,10].
   // Ascends 'z-', so the tall end lands against the building at z = 12.5.
+  // Join caveat: top tread and deck never touch — the wall top shows through
+  // a 0.5-deep notch, SLAB_T under deck level. It holds because a walker's
+  // circle (player 0.45 / bot 0.5) bridges the notch while moving; shrink a
+  // radius or grow SLAB_T and re-check this join and the tower flight's slot.
   addStairs(8, 0, 21.5, 4, STEP_H, STEP_D, 12, matWall2, 'z-');
 
   // Parapet: 1.0 m is chosen, not arbitrary. Above STEP_HEIGHT so it contains

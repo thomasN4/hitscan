@@ -229,7 +229,7 @@ function candidateConfig(): SessionConfig {
     // A cleared/garbage field keeps the currently-applied value rather than
     // forcing a retype; Number('') is 0, so emptiness must be checked first.
     botsT: Math.round(clampTo(numOr(botsTIn.value, session.botsT), BOTS_T_LIMITS)),
-    botsCt: Math.round(clampTo(numOr(botsTIn.value, session.botsCt), BOTS_CT_LIMITS)),
+    botsCt: Math.round(clampTo(numOr(botsCtIn.value, session.botsCt), BOTS_CT_LIMITS)),
     roundSeconds: Math.round(
       clampTo(numOr(timeMinIn.value, session.roundSeconds / 60) * 60, TIME_LIMITS_S),
     ),

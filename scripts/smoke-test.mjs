@@ -328,6 +328,8 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         card('Secondary', 'REVOLVER').click();
         document.getElementById('deployBtn').click();
         const cs = window.__cs;
+        // Capture the armed PRIMARY before stepping off it.
+        const armed = { name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize };
         // Step off the primary so the next phase's Digit1 is a real switch
         // rather than a same-position no-op.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
@@ -335,16 +337,14 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         return {
           primary: cs.game.primary,
           secondary: cs.game.secondary,
-          name: cs.weapon.name,
-          mag: cs.weapon.mag,
-          magSize: cs.weapon.magSize,
+          armed,
           offPrimarySlot: cs.game.slot,
           offPrimaryName: cs.weapon.name,
         };
       });
       if (picked.fail) throw new Error(picked.fail);
       if (picked.primary !== 'sniper' || picked.secondary !== 'revolver') throw new Error(`deploy did not commit the loadout: ${JSON.stringify(picked)}`);
-      if (picked.name !== 'SNIPER' || picked.mag !== picked.magSize) throw new Error(`deploy did not arm the primary: ${JSON.stringify(picked)}`);
+      if (picked.armed.name !== 'SNIPER' || picked.armed.mag !== picked.armed.magSize) throw new Error(`deploy did not arm the primary: ${JSON.stringify(picked.armed)}`);
       if (picked.offPrimarySlot !== 1 || picked.offPrimaryName !== 'REVOLVER') throw new Error(`Digit2 did not take the secondary position: ${JSON.stringify(picked)}`);
       console.log(`[picker] OK`, JSON.stringify(picked));
 
@@ -819,6 +819,7 @@ async function runShotgunCheck() {
       cs.game.locked = true;
       await new Promise(r => requestAnimationFrame(r));
       cs.game.pitch = -1.4;
+      cs.weapon.lastShot = -9; // the fire-rate gate must not eat the fresh deploy's first shell
       const holesBefore = cs.bulletHoles.length;
       const magBefore = cs.weapon.mag;
       window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));

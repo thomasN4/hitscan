@@ -112,7 +112,13 @@ function unwedges(
   const movingX = toX !== fromX;
   let improved = false;
   for (const c of colliders) {
-    if (!blocks(c, toX, toZ, radius, feetY)) continue;
+    // EITHER end, not just the destination. A move that clears an escapable
+    // collider outright drops it from a destination-only scan, so `improved`
+    // never gets set and the escape is refused forever — another state with no
+    // exit, which is the whole thing this function exists to remove. Crediting
+    // it needs no new rule: a collider blocking here but not there has overlap
+    // 0 there, which the comparison below already reads as an improvement.
+    if (!blocks(c, toX, toZ, radius, feetY) && !blocks(c, fromX, fromZ, radius, feetY)) continue;
     const before = movingX
       ? axisOverlap(fromX, radius, c.min.x, c.max.x)
       : axisOverlap(fromZ, radius, c.min.z, c.max.z);

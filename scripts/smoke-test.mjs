@@ -696,11 +696,29 @@ async function runAllyCheck() {
 // OUT of the flight (a riser built over STEP_HEIGHT would block it entirely,
 // and nothing else in the suite would notice).
 //
-// How FAR the bot gets is reported, not asserted. Beyond one riser the outcome
-// is policy, not geometry: BrainView.dist is planar, so once the bot is inside
-// farBand (14 m) of the player above it the radial term drops out and it
-// circles at constant radius instead of continuing to climb. That is a finding
-// to watch during a playtest, not a regression to pin.
+// How FAR the bot gets is reported, not asserted, and there turned out to be TWO
+// stalls stacked on top of each other — worth recording, because the second one
+// hid behind the first for as long as this comment has existed.
+//
+//   1. A COLLISION WEDGE, now fixed here. The bot drifted east until its 0.5
+//      radius overlapped the x >= 6 second-floor slab (x[6,14], y[3.2,3.6]); at
+//      feet 1.5 that slab's underside sits below its head, so collidesAt refused
+//      every direction, the ones reducing the overlap included. Frozen at one
+//      coordinate with moveBlocked set, permanently — and the same trap caught
+//      the PLAYER (verified: four cardinals plus jump, zero displacement). The
+//      [wedge] phase pins the escape.
+//
+//   2. ORBITING AT CONSTANT RADIUS, still live and steering-level. With the
+//      wedge gone the bot slides freely and climbs to feet 1.5, then holds
+//      planarDist ~ 13.98 against a farBand of 14 while sweeping x across the
+//      flight: inside the band the radial term drops out, so it circles instead
+//      of climbing. This is what the comment here always described. It was not
+//      wrong — it was right about a stall nobody could see yet, because the
+//      wedge stopped the bot before it ever got there.
+//
+// Fixing 2 is steering policy, not geometry, and belongs with the bot-AI work
+// (feat/bot-3d-brain and the stair navigation after it). Report the number
+// here; assert it once bots are actually meant to arrive.
 async function runBotClimbCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -743,7 +761,7 @@ async function runBotClimbCheck() {
     // The geometry gate: one riser proves the flight is climbable by a bot.
     if (result.maxFeet < 0.25) throw new Error(`bot never gained a single riser — is a riser taller than STEP_HEIGHT? ${JSON.stringify(result)}`);
     console.log('[botClimb] OK', JSON.stringify(result));
-    if (!result.gainedDeck) console.log('[botClimb] note: bot stalled below the deck — expected with planar band steering, watch this during playtests');
+    if (!result.gainedDeck) console.log(`[botClimb] note: bot never gained the deck (feet ${result.maxFeet}) — stall 2 above, steering-level follow-up`);
   } catch (e) {
     failures++;
     console.log(`[botClimb] FAIL: ${e.message}`);

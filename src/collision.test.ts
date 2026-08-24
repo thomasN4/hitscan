@@ -367,6 +367,20 @@ describe('slideMoveXZ unwedging', () => {
     expect(pos.x).toBe(6.15);
   });
 
+  test('escapes in one step even when the move clears the blocker outright', () => {
+    // Lap the slab by less than one frame's move, with a span-swallowing beam
+    // also blocking. The move clears the slab entirely, so a destination-only
+    // scan never sees it — leaving only the indifferent beam, no improvement,
+    // and a move refused forever. Scanning both ends credits the clearance.
+    const beam = new THREE.Box3(
+      new THREE.Vector3(0, 3.2, -7),
+      new THREE.Vector3(20, 3.6, -6),
+    );
+    const pos = new THREE.Vector3(5.55, 0, -6.42); // footprint [5.05, 6.05]: 0.05 into the slab
+    slideMoveXZ(pos, -0.07, 0, BOT_RADIUS, TRAPPED_FEET, [slabEdge, beam]);
+    expect(pos.x).toBeCloseTo(5.48, 12);
+  });
+
   test('a collider the axis cannot escape does not veto one it can', () => {
     // A beam spanning the whole x range swallows the footprint, so an x move
     // cannot reduce ITS overlap. Indifferent must not read as "worse", or

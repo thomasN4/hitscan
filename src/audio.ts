@@ -53,6 +53,9 @@ export const sfxShoot = (): void => playGunshot(0.4, 1400, 0.14);
 /** Sniper: deeper boom with a longer tail than the smg crack. */
 export const sfxSniper = (): void => playGunshot(0.5, 500, 0.3);
 
+/** Pistol: sharper, shorter crack than the smg burst. */
+export const sfxPistol = (): void => playGunshot(0.35, 1100, 0.09);
+
 /** Weapon switch: short metallic click. */
 export const sfxSwitch = (): void => playGunshot(0.1, 1800, 0.04);
 

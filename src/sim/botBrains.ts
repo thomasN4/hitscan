@@ -38,9 +38,19 @@ export interface BrainParams {
   firstDelayMin: number;
   /** Spawn stagger random span added to firstDelayMin. */
   firstDelaySpan: number;
+  /** Hit chance at point-blank. */
+  hitChanceNear: number;
+  /** Hit-chance falloff divisor: chance = near − dist / this. */
+  hitChanceDivisor: number;
+  /** Hit-chance floor — distant bots stay mostly noise, never harmless. */
+  hitChanceMin: number;
+  /** Damage of a landed bullet: lower bound… */
+  damageMin: number;
+  /** …plus rng()·span. */
+  damageSpan: number;
 }
 
-/** The shipped T-bot behavior, verbatim from the pre-seam inline numbers. */
+/** The shipped bot behavior, verbatim from the pre-seam inline numbers. */
 export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   nearBand: 7,
   farBand: 14,
@@ -52,20 +62,55 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   cooldownSpan: 1.2,
   firstDelayMin: 1,
   firstDelaySpan: 2,
+  hitChanceNear: 0.65,
+  hitChanceDivisor: 80,
+  hitChanceMin: 0.12,
+  damageMin: 8,
+  damageSpan: 14,
 };
 
 /**
  * Hit chance of a bot bullet at planar `dist`: linear falloff from close
  * range clamped to a floor, so distant bots are mostly noise.
- * Tuning notes: 0.65 up close, −1/80 per metre, floor 0.12.
  */
-export function botHitChance(dist: number): number {
-  return Math.max(0.12, 0.65 - dist / 80);
+export function botHitChance(dist: number, params: BrainParams): number {
+  return Math.max(params.hitChanceMin, params.hitChanceNear - dist / params.hitChanceDivisor);
 }
 
-/** Damage of a landed bot bullet, drawn via `rng` over [8, 22]. */
-export function botDamageRoll(rng: () => number): number {
-  return 8 + rng() * 14;
+/** Damage of a landed bot bullet, drawn via `rng` over [damageMin, damageMin + damageSpan]. */
+export function botDamageRoll(rng: () => number, params: BrainParams): number {
+  return params.damageMin + rng() * params.damageSpan;
+}
+
+/** A targetable entity as the executor presents it: position + liveness. */
+export interface OpposingCandidate {
+  /** World-space position to chase and ray at (y ignored — ground-locked sim). */
+  pos: THREE.Vector3;
+  alive: boolean;
+}
+
+/**
+ * Nearest ALIVE candidate by planar distance from `origin`, or undefined
+ * when nothing is alive. Corpses never draw fire; y is ignored so height
+ * differences can't outrank ground positioning.
+ */
+export function nearestOpposing<T extends OpposingCandidate>(
+  origin: THREE.Vector3,
+  candidates: readonly T[],
+): T | undefined {
+  let best: T | undefined;
+  let bestD2 = Infinity;
+  for (const c of candidates) {
+    if (!c.alive) continue;
+    const dx = c.pos.x - origin.x;
+    const dz = c.pos.z - origin.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = c;
+    }
+  }
+  return best;
 }
 
 /** What a brain may know about the world this frame — all executor-supplied. */
@@ -98,9 +143,16 @@ export interface BrainIntent {
 /** The decision half of a bot. Instances own per-bot state; executors are stateless shells. */
 export interface BotBrain {
   decide(view: BrainView, dt: number): BrainIntent;
+  /** Hit probability for a shot at planar `dist` under this brain's accuracy. */
+  hitChance(dist: number): number;
+  /** Draw one hit/miss outcome for a shot at planar `dist` from this brain's
+   *  rng stream — ALL of a bot's dice come from the brain, never a global. */
+  rollHit(dist: number): boolean;
+  /** Draw one landed-shot damage from this brain's ballistic params. */
+  rollDamage(): number;
 }
 
-/** The original inline T-bot policy, parameterized for future variants. */
+/** The original inline bot policy, parameterized for future variants. */
 export class DefaultBrain implements BotBrain {
   private strafeDir: 1 | -1;
   private cooldown: number;
@@ -112,6 +164,18 @@ export class DefaultBrain implements BotBrain {
     this.strafeDir = this.rng() < 0.5 ? -1 : 1;
     // Staggered first shot so a fresh wave doesn't volley in unison.
     this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
+  }
+
+  hitChance(dist: number): number {
+    return botHitChance(dist, this.params);
+  }
+
+  rollHit(dist: number): boolean {
+    return this.rng() < botHitChance(dist, this.params);
+  }
+
+  rollDamage(): number {
+    return botDamageRoll(this.rng, this.params);
   }
 
   decide(view: BrainView, dt: number): BrainIntent {

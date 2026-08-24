@@ -13,8 +13,10 @@ import {
   DefaultBrain,
   botDamageRoll,
   botHitChance,
+  nearestOpposing,
   type BrainParams,
   type BrainView,
+  type OpposingCandidate,
 } from './botBrains';
 
 const DT = 1 / 60;
@@ -220,22 +222,73 @@ describe('DefaultBrain trigger', () => {
 });
 
 describe('ballistic rolls', () => {
-  it('hit chance falls off linearly and clamps to its floor', () => {
-    expect(botHitChance(0)).toBeCloseTo(0.65, 12);
-    expect(botHitChance(40)).toBeCloseTo(0.15, 12);
-    expect(botHitChance(80)).toBeCloseTo(0.12, 12);
-    expect(botHitChance(800)).toBeCloseTo(0.12, 12);
+  it('hit chance falls off linearly and clamps to its floor (default params)', () => {
+    const p = DEFAULT_BRAIN_PARAMS;
+    expect(botHitChance(0, p)).toBeCloseTo(p.hitChanceNear, 12);
+    expect(botHitChance(40, p)).toBeCloseTo(0.15, 12); // 0.65 − 40/80
+    expect(botHitChance(80, p)).toBeCloseTo(p.hitChanceMin, 12);
+    expect(botHitChance(800, p)).toBeCloseTo(p.hitChanceMin, 12);
     let prev = Infinity;
     for (let d = 0; d <= 100; d += 5) {
-      const c = botHitChance(d);
+      const c = botHitChance(d, p);
       expect(c).toBeLessThanOrEqual(prev);
       prev = c;
     }
   });
 
-  it('damage roll spans [8, 22]', () => {
-    expect(botDamageRoll(() => 0)).toBeCloseTo(8, 12);
-    expect(botDamageRoll(() => 0.5)).toBeCloseTo(15, 12);
-    expect(botDamageRoll(() => 1)).toBeCloseTo(22, 12);
+  it('damage roll spans [damageMin, damageMin + damageSpan] (default params)', () => {
+    const p = DEFAULT_BRAIN_PARAMS;
+    expect(botDamageRoll(() => 0, p)).toBeCloseTo(p.damageMin, 12);
+    expect(botDamageRoll(() => 0.5, p)).toBeCloseTo(15, 12);
+    expect(botDamageRoll(() => 1, p)).toBeCloseTo(p.damageMin + p.damageSpan, 12);
+  });
+
+  it('brain delegates consume the same rng stream and read the same params', () => {
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([/* dir */ 0.9, /* cd */ 0.9, /* dmg */ 0.25]));
+    expect(brain.hitChance(0)).toBe(DEFAULT_BRAIN_PARAMS.hitChanceNear);
+    expect(brain.rollDamage()).toBeCloseTo(DEFAULT_BRAIN_PARAMS.damageMin + 0.25 * DEFAULT_BRAIN_PARAMS.damageSpan, 12);
+  });
+
+  it('rollHit draws from the brain rng and thresholds against hitChance', () => {
+    // hitChance(0) = hitChanceNear = 0.65: a draw below lands, at/above misses.
+    const p = DEFAULT_BRAIN_PARAMS;
+    const brain = new DefaultBrain(p, queueRng([/* dir */ 0.9, /* cd */ 0.9, /* hit */ 0.649, /* hit */ 0.65, /* hit */ 0.9]));
+    expect(brain.rollHit(0)).toBe(true);
+    expect(brain.rollHit(0)).toBe(false);
+    expect(brain.rollHit(0)).toBe(false);
+    // hitChance never wins a draw the floor can't: at extreme range the same
+    // low draw that would land near still lands iff below hitChanceMin.
+    const far = new DefaultBrain(p, queueRng([0.9, 0.9, p.hitChanceMin - 0.001, p.hitChanceMin]));
+    expect(far.rollHit(800)).toBe(true);
+    expect(far.rollHit(800)).toBe(false);
+  });
+});
+
+describe('nearestOpposing', () => {
+  const at = (x: number, z: number, y = 0): THREE.Vector3 => new THREE.Vector3(x, y, z);
+  const cand = (x: number, z: number, alive = true, y = 0): OpposingCandidate & { tag: string } => ({
+    pos: at(x, z, y),
+    alive,
+    tag: `${x},${z}`,
+  });
+  const origin = at(0, 0);
+
+  it('returns undefined with no candidates or none alive', () => {
+    expect(nearestOpposing(origin, [])).toBeUndefined();
+    expect(nearestOpposing(origin, [cand(1, 1, false), cand(50, 50, false)])).toBeUndefined();
+  });
+
+  it('picks the planar-nearest alive candidate; height cannot outrank ground distance', () => {
+    // The (2,0) entry is nearer in the GROUND plane even though the high one
+    // would win a 3D comparison.
+    const near = cand(2, 0);
+    const farButLowY = cand(5, 0, true, 100);
+    expect(nearestOpposing(origin, [farButLowY, near])).toBe(near);
+  });
+
+  it('skips corpses between the bot and its prey', () => {
+    const corpseBetween = cand(1, 0, false);
+    const prey = cand(4, 0);
+    expect(nearestOpposing(origin, [corpseBetween, prey])).toBe(prey);
   });
 });

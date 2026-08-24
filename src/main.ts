@@ -19,6 +19,7 @@ import { parseSessionConfig } from './core/sessionConfig';
 import { colliders } from './world';
 import { buildMap } from './map';
 import { buildRange } from './range';
+import { buildElevation } from './elevation';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons';
@@ -57,10 +58,13 @@ if (import.meta.env.DEV) {
 initEngine();
 initHUD();
 initWeaponViewmodels();  // needs camera/scene
-if (RANGE) {
-  buildRange();
-} else {
-  buildMap();
+// Builder dispatch. RANGE stays a separate flag from this switch because it
+// means something narrower — "no bots, no round clock" — and gates the loop
+// below; elevation is a full combat map that happens to be built elsewhere.
+if (session.map === 'range') buildRange();
+else if (session.map === 'elevation') buildElevation();
+else buildMap();
+if (!RANGE) {
   spawnBots(session.botsT, 'T');
   if (session.botsCt > 0) spawnBots(session.botsCt, 'CT');
 }

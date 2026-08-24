@@ -108,8 +108,15 @@ export class Bot implements BotShape {
   respawnPoint = new THREE.Vector3();
   /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
   private readonly brain = new DefaultBrain();
-  /** Whether last frame's intended step was rejected by world collision. */
-  private moveBlocked = false;
+  /**
+   * Whether last frame's intended step was rejected by world collision.
+   *
+   * Public because it is part of the structural Bot shape in core/state.ts:
+   * with no pathfinding, this flag plus `onGround` is the whole story of what
+   * a bot is doing against geometry, and hud.ts's elevation readout shows it
+   * live. Written here only — treat it as read-only from outside.
+   */
+  moveBlocked = false;
   /** Vertical velocity — bots resolve support like the player does (stairs). */
   vy = 0;
   /** Grounded state fed back to resolveVertical so stair descents stick. */

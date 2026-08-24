@@ -34,9 +34,10 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 
 ## Gameplay
 
-Two maps plus the match setup (enemy/allied bot counts, round length in minutes), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…`) and reloads the page:
+Three maps plus the match setup (enemy/allied bot counts, round length in minutes), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…`) and reloads the page:
 
 - **Arena** (`src/map.js`) — enemy bots (menu-configured count, default 6) spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
+- **Elevation** (`src/elevation.js`) — a playtest map for watching how the bots cope with height: a two-story building with an internal stairwell and an external flight, an unrailed bridge to a tower, a plateau, and a jump-only route no bot can ever take. Bots have no pathfinding, so this is where you see what reactive steering does with stairs, decks and drops.
 - **Shooting Range** (`src/range.js`) — a private lane with floor markers at 10–50 m and bot-silhouette targets (identical hitbox dimensions to real bots) wearing elliptical bullseye rings at 10–60 m. Nothing shoots back; `R` restores your full loadout without consuming reserve ammo. Use it to practice accuracy and recoil patterns.
 
 Common rules:
@@ -65,6 +66,7 @@ src/
 │   └── smoothing.js  # frame-rate-aware easing shared by every 0..1 blend
 ├── main.js       # entry point: init order, input, pointer lock/menus, game loop
 ├── map.js        # arena geometry (walls, buildings, crates)
+├── elevation.js  # elevation playtest geometry (two-story building, bridge, plateau)
 ├── world.js      # solids/colliders registries — the ONE way to register geometry
 ├── collision.js  # AABB movement collision + line-of-sight raycast (pure)
 ├── player.js     # FPS controller: move/crouch/footsteps/camera

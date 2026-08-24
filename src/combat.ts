@@ -3,7 +3,7 @@
 // This module is the single place where HP crosses 0: bots call
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
-import type { Bot as BotShape, HitZone } from './core/state';
+import type { Bot as BotShape, HitZone, MapName } from './core/state';
 import { player, session, aim, wpn, motion, score, bots, input, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud';
@@ -53,10 +53,22 @@ export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerNam
   if (bot.hp <= 0) bot.die(part, attackerName);
 }
 
+/**
+ * Player spawn z per map, on the map's centre line (x = 0).
+ *
+ * A full Record rather than a ternary chain on purpose: adding a MapName now
+ * fails to compile until the new map declares where the player starts, instead
+ * of silently inheriting the arena's coordinates.
+ */
+const SPAWN_Z: Record<MapName, number> = {
+  arena: 48,
+  range: 8,       // behind the firing line
+  elevation: 48,  // open ground south of the two-story building
+};
+
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
 export function respawn(): void {
-  const spawnZ = session.map === 'range' ? 8 : 48; // range: behind the firing line
-  player.pos.set(0, player.eyeHeight, spawnZ);
+  player.pos.set(0, player.eyeHeight, SPAWN_Z[session.map]);
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;

@@ -74,6 +74,10 @@ export interface Bot {
   legs: THREE.Mesh;
   hp: number;
   alive: boolean;
+  /** Resting on support this frame; false while airborne. Written by the executor's vertical stage. */
+  onGround: boolean;
+  /** Whether LAST frame's step was rejected by world collision — the brain's obstacle feedback. */
+  moveBlocked: boolean;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
   /** @param killerName display name of a bot killer; omitted for player kills */
@@ -350,7 +354,7 @@ export function resetAmmo(): void {
 }
 
 /** Maps selectable from the start menu (the ?map= part of the config query). */
-export type MapName = 'arena' | 'range';
+export type MapName = 'arena' | 'range' | 'elevation';
 
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every

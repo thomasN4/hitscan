@@ -4,8 +4,8 @@
 //   solids    -> raycast targets: bullets, bullet-hole decals, bot line-of-sight
 //   colliders -> world-space AABBs: cheap per-frame movement tests
 // A mesh in `solids` but not `colliders` can be shot but walked through; the
-// reverse blocks movement but lets bullets pass. `map.ts` and `range.ts` each
-// used to carry their own copy of this logic, and the range copy shipped
+// reverse blocks movement but lets bullets pass. The map builders in `maps/`
+// each used to carry their own copy of this logic, and the range copy shipped
 // without the `colliders` push — the whole map was no-clip (`431ac6e`).
 //
 // Only `addSolidBox` touches the scene. Everything else is pure, so the two
@@ -26,8 +26,8 @@ export const colliders: THREE.Box3[] = [];
  * Register a mesh as a raycast target only — no movement AABB.
  *
  * For the ground planes in both builders: they need decals and must stop
- * bullets, but movement is bounded by other geometry instead (map.ts's
- * perimeter walls, range.ts's lane walls). Giving a flat plane an AABB would
+ * bullets, but movement is bounded by other geometry instead (maps/arena.ts's
+ * perimeter walls, maps/range.ts's lane walls). Giving a flat plane an AABB would
  * not trap anyone — it would simply do nothing: a PlaneGeometry rotated -PI/2
  * measures to a ZERO-HEIGHT box at y ~ 0, which collidesAt always reads as
  * steppable floor.
@@ -105,8 +105,8 @@ export function createSolidBox(x: number, y: number, z: number, w: number, h: nu
 
 /**
  * Create a box sitting on y = `y`, add it to the scene, and register it in
- * both registries. The shared body of what `map.ts` and `range.ts` each used
- * to implement separately, and the default for walls and crates.
+ * both registries. The shared body of what `maps/arena.ts` and `maps/range.ts`
+ * each used to implement separately, and the default for walls and crates.
  *
  * Browser-only: this is the one function here that touches the scene, so it
  * requires initEngine() to have run.

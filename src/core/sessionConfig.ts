@@ -14,7 +14,9 @@
 // The numeric plumbing here (numOr/clampTo below) is ALSO what the start
 // menu's candidateConfig() runs the form fields through, so the form and the
 // URL parser cannot drift apart — there is deliberately no second copy in
-// menu.ts.
+// menu.ts. asMapName is shared for the same reason: menu.ts used to open-code
+// its own `=== 'range' ? 'range' : 'arena'`, which silently drops any map
+// added after it was written.
 import type { MapName } from './state';
 import { SESSION_DEFAULTS } from './state';
 
@@ -77,15 +79,37 @@ export function secondsToMinutesLabel(seconds: number): string {
   return String(Math.round((seconds / 60) * 100) / 100);
 }
 
-/** Literal comparison narrows to MapName; anything else falls back. */
-function parseMap(raw: string | null): MapName {
-  return raw === 'arena' || raw === 'range' ? raw : SESSION_DEFAULTS.map;
+/**
+ * Narrow an untrusted string to MapName, falling back to the default map for
+ * anything unrecognized.
+ *
+ * Shared with the start menu's candidateConfig(), exactly like numOr/clampTo:
+ * the form's <select> and the URL parser must agree on what counts as a map,
+ * and a second literal comparison in menu.ts is how they would drift apart the
+ * next time a map is added.
+ *
+ * Membership goes through an exhaustive Record rather than a literal chain so
+ * widening MapName fails to compile HERE too, not just at BUILDERS / SPAWN_Z /
+ * SUBTITLES. The cast is the unavoidable cost of runtime narrowing (`in` can't
+ * narrow a bare string); hasOwn rather than `in` keeps prototype keys like
+ * 'toString' from passing the guard and reaching the builder lookup.
+ */
+const IS_MAP_NAME: Record<MapName, true> = {
+  arena: true,
+  range: true,
+  elevation: true,
+};
+
+export function asMapName(raw: string | null | undefined): MapName {
+  return typeof raw === 'string' && Object.hasOwn(IS_MAP_NAME, raw)
+    ? (raw as MapName)
+    : SESSION_DEFAULTS.map;
 }
 
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
   return {
-    map: parseMap(src.get('map')),
+    map: asMapName(src.get('map')),
     botsT: Math.round(clampTo(numOr(src.get('tbots'), SESSION_DEFAULTS.botsT), BOTS_T_LIMITS)),
     botsCt: Math.round(clampTo(numOr(src.get('ctbots'), SESSION_DEFAULTS.botsCt), BOTS_CT_LIMITS)),
     roundSeconds: Math.round(

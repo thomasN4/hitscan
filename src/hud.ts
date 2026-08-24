@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, WEAPONS, BASE_FOV } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV } from './core/state';
 import { isLowAmmo } from './sim/ammo';
 
 /**
@@ -33,7 +33,7 @@ const el = requireEl;
 let hitmarkerEl: HTMLElement, killfeedEl: HTMLElement, hpText: HTMLElement,
   healthFill: HTMLElement, magText: HTMLElement,
   ammoReserve: HTMLElement, reloadHint: HTMLElement, scopeOverlay: HTMLElement,
-  zoomText: HTMLElement, weaponName: HTMLElement;
+  zoomText: HTMLElement, weaponName: HTMLElement, botDebug: HTMLElement;
 
 // Declared non-optional on purpose: like engine.ts's singletons, the
 // contract is "read only after init*()" — typing them optional would push
@@ -57,6 +57,7 @@ export function initHUD(): void {
   scopeOverlay = el('scopeOverlay');
   zoomText = el('zoomText');
   weaponName = el('weaponName');
+  botDebug = el('botDebug');
 }
 
 let hitmarkerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -167,4 +168,26 @@ export function updateHUD(): void {
     lastZoomLabel = zoomLabel;
     zoomText.textContent = zoomLabel;
   }
+  updateBotDebug();
+}
+
+// ---------- Bot elevation readout (DEV, elevation map only) ----------
+// The elevation map exists to make bot-vs-height behavior observable, and the
+// three numbers that explain what a bot is doing on a staircase — how high its
+// feet are, whether it is grounded, whether geometry just rejected its step —
+// are otherwise only reachable by pausing in devtools. Rendered as one cached
+// string because updateHUD runs every frame; a bot standing still must not
+// touch the DOM. Mesh y IS the bot's feet height (bots.ts positions by feet).
+let lastBotDebug = '';
+function updateBotDebug(): void {
+  if (!import.meta.env.DEV || session.map !== 'elevation') return;
+  const text = bots
+    .map(b => `${b.name.padEnd(5)} y=${b.mesh.position.y.toFixed(2).padStart(5)}` +
+              `${b.onGround ? '  G' : '  -'}${b.moveBlocked ? ' blk' : '    '}` +
+              `${b.alive ? '' : ' dead'}`)
+    .join('\n');
+  if (text === lastBotDebug) return;
+  lastBotDebug = text;
+  botDebug.textContent = text;
+  botDebug.style.display = text ? 'block' : 'none';
 }

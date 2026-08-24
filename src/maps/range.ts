@@ -12,8 +12,8 @@
 // the whole range map was no-clip (`431ac6e`). There is now one
 // implementation to get wrong.
 import * as THREE from 'three';
-import { scene } from './core/engine';
-import { addSolidBox, registerSolid, registerGroupParts } from './world';
+import { scene } from '../core/engine';
+import { addSolidBox, registerSolid, registerGroupParts } from '../world';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });
@@ -134,7 +134,7 @@ function addTarget(x: number, z: number, { height = 0, yaw = 0 }: TargetOpts = {
   return g;
 }
 
-/** Build the shooting range. Called once from main.ts instead of buildMap. */
+/** Build the shooting range. Called once, via the maps/index.ts registry. */
 export function buildRange(): void {
   // Floor spans the full lane: z from -95 to +35, so every wall, target and
   // marker stands on it; the far edge stays hidden behind the backstop + fog.

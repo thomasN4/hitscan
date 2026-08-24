@@ -1,7 +1,7 @@
 // main.ts — entry point: builds the world, wires all input, owns the game loop.
 //
 // Flow: parse config query -> initEngine() (imports have no engine/DOM side
-// effects) -> buildMap + spawnBots -> initMenus -> register input/pointer-lock
+// effects) -> BUILDERS[map]() + spawnBots -> initMenus -> register input/pointer-lock
 // handlers -> start the render loop.
 // The loop only simulates (player, bots, timer) while pointer lock is held;
 // rendering and effect updates run always so pause screens stay visible.
@@ -17,8 +17,7 @@ import { initEngine, renderer, scene, camera, clock } from './core/engine';
 import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders } from './world';
-import { buildMap } from './map';
-import { buildRange } from './range';
+import { BUILDERS } from './maps';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons';
@@ -57,10 +56,11 @@ if (import.meta.env.DEV) {
 initEngine();
 initHUD();
 initWeaponViewmodels();  // needs camera/scene
-if (RANGE) {
-  buildRange();
-} else {
-  buildMap();
+// Geometry first, then the wave. RANGE stays a separate flag from the builder
+// lookup because it means something narrower — "no bots, no round clock" — and
+// gates the loop below too; every other map is a full combat map.
+BUILDERS[session.map]();
+if (!RANGE) {
   spawnBots(session.botsT, 'T');
   if (session.botsCt > 0) spawnBots(session.botsCt, 'CT');
 }

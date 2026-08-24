@@ -1,19 +1,19 @@
-// map.ts — builds the arena geometry.
+// arena.ts — builds the de_dust-inspired arena geometry.
 //
 // All geometry goes through world.ts, which registers each solid as both a
 // raycast target and a movement AABB. Do not add meshes to the scene
 // directly: that is how you get walk-through / shoot-through bugs.
 import * as THREE from 'three';
-import { scene } from './core/engine';
-import { addSolidBox, addStairs, registerSolid } from './world';
+import { scene } from '../core/engine';
+import { addSolidBox, addStairs, registerSolid } from '../world';
 
 const matWall   = new THREE.MeshLambertMaterial({ color: 0xc9a86c });
 const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });
 const matCrate  = new THREE.MeshLambertMaterial({ color: 0x8a6d3f });
 const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
 
-/** Build the de_dust-inspired arena. Called once from main.ts. */
-export function buildMap(): void {
+/** Build the de_dust-inspired arena. Called once, via the maps/index.ts registry. */
+export function buildArena(): void {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), matGround);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;

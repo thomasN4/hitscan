@@ -19,6 +19,7 @@ import {
   BOTS_CT_LIMITS,
   BOTS_T_LIMITS,
   TIME_LIMITS_S,
+  asMapName,
   clampTo,
   configsEqual,
   configToQuery,
@@ -31,6 +32,7 @@ import { requireEl } from './hud';
 const SUBTITLES: Record<MapName, string> = {
   arena: 'Clone Demo \u2014 eliminate all Ts to win the round',
   range: 'Practice your aim \u2014 silhouettes with bullseyes at 10\u201360 m',
+  elevation: 'Bot testbed \u2014 stairs, decks and drops: watch how the AI handles height',
 };
 
 /** What the menu does on Play/Resume/Quit — main.ts supplies the behaviors. */
@@ -92,7 +94,7 @@ export function initMenus(handlers: MenuHandlers): void {
 /** Range matches have no bots and no clock: gray those rows out live. */
 function applyMapUi(): void {
   const isRange = mapSel.value === 'range';
-  subtitleEl.textContent = SUBTITLES[mapSel.value === 'range' ? 'range' : 'arena'];
+  subtitleEl.textContent = SUBTITLES[asMapName(mapSel.value)];
   botsTIn.disabled = isRange;
   botsCtIn.disabled = isRange;
   timeMinIn.disabled = isRange;
@@ -106,7 +108,7 @@ function appliedConfig(): SessionConfig {
 /** Form contents as a SessionConfig, clamped exactly like the URL parser. */
 function candidateConfig(): SessionConfig {
   return {
-    map: mapSel.value === 'range' ? 'range' : 'arena',
+    map: asMapName(mapSel.value),
     // A cleared/garbage field keeps the currently-applied value rather than
     // forcing a retype; Number('') is 0, so emptiness must be checked first.
     botsT: Math.round(clampTo(numOr(botsTIn.value, session.botsT), BOTS_T_LIMITS)),

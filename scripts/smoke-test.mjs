@@ -20,7 +20,25 @@ const browser = await puppeteer.launch({
 const errors = [];
 let failures = 0;
 
-async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = false } = {}) {
+// Stair specs for the stairsCheck phase, one per map with a flight. Kept as
+// data because the phase below is map-agnostic: it drives a sprint up a flight
+// and a walk back down, and only these numbers differ.
+//   start     player EYE position at the foot of the flight
+//   upYaw     yaw whose forward vector points UP the flight
+//   deckFeet  feet height of the surface the flight lands on
+//   downYaw   yaw pointing back down (upYaw rotated 180 degrees)
+//   bottomZ   z past which the descent counts as back on open ground...
+//   bottomDir ...compared with >= when +1, <= when -1 (flights face both ways)
+const STAIRS = {
+  // Arena: the raised platform's south flight, 8 x 0.3 = 2.4.
+  arena: { start: [26, 1.7, 22.5], upYaw: Math.PI, deckFeet: 2.4, downYaw: 0, bottomZ: 23, bottomDir: -1 },
+  // Elevation: the two-story building's EXTERNAL south flight, 12 x 0.3 = 3.6.
+  // Deliberately the outside one — it is the flight a player uses without
+  // entering the building, so this phase stays independent of the interior.
+  elevation: { start: [8, 1.7, 22.5], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 22, bottomDir: 1 },
+};
+
+async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = null } = {}) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
   const mapErrors = [];
@@ -81,30 +99,32 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
     if (fired.holes === 0) throw new Error('expected bullet holes after firing, got 0');
 
     let stairs = null;
-    // 2b) Stairs: step-up must carry a sprinting player up the arena stair
-    //     flight onto the raised platform (top 2.4 m) WITHOUT jumping — and
-    //     then back DOWN again without going airborne per tread (the
-    //     descend-stick in resolveVertical). Mechanics over position: poll
-    //     until deterministic states are reached (grounded at platform
-    //     height; grounded back on open ground), then assert — no sinking,
-    //     no overshoot, and zero airborne frames on the way down.
+    // 2b) Stairs: step-up must carry a sprinting player up the map's stair
+    //     flight onto the deck it lands on WITHOUT jumping — and then back
+    //     DOWN again without going airborne per tread (the descend-stick in
+    //     resolveVertical). Mechanics over position: poll until deterministic
+    //     states are reached (grounded at deck height; grounded back on open
+    //     ground), then assert — no sinking, no overshoot, and zero airborne
+    //     frames on the way down. The flight itself is a STAIRS spec, so the
+    //     same phase covers every map that has one.
     if (stairsCheck) {
-      stairs = await page.evaluate(async () => {
+      const spec = stairsCheck;
+      stairs = await page.evaluate(async (spec) => {
         const cs = window.__cs;
         cs.player.hp = 100000; // bot fire during the walk must not kill the runner
         cs.game.pitch = 0;
-        cs.player.pos.set(26, 1.7, 22.5);
-        cs.game.yaw = Math.PI; // forward is +z: up the stairs
+        cs.player.pos.set(spec.start[0], spec.start[1], spec.start[2]);
+        cs.game.yaw = spec.upYaw;
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         const startY = cs.player.pos.y;
         let minY = Infinity;
         let reached = false;
         const t0 = performance.now();
-        while (performance.now() - t0 < 6000) {
+        while (performance.now() - t0 < 8000) {
           await new Promise(r => requestAnimationFrame(r));
           minY = Math.min(minY, cs.player.pos.y);
-          if ((cs.player.pos.y - 1.7) >= 2.35 && cs.player.onGround) { reached = true; break; }
+          if ((cs.player.pos.y - 1.7) >= spec.deckFeet - 0.05 && cs.player.onGround) { reached = true; break; }
         }
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
@@ -116,32 +136,33 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         };
         cs.player.hp = 100; // restore for later phases
         return result;
-      });
-      if (!stairs.reached || stairs.climbedTo < 2.1) throw new Error(`step-up never gained the platform (feet ${stairs.climbedTo} m): ${JSON.stringify(stairs)}`);
+      }, spec);
+      if (!stairs.reached || stairs.climbedTo < spec.deckFeet - 0.3) throw new Error(`step-up never gained the deck (feet ${stairs.climbedTo} m, wanted ${spec.deckFeet}): ${JSON.stringify(stairs)}`);
       if (!stairs.onGround) throw new Error(`stairs climb ended airborne: ${JSON.stringify(stairs)}`);
-      if (stairs.climbedTo > 2.7) throw new Error(`climbed impossibly high (feet ${stairs.climbedTo} m): ${JSON.stringify(stairs)}`);
+      if (stairs.climbedTo > spec.deckFeet + 0.3) throw new Error(`climbed impossibly high (feet ${stairs.climbedTo} m): ${JSON.stringify(stairs)}`);
       if (stairs.sankBy > 0.05) throw new Error(`player sank ${stairs.sankBy} m below start during climb: ${JSON.stringify(stairs)}`);
       console.log(`[stairs] OK`, JSON.stringify(stairs));
 
       // 2c) Descent: turn around and walk back down the same flight. Every
       //     riser is exactly one STEP_HEIGHT drop, so a grounded player must
       //     stick tread-to-tread — ANY airborne frame is the micro-hop the
-      //     descend-stick exists to prevent. Platform top (2.4) -> first
-      //     tread (2.1) and last tread (0.3) -> ground are also one-step
-      //     drops, so the whole run should stay glued.
-      const down = await page.evaluate(async () => {
+      //     descend-stick exists to prevent. Deck -> first tread and last
+      //     tread -> ground are also one-step drops, so the whole run should
+      //     stay glued.
+      const down = await page.evaluate(async (spec) => {
         const cs = window.__cs;
         cs.player.hp = 100000; // bot fire must not kill the runner mid-descent
         cs.game.pitch = 0;
-        cs.game.yaw = 0; // forward is -z: back down the flight
+        cs.game.yaw = spec.downYaw;
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         let airborneFrames = 0;
         let reachedBottom = false;
         const t0 = performance.now();
-        while (performance.now() - t0 < 8000) {
+        while (performance.now() - t0 < 10000) {
           await new Promise(r => requestAnimationFrame(r));
           if (!cs.player.onGround) airborneFrames++;
-          if ((cs.player.pos.y - 1.7) <= 0.05 && cs.player.pos.z <= 23) { reachedBottom = true; break; }
+          const pastBottom = spec.bottomDir > 0 ? cs.player.pos.z >= spec.bottomZ : cs.player.pos.z <= spec.bottomZ;
+          if ((cs.player.pos.y - 1.7) <= 0.05 && pastBottom) { reachedBottom = true; break; }
         }
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         const result = {
@@ -151,7 +172,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         };
         cs.player.hp = 100;
         return result;
-      });
+      }, spec);
       if (!down.reachedBottom || Math.abs(down.endedAtFeet) > 0.05) throw new Error(`descent never reached open ground grounded (feet ${down.endedAtFeet} m): ${JSON.stringify(down)}`);
       if (down.airborneFrames > 0) throw new Error(`descent went airborne on ${down.airborneFrames} frames: ${JSON.stringify(down)}`);
       console.log(`[stairs-down] OK`, JSON.stringify(down));
@@ -603,10 +624,77 @@ async function runAllyCheck() {
   await page.close();
 }
 
+// Bots and stairs — the question the elevation map exists to answer.
+//
+// A T bot is placed at the foot of the two-story building's INTERNAL flight
+// with the player directly up the fall line on the deck above, which is the
+// most favorable case the steering policy can get: the beeline points straight
+// up the stairs. What it proves is narrow but real — that a bot is not WALLED
+// OUT of the flight (a riser built over STEP_HEIGHT would block it entirely,
+// and nothing else in the suite would notice).
+//
+// How FAR the bot gets is reported, not asserted. Beyond one riser the outcome
+// is policy, not geometry: BrainView.dist is planar, so once the bot is inside
+// farBand (14 m) of the player above it the radial term drops out and it
+// circles at constant radius instead of continuing to climb. That is a finding
+// to watch during a playtest, not a regression to pin.
+async function runBotClimbCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1500));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      cs.game.started = true;
+      cs.game.locked = true;
+      cs.player.hp = 100000; // the bot shoots back; the climb is what matters
+      // Player on the second-floor slab, directly up the fall line of the
+      // internal flight (which runs x [2,6], z -9 -> 0, deck at 3.6).
+      cs.player.pos.set(4, 3.6 + 1.7, 8);
+      const bot = cs.bots[0];
+      if (!bot) return { fail: 'no bot spawned on the elevation map' };
+      bot.mesh.position.set(4, 0, -10); // just north of the first riser
+      let maxFeet = 0;
+      let groundedFrames = 0;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 25000) {
+        await new Promise(r => requestAnimationFrame(r));
+        if (!bot.alive) continue; // a self-respawn resets it to a spawn band; keep watching
+        maxFeet = Math.max(maxFeet, bot.mesh.position.y);
+        if (bot.onGround) groundedFrames++;
+        if (maxFeet >= 3.55) break;
+      }
+      return {
+        maxFeet: +maxFeet.toFixed(2),
+        gainedDeck: maxFeet >= 3.55,
+        risersClimbed: Math.round(maxFeet / 0.3),
+        groundedFrames,
+      };
+    });
+    if (result.fail) throw new Error(result.fail);
+    // The geometry gate: one riser proves the flight is climbable by a bot.
+    if (result.maxFeet < 0.25) throw new Error(`bot never gained a single riser — is a riser taller than STEP_HEIGHT? ${JSON.stringify(result)}`);
+    console.log('[botClimb] OK', JSON.stringify(result));
+    if (!result.gainedDeck) console.log('[botClimb] note: bot stalled below the deck — expected with planar band steering, watch this during playtests');
+  } catch (e) {
+    failures++;
+    console.log(`[botClimb] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[botClimb] ${e}`));
+  await page.close();
+}
+
 try {
-  await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: true });
+  await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
+  await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
+  await runBotClimbCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {
   await browser.close();

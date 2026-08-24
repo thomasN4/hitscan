@@ -696,11 +696,29 @@ async function runAllyCheck() {
 // OUT of the flight (a riser built over STEP_HEIGHT would block it entirely,
 // and nothing else in the suite would notice).
 //
-// How FAR the bot gets is reported, not asserted. Beyond one riser the outcome
-// is policy, not geometry: BrainView.dist is planar, so once the bot is inside
-// farBand (14 m) of the player above it the radial term drops out and it
-// circles at constant radius instead of continuing to climb. That is a finding
-// to watch during a playtest, not a regression to pin.
+// How FAR the bot gets is reported, not asserted, and there turned out to be TWO
+// stalls stacked on top of each other — worth recording, because the second one
+// hid behind the first for as long as this comment has existed.
+//
+//   1. A COLLISION WEDGE, now fixed here. The bot drifted east until its 0.5
+//      radius overlapped the x >= 6 second-floor slab (x[6,14], y[3.2,3.6]); at
+//      feet 1.5 that slab's underside sits below its head, so collidesAt refused
+//      every direction, the ones reducing the overlap included. Frozen at one
+//      coordinate with moveBlocked set, permanently — and the same trap caught
+//      the PLAYER (verified: four cardinals plus jump, zero displacement). The
+//      [wedge] phase pins the escape.
+//
+//   2. ORBITING AT CONSTANT RADIUS, still live and steering-level. With the
+//      wedge gone the bot slides freely and climbs to feet 1.5, then holds
+//      planarDist ~ 13.98 against a farBand of 14 while sweeping x across the
+//      flight: inside the band the radial term drops out, so it circles instead
+//      of climbing. This is what the comment here always described. It was not
+//      wrong — it was right about a stall nobody could see yet, because the
+//      wedge stopped the bot before it ever got there.
+//
+// Fixing 2 is steering policy, not geometry, and belongs with the bot-AI work
+// (feat/bot-3d-brain and the stair navigation after it). Report the number
+// here; assert it once bots are actually meant to arrive.
 async function runBotClimbCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -743,12 +761,70 @@ async function runBotClimbCheck() {
     // The geometry gate: one riser proves the flight is climbable by a bot.
     if (result.maxFeet < 0.25) throw new Error(`bot never gained a single riser — is a riser taller than STEP_HEIGHT? ${JSON.stringify(result)}`);
     console.log('[botClimb] OK', JSON.stringify(result));
-    if (!result.gainedDeck) console.log('[botClimb] note: bot stalled below the deck — expected with planar band steering, watch this during playtests');
+    if (!result.gainedDeck) console.log(`[botClimb] note: bot never gained the deck (feet ${result.maxFeet}) — stall 2 above, steering-level follow-up`);
   } catch (e) {
     failures++;
     console.log(`[botClimb] FAIL: ${e.message}`);
   }
   errors.push(...mapErrors.map(e => `[botClimb] ${e}`));
+  await page.close();
+}
+
+// The unwedge escape, end to end (collision.ts:slideMoveXZ).
+//
+// Stands the player at the exact coordinate that used to soft-lock: riser 5 of
+// the elevation map's internal flight, radius lapping the x >= 6 second-floor
+// slab whose underside sits below head height at feet 1.5. Before the escape
+// existed, every direction was refused here — all four cardinals plus jump,
+// zero displacement, forever. This asserts you can walk back out, and that the
+// directions INTO the slab are still solid, because an escape that let you
+// through geometry would be the worse bug.
+async function runWedgeCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=0&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      cs.game.started = true; cs.game.locked = true; cs.player.hp = 100000; cs.game.pitch = 0;
+      const TRAP = { x: 6.15, feet: 1.5, z: -6.42 };
+      const attempt = async (yaw) => {
+        cs.player.pos.set(TRAP.x, TRAP.feet + cs.player.eyeHeight, TRAP.z);
+        cs.player.vel.set(0, 0, 0);
+        cs.game.yaw = yaw;
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        for (let i = 0; i < 90; i++) await new Promise(r => requestAnimationFrame(r));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        return +Math.hypot(cs.player.pos.x - TRAP.x, cs.player.pos.z - TRAP.z).toFixed(2);
+      };
+      // Away from the slab (west) must free the player; into it (east) must not.
+      const out = await attempt(Math.PI / 2);
+      const into = await attempt(-Math.PI / 2);
+      // And the slab must still stop a clean approach from open ground.
+      cs.player.pos.set(5, TRAP.feet + cs.player.eyeHeight, TRAP.z);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = -Math.PI / 2;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      for (let i = 0; i < 90; i++) await new Promise(r => requestAnimationFrame(r));
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      const approachedTo = +cs.player.pos.x.toFixed(2);
+      cs.player.hp = 100;
+      return { out, into, approachedTo };
+    });
+    if (result.out < 1) throw new Error(`player still soft-locked in the slab wedge: ${JSON.stringify(result)}`);
+    if (result.into > 0.05) throw new Error(`escape leaked THROUGH the slab — walls must stay solid: ${JSON.stringify(result)}`);
+    if (result.approachedTo > 5.55) throw new Error(`player pushed past the slab's west face: ${JSON.stringify(result)}`);
+    console.log('[wedge] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[wedge] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[wedge] ${e}`));
   await page.close();
 }
 
@@ -758,6 +834,7 @@ try {
   await runAllyCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
+  await runWedgeCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {
   await browser.close();

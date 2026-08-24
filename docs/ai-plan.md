@@ -128,3 +128,29 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
    exit status; a chained `&&` sequence ran straight through a red
    typecheck and briefly committed broken code. Use `set -o pipefail` (or
    run gates bare) whenever output is piped.
+23. **A binary "am I inside?" test is a trap unless something can walk back
+   out.** `collidesAt` answers overlap with no notion of depth, so
+   `slideMoveXZ` refused EVERY direction for an entity already inside
+   geometry — the way out included. That soft-locked the player permanently
+   on the elevation map's internal flight and froze bots there for whole
+   matches. Two things hid it for this long: the collision suite only ever
+   tested entities approaching from OUTSIDE, and the one fixture that did
+   start inside a wall (`blocking follows the given feet height`) asserted
+   the trap as correct behavior. Depenetration is not an optional refinement
+   of a solid-body test — without it the test has a state with no exit.
+24. **A plausible explanation can be right about the wrong thing.** The
+   `[botClimb]` phase explained bots never gaining the deck as planar band
+   steering: "once inside farBand the radial term drops out and it circles at
+   constant radius". A position trace refuted it — the bot sat frozen at ONE
+   coordinate with `moveBlocked` set, wedged rather than circling, and that
+   finding is what turned up the soft-lock this PR fixes. But with the wedge
+   gone the bot goes on to do precisely what the comment said, holding
+   planarDist ~ 13.98 against a farBand of 14 while sweeping across the
+   flight. The explanation was accurate about a SECOND stall that the first
+   one had been hiding.
+   Both halves cost something. It was wrong about the behavior anyone could
+   actually observe, and it was believed long enough to shape a plan around.
+   It was also right about a stall nobody could reach yet, which is why
+   deleting it would have thrown away a real finding. Trace before
+   attributing — and when a trace refutes an explanation, check whether it is
+   describing something further along the same path rather than nothing.

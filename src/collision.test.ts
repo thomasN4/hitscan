@@ -295,14 +295,89 @@ describe('slideMoveXZ', () => {
   });
 
   test('blocking follows the given feet height', () => {
-    // The same 2m wall blocks feet at 0 ...
-    const posA = at(0, 0);
+    // Approached from OUTSIDE, deliberately: this fixture used to start at
+    // the wall's centre, which now reads as an entity trapped inside it and
+    // is allowed to walk out (see the unwedging suite). Starting clear pins
+    // what the test was always for — that feetY gates blocking — without
+    // depending on the trapped case.
+    const posA = at(-2, 0);
     slideMoveXZ(posA, 1.3, 0, PLAYER_RADIUS, 0, [wall(0, 0, 1, 2)]);
-    expect(posA.x).toBe(0);
+    expect(posA.x).toBe(-2);
     // ...but not feet at 2.5, where its top is below feet + STEP_HEIGHT.
-    const posB = at(0, 0);
+    const posB = at(-2, 0);
     slideMoveXZ(posB, 1.3, 0, PLAYER_RADIUS, 2.5, [wall(0, 0, 1, 2)]);
-    expect(posB.x).toBe(1.3);
+    expect(posB.x).toBeCloseTo(-0.7, 12);
+  });
+});
+
+// Unwedging — the escape that keeps a binary overlap test from being a trap.
+//
+// Fixture is the elevation map's real trap, reduced: the second-floor slab
+// x[6,14] y[3.2,3.6], and an entity standing on riser 5 of the internal
+// flight (feet 1.5) with its radius lapping the slab's west edge. The slab's
+// underside is below that entity's head, so it blocks; and because collidesAt
+// only answers "inside or not", every direction was refused — the way out
+// included. Player and bot alike were pinned there permanently.
+describe('slideMoveXZ unwedging', () => {
+  const slabEdge = new THREE.Box3(
+    new THREE.Vector3(6, 3.2, -12),
+    new THREE.Vector3(14, 3.6, 12),
+  );
+  const BOT_RADIUS = 0.5;
+  const TRAPPED_FEET = 1.5;
+  /** The exact coordinate a traced bot froze at for 18 s. */
+  const trapped = (): THREE.Vector3 => new THREE.Vector3(6.15, 0, -6.42);
+
+  test('lets a trapped entity move back out of the overlap', () => {
+    const pos = trapped();
+    slideMoveXZ(pos, -0.07, 0, BOT_RADIUS, TRAPPED_FEET, [slabEdge]);
+    expect(pos.x).toBeCloseTo(6.08, 12);
+  });
+
+  test('refuses the same move driven deeper in', () => {
+    const pos = trapped();
+    slideMoveXZ(pos, 0.07, 0, BOT_RADIUS, TRAPPED_FEET, [slabEdge]);
+    expect(pos.x).toBe(6.15);
+  });
+
+  test('refuses an axis that cannot reduce the overlap', () => {
+    // The footprint sits well inside the slab's z span, so sliding along z
+    // leaves the overlap exactly as it was — indifferent, not an escape.
+    const pos = trapped();
+    slideMoveXZ(pos, 0, 0.07, BOT_RADIUS, TRAPPED_FEET, [slabEdge]);
+    expect(pos.z).toBe(-6.42);
+  });
+
+  test('keeps walls solid from outside — the escape only fires from within', () => {
+    // Zero overlap now, positive overlap at the destination: the strict
+    // decrease cannot hold, so this is refused exactly as it was before.
+    const pos = new THREE.Vector3(5, 0, -6.42);
+    slideMoveXZ(pos, 0.6, 0, BOT_RADIUS, TRAPPED_FEET, [slabEdge]);
+    expect(pos.x).toBe(5);
+  });
+
+  test('will not burrow into one face to escape another', () => {
+    // A perpendicular wall the move would push INTO vetoes the escape.
+    const crossWall = new THREE.Box3(
+      new THREE.Vector3(4, 0, -7),
+      new THREE.Vector3(5.9, 4, -6),
+    );
+    const pos = trapped();
+    slideMoveXZ(pos, -0.3, 0, BOT_RADIUS, TRAPPED_FEET, [slabEdge, crossWall]);
+    expect(pos.x).toBe(6.15);
+  });
+
+  test('a collider the axis cannot escape does not veto one it can', () => {
+    // A beam spanning the whole x range swallows the footprint, so an x move
+    // cannot reduce ITS overlap. Indifferent must not read as "worse", or
+    // the fix rebuilds the trap out of a second collider.
+    const beam = new THREE.Box3(
+      new THREE.Vector3(0, 3.2, -7),
+      new THREE.Vector3(20, 3.6, -6),
+    );
+    const pos = trapped();
+    slideMoveXZ(pos, -0.07, 0, BOT_RADIUS, TRAPPED_FEET, [slabEdge, beam]);
+    expect(pos.x).toBeCloseTo(6.08, 12);
   });
 });
 

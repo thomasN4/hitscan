@@ -50,25 +50,86 @@ export const COLLISION_EPSILON = 1e-6;
  * @param colliders registry from world.ts
  */
 export function collidesAt(pos: THREE.Vector3, radius: number, feetY: number, colliders: THREE.Box3[]): boolean {
-  // Explicit comparisons, not Box3.intersectsBox, for two reasons: THREE
-  // treats mere EDGE CONTACT as intersecting, and stair risers sit EXACTLY
-  // one STEP_HEIGHT above the previous tread — an inclusive test would wall
-  // off every flight. Tops within STEP_HEIGHT of the feet are steppable,
-  // bottoms at or above head height are overhead cover; both bounds take
-  // COLLISION_EPSILON slack for float32-measured tops (see above).
-  const minX = pos.x - radius, maxX = pos.x + radius;
-  const minZ = pos.z - radius, maxZ = pos.z + radius;
-  const steppableBelow = feetY + STEP_HEIGHT + COLLISION_EPSILON;
-  // Minus slack here: float32 stores bottoms LOW, and an exact-height
-  // overhead slab must still read as walkable-under.
-  const overheadAbove = feetY + HEAD_HEIGHT - COLLISION_EPSILON;
   for (const c of colliders) {
-    if (minX >= c.max.x || maxX <= c.min.x) continue;
-    if (minZ >= c.max.z || maxZ <= c.min.z) continue;
-    if (c.max.y <= steppableBelow || c.min.y >= overheadAbove) continue;
-    return true;
+    if (blocks(c, pos.x, pos.z, radius, feetY)) return true;
   }
   return false;
+}
+
+/**
+ * Whether ONE collider blocks a footprint centred at (x, z) with feet at
+ * `feetY`. The predicate collidesAt is built from, factored out so the
+ * unwedge test below cannot drift away from it.
+ *
+ * Explicit comparisons, not Box3.intersectsBox, for two reasons: THREE
+ * treats mere EDGE CONTACT as intersecting, and stair risers sit EXACTLY
+ * one STEP_HEIGHT above the previous tread — an inclusive test would wall
+ * off every flight. Tops within STEP_HEIGHT of the feet are steppable,
+ * bottoms at or above head height are overhead cover; both bounds take
+ * COLLISION_EPSILON slack for float32-measured tops (see above). Minus slack
+ * on the ceiling: float32 stores bottoms LOW, and an exact-height overhead
+ * slab must still read as walkable-under.
+ */
+function blocks(c: THREE.Box3, x: number, z: number, radius: number, feetY: number): boolean {
+  if (x - radius >= c.max.x || x + radius <= c.min.x) return false;
+  if (z - radius >= c.max.z || z + radius <= c.min.z) return false;
+  if (c.max.y <= feetY + STEP_HEIGHT + COLLISION_EPSILON) return false;
+  if (c.min.y >= feetY + HEAD_HEIGHT - COLLISION_EPSILON) return false;
+  return true;
+}
+
+/**
+ * Overlap between the footprint span [c − radius, c + radius] and [lo, hi].
+ * Zero when they are disjoint.
+ */
+function axisOverlap(c: number, radius: number, lo: number, hi: number): number {
+  return Math.max(0, Math.min(c + radius, hi) - Math.max(c - radius, lo));
+}
+
+/**
+ * Whether a blocked single-axis move strictly UNWEDGES: every collider that
+ * blocks at the destination overlaps the footprint LESS along the moving
+ * axis than it does right now.
+ *
+ * This is what keeps a binary overlap test from being a trap. `collidesAt`
+ * answers "would I be inside something" with no notion of how deep, so an
+ * entity that is ALREADY inside has every direction refused — including the
+ * ones heading out. That soft-lock is not theoretical: on the elevation map's
+ * internal flight, feet at 1.5 m put the x >= 6 second-floor slab's underside
+ * below head height, and a player or bot whose radius laps that edge is
+ * pinned at one coordinate permanently, jump included.
+ *
+ * It cannot open a path through anything. Walking into a wall from OUTSIDE
+ * has zero overlap now and positive overlap at the destination, so the strict
+ * decrease never holds and the move is refused exactly as before; the escape
+ * only ever fires from inside, and only toward the way out.
+ */
+function unwedges(
+  fromX: number, fromZ: number,
+  toX: number, toZ: number,
+  radius: number, feetY: number, colliders: THREE.Box3[],
+): boolean {
+  const movingX = toX !== fromX;
+  let improved = false;
+  for (const c of colliders) {
+    if (!blocks(c, toX, toZ, radius, feetY)) continue;
+    const before = movingX
+      ? axisOverlap(fromX, radius, c.min.x, c.max.x)
+      : axisOverlap(fromZ, radius, c.min.z, c.max.z);
+    const after = movingX
+      ? axisOverlap(toX, radius, c.min.x, c.max.x)
+      : axisOverlap(toZ, radius, c.min.z, c.max.z);
+    // Strictly worse vetoes outright: escaping one face must not be paid for
+    // by burrowing into another, and approaching from OUTSIDE is this case
+    // (0 before, positive after) — which is what keeps walls solid.
+    if (after > before) return false;
+    // UNCHANGED is indifferent, not a veto. A collider the moving axis
+    // cannot escape — one whose span swallows the whole footprint — would
+    // otherwise veto every escape from the collider that IS escapable, and
+    // rebuild the trap out of the fix.
+    if (after < before) improved = true;
+  }
+  return improved;
 }
 
 /**
@@ -111,6 +172,10 @@ export function supportHeightAt(x: number, z: number, radius: number, ceilingY: 
  * Step-up is NOT done here: a riser simply doesn't block, and the caller's
  * vertical stage (resolveVertical) lifts the feet onto it afterwards.
  *
+ * An axis move that WOULD be blocked is still taken when it strictly reduces
+ * the overlap that is blocking it (see unwedges) — otherwise an entity that
+ * ends up inside geometry has no way out and stays there for good.
+ *
  * @param pos entity position; mutated in x/z, y untouched
  * @param moveX intended x displacement this frame
  * @param moveZ intended z displacement this frame
@@ -128,9 +193,16 @@ export function slideMoveXZ(
 ): void {
   const nx = pos.x + moveX;
   const probe = new THREE.Vector3(nx, 0, pos.z);
-  if (!collidesAt(probe, radius, feetY, colliders)) pos.x = nx;
-  probe.set(pos.x, 0, pos.z + moveZ);
-  if (!collidesAt(probe, radius, feetY, colliders)) pos.z += moveZ;
+  if (!collidesAt(probe, radius, feetY, colliders)
+      || unwedges(pos.x, pos.z, nx, pos.z, radius, feetY, colliders)) {
+    pos.x = nx;
+  }
+  const nz = pos.z + moveZ;
+  probe.set(pos.x, 0, nz);
+  if (!collidesAt(probe, radius, feetY, colliders)
+      || unwedges(pos.x, pos.z, pos.x, nz, radius, feetY, colliders)) {
+    pos.z = nz;
+  }
 }
 
 /** Result of one vertical integration step — see resolveVertical. */

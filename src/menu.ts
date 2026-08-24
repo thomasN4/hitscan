@@ -63,14 +63,17 @@ let mapSel: HTMLSelectElement, botsTIn: HTMLInputElement, botsCtIn: HTMLInputEle
 
 // ---------- Loadout picker state ----------
 // Both columns always hold a valid selection (pre-filled from lastLoadout);
-// keyboard focus just moves which one the arrows control.
+// keyboard focus just moves which one the arrows control. The knife has no
+// column — it is always carried (key 3), never picked — so the picker's
+// types cover only the two positions a deploy actually sets.
+type PickedClass = Exclude<WeaponClass, 'melee'>;
 interface CardRefs {
   id: WeaponId;
   el: HTMLButtonElement;
 }
-const cards: Record<WeaponClass, CardRefs[]> = { primary: [], secondary: [] };
+const cards: Record<PickedClass, CardRefs[]> = { primary: [], secondary: [] };
 let sel: LoadoutState = { ...lastLoadout };
-let focusCol: WeaponClass = 'primary';
+let focusCol: PickedClass = 'primary';
 
 /**
  * Persisted last-deployed loadout (sessionStorage): survives map switches and
@@ -127,8 +130,16 @@ export function showLoadoutPicker(mode: 'start' | 'death'): void {
 
 function buildCards(): void {
   for (const [id, def] of Object.entries(WEAPONS)) {
+    // Melee defs build no card: the knife is carried always and picked never
+    // (the hint below the Deploy button says so). Skipping here is what keeps
+    // it out of the secondary column, where the non-primary branch would
+    // otherwise drop it.
+    if (def.class === 'melee') continue;
     // Object.entries widens to string; the card click handler narrows via a
-    // catalog lookup instead of trusting the attribute.
+    // catalog lookup instead of trusting the attribute. The class is captured
+    // narrowed here because a closure cannot see control-flow narrowing of a
+    // property read.
+    const cls: PickedClass = def.class;
     const el = document.createElement('button');
     el.className = 'wcard';
     const dps = def.pellets !== undefined ? `${def.damage}\u00d7${def.pellets}` : String(def.damage);
@@ -136,12 +147,12 @@ function buildCards(): void {
       `<span class="wname">${def.name}</span>` +
       `<span class="wstats">${dps} dmg \u00b7 ${(1 / def.fireRate).toFixed(1)}/s \u00b7 ${def.magSize} rounds</span>`;
     el.onclick = () => {
-      sel[def.class] = id as WeaponId;
-      focusCol = def.class;
+      sel[cls] = id as WeaponId;
+      focusCol = cls;
       refreshPickerUi();
     };
-    (def.class === 'primary' ? colPrimary : colSecondary).appendChild(el);
-    cards[def.class].push({ id: id as WeaponId, el });
+    (cls === 'primary' ? colPrimary : colSecondary).appendChild(el);
+    cards[cls].push({ id: id as WeaponId, el });
   }
 }
 

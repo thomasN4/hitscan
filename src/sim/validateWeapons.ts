@@ -15,7 +15,10 @@
 // both recoil rates because full settle inside the bolt cycle IS the feel,
 // and the vertical settle is what makes scopeGate work. A rule without the
 // exemption flags shipped-correct tuning, and the obvious "fix" breaks the
-// scope gate.
+// scope gate. The melee exemption is the same shape: the knife's zero
+// magSize/reloadTime ARE the contract (a blade holds no rounds), so those
+// two bounds are firearm-only — while every kick/spray/punch bound still
+// applies to a swing, and the reach fields owe their own pairing rule.
 
 import { RECOIL_CAP, BASE_FOV, type WeaponDef } from '../core/state';
 
@@ -99,7 +102,12 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
       }
     }
 
-    if (!(def.magSize > 0)) {
+    // The knife's zero mag/reload is the CONTRACT (a blade holds no rounds
+    // and never reloads — see WEAPONS.knife), not broken tuning, so these
+    // two bounds are firearm-only. Everything else applies to a melee weapon
+    // unchanged: kicks must still kick, spray must still bloom, the
+    // crosshair must still cost something at rest.
+    if (!def.melee && !(def.magSize > 0)) {
       out.push(`${name}: magSize ${num(def.magSize)} must be > 0 — the magazine holds nothing`);
     }
 
@@ -123,8 +131,21 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     if (!(def.fireRate > 0)) {
       out.push(`${name}: fireRate ${num(def.fireRate)} must be > 0 — every sustained-fire bound divides by it`);
     }
-    if (!(def.reloadTime > 0)) {
+    if (!def.melee && !(def.reloadTime > 0)) {
       out.push(`${name}: reloadTime ${num(def.reloadTime)} must be > 0 — an instant reload skips the mechanic`);
+    }
+
+    // Melee pairing, the same both-directions pattern as pellets/pelletCone:
+    // the reach fields exist exactly when the def swings.
+    if (def.melee) {
+      if (!(def.range !== undefined && def.range > 0)) {
+        out.push(`${name}: range ${num(def.range ?? NaN)} must be > 0 when melee — a swing without reach connects with nothing`);
+      }
+      if (!(def.arcRad !== undefined && def.arcRad > 0 && def.arcRad <= Math.PI)) {
+        out.push(`${name}: arcRad ${num(def.arcRad ?? NaN)} must lie in (0, π] when melee — an arc at/below 0 swings at nothing, past a half-turn it strikes behind`);
+      }
+    } else if (def.range !== undefined || def.arcRad !== undefined) {
+      out.push(`${name}: range/arcRad without melee does nothing — only a melee weapon swings`);
     }
     if (!(def.damage > 0)) {
       out.push(`${name}: damage ${num(def.damage)} must be > 0 — the weapon cannot hurt anything`);

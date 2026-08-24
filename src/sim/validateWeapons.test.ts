@@ -4,6 +4,7 @@ import { WEAPONS, RECOIL_CAP, type WeaponDef } from '../core/state';
 
 const SMG = WEAPONS.smg;
 const SNIPER = WEAPONS.sniper;
+const KNIFE = WEAPONS.knife;
 
 /** The numeric fields — exactly the ones a NaN can poison. */
 type NumericField = {
@@ -140,6 +141,40 @@ describe('static bounds', () => {
     expect(matching([tuned({ pelletCone: 0 }, SHOTGUN)], 'SHOTGUN', 'pelletCone')).toHaveLength(1);
     // A fixed pattern on a single-ray weapon does nothing — flag the dead field.
     expect(matching([tuned({ pelletCone: 0.02, pellets: undefined }, SHOTGUN)], 'SHOTGUN', 'pelletCone')).toHaveLength(1);
+  });
+});
+
+describe('melee weapons', () => {
+  test('the shipped knife produces zero violations', () => {
+    // The shipped-table gate above already covers the knife via
+    // Object.values; this pins the def in isolation so a knife-specific
+    // regression names itself instead of hiding among five guns.
+    expect(validateWeapons([KNIFE])).toEqual([]);
+  });
+
+  test('zero mag/reload is exempt ONLY while melee — flip it off and they flag', () => {
+    expect(matching([KNIFE], 'magSize')).toHaveLength(0);
+    expect(matching([KNIFE], 'reloadTime')).toHaveLength(0);
+    expect(matching([tuned({ melee: false }, KNIFE)], 'KNIFE', 'magSize')).toHaveLength(1);
+    expect(matching([tuned({ melee: false }, KNIFE)], 'KNIFE', 'reloadTime')).toHaveLength(1);
+  });
+
+  test('reach fields exist exactly when the def swings', () => {
+    expect(matching([tuned({ range: undefined }, KNIFE)], 'KNIFE', 'range')).toHaveLength(1);
+    expect(matching([tuned({ arcRad: undefined }, KNIFE)], 'KNIFE', 'arcRad')).toHaveLength(1);
+    expect(matching([tuned({ range: 0 }, KNIFE)], 'KNIFE', 'range')).toHaveLength(1);
+    // Past a half-turn the cone would strike behind the eye.
+    expect(matching([tuned({ arcRad: Math.PI + 0.1 }, KNIFE)], 'KNIFE', 'arcRad')).toHaveLength(1);
+  });
+
+  test('reach fields on a firearm are a dead field, like pelletCone without pellets', () => {
+    expect(matching([tuned({ range: 2 })], 'SMG', 'range/arcRad')).toHaveLength(1);
+    expect(matching([tuned({ arcRad: 0.6 })], 'SMG', 'range/arcRad')).toHaveLength(1);
+  });
+
+  test('NaN reach cannot slip through the pairing bounds', () => {
+    expect(matching([tuned({ range: NaN }, KNIFE)], 'KNIFE', 'range')).toHaveLength(1);
+    expect(matching([tuned({ arcRad: NaN }, KNIFE)], 'KNIFE', 'arcRad')).toHaveLength(1);
   });
 });
 

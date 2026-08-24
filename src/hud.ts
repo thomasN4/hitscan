@@ -31,7 +31,7 @@ export function requireEl(id: string): HTMLElement {
 const el = requireEl;
 
 let hitmarkerEl: HTMLElement, killfeedEl: HTMLElement, hpText: HTMLElement,
-  healthFill: HTMLElement, magText: HTMLElement,
+  healthFill: HTMLElement, magText: HTMLElement, ammoSep: HTMLElement,
   ammoReserve: HTMLElement, reloadHint: HTMLElement, scopeOverlay: HTMLElement,
   zoomText: HTMLElement, weaponName: HTMLElement, botDebug: HTMLElement;
 
@@ -52,6 +52,7 @@ export function initHUD(): void {
   hpText = el('hpText');
   healthFill = el('healthFill');
   magText = el('magText');
+  ammoSep = el('ammoSep');
   ammoReserve = el('ammoReserve');
   reloadHint = el('reloadHint');
   scopeOverlay = el('scopeOverlay');
@@ -144,9 +145,14 @@ export function updateHUD(): void {
   healthFill.style.width = Math.max(0, player.hp) + '%';
   // Color shifts green -> orange -> red as HP drops.
   healthFill.style.background = player.hp > 60 ? '#4caf50' : player.hp > 25 ? '#ffab40' : '#ff5252';
-  magText.textContent = String(weapon.mag);
-  ammoReserve.textContent = String(weapon.reserve);
-  reloadHint.style.visibility = (!weapon.reloading && isLowAmmo(weapon.mag, weapon.magSize)) ? 'visible' : 'hidden';
+  // The knife holds no rounds: the mag/reserve readout and reload hint hide
+  // while it is live (the separator between the two numbers goes with them).
+  const meleeHeld = WEAPONS[equippedId(wpn.slot)].melee === true;
+  const ammoDisplay = meleeHeld ? 'none' : 'inline';
+  magText.style.display = ammoDisplay;
+  ammoSep.style.display = ammoDisplay;
+  ammoReserve.style.display = ammoDisplay;
+  reloadHint.style.visibility = (!meleeHeld && !weapon.reloading && isLowAmmo(weapon.mag, weapon.magSize)) ? 'visible' : 'hidden';
   if (weapon.reloading) reloadHint.textContent = 'RELOADING...';
   else reloadHint.textContent = 'PRESS [R] TO RELOAD';
   // Weapon name + scope zoom label; cached so unchanged values don't touch

@@ -14,11 +14,15 @@ import * as THREE from 'three';
 import { GameClock } from '../sim/gameClock';
 
 // ---------- Domain vocabulary ----------
-/** Picker column / loadout position a weapon belongs in. */
-export type WeaponClass = 'primary' | 'secondary';
+/**
+ * Picker column / loadout position a weapon belongs in. `melee` is NOT a
+ * picker column — the knife is always carried and never picked — but the
+ * catalog classes every def so the picker's card builder can route/skip.
+ */
+export type WeaponClass = 'primary' | 'secondary' | 'melee';
 
 /** Catalog ids — stable strings; the loadout slice and the picker use them. */
-export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver';
+export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'knife';
 
 /**
  * Static stats for one weapon, shaped like the WEAPONS entries below.
@@ -82,6 +86,24 @@ export interface WeaponDef {
   semiAuto?: boolean;
   /** Firing kicks you out of the scope (re-press RMB). Sniper only. */
   unscopeOnShot?: boolean;
+  /**
+   * Melee weapon: swings instead of firing — no ammo, no reload, no cone —
+   * and the trigger path branches to a short-range arc test (sim/melee.ts).
+   * Absent means a firearm. RMB is inert while held.
+   */
+  melee?: boolean;
+  /**
+   * Reach of a melee swing, in metres from the eye. Required whenever
+   * `melee` is present and meaningless otherwise — the same pairing rule
+   * as pellets/pelletCone (validateWeapons owns both directions of it).
+   */
+  range?: number;
+  /**
+   * Total apex angle (radians) of the swing cone: a strike point connects
+   * when its angular offset from the view direction is at most arcRad/2.
+   * Required whenever `melee` is present.
+   */
+  arcRad?: number;
 }
 
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
@@ -202,13 +224,14 @@ export const RECOIL_YAW_CAP = 3;
 export const BASE_FOV = 75;
 
 /**
- * Which loadout POSITION is live: 0 = primary, 1 = secondary. The catalog
- * position of a slot comes from `loadout` (see equippedId below), not from
- * this index — keys 1/2 switch POSITIONS, not specific weapons.
+ * Which weapon POSITION is live: 0 = primary, 1 = secondary, 2 = knife.
+ * What positions 0/1 hold comes from `loadout` (see equippedId below);
+ * position 2 is the always-carried knife — never picked, so `SLOTS`
+ * covers only the two positions the picker fills.
  */
-export type WeaponSlot = 0 | 1;
+export type WeaponSlot = 0 | 1 | 2;
 
-/** The positions, for iterating both without widening the index to `number`. */
+/** The PICKED positions, for iterating both without widening the index to `number`. */
 export const SLOTS: readonly WeaponSlot[] = [0, 1];
 
 /**
@@ -391,6 +414,38 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     semiAuto: true,     // one shot per LMB press; holding does nothing
     perRound: true,     // chamber-by-chamber reload; firing cancels the rest (playtest round 2)
   },
+  knife: {
+    name: 'KNIFE',
+    class: 'melee',  // not a picker column — always carried (key 3), never picked
+    magSize: 0, reserveMax: 0, // a blade holds no rounds — melee is exempt from the
+                               // ammo bounds in validateWeapons, and this zero IS
+                               // the contract rather than broken tuning
+    fireRate: 0.45,  // swing cadence (~2.2 swings/sec click ceiling)
+    reloadTime: 0,   // never reloads; tryReload() no-ops on a melee def
+    damage: 55,      // two swings to kill; legs x0.75, head x4 one-taps point-blank
+    headshotMult: 4,
+    zoomFovs: [70],  // placeholder for the non-empty-zoomFovs invariant; RMB is
+                     // inert while melee (updateWeapon gates adsLerp off)
+    spreadMul: 1,    // unused: a swing samples no cone
+    inherent: 0.002, // feeds only the resting crosshair gap
+    sprayKick: 0.05, recoilKick: 0.35,
+    sprayCap: 1.5,
+    sprayRecover: 0.1, // input = 0.05/0.45 ≈ 0.111/s — clears the bound (it applies to
+                       // every weapon, semiAuto included). Spray moves nothing here but
+                       // the crosshair gap.
+    recoilRecover: 8,
+    punchRad: 0.008,   // rad/unit — ~1° lunge per swing, ~2.7° at the cap: the swing
+                       // reads through the viewmodel kick (recoil channel), with just
+                       // enough camera nudge to feel physical
+    yawKick: 0.2,
+    yawRecover: 8,     // semiAuto exemption as the other semi weapons; each swing's
+                       // jolt settles long before the next
+    scopedOverlay: false,
+    semiAuto: true,    // one swing per LMB press
+    melee: true,
+    range: 2.0,        // metres from the eye a strike reaches
+    arcRad: 0.6,       // rad (~34°) total apex angle — forgiving CS-style arc
+  },
 };
 
 /** Per-position saved ammo, so switching weapons doesn't magically refill mags. */
@@ -401,11 +456,13 @@ export interface AmmoStore {
 
 /**
  * Per-POSITION saved ammo (not per weapon): swapping slots swaps whatever is
- * loaded in each position. Rebuilt from the equipped defs by armLoadout().
+ * loaded in each position. Rebuilt from the equipped defs by armLoadout() —
+ * position 2 (the knife) holds no rounds and armLoadout leaves it at zero.
  */
-export const ammoStore: [AmmoStore, AmmoStore] = [
+export const ammoStore: [AmmoStore, AmmoStore, AmmoStore] = [
   { mag: WEAPONS.smg.magSize, reserve: WEAPONS.smg.reserveMax },
   { mag: WEAPONS.pistol.magSize, reserve: WEAPONS.pistol.reserveMax },
+  { mag: 0, reserve: 0 },
 ];
 
 /**
@@ -454,9 +511,13 @@ export const loadout: LoadoutState = { primary: 'smg', secondary: 'pistol' };
 /** The most recently DEPLOYED loadout; the picker pre-fills from it. */
 export const lastLoadout: LoadoutState = { primary: 'smg', secondary: 'pistol' };
 
-/** Weapon id held in loadout position `slot` (0 primary, 1 secondary). */
+/**
+ * Weapon id held in loadout position `slot`. Positions 0/1 resolve through
+ * the loadout slice; position 2 is always the knife — the one weapon the
+ * picker never touches.
+ */
 export function equippedId(slot: WeaponSlot): WeaponId {
-  return slot === 0 ? loadout.primary : loadout.secondary;
+  return slot === 0 ? loadout.primary : slot === 1 ? loadout.secondary : 'knife';
 }
 
 /** Live state of the ACTIVE weapon. Initialized to the default loadout's primary. */

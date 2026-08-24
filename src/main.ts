@@ -95,10 +95,11 @@ addEventListener('resize', () => {
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') tryReload();
-  // Keys 1/2 switch LOADOUT POSITIONS (primary/secondary), not specific
-  // weapons — which weapon that is comes from the loadout slice.
+  // Keys 1/2/3 switch WEAPON POSITIONS (primary/secondary/knife), not specific
+  // weapons — 0/1 resolve through the loadout slice; 2 is always the knife.
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
+  if (e.code === 'Digit3') switchWeapon(2);
   if (e.code === 'KeyQ') switchToLast();
   // Stance keys only count during live play — same gate as the mouse
   // handlers — so nothing toggled pre-lock or behind the pause menu leaks

@@ -11,8 +11,9 @@ import { solids } from './world';
 import { bots, weapon, session, input, aim, wpn, motion, player, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId,
-         type WeaponDef, type WeaponSlot, type WeaponId } from './core/state';
-import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxReload, sfxShell, sfxSwitch } from './audio';
+         type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
+import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
+         sfxReload, sfxShell, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
@@ -22,6 +23,7 @@ import { roundInterval, roundTransfer } from './sim/ammo';
 import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
+import { meleeSwing, type MeleeCandidate } from './sim/melee';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -153,7 +155,27 @@ let revolverMag: THREE.Mesh; // kept for the reload animation (cylinder drop/res
   revolverGroup.add(frame, barrel, cylinder, grip);
 }
 
-gunGroup.add(smgGroup, sniperGroup, pistolGroup, shotgunGroup, revolverGroup);
+const knifeGroup = new THREE.Group();
+let knifeBlade: THREE.Mesh; // poseReload's target slot — never reloads, but keeps
+                            // the pose-reset path uniform with every viewmodel
+{
+  const steel = new THREE.MeshLambertMaterial({ color: 0xb9bdc6 }); // honed edge
+  const dark = new THREE.MeshLambertMaterial({ color: 0x1f1f22 });
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.16), dark);
+  grip.position.set(0.24, -0.24, -0.32);
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.03), dark);
+  guard.position.set(0.24, -0.235, -0.41);
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.055, 0.36), steel);
+  blade.position.set(0.24, -0.225, -0.6);
+  blade.userData.baseY = -0.225;
+  knifeBlade = blade;
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.055, 0.1), steel);
+  tip.position.set(0.24, -0.212, -0.82);
+  tip.rotation.x = 0.25; // clip-point lean toward the thrust line
+  knifeGroup.add(grip, guard, blade, tip);
+}
+
+gunGroup.add(smgGroup, sniperGroup, pistolGroup, shotgunGroup, revolverGroup, knifeGroup);
 
 /**
  * Per-weapon viewmodel: the animated group, the mesh poseReload() drops and
@@ -178,6 +200,7 @@ const VIEWMODELS: Record<WeaponId, ViewModel> = {
   shotgun: { group: shotgunGroup, mag: shotgunMag, aimOffset: { x: -0.25, y: 0.105 } },  // bead line rides ~30% lower than the others' sight lines (playtest round 2)
   pistol:  { group: pistolGroup,  mag: pistolMag,  aimOffset: { x: -0.24, y: 0.15 } },  // slide-top sight line at the smg's height
   revolver:{ group: revolverGroup,mag: revolverMag,aimOffset: { x: -0.24, y: 0.147 } }, // frame-top sight line at the smg's height
+  knife:   { group: knifeGroup,   mag: knifeBlade, aimOffset: { x: -0.24, y: 0.14 } },  // catalog-complete; RMB is inert while melee so the offset never blends in
 };
 
 /**
@@ -195,6 +218,7 @@ const SHOT_SFX: Record<WeaponId, () => void> = {
   shotgun: sfxShotgun,
   pistol: sfxPistol,
   revolver: sfxRevolver,
+  knife: sfxKnife,
 };
 
 const raycaster = new THREE.Raycaster();
@@ -276,6 +300,9 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
  * with whatever has already chambered (see shoot()'s interrupt).
  */
 export function tryReload(): void {
+  // A blade holds no rounds — R is inert while knifing, before any of the
+  // mag guards below could misfire on the knife's zeroed magSize.
+  if (currentDef().melee) return;
   if (!session.started || !player.alive || weapon.reloading || weapon.mag === weapon.magSize || weapon.reserve <= 0) return;
   weapon.reloading = true;
   if (currentDef().perRound) {
@@ -369,6 +396,44 @@ export function switchToLast(): void {
 }
 
 /**
+ * One melee swing. No ammo, no cone, no muzzle flash: the strike resolves
+ * through sim/melee.ts's range+arc test against every live enemy part
+ * (nearest wins; allies are neither struck nor blocking — a stronger cut
+ * than the bullets' "allies stop the ray", and deliberate). The kick rides
+ * the normal recoil channel, which is what animates the lunge in
+ * player.ts:updateViewmodel — one kick per pull, tiny values, so the camera
+ * barely nods while the viewmodel lunges.
+ */
+function swingMelee(def: WeaponDef): void {
+  weapon.lastShot = gameTime.now();
+  SHOT_SFX[equippedId(wpn.slot)]();
+
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  // Exact aim direction — spread 0 samples no cone; a swing has none.
+  const dir = shotDirection(currentAimPitch(), currentAimYaw(), 0);
+  const candidates: MeleeCandidate<Bot>[] = [];
+  for (const bot of bots) {
+    if (!bot.alive || bot.team === 'CT') continue;
+    for (const zone of ['head', 'torso', 'legs'] as const) {
+      candidates.push({ payload: bot, zone, at: bot[zone].getWorldPosition(new THREE.Vector3()) });
+    }
+  }
+  // Documented pairing (validateWeapons): range/arcRad exist exactly when melee.
+  const hit = meleeSwing(origin, dir, def.range ?? 0, def.arcRad ?? 0, candidates);
+  if (hit) {
+    sfxKnifeHit();
+    showHitmarker(hit.part === 'head');
+    damageBot(hit.payload, damageForPart(weapon, hit.part), hit.part);
+  }
+
+  wpn.recoil = Math.min(wpn.recoil + def.recoilKick, RECOIL_CAP);
+  wpn.recoilYaw = THREE.MathUtils.clamp(
+    wpn.recoilYaw + (Math.random() * 2 - 1) * def.yawKick,
+    -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
+  wpn.spray = Math.min(wpn.spray + def.sprayKick, def.sprayCap);
+}
+
+/**
  * Fire one shot (one trigger pull): consume ammo, kick recoil and spray, then
  * hitscan. A weapon with `pellets` fires that many independent rays, each
  * sampled in the live spread cone — the shotgun's wide kill/no-kill falloff
@@ -377,6 +442,13 @@ export function switchToLast(): void {
  */
 export function shoot(): void {
   const def = currentDef();
+  // A blade swings instead of firing: nothing to spend, nothing to cancel,
+  // nothing to flash. updateWeapon's trigger gate already paced this against
+  // the swing cadence.
+  if (def.melee) {
+    swingMelee(def);
+    return;
+  }
   // Per-round reloads are INTERRUPTIBLE CS-style: a trigger pull cancels the
   // remaining shells/chambers and fires whatever has already transferred.
   // Whole-mag weapons keep the hard block — no rounds exist until the timer
@@ -508,10 +580,12 @@ export function updateWeapon(dt: number): void {
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // the smg has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
-  // mutually exclusive by the movement precedence rules).
-  if (!input.aiming) wpn.zoomLevel = 0; // every re-scope starts at lowest zoom
+  // mutually exclusive by the movement precedence rules). RMB is inert while
+  // a melee def is held — there is no sight line to raise.
+  const aiming = input.aiming && !def.melee;
+  if (!aiming) wpn.zoomLevel = 0; // every re-scope starts at lowest zoom
   const aimFov = aimFovFor(def);
-  wpn.adsLerp = approach(wpn.adsLerp, input.aiming ? 1 : 0, dt, ADS_RATE);
+  wpn.adsLerp = approach(wpn.adsLerp, aiming ? 1 : 0, dt, ADS_RATE);
   // Sensitivity scales with the actual zoom ratio so tracking at 12x stays
   // usable; main.ts multiplies mouse deltas by this.
   wpn.zoomScale = 1 - (1 - aimFov / BASE_FOV) * wpn.adsLerp;
@@ -602,7 +676,7 @@ export function updateWeapon(dt: number): void {
     airLerp: motion.airLerp,
     spray: wpn.spray,
     inherent: def.inherent,
-    adsMul: input.aiming ? def.spreadMul : 1,
+    adsMul: aiming ? def.spreadMul : 1,
   });
   wpn.spray = decaySpray(wpn.spray, dt, def.sprayRecover);
   // The crosshair must be honest about where shots land: for pellet weapons

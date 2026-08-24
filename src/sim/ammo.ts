@@ -7,6 +7,10 @@
 
 /** True when `mag` rounds left counts as "think about reloading" for this weapon. */
 export function isLowAmmo(mag: number, magSize: number): boolean {
+  // A zero-capacity weapon (the melee knife) has NO ammo semantics — it can
+  // never be "low". Returning false here keeps "a full mag is never low"
+  // universal over the whole catalog instead of special-casing the caller.
+  if (magSize <= 0) return false;
   return mag <= Math.floor(magSize / 3);
 }
 

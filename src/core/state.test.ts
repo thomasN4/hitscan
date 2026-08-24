@@ -6,7 +6,7 @@
 // they are caught by review and by scripts/smoke-test.mjs.)
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
-         sanitizeLoadout, session, player } from './state';
+         sanitizeLoadout, session, player, equippedId } from './state';
 
 describe('state module purity', () => {
   // main.ts overwrites session's config fields from the URL query at startup;
@@ -26,6 +26,23 @@ describe('state module purity', () => {
     expect(primaries.length).toBeGreaterThanOrEqual(2);
     expect(secondaries.length).toBeGreaterThanOrEqual(2);
   });
+
+  test('exactly one melee weapon, and it sits in neither picker column', () => {
+    // The knife is always carried (slot 2) and never picked — the class
+    // split is what keeps a corrupted loadout from naming it.
+    const melee = Object.values(WEAPONS).filter(d => d.class === 'melee');
+    expect(melee).toHaveLength(1);
+    expect(melee[0]!.name).toBe('KNIFE');
+  });
+
+  test('position 2 is always the knife, whatever the loadout', () => {
+    setLoadout('sniper', 'revolver');
+    expect(equippedId(0)).toBe('sniper');
+    expect(equippedId(1)).toBe('revolver');
+    expect(equippedId(2)).toBe('knife');
+    setLoadout('smg', 'pistol');
+    expect(equippedId(2)).toBe('knife');
+  });
 });
 
 describe('armLoadout', () => {
@@ -43,6 +60,14 @@ describe('armLoadout', () => {
     expect(ammoStore[0].reserve).toBe(WEAPONS[loadout.primary].reserveMax);
     expect(ammoStore[1].mag).toBe(WEAPONS[loadout.secondary].magSize);
     expect(ammoStore[1].reserve).toBe(WEAPONS[loadout.secondary].reserveMax);
+  });
+
+  test('leaves the knife position alone — a blade holds no rounds', () => {
+    // armLoadout covers the PICKED positions only; slot 2 stays zeroed no
+    // matter what was deployed.
+    ammoStore[2].mag = 5; // even a corrupted value survives untouched
+    setLoadout('shotgun', 'revolver');
+    expect([ammoStore[2].mag, ammoStore[2].reserve]).toEqual([5, 0]);
   });
 
   test('mirrors the PRIMARY into the live weapon and clears an in-flight reload', () => {
@@ -73,6 +98,9 @@ describe('setLoadout', () => {
   test('enforces the class split with a named error', () => {
     expect(() => setLoadout('revolver', 'smg')).toThrow('not a primary');
     expect(() => setLoadout('sniper', 'sniper')).toThrow('not a secondary');
+    // The melee class passes neither column — the knife cannot be picked.
+    expect(() => setLoadout('knife', 'pistol')).toThrow('not a primary');
+    expect(() => setLoadout('smg', 'knife')).toThrow('not a secondary');
     // Rejected calls must not have touched state.
     expect(loadout.primary).not.toBe('revolver');
   });

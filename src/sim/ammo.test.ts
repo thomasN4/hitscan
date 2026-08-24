@@ -1,18 +1,29 @@
 import { describe, expect, test } from 'vitest';
 import { isLowAmmo, roundInterval, roundTransfer } from './ammo';
-import { WEAPONS } from '../core/state';
+import { WEAPONS, type WeaponId } from '../core/state';
+
+/** Catalog weapons with real ammo semantics (the knife's mag holds nothing). */
+function firearms(): typeof WEAPONS[WeaponId][] {
+  return Object.values(WEAPONS).filter(w => w.magSize > 0);
+}
 
 describe('isLowAmmo', () => {
   test('a FULL mag is never low — the issue #10 regression', () => {
-    for (const w of Object.values(WEAPONS)) {
+    for (const w of firearms()) {
       expect(isLowAmmo(w.magSize, w.magSize)).toBe(false);
     }
   });
 
   test('empty mag is always low', () => {
-    for (const w of Object.values(WEAPONS)) {
+    for (const w of firearms()) {
       expect(isLowAmmo(0, w.magSize)).toBe(true);
     }
+  });
+
+  test('a zero-capacity weapon has no ammo semantics and is never low', () => {
+    // The knife never reloads; classifying its perpetual 0/0 as "low" would
+    // advertise a reload that cannot happen.
+    expect(isLowAmmo(0, WEAPONS.knife.magSize)).toBe(false);
   });
 
   test('smg threshold stays at its historical 10', () => {

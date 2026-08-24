@@ -877,6 +877,108 @@ async function runShotgunCheck() {
   await page.close();
 }
 
+// Knife: the always-carried fallback (key 3). Pins the position-3 swap
+// through the real keybind, the hidden ammo readout while knifing, the
+// inert R/RMB paths (a blade holds no rounds and raises no sights), the
+// ABSENCE of a knife card in the picker, and an actual kill: two swings at
+// a teleported bot must drop it through the melee arc without touching ammo.
+async function runKnifeCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1500));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      // Real UI path: Play -> picker -> Deploy. The KNIFE card must NOT exist
+      // (melee builds no card; it would otherwise land in the secondary col).
+      document.getElementById('playBtn').click();
+      const screen = document.getElementById('loadoutScreen');
+      if (!screen || screen.style.display !== 'flex') return { fail: 'picker did not open' };
+      const knifeCard = [...document.querySelectorAll('.wcard')].find(b => b.textContent.includes('KNIFE'));
+      if (knifeCard) return { fail: 'KNIFE built a picker card; melee must be skipped' };
+      const hint = document.getElementById('loadoutScreen').textContent;
+      if (!/knife/i.test(hint)) return { fail: 'picker never mentions the carried knife' };
+      const card = name => [...document.querySelectorAll('.wcard')].find(b => b.textContent.includes(name));
+      card('SMG').click();
+      card('PISTOL').click();
+      document.getElementById('deployBtn').click();
+      cs.game.started = true;
+      cs.game.locked = true;
+      await wait(150);
+
+      // Key 3 takes the always-carried third position.
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit3' }));
+      await wait(150);
+      const swapped = {
+        slot: cs.game.slot,
+        name: cs.weapon.name,
+        mag: cs.weapon.mag,
+        magSize: cs.weapon.magSize,
+        reserve: cs.weapon.reserve,
+        ammoHidden: document.getElementById('magText').style.display === 'none',
+      };
+
+      // R is inert while knifing — no reload may start.
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+      await wait(300);
+      const reloadInert = { reloading: cs.weapon.reloading };
+      // RMB is inert while knifing — input flips, but ADS must never blend in.
+      window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+      await wait(400);
+      const rmbInert = { aimingInput: cs.game.aiming, adsLerp: +cs.game.adsLerp.toFixed(3) };
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
+
+      // The kill: teleport next to a live T, face its torso, swing twice.
+      cs.player.hp = 100000; // the bot shoots back; the swings are what matter
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+      bot.mesh.position.set(cs.player.pos.x, 0, cs.player.pos.z - 1.4);
+      cs.game.yaw = 0; // forward is -z, straight at the bot
+      cs.game.pitch = 0; // torso sits inside the arc from here
+      const first = { alive: bot.alive };
+      window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+      await wait(250); // one swing per press (semiAuto latch)
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+      first.hpAfterSwing1 = bot.hp;
+      await wait(400); // clear the 0.45 s swing cadence
+      window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+      await wait(250);
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+      await wait(200);
+      return {
+        swapped, reloadInert, rmbInert,
+        killed: !bot.alive,
+        // Head/torso depends on which part is nearest the eye (a point-blank
+        // swing often lands the ☠ headshot line), and the round-win banner
+        // may prepend above either (one bot = an instant round) — so match
+        // anywhere in the feed.
+        feedHasKill: /You (killed|☠ headshot) T-\d+/.test(document.getElementById('killfeed')?.textContent ?? ''),
+        magStillZero: cs.weapon.mag === 0 && cs.weapon.reserve === 0,
+        hpAfterSwing1: first.hpAfterSwing1,
+      };
+    });
+    if (result.fail) throw new Error(result.fail);
+    if (result.swapped.slot !== 2 || result.swapped.name !== 'KNIFE') throw new Error(`key 3 did not take the knife: ${JSON.stringify(result.swapped)}`);
+    if (result.swapped.mag !== 0 || result.swapped.magSize !== 0 || result.swapped.reserve !== 0) throw new Error(`knife armed holding ammo: ${JSON.stringify(result.swapped)}`);
+    if (!result.swapped.ammoHidden) throw new Error('ammo readout still visible while knifing');
+    if (result.reloadInert.reloading) throw new Error('R started a reload while knifing');
+    if (result.rmbInert.adsLerp > 0.01) throw new Error(`RMB blended into ADS while knifing: ${JSON.stringify(result.rmbInert)}`);
+    if (!result.killed) throw new Error(`two swings did not kill the bot (hp after swing 1: ${result.hpAfterSwing1})`);
+    if (!result.feedHasKill) throw new Error('killfeed missing the knife kill line');
+    if (!result.magStillZero) throw new Error(`swinging consumed ammo: ${JSON.stringify({ mag: result.swapped })}`);
+    console.log('[knife] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[knife] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[knife] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
@@ -885,6 +987,7 @@ try {
   await runBotClimbCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
   await runShotgunCheck();
+  await runKnifeCheck();
 } finally {
   await browser.close();
 }

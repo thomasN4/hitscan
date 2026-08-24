@@ -422,8 +422,12 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                                // the contract rather than broken tuning
     fireRate: 0.45,  // swing cadence (~2.2 swings/sec click ceiling)
     reloadTime: 0,   // never reloads; tryReload() no-ops on a melee def
-    damage: 55,      // two swings to kill; legs x0.75, head x4 one-taps point-blank
-    headshotMult: 4,
+    damage: 55,      // two swings to kill ANYWHERE on the body; legs x0.75
+    headshotMult: 1, // NO head premium. The arc strikes the NEAREST part, and
+                     // point-blank that is usually the head — with x4 every
+                     // close swing one-tapped (the smoke phase measured -120
+                     // hp), making the free fallback out-gun the revolver in
+                     // its own niche. A blade cuts the same at any height.
     zoomFovs: [70],  // placeholder for the non-empty-zoomFovs invariant; RMB is
                      // inert while melee (updateWeapon gates adsLerp off)
     spreadMul: 1,    // unused: a swing samples no cone

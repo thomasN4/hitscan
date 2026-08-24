@@ -56,6 +56,16 @@ describe('balance intents from the WEAPONS comments', () => {
     expect(damageForPart(WEAPONS.pistol, 'head')).toBeLessThan(100);
   });
 
+  test('the knife pays NO head premium — two swings to kill, any zone', () => {
+    // The arc strikes the nearest part and point-blank that is usually the
+    // head, so a multiplier there is really a point-blank one-tap multiplier
+    // (measured -120 hp in the smoke phase). Pinned as GONE, like the smg's
+    // retired one-tap above: heads cut for exactly torso damage.
+    expect(damageForPart(WEAPONS.knife, 'head')).toBe(damageForPart(WEAPONS.knife, 'torso'));
+    expect(headShots('knife')).toBe(2);
+    expect(torsoShots('knife')).toBe(2);
+  });
+
   test('torso shots to kill match the stated intents', () => {
     expect(torsoShots('sniper')).toBe(2);
     expect(torsoShots('revolver')).toBe(2);

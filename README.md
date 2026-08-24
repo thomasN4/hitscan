@@ -44,7 +44,7 @@ Three maps plus the match setup (enemy/allied bot counts, round length in minute
 
 Common rules:
 
-- Damage zones: head ×4 (one-shot kill), torso ×1, legs ×0.75.
+- Damage zones: head ×2 with the SMG/pistol (two headshots to kill), ×4 with the sniper/shotgun/revolver (one-shot kill); torso ×1; legs ×0.75.
 - Accuracy stacks: each weapon has an inherent rest cone, on top of which stance, movement and being airborne add spread, all multiplied by a spray factor that grows while you hold the trigger. Crouching is the most accurate stance and crouch-walking the most accurate way to move; sprinting is far worse than walking (movement scales cubically), and shooting mid-air is worse still. Recoil climbs vertically *and* wanders horizontally, so sustained fire has to be steered, not just pulled down.
 - Bullets leave persistent decals (capped at 200; oldest recycled) — check your grouping on any surface.
 - Clearing all bots simultaneously wins the round; individual bots self-respawn after 6 s.

@@ -89,7 +89,11 @@ export function respawn(): void {
   wpn.adsLerp = 0;
   armLoadout();   // refills both loadout positions and mirrors the primary into `weapon`
   wpn.slot = 0;
-  wpn.lastSlot = 0; // Q target resets with the position: no swap has happened yet
+  // Spawn Q-READY: switchWeapon only records lastSlot on a REAL swap, so
+  // pinning it to the primary here made the first Q a self-targeted no-op —
+  // Q did nothing until you'd switched once by hand (playtest round 1).
+  // Pre-seeding the secondary position makes the first Q take it.
+  wpn.lastSlot = 1;
   wpn.zoomLevel = 0;
   updateHUD();
   clearVignette();

@@ -36,19 +36,19 @@ describe('the shipped table', () => {
 
 describe('sustained-fire bounds', () => {
   test('vertical recoil at/above the per-second input is flagged', () => {
-    // smg input = 1 kick / 0.105 s ≈ 9.52/s
-    expect(matching([tuned({ recoilRecover: 12 })], 'SMG', 'recoilRecover')).toHaveLength(1);
+    // smg input = 1 kick / 0.075 s ≈ 13.3/s (800 RPM)
+    expect(matching([tuned({ recoilRecover: 14 })], 'SMG', 'recoilRecover')).toHaveLength(1);
   });
 
   test('spray applies to EVERY weapon, semiAuto included', () => {
-    expect(matching([tuned({ sprayRecover: 0.6 })], 'SMG', 'sprayRecover')).toHaveLength(1);
+    expect(matching([tuned({ sprayRecover: 0.9 })], 'SMG', 'sprayRecover')).toHaveLength(1); // input = 0.06/0.075 = 0.8/s
     expect(matching([tuned({ sprayRecover: 0.3 }, SNIPER)], 'SNIPER', 'sprayRecover')).toHaveLength(1); // input ≈ 0.227/s
   });
 
   test('horizontal yaw is sized against the MEAN kick, not the max', () => {
-    // 2 × 0.105 = 0.21 ≥ yawKick/2 = 0.2 — the drain per shot interval beats
+    // 3 × 0.075 = 0.225 ≥ yawKick/2 = 0.2 — the drain per shot interval beats
     // the average kick even though it never beats the full one.
-    expect(matching([tuned({ yawRecover: 2 })], 'SMG', 'yawRecover')).toHaveLength(1);
+    expect(matching([tuned({ yawRecover: 3 })], 'SMG', 'yawRecover')).toHaveLength(1);
   });
 });
 
@@ -132,6 +132,14 @@ describe('static bounds', () => {
   test('punchRad climbing past ~10° over the cap is flagged', () => {
     // 0.03 rad × 6 units ≈ 10.3°
     expect(matching([tuned({ punchRad: 0.03 })], 'SMG', 'punchRad')).toHaveLength(1);
+  });
+
+  test('pellets and pelletCone: present means positive, cone needs pellets', () => {
+    const SHOTGUN = WEAPONS.shotgun;
+    expect(matching([tuned({ pellets: 0 }, SHOTGUN)], 'SHOTGUN', 'pellets')).toHaveLength(1);
+    expect(matching([tuned({ pelletCone: 0 }, SHOTGUN)], 'SHOTGUN', 'pelletCone')).toHaveLength(1);
+    // A fixed pattern on a single-ray weapon does nothing — flag the dead field.
+    expect(matching([tuned({ pelletCone: 0.02, pellets: undefined }, SHOTGUN)], 'SHOTGUN', 'pelletCone')).toHaveLength(1);
   });
 });
 

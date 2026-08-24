@@ -102,6 +102,21 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     if (!(def.magSize > 0)) {
       out.push(`${name}: magSize ${num(def.magSize)} must be > 0 — the magazine holds nothing`);
     }
+
+    // Pellet weapons: a pull fires at least one ray, and the fixed pattern
+    // (pelletCone) only exists where there IS a pattern. A zero cone would
+    // make pellets laser-tight — contradicting the fixed-choke model.
+    if (def.pellets !== undefined && !(def.pellets > 0)) {
+      out.push(`${name}: pellets ${num(def.pellets)} must be > 0 when present — a trigger pull fires at least one ray`);
+    }
+    if (def.pelletCone !== undefined) {
+      if (!(def.pelletCone > 0)) {
+        out.push(`${name}: pelletCone ${num(def.pelletCone)} must be > 0 when present — a zero cone contradicts the fixed-pattern choke model`);
+      }
+      if (def.pellets === undefined) {
+        out.push(`${name}: pelletCone without pellets does nothing — single-ray weapons have no pattern to fix`);
+      }
+    }
     if (!(def.reserveMax >= 0)) {
       out.push(`${name}: reserveMax ${num(def.reserveMax)} must be >= 0 — negative reserve breaks reload accounting`);
     }

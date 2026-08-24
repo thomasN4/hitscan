@@ -39,6 +39,28 @@ match start and at death.
   sniper/revolver pair; dedicated shotgun phase pins "one shell = one round,
   ~one hole per pellet".
 
+## Playtest round 1 (same branch)
+
+Five fixes from hands-on testing, all on the picker branch:
+
+- **Per-weapon ADS alignment.** `updateViewmodel`'s hardcoded hip→ADS shift was
+  tuned for the smg and left the pistols' sight lines off screen-center. Each
+  `VIEWMODELS` entry now carries an `aimOffset`, applied by player.ts; tuned
+  and verified per weapon with `scripts/viewmodel-shots.mjs` (hip + ADS
+  captures against the crosshair).
+- **Shotgun fixed choke.** Pellets used to sample inside the live spread, so
+  ADS/crouch shrank the whole group. Now two layers: situational cone moves
+  the pattern's center; `pelletCone` (0.02 rad) is the fixed mutual pattern,
+  sampled by `sim/ballistics.ts:pelletShotDirection`. Crosshair shows the
+  situational + cone sum — the true outer bound.
+- **Q works immediately.** respawn() pre-seeds `wpn.lastSlot` with the
+  secondary position; previously Q was a self-targeted no-op until the first
+  manual switch. Pinned by a Q-first smoke phase.
+- **SMG/pistol headshots ×2** (two taps to kill; sniper/shotgun/revolver keep
+  the one-tap). Pinned per-weapon in damage.test.ts.
+- **SMG 800 RPM** (fireRate 0.075). All rate-derived tuning notes and the
+  recoil.test.ts spray pins recomputed (mag-end bloom ≈ 2.15, ~4 s settle).
+
 ## Review lessons
 
 (Tranche open — lessons append below with repo-wide continuing numbers.)

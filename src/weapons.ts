@@ -19,7 +19,7 @@ import { spawnImpact, spawnBulletHole } from './effects';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
 import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
-import { shotDirection } from './sim/ballistics';
+import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { approach } from './sim/smoothing';
 
@@ -155,22 +155,37 @@ let revolverMag: THREE.Mesh; // kept for the reload animation (cylinder drop/res
 gunGroup.add(smgGroup, sniperGroup, pistolGroup, shotgunGroup, revolverGroup);
 
 /**
- * Per-weapon viewmodel: the animated group plus the mesh poseReload() drops
- * and reseats during a reload. Keyed by catalog id so a new weapon fails to
+ * Per-weapon viewmodel: the animated group, the mesh poseReload() drops and
+ * reseats during a reload, and the hip→ADS position delta that brings THIS
+ * gun's sights onto the screen center at full adsLerp (each viewmodel rests
+ * at its own offset/sight height — one hardcoded shift cannot center them
+ * all; playtest round 1). Keyed by catalog id so a new weapon fails to
  * compile until it registers here.
  */
 interface ViewModel {
   group: THREE.Group;
   mag: THREE.Mesh;
+  /** Position delta applied at full ADS: x re-centers the rest offset,
+   *  y raises the sight line to eye height. Tuned against screenshots
+   *  (scripts/viewmodel-shots.mjs). */
+  aimOffset: { x: number; y: number };
 }
 
 const VIEWMODELS: Record<WeaponId, ViewModel> = {
-  smg: { group: smgGroup, mag: smgMag },
-  sniper: { group: sniperGroup, mag: sniperMag },
-  shotgun: { group: shotgunGroup, mag: shotgunMag },
-  pistol: { group: pistolGroup, mag: pistolMag },
-  revolver: { group: revolverGroup, mag: revolverMag },
+  smg:     { group: smgGroup,     mag: smgMag,     aimOffset: { x: -0.25, y: 0.14 } },  // the baseline every sight line matches
+  sniper:  { group: sniperGroup,  mag: sniperMag,  aimOffset: { x: -0.26, y: 0.12 } },  // scope tube centered (overlay takes over at full ADS)
+  shotgun: { group: shotgunGroup, mag: shotgunMag, aimOffset: { x: -0.25, y: 0.15 } },  // barrel top line converges on center
+  pistol:  { group: pistolGroup,  mag: pistolMag,  aimOffset: { x: -0.24, y: 0.15 } },  // slide-top sight line at the smg's height
+  revolver:{ group: revolverGroup,mag: revolverMag,aimOffset: { x: -0.24, y: 0.147 } }, // frame-top sight line at the smg's height
 };
+
+/**
+ * The equipped weapon's hip→ADS viewmodel delta, for player.ts:updateViewmodel
+ * to apply scaled by adsLerp. Same no-miss lookup contract as currentDef().
+ */
+export function viewmodelAimOffset(): { x: number; y: number } {
+  return VIEWMODELS[equippedId(wpn.slot)].aimOffset;
+}
 
 // Per-weapon shot sound; keyed by WeaponId so no weapon can miss.
 const SHOT_SFX: Record<WeaponId, () => void> = {
@@ -382,7 +397,14 @@ export function shoot(): void {
     // Euler order and cone sampling live in sim/ballistics.ts; pitch and yaw
     // both carry their recoil punch, so shots follow exactly what the camera
     // shows — vertically via currentAimPitch, horizontally via currentAimYaw.
-    const dir = shotDirection(currentAimPitch(), currentAimYaw(), wpn.spread);
+    // Pellet weapons sample TWO layers: the live situational cone plus the
+    // weapon's fixed pattern (pelletCone), so ADS/crouch steer the pattern's
+    // center without shrinking it.
+    const pitch = currentAimPitch();
+    const yaw = currentAimYaw();
+    const dir = def.pelletCone !== undefined
+      ? pelletShotDirection(pitch, yaw, wpn.spread, def.pelletCone)
+      : shotDirection(pitch, yaw, wpn.spread);
     raycaster.set(origin, dir);
     raycaster.far = 200;
     const hits = raycaster.intersectObjects(targets, false);
@@ -529,5 +551,9 @@ export function updateWeapon(dt: number): void {
     adsMul: input.aiming ? def.spreadMul : 1,
   });
   wpn.spray = decaySpray(wpn.spray, dt, def.sprayRecover);
-  setCrosshairGap(crosshairGapPx(wpn.spread, camera.fov, window.innerHeight));
+  // The crosshair must be honest about where shots land: for pellet weapons
+  // that is the situational cone PLUS the fixed pattern (pelletCone) — their
+  // per-axis sum is the true outer bound of a pellet's deflection.
+  const displaySpread = wpn.spread + (def.pelletCone ?? 0); // documented default: no pattern
+  setCrosshairGap(crosshairGapPx(displaySpread, camera.fov, window.innerHeight));
 }

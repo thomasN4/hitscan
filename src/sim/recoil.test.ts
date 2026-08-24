@@ -81,18 +81,19 @@ describe('decaySpray', () => {
     expect(decaySpray(3, 1, 0.5)).toBeCloseTo(2.5, 12);
   });
 
-  test('a full smg magazine blooms the cone to about 1.9x', () => {
+  test('a full smg magazine blooms the cone to about 2.15x', () => {
     // Simulated against the REAL fire loop, not a hand-seeded end state: decay
     // runs concurrently with fire, so the net per shot is
     // sprayKick − sprayRecover × fireRate, well under sprayKick. An earlier
     // version of this test seeded 1 + 30 × sprayKick = 2.8 and measured pure
     // decay from there — a value the game could not produce, which is how a
-    // spray that only reached 1.28 shipped green.
+    // spray that only reached 1.28 shipped green. (Figure updated for the
+    // 800 RPM rate: net ≈ +0.0383/shot × 30 rounds.)
     const smg = WEAPONS.smg;
-    expect(magazineSprayPeak(smg)).toBeCloseTo(1.9, 1);
+    expect(magazineSprayPeak(smg)).toBeCloseTo(2.15, 1);
   });
 
-  test('that bloom settles back in about three seconds', () => {
+  test('that bloom settles back in about four seconds', () => {
     const smg = WEAPONS.smg;
     let spray = magazineSprayPeak(smg);
     let elapsed = 0;
@@ -101,8 +102,8 @@ describe('decaySpray', () => {
       spray = decaySpray(spray, dt, smg.sprayRecover);
       elapsed += dt;
     }
-    expect(elapsed).toBeGreaterThan(2.7);
-    expect(elapsed).toBeLessThan(3.5);
+    expect(elapsed).toBeGreaterThan(3.6);
+    expect(elapsed).toBeLessThan(4.4);
   });
 
   test('a sustained smg spray outruns its own recovery', () => {

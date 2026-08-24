@@ -446,29 +446,32 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       console.log(`[revolver] OK`, JSON.stringify(revolver));
     }
 
-    // 6b) Q quick-swap: toggles between the two most recently held POSITIONS.
-    //     Digit2 records the primary position as lastSlot; each Q then flips
-    //     slot/lastSlot (so Q,Q returns you where you were), and Digit1
-    //     restores the primary for the phases below. Range only, like the
-    //     other switch phases.
+    // 6b) Q quick-swap: works IMMEDIATELY. respawn() pre-seeds lastSlot with
+    //     the secondary position, so the FIRST Q (before any manual switch)
+    //     must take it — a playtest regression had Q no-op until you switched
+    //     by hand once. After that each Q flips slot/lastSlot (Q,Q returns
+    //     you where you were), and Digit1 restores the primary for the phases
+    //     below. Range only, like the other switch phases.
     if (sprintCheck) {
       const qswap = await page.evaluate(async () => {
         const cs = window.__cs;
         const wait = ms => new Promise(r => setTimeout(r, ms));
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
-        await wait(150);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
         await wait(150);
-        const backToPrimary = { slot: cs.game.slot, last: cs.game.lastSlot };
+        const firstQ = { slot: cs.game.slot };
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
         await wait(150);
-        const backToSecondary = { slot: cs.game.slot };
+        const secondQ = { slot: cs.game.slot, last: cs.game.lastSlot };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
+        await wait(150);
+        const thirdQ = { slot: cs.game.slot };
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
-        return { backToPrimary, backToSecondary, restored: cs.game.slot };
+        return { firstQ, secondQ, thirdQ, restored: cs.game.slot };
       });
-      if (qswap.backToPrimary.slot !== 0 || qswap.backToPrimary.last !== 1) throw new Error(`Q should return to the previous position: ${JSON.stringify(qswap.backToPrimary)}`);
-      if (qswap.backToSecondary.slot !== 1) throw new Error(`second Q should toggle back: ${JSON.stringify(qswap.backToSecondary)}`);
+      if (qswap.firstQ.slot !== 1) throw new Error(`first Q after spawn must take the secondary position: ${JSON.stringify(qswap.firstQ)}`);
+      if (qswap.secondQ.slot !== 0 || qswap.secondQ.last !== 1) throw new Error(`second Q should return to the primary: ${JSON.stringify(qswap.secondQ)}`);
+      if (qswap.thirdQ.slot !== 1) throw new Error(`third Q should toggle back to the secondary: ${JSON.stringify(qswap.thirdQ)}`);
       if (qswap.restored !== 0) throw new Error(`restore to primary failed: slot ${qswap.restored}`);
       console.log(`[qswap] OK`, JSON.stringify(qswap));
     }

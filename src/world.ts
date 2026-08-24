@@ -23,6 +23,26 @@ export const solids: THREE.Object3D[] = [];
 export const colliders: THREE.Box3[] = [];
 
 /**
+ * A level change a walker can traverse but a grid of standable cells cannot
+ * express cheaply — today, exactly one flight of stairs.
+ *
+ * The navigation grid (sim/navGrid.ts) samples at 1 m, and a 0.75 m tread
+ * means one cell along a flight climbs more than STEP_HEIGHT; sampled that
+ * coarsely, every staircase reads as a wall. Rather than quadruple the sample
+ * count to resolve treads, flights announce their own endpoints here and enter
+ * the graph as a single edge.
+ */
+export interface NavLink {
+  /** Floor-level mouth of the flight. */
+  bottom: THREE.Vector3;
+  /** Landing at the top, level with whatever the flight serves. */
+  top: THREE.Vector3;
+}
+
+/** Traversable level changes, one per flight. Populated by addStairs. */
+export const navLinks: NavLink[] = [];
+
+/**
  * Register a mesh as a raycast target only — no movement AABB.
  *
  * For the ground planes in both builders: they need decals and must stop
@@ -135,6 +155,10 @@ export type StairDir = 'x+' | 'x-' | 'z+' | 'z-';
  * reaches exactly `y + count * stepH`: place the landing platform at that
  * height with its face flush against the last step for a seamless join.
  *
+ * Also registers the flight's endpoints as a NavLink, so navigation gets
+ * stairs for free from the same call that builds them — there is no second
+ * place to keep in sync, and a map cannot ship a flight bots cannot see.
+ *
  * Browser-only: composes addSolidBox, which touches the scene.
  *
  * @param x centre x of the flight's first step
@@ -148,6 +172,37 @@ export type StairDir = 'x+' | 'x-' | 'z+' | 'z-';
  * @param mat surface material; omitted means Mesh's own default
  * @param dir direction of ascent; the flight advances this way step by step
  */
+/**
+ * The endpoints addStairs would build a flight between, without building it.
+ *
+ * Pure and separate so the arithmetic is testable against the coordinates the
+ * map builders document independently — maps/elevation.ts states its internal
+ * flight tops out at z = 0 and its external one at z = 12.5, and this must
+ * agree with both or navigation is aiming at nothing.
+ */
+export function stairLink(
+  x: number,
+  y: number,
+  z: number,
+  stepH: number,
+  stepD: number,
+  count: number,
+  dir: StairDir,
+): NavLink {
+  // (x, z) is the flight's origin — step 0's centre sits half a tread along
+  // dir from it — so the origin itself is the floor immediately at the mouth.
+  // The far edge of the last step is count treads along, at count risers up.
+  const run = count * stepD;
+  return {
+    bottom: new THREE.Vector3(x, y, z),
+    top: new THREE.Vector3(
+      dir === 'x+' ? x + run : dir === 'x-' ? x - run : x,
+      y + count * stepH,
+      dir === 'z+' ? z + run : dir === 'z-' ? z - run : z,
+    ),
+  };
+}
+
 export function addStairs(
   x: number,
   y: number,
@@ -159,6 +214,7 @@ export function addStairs(
   mat?: THREE.Material,
   dir: StairDir = 'z+',
 ): void {
+  navLinks.push(stairLink(x, y, z, stepH, stepD, count, dir));
   for (let i = 0; i < count; i++) {
     const rise = (i + 1) * stepH;
     const run = (i + 0.5) * stepD;
@@ -176,4 +232,5 @@ export function addStairs(
 export function resetWorld(): void {
   solids.length = 0;
   colliders.length = 0;
+  navLinks.length = 0;
 }

@@ -18,6 +18,7 @@ import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders } from './world';
 import { BUILDERS } from './maps';
+import { buildNav, route, navGrid } from './nav';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
@@ -60,6 +61,10 @@ initWeaponViewmodels();  // needs camera/scene
 // lookup because it means something narrower — "no bots, no round clock" — and
 // gates the loop below too; every other map is a full combat map.
 BUILDERS[session.map]();
+// After the builder, never before: the graph samples world.ts's registries,
+// which the builder is what fills. Map switching is a full page reload, so
+// this runs once per session.
+buildNav();
 if (!RANGE) {
   spawnBots(session.botsT, 'T');
   if (session.botsCt > 0) spawnBots(session.botsCt, 'CT');
@@ -276,7 +281,13 @@ declare global {
       colliders: typeof colliders;
       /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */
       gameTime: typeof gameTime;
+      /**
+       * Navigation graph queries. The graph is the one part of the AI whose
+       * correctness can be checked without watching a bot move, so the smoke
+       * test asks it directly whether the deck is reachable from the floor.
+       */
+      nav: { route: typeof route; grid: typeof navGrid };
     };
   }
 }
-window.__cs = { game, weapon, player, bots, bulletHoles, colliders, gameTime };
+window.__cs = { game, weapon, player, bots, bulletHoles, colliders, gameTime, nav: { route, grid: navGrid } };

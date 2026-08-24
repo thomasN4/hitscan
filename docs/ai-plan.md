@@ -179,6 +179,42 @@ where the stall happens, not that it happens — stair navigation is what closes
 it, because a bot must head for the TOP OF THE FLIGHT and keep heading there
 until the level changes, which no band around the target can express.
 
+### Tranche 5 — navigation (in flight)
+
+Reactive steering has a ceiling, and measurement found it. With the player
+held on the second-floor deck, the worst 5-second windows show bots walking
+17 m to finish 0.1 m from where they started, **never blocked**, standing
+directly underneath. Not pinned — routeless. 7 of 40 windows; median
+straightness 0.81, so most bots move fine.
+
+That killed two cheaper designs before either shipped:
+
+- A stuck-detector keyed on sustained `moveBlocked` fired on **0%** of frames.
+  The longest run of consecutive blocked frames across 8 bots over 30 s is
+  1–2, peak blocked rate 1%. `blk` looks solid in the readout because it
+  flickers fast, not because it stays set.
+- Straight-line steering to a stair mouth cannot solve the measured case
+  either. The internal flight ascends `z+` from `z=-9` and tops out at `z=0`,
+  so a bot at `(4, 0, 8)` faces its 3.6 m **tall end**, and the nearest
+  outdoor flight is behind a doorway.
+
+So: an actual graph. `sim/navGrid.ts` samples the world into multi-level
+walkable nodes and A*s over them; `nav.ts` binds it to `collision.ts` and
+`world.ts`; `world.ts:addStairs` publishes each flight's endpoints as a
+`NavLink`, since a grid coarse enough to be cheap reads every staircase as a
+wall. Measured on the elevation map: 16,896 nodes, 124,140 edges, 4 links,
+33 ms to build, and a 23-waypoint route from under the deck to the deck that
+traverses exactly one 3.6 m link jump.
+
+Two things worth knowing before building on it:
+
+- **Representation matters more than it looks.** Arrays-of-arrays-of-objects
+  cost 5.5 MB of live heap against a 6.3 MB baseline for the entire game.
+  Flat CSR typed arrays cost ~1.4 MB, and the build dropped 53 ms to 33 ms.
+- **A\* is 3.7 ms** for a worst-case cross-map route. Per-bot recomputes must
+  be staggered and bounded, or a dozen bots re-routing on the same frame will
+  be felt.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —

@@ -59,6 +59,10 @@ export type HitZone = 'head' | 'torso' | 'legs';
 
 /** Structural shape of one enemy (see bots.ts for the concrete class). */
 export interface Bot {
+  /** Per-match serial (1-based), stamped at construction — stable across deaths. */
+  id: number;
+  /** Debug-log/killfeed display name derived from id, e.g. 'T-3'. */
+  name: string;
   mesh: THREE.Group;
   head: THREE.Mesh;
   torso: THREE.Mesh;

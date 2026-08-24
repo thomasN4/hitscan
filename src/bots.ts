@@ -22,6 +22,19 @@ import { addKillfeed, updateScore } from './hud';
 
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
+
+/** Serial source for Bot ids/names; 1-based per page load. */
+let nextBotId = 1;
+
+/**
+ * DEV-only lifecycle trace (issue #17): makes the pause-freeze of the
+ * scheduled revival observable from devtools — kill a bot, note the death
+ * line, wait past 6 s wall-clock behind the pause menu, confirm the respawn
+ * line only appears after resuming. Statically dead in production builds.
+ */
+function debugLog(msg: string): void {
+  if (import.meta.env.DEV) console.debug(`[bot] ${msg}`);
+}
 // Shared geometries/materials — one allocation for all bots.
 const botGeo = {
   torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),
@@ -52,6 +65,9 @@ export class Bot implements BotShape {
   legs: THREE.Mesh;
   hp = 100;
   alive = true;
+  /** Stable identity for debug logs and killfeed attribution. */
+  id = nextBotId++;
+  name = `T-${this.id}`;
   /** Varied per bot so they spread out. */
   speed = 3.2 + Math.random() * 1.4;
   fireCooldown = 1 + Math.random() * 2; // staggered first shot
@@ -168,13 +184,15 @@ export class Bot implements BotShape {
     this.mesh.visible = false;
     score.scoreKills++;
     updateScore();
-    addKillfeed(`You ${killerPart === 'head' ? '☠ headshot' : 'killed'} Bot`);
+    addKillfeed(`You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`);
+    debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();
     gameTime.schedule(6, () => {
       this.hp = 100;
       this.alive = true;
       this.mesh.visible = true;
       this.spawnAtRandom();
+      debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }
 }

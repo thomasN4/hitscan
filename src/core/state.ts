@@ -14,21 +14,33 @@ import * as THREE from 'three';
 import { GameClock } from '../sim/gameClock';
 
 // ---------- Domain vocabulary ----------
+/** Picker column / loadout position a weapon belongs in. */
+export type WeaponClass = 'primary' | 'secondary';
+
+/** Catalog ids — stable strings; the loadout slice and the picker use them. */
+export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver';
+
 /**
  * Static stats for one weapon, shaped like the WEAPONS entries below.
  *
- * The three optional fields are sniper-only; every consumer must tolerate
- * their absence (the smg has no scope gate, fires full-auto, and does not
- * kick you out of iron sights).
+ * The optional fields are per-weapon extras — the sniper's scope gate /
+ * semi-auto / unscope-on-shot trio and the shotgun's pellets count. Every
+ * consumer must tolerate their absence (the smg has no scope gate, fires
+ * full-auto, does not kick you out of iron sights, and fires one ray).
  */
 export interface WeaponDef {
   name: string;
+  /** Which picker column / loadout position this weapon may occupy. */
+  class: WeaponClass;
   magSize: number;
   reserveMax: number;
   /** Seconds between shots (~9.5 rounds/sec for the smg). */
   fireRate: number;
   reloadTime: number;
-  /** Per body shot; legs x0.75, head x headshotMult. */
+  /**
+   * Damage per body hit per RAY; legs x0.75, head x headshotMult. With
+   * pellets > 1 several rays land per trigger pull, so `damage` is per pellet.
+   */
   damage: number;
   headshotMult: number;
   /** Scoped FOV targets cycled with the mouse wheel while aiming. */
@@ -46,6 +58,9 @@ export interface WeaponDef {
   yawKick: number;
   yawRecover: number;
   scopedOverlay: boolean;
+  /** Hitscan rays fired per trigger pull, each sampled in the live cone.
+   *  Absent means a single ray. Shotgun only. */
+  pellets?: number;
   /** Recoil below which a fresh RMB press may enter the scope. Sniper only. */
   scopeGate?: number;
   /** One shot per LMB press; holding does nothing. Sniper only. */
@@ -172,27 +187,29 @@ export const RECOIL_YAW_CAP = 3;
 export const BASE_FOV = 75;
 
 /**
- * Weapon definitions (slot order = switch order via keys 1/2/3). Static stats
- * only — the live mutable copy is `weapon` below. zoomFovs are the scoped
- * FOV targets cycled with the mouse wheel while aiming (the smg has one
- * "iron sights" step); spreadMul is the ADS cone multiplier; inherent is the
- * weapon's resting shot cone in radians, before any stance/movement/spray.
+ * Which loadout POSITION is live: 0 = primary, 1 = secondary. The catalog
+ * position of a slot comes from `loadout` (see equippedId below), not from
+ * this index — keys 1/2 switch POSITIONS, not specific weapons.
  */
+export type WeaponSlot = 0 | 1;
+
+/** The positions, for iterating both without widening the index to `number`. */
+export const SLOTS: readonly WeaponSlot[] = [0, 1];
+
 /**
- * Which weapon slot is live. A three-entry union, not `number`, because the
- * table below is statically populated and every consumer already branches on
- * `=== 0` / `=== 1` / `=== 2`. Indexing a TUPLE by this union is exempt from
- * noUncheckedIndexedAccess, so `WEAPONS[wpn.slot]` is a plain WeaponDef and
- * the misses simply cannot happen rather than being guarded for.
+ * The full weapon catalog, keyed by id. A Record over the WeaponId union
+ * keeps the no-miss-indexing property the tuple used to provide: every key
+ * exists statically, so `WEAPONS[id]` is a plain WeaponDef under
+ * noUncheckedIndexedAccess. Static stats only — the live mutable copy is
+ * `weapon` below. zoomFovs are the scoped FOV targets cycled with the mouse
+ * wheel while aiming (single-entry weapons have one "iron sights" step);
+ * spreadMul is the ADS cone multiplier; inherent is the weapon's resting
+ * shot cone in radians, before any stance/movement/spray.
  */
-export type WeaponSlot = 0 | 1 | 2;
-
-/** The slots, for iterating all without widening the index back to `number`. */
-export const SLOTS: readonly WeaponSlot[] = [0, 1, 2];
-
-export const WEAPONS: readonly [WeaponDef, WeaponDef, WeaponDef] = [
-  {
+export const WEAPONS: Record<WeaponId, WeaponDef> = {
+  smg: {
     name: 'SMG',
+    class: 'primary',
     magSize: 30, reserveMax: 90,
     fireRate: 0.105, // seconds between shots (~9.5 rounds/sec, smg-like)
     reloadTime: 2.2,
@@ -200,7 +217,7 @@ export const WEAPONS: readonly [WeaponDef, WeaponDef, WeaponDef] = [
     headshotMult: 4,
     zoomFovs: [55],  // iron sights
     spreadMul: 0.3,
-    inherent: 0.0031, // rest-cone rad — ADS crouched ≈ 2" @ 50 m; hip ≈ 6.7"
+    inherent: 0.0031, // rest-cone rad — ADS crouched ≈ 2" @ 50 m; hip ≈ 6.7" @ 50 m
     sprayKick: 0.06, recoilKick: 1,
     sprayCap: 4,       // hard ceiling on the multiplier (rested = 1). Sustained
                        // fire alone tops out near 1.9 (see sprayRecover), so in
@@ -237,8 +254,9 @@ export const WEAPONS: readonly [WeaponDef, WeaponDef, WeaponDef] = [
                        // 0.5 → a typical mag-end walk clears in well under a second
     scopedOverlay: false,
   },
-  {
+  sniper: {
     name: 'SNIPER',
+    class: 'primary',
     magSize: 10, reserveMax: 30,
     fireRate: 1.1,   // semi-auto pacing (~0.9 shots/sec)
     reloadTime: 3.2,
@@ -265,8 +283,38 @@ export const WEAPONS: readonly [WeaponDef, WeaponDef, WeaponDef] = [
     semiAuto: true,      // one shot per LMB press; holding does nothing
     unscopeOnShot: true, // firing kicks you out of the scope (re-press RMB)
   },
-  {
+  shotgun: {
+    name: 'SHOTGUN',
+    class: 'primary',
+    magSize: 7, reserveMax: 28,
+    fireRate: 0.9,   // pump-action pacing (~1.1 shots/sec)
+    reloadTime: 3.2,
+    damage: 13,      // PER PELLET × pellets: 8 body hits = 104 — the point-blank
+                     // one-tap that decays hard with range as the cone spreads
+                     // pellets off target; legs x0.75, head x4 = 52/pellet
+    headshotMult: 4,
+    pellets: 8,      // independent hitscan rays per trigger pull
+    zoomFovs: [60],  // bead sight
+    spreadMul: 0.6,  // ADS chokes the cone only slightly — pellet guns don't snipe
+    inherent: 0.02,  // rad — THE pellet cone: ~1.1° half-angle ≈ a 40 cm group
+                     // at 20 m; stance/movement/spray terms ride on top of it
+    sprayKick: 0.15, recoilKick: 5,
+    sprayCap: 3,
+    sprayRecover: 0.08, // sustained-fire input bound = 0.15/0.9 ≈ 0.167/s — clears
+                        // it; semiAuto exempts the recoil rates but NEVER the
+                        // spray accumulator (validateWeapons header)
+    recoilRecover: 7,   // full settle inside the ~0.9 s pump cycle, bolt-action style;
+                        // semiAuto exemption like the sniper's
+    punchRad: 0.016,    // rad/unit — one meaty shoulder hit ≈ 3.4°, ~5.5° max climb
+    yawKick: 1.2,       // pumps kick crooked
+    yawRecover: 7,      // deliberate over-drain like the sniper: a per-shot jolt,
+                        // not a walk — settled before the next pump stroke lands
+    scopedOverlay: false,
+    semiAuto: true,     // one trigger pull = one shell; holding does nothing
+  },
+  pistol: {
     name: 'PISTOL',
+    class: 'secondary',
     magSize: 12, reserveMax: 36,
     fireRate: 0.17,  // semi-auto pacing (~5.9 shots/sec click ceiling)
     reloadTime: 1.8,
@@ -290,24 +338,51 @@ export const WEAPONS: readonly [WeaponDef, WeaponDef, WeaponDef] = [
     scopedOverlay: false,
     semiAuto: true,     // one shot per LMB press; holding does nothing
   },
-];
+  revolver: {
+    name: 'REVOLVER',
+    class: 'secondary',
+    magSize: 6, reserveMax: 24,
+    fireRate: 0.45,  // semi-auto pacing (~2.2 shots/sec click ceiling)
+    reloadTime: 3.0, // moon-clip style: slower than the pistol, hits far harder
+    damage: 55,      // two torso shots to kill; head x4 one-taps with room to spare
+    headshotMult: 4,
+    zoomFovs: [56],  // iron sights
+    spreadMul: 0.3,
+    inherent: 0.0035, // rest-cone rad — a touch looser than the pistol's
+    sprayKick: 0.12, recoilKick: 4,
+    sprayCap: 3,
+    sprayRecover: 0.12, // input ≈ 2.2 shots/s × 0.12 = 0.267/s — clears the sustained-fire
+                        // bound; net ≈ +0.066/shot so a six-shot string peaks near spray 1.4
+    recoilRecover: 9,   // tap-fire settle; exempt from the sustained-fire bound as a
+                        // semiAuto weapon (see validateWeapons header)
+    punchRad: 0.02,     // rad/unit — a heavy ~2.6° jolt per shot, ~6.9° over the cap climb
+    yawKick: 0.9,
+    yawRecover: 9,      // same semiAuto exemption as recoilRecover — per-shot jolts,
+                        // not a walk, and the slow pacing lets each settle
+    scopedOverlay: false,
+    semiAuto: true,     // one shot per LMB press; holding does nothing
+  },
+};
 
-/** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
+/** Per-position saved ammo, so switching weapons doesn't magically refill mags. */
 export interface AmmoStore {
   mag: number;
   reserve: number;
 }
 
-/** Per-slot saved ammo, so switching weapons doesn't magically refill mags. */
-export const ammoStore: [AmmoStore, AmmoStore, AmmoStore] = [
-  { mag: WEAPONS[0].magSize, reserve: WEAPONS[0].reserveMax },
-  { mag: WEAPONS[1].magSize, reserve: WEAPONS[1].reserveMax },
-  { mag: WEAPONS[2].magSize, reserve: WEAPONS[2].reserveMax },
+/**
+ * Per-POSITION saved ammo (not per weapon): swapping slots swaps whatever is
+ * loaded in each position. Rebuilt from the equipped defs by armLoadout().
+ */
+export const ammoStore: [AmmoStore, AmmoStore] = [
+  { mag: WEAPONS.smg.magSize, reserve: WEAPONS.smg.reserveMax },
+  { mag: WEAPONS.pistol.magSize, reserve: WEAPONS.pistol.reserveMax },
 ];
 
 /**
  * Live state of the ACTIVE weapon. Stat fields are copied from
- * WEAPONS[wpn.slot] by switchWeapon() in weapons.ts; HUD/combat read this
+ * WEAPONS[equippedId(wpn.slot)] by switchWeapon() in weapons.ts; HUD/combat
+ * read this
  * object only. A subset of WeaponDef plus mutable ammo/reload bookkeeping —
  * deliberately NOT a WeaponDef, since Object.assign in switchWeapon copies
  * only the fields listed here.
@@ -327,30 +402,94 @@ export interface LiveWeapon {
   recoilRecover: number;
 }
 
-// WEAPONS is a tuple, so this needs no assertion — slot 0 exists by type.
-const SMG = WEAPONS[0];
+// ---------- Loadout ----------
+/**
+ * Which catalog weapon occupies each loadout POSITION (0 primary,
+ * 1 secondary). Written ONLY by setLoadout() — the picker's Deploy — and
+ * read everywhere through equippedId().
+ */
+export interface LoadoutState {
+  primary: WeaponId;
+  secondary: WeaponId;
+}
 
-/** Live state of the ACTIVE weapon. Initialized to slot 0. */
+export const loadout: LoadoutState = { primary: 'smg', secondary: 'pistol' };
+
+/** The most recently DEPLOYED loadout; the picker pre-fills from it. */
+export const lastLoadout: LoadoutState = { primary: 'smg', secondary: 'pistol' };
+
+/** Weapon id held in loadout position `slot` (0 primary, 1 secondary). */
+export function equippedId(slot: WeaponSlot): WeaponId {
+  return slot === 0 ? loadout.primary : loadout.secondary;
+}
+
+/** Live state of the ACTIVE weapon. Initialized to the default loadout's primary. */
 export const weapon: LiveWeapon = {
-  name: SMG.name,
-  magSize: SMG.magSize, mag: SMG.magSize, reserve: SMG.reserveMax,
-  fireRate: SMG.fireRate,
+  name: WEAPONS.smg.name,
+  magSize: WEAPONS.smg.magSize, mag: WEAPONS.smg.magSize, reserve: WEAPONS.smg.reserveMax,
+  fireRate: WEAPONS.smg.fireRate,
   lastShot: 0,
-  reloading: false, reloadTime: SMG.reloadTime, reloadEnd: 0,
-  damage: SMG.damage,
-  headshotMult: SMG.headshotMult,
-  recoilRecover: SMG.recoilRecover,
+  reloading: false, reloadTime: WEAPONS.smg.reloadTime, reloadEnd: 0,
+  damage: WEAPONS.smg.damage,
+  headshotMult: WEAPONS.smg.headshotMult,
+  recoilRecover: WEAPONS.smg.recoilRecover,
 };
 
-/** Reset both slots' ammo and mirror slot 0 into `weapon`. Used on respawn. */
-export function resetAmmo(): void {
-  SLOTS.forEach(i => { ammoStore[i].mag = WEAPONS[i].magSize; ammoStore[i].reserve = WEAPONS[i].reserveMax; });
-  weapon.name = SMG.name;
-  weapon.magSize = SMG.magSize; weapon.mag = SMG.magSize; weapon.reserve = SMG.reserveMax;
-  weapon.fireRate = SMG.fireRate; weapon.reloadTime = SMG.reloadTime;
-  weapon.damage = SMG.damage; weapon.headshotMult = SMG.headshotMult;
-  weapon.recoilRecover = SMG.recoilRecover;
-  weapon.reloading = false;
+/**
+ * Refill both positions' ammo from their equipped defs and mirror the PRIMARY
+ * weapon into the live `weapon` object. The ONE place "make ammo and the live
+ * weapon match the loadout" happens — boot, Deploy and respawn all land here.
+ */
+export function armLoadout(): void {
+  SLOTS.forEach(i => {
+    const def = WEAPONS[equippedId(i)];
+    ammoStore[i].mag = def.magSize;
+    ammoStore[i].reserve = def.reserveMax;
+  });
+  const primary = WEAPONS[loadout.primary];
+  Object.assign(weapon, {
+    name: primary.name,
+    magSize: primary.magSize, mag: primary.magSize, reserve: primary.reserveMax,
+    fireRate: primary.fireRate, reloadTime: primary.reloadTime,
+    damage: primary.damage, headshotMult: primary.headshotMult,
+    recoilRecover: primary.recoilRecover,
+    reloading: false,
+  });
+}
+
+/**
+ * Commit a picked loadout: validate the class split (a corrupted caller is a
+ * named crash here rather than silently swapped stats), remember it as the
+ * next picker's pre-fill, and arm it immediately. Deploy in menu.ts's handler
+ * (via main.ts) is the only writer.
+ */
+export function setLoadout(primary: WeaponId, secondary: WeaponId): void {
+  if (WEAPONS[primary].class !== 'primary') throw new Error(`${primary} is not a primary weapon`);
+  if (WEAPONS[secondary].class !== 'secondary') throw new Error(`${secondary} is not a secondary weapon`);
+  loadout.primary = primary;
+  loadout.secondary = secondary;
+  lastLoadout.primary = primary;
+  lastLoadout.secondary = secondary;
+  armLoadout();
+}
+
+function isWeaponId(v: string): v is WeaponId {
+  return v in WEAPONS;
+}
+
+/**
+ * Validate untrusted persisted data (sessionStorage JSON) into a
+ * LoadoutState, or undefined when anything at all is off. Pure — the storage
+ * IO lives in menu.ts; this only decides what may be applied.
+ */
+export function sanitizeLoadout(v: unknown): LoadoutState | undefined {
+  if (typeof v !== 'object' || v === null) return undefined;
+  const o = v as Record<string, unknown>;
+  const { primary, secondary } = o;
+  if (typeof primary !== 'string' || typeof secondary !== 'string') return undefined;
+  if (!isWeaponId(primary) || !isWeaponId(secondary)) return undefined;
+  if (WEAPONS[primary].class !== 'primary' || WEAPONS[secondary].class !== 'secondary') return undefined;
+  return { primary, secondary };
 }
 
 /** Maps selectable from the start menu (the ?map= part of the config query). */
@@ -476,13 +615,14 @@ export interface WeaponDynamics {
   recoil: number;
   recoilYaw: number;
   adsLerp: number;
-  /** Active weapon index into WEAPONS (0 smg, 1 sniper). */
+  /** Active loadout POSITION (0 primary, 1 secondary); the weapon itself is
+   *  WEAPONS[equippedId(slot)] from the loadout slice. */
   slot: WeaponSlot;
-  /** Slot held immediately before `slot`: the target of the Q quick-swap.
-   *  switchWeapon records the outgoing slot here; combat.ts's respawn()
+  /** Position held immediately before `slot`: the target of the Q quick-swap.
+   *  switchWeapon records the outgoing position here; combat.ts's respawn()
    *  resets it alongside `slot`. */
   lastSlot: WeaponSlot;
-  /** Scoped zoom step: index into WEAPONS[slot].zoomFovs. */
+  /** Scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
 }
@@ -538,7 +678,7 @@ export const wpn: WeaponDynamics = {
                    // back toward 1 at sprayRecover/s. Scales only the
                    // situational terms; `inherent` is unaffected by it.
   recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
-                   // While above WEAPONS[slot].scopeGate, a new RMB press
+                   // While above the live weapon's scopeGate, a new RMB press
                    // can't enter the scope (main.ts)
   recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot
                    // adds up to ±yawKick — a random walk, clamped to
@@ -547,10 +687,10 @@ export const wpn: WeaponDynamics = {
                    // recoilRecover, which drains fast enough to zero the walk
                    // between shots.
   adsLerp: 0,
-  slot: 0,         // active weapon index into WEAPONS (0 smg, 1 sniper, 2 pistol)
-  lastSlot: 0,     // slot held before `slot`, the Q swap target; respawn pins
-                   // both to the smg so Q can't yank you across a death
-  zoomLevel: 0,    // scoped zoom step: index into WEAPONS[slot].zoomFovs
+  slot: 0,         // active loadout POSITION (0 primary, 1 secondary)
+  lastSlot: 0,     // position held before `slot`, the Q swap target; respawn
+                   // pins both to primary so Q can't yank you across a death
+  zoomLevel: 0,    // scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                    // doesn't get twitchy at 12x (computed in weapons.ts)
 };

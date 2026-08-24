@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId } from './core/state';
 import { isLowAmmo } from './sim/ammo';
 
 /**
@@ -155,14 +155,19 @@ export function updateHUD(): void {
     lastName = weapon.name;
     weaponName.textContent = weapon.name;
   }
-  // The WEAPONS read needs no guard (tuple + WeaponSlot), but zoomFovs is a
-  // plain array indexed by the unbounded wpn.zoomLevel, so that read is still
-  // `T | undefined`. weapons.ts:aimFovFor CLAMPS the same index because it owes
-  // its caller a number; the HUD degrades to no label instead, because a view
-  // must never throw mid-frame over a cosmetic string. Both are unreachable in
-  // play — zoomLevel is wheel-wrapped mod n and reset to 0 on swap — but they
-  // are deliberately different answers to the same miss, so change them together.
-  const zoomFov = input.aiming && wpn.slot === 1 ? WEAPONS[wpn.slot].zoomFovs[wpn.zoomLevel] : undefined;
+  // The WEAPONS read needs no guard (Record keyed by WeaponId), but zoomFovs
+  // is a plain array indexed by the unbounded wpn.zoomLevel, so that read is
+  // still `T | undefined`. weapons.ts:aimFovFor CLAMPS the same index because
+  // it owes its caller a number; the HUD degrades to no label instead, because
+  // a view must never throw mid-frame over a cosmetic string. Both are
+  // unreachable in play — zoomLevel is wheel-wrapped mod n and reset to 0 on
+  // swap — but they are deliberately different answers to the same miss, so
+  // change them together. The label only applies to multi-step zooms: a
+  // single-entry weapon (iron sights / bead) has nothing to cycle.
+  const liveDef = WEAPONS[equippedId(wpn.slot)];
+  const zoomFov = input.aiming && liveDef.zoomFovs.length > 1
+    ? liveDef.zoomFovs[wpn.zoomLevel]
+    : undefined;
   const zoomLabel = zoomFov !== undefined ? Math.round(BASE_FOV / zoomFov) + 'x' : '';
   if (zoomLabel !== lastZoomLabel) {
     lastZoomLabel = zoomLabel;

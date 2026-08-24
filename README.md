@@ -34,6 +34,8 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 
 ## Gameplay
 
+Before deploying you pick a **loadout**: one primary and one secondary from the weapon catalog (SMG / sniper / shotgun primaries; pistol / revolver secondaries). The picker opens at match start (after Play) and again on death, pre-filled with your last pick; Deploy commits it and enters the game. In-game, `1`/`2` switch between the two positions and `Q` quick-swaps. Your pick survives map switches via sessionStorage.
+
 Three maps plus the match setup (enemy/allied bot counts, round length in minutes), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…`) and reloads the page:
 
 - **Arena** (`src/maps/arena.ts`) — enemy bots (menu-configured count, default 6) spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
@@ -74,12 +76,12 @@ src/
 ├── world.ts      # solids/colliders registries — the ONE way to register geometry
 ├── collision.ts  # AABB movement collision + line-of-sight raycast (pure)
 ├── player.ts     # FPS controller: move/crouch/footsteps/camera
-├── weapons.ts    # smg/sniper/pistol viewmodels, firing, reload, ADS/recoil/spread
+├── weapons.ts    # per-weapon viewmodels, firing (incl. shotgun pellets), reload, ADS/recoil/spread
 ├── bots.ts       # Bot executor: realizes what its brain decides
 ├── combat.ts     # damage resolution, respawn, round end
 ├── effects.ts    # transient visuals (bullet impacts)
 ├── audio.ts      # WebAudio-synthesized SFX (no assets)
-├── menu.ts       # start / pause / death overlays and the match-config form
+├── menu.ts       # start / pause / loadout-picker overlays and the match-config form
 └── hud.ts        # DOM overlay (health/ammo/score/kill feed)
 ```
 

@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest';
 import { validateWeapons } from './validateWeapons';
 import { WEAPONS, RECOIL_CAP, type WeaponDef } from '../core/state';
 
-const SMG = WEAPONS[0];
-const SNIPER = WEAPONS[1];
+const SMG = WEAPONS.smg;
+const SNIPER = WEAPONS.sniper;
 
 /** The numeric fields — exactly the ones a NaN can poison. */
 type NumericField = {
@@ -30,7 +30,7 @@ describe('the shipped table', () => {
     // The hard gate: any retune that breaks an invariant fails npm test.
     // The sniper's over-drain passes BECAUSE of the semiAuto exemption —
     // see the live-branch tests below.
-    expect(validateWeapons(WEAPONS)).toEqual([]);
+    expect(validateWeapons(Object.values(WEAPONS))).toEqual([]);
   });
 });
 

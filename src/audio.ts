@@ -53,8 +53,14 @@ export const sfxShoot = (): void => playGunshot(0.4, 1400, 0.14);
 /** Sniper: deeper boom with a longer tail than the smg crack. */
 export const sfxSniper = (): void => playGunshot(0.5, 500, 0.3);
 
+/** Shotgun: big low boom, longer tail — a powder charge, not a cartridge crack. */
+export const sfxShotgun = (): void => playGunshot(0.55, 380, 0.28);
+
 /** Pistol: sharper, shorter crack than the smg burst. */
 export const sfxPistol = (): void => playGunshot(0.35, 1100, 0.09);
+
+/** Revolver: louder, fuller bark than the pistol — more powder, longer barrel. */
+export const sfxRevolver = (): void => playGunshot(0.48, 750, 0.18);
 
 /** Weapon switch: short metallic click. */
 export const sfxSwitch = (): void => playGunshot(0.1, 1800, 0.04);

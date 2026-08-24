@@ -34,20 +34,23 @@ describe('damageForPart', () => {
 
 describe('balance intents from the WEAPONS comments', () => {
   test('every weapon one-taps on a headshot', () => {
-    for (const w of WEAPONS) {
-      expect(damageForPart(w, 'head')).toBeGreaterThanOrEqual(100);
+    for (const w of Object.values(WEAPONS)) {
+      // Pellet weapons fire several rays per pull: the intent is per TRIGGER
+      // PULL, so the shotgun qualifies when enough pellets land together.
+      const perPull = damageForPart(w, 'head') * (w.pellets ?? 1);
+      expect(perPull).toBeGreaterThanOrEqual(100);
     }
   });
 
   test('the sniper kills in two torso shots, the smg does not', () => {
-    const smg = WEAPONS[0];
-    const sniper = WEAPONS[1];
+    const smg = WEAPONS.smg;
+    const sniper = WEAPONS.sniper;
     expect(damageForPart(sniper, 'torso') * 2).toBeGreaterThanOrEqual(100);
     expect(damageForPart(smg, 'torso') * 2).toBeLessThan(100);
   });
 
   test('leg hits never out-damage torso hits', () => {
-    for (const w of WEAPONS) {
+    for (const w of Object.values(WEAPONS)) {
       expect(damageForPart(w, 'legs')).toBeLessThan(damageForPart(w, 'torso'));
     }
   });

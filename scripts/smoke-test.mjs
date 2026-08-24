@@ -309,13 +309,52 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       console.log(`[targetclip] OK`, JSON.stringify(target));
     }
 
-    // 5) Sniper: 1/2 weapon switch, scope overlay, and wheel zoom steps
-    //    (range only, same reason as sprint/accuracy above)
+    // 4b) Loadout picker (range only): Play with a clean config opens the
+    //     shared picker; clicking cards + Deploy commits the loadout through
+    //     the real UI path. Deploys sniper/revolver so the weapon phases
+    //     below exercise the new position-based switching.
     if (sprintCheck) {
+      const picked = await page.evaluate(async () => {
+        document.getElementById('playBtn').click();
+        const screen = document.getElementById('loadoutScreen');
+        if (!screen || screen.style.display !== 'flex') return { fail: 'Play did not open the loadout picker' };
+        const cardCount = col => document.querySelectorAll(`#col${col} .wcard`).length;
+        if (cardCount('Primary') < 2 || cardCount('Secondary') < 2) {
+          return { fail: 'picker columns missing cards' };
+        }
+        const card = (col, name) =>
+          [...document.querySelectorAll(`#col${col} .wcard`)].find(b => b.textContent.includes(name));
+        card('Primary', 'SNIPER').click();
+        card('Secondary', 'REVOLVER').click();
+        document.getElementById('deployBtn').click();
+        const cs = window.__cs;
+        // Step off the primary so the next phase's Digit1 is a real switch
+        // rather than a same-position no-op.
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        await new Promise(r => setTimeout(r, 150));
+        return {
+          primary: cs.game.primary,
+          secondary: cs.game.secondary,
+          name: cs.weapon.name,
+          mag: cs.weapon.mag,
+          magSize: cs.weapon.magSize,
+          offPrimarySlot: cs.game.slot,
+          offPrimaryName: cs.weapon.name,
+        };
+      });
+      if (picked.fail) throw new Error(picked.fail);
+      if (picked.primary !== 'sniper' || picked.secondary !== 'revolver') throw new Error(`deploy did not commit the loadout: ${JSON.stringify(picked)}`);
+      if (picked.name !== 'SNIPER' || picked.mag !== picked.magSize) throw new Error(`deploy did not arm the primary: ${JSON.stringify(picked)}`);
+      if (picked.offPrimarySlot !== 1 || picked.offPrimaryName !== 'REVOLVER') throw new Error(`Digit2 did not take the secondary position: ${JSON.stringify(picked)}`);
+      console.log(`[picker] OK`, JSON.stringify(picked));
+
+      // 5) Sniper: 1/2 POSITION switching, scope overlay, and wheel zoom steps
+      //    (range only, same reason as sprint/accuracy above). Position 0 is
+      //    the deployed primary (sniper), so Digit1 holds it.
       const sniper = await page.evaluate(async () => {
         const cs = window.__cs;
         const wait = ms => new Promise(r => setTimeout(r, ms));
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
         const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag };
         // Issue #10: a FULL sniper mag (10) must not advertise a reload
@@ -356,32 +395,33 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         await wait(800); // adsLerp needs ~0.16 s to cross the overlay threshold
         const rescope = { aiming: cs.game.aiming, overlay: document.getElementById('scopeOverlay').style.display };
         window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
         await wait(150);
         return { switched, hintFull, zoomed, shot, gated, rescope, backTo: cs.game.slot };
       });
-      if (sniper.switched.slot !== 1 || sniper.switched.name !== 'SNIPER') throw new Error(`switch to sniper failed: ${JSON.stringify(sniper.switched)}`);
+      if (sniper.switched.slot !== 0 || sniper.switched.name !== 'SNIPER') throw new Error(`switch to sniper (primary position) failed: ${JSON.stringify(sniper.switched)}`);
       if (sniper.hintFull.mag !== sniper.hintFull.magSize || sniper.hintFull.vis !== 'hidden') throw new Error(`reload hint shown with a FULL mag (issue #10): ${JSON.stringify(sniper.hintFull)}`);
       if (sniper.zoomed.level !== 2 || sniper.zoomed.overlay !== 'block') throw new Error(`zoom steps failed: ${JSON.stringify(sniper.zoomed)}`);
       if (sniper.shot.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(sniper.shot)}`);
       if (sniper.shot.aimingAfter !== false) throw new Error(`shot should exit the scope: ${JSON.stringify(sniper.shot)}`);
       if (sniper.gated.aiming !== false || sniper.gated.overlay !== 'none') throw new Error(`re-scope during recoil settle must stay blocked: ${JSON.stringify(sniper.gated)}`);
       if (sniper.rescope.aiming !== true || sniper.rescope.overlay !== 'block') throw new Error(`re-scope after settle failed: ${JSON.stringify(sniper.rescope)}`);
-      if (sniper.backTo !== 0) throw new Error(`switch back to smg failed: slot ${sniper.backTo}`);
+      if (sniper.backTo !== 1) throw new Error(`switch back to secondary position failed: slot ${sniper.backTo}`);
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }
 
-    // 6) Pistol: third-slot switch + semi-auto trigger latch (range only)
+    // 6) Revolver: secondary-position switch + semi-auto trigger latch
+    //    (range only). Digit2 holds position 1 = the deployed revolver.
     if (sprintCheck) {
-      const pistol = await page.evaluate(async () => {
+      const revolver = await page.evaluate(async () => {
         const cs = window.__cs;
         const wait = ms => new Promise(r => setTimeout(r, ms));
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit3' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
         await wait(150);
         const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize };
         cs.game.pitch = -1.2; // into the floor so shots land somewhere safe
         // Semi-auto: holding LMB must fire exactly once (trigger latch),
-        // even held far past the 0.17 s fireRate.
+        // even held far past the 0.45 s fireRate.
         const magBeforeShot = cs.weapon.mag;
         window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
         await wait(300);
@@ -398,18 +438,19 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         await wait(150);
         return { switched, held, second, backTo: cs.game.slot };
       });
-      if (pistol.switched.slot !== 2 || pistol.switched.name !== 'PISTOL' || pistol.switched.mag !== pistol.switched.magSize) throw new Error(`switch to pistol failed: ${JSON.stringify(pistol.switched)}`);
-      if (pistol.held.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(pistol.held)}`);
-      if (pistol.second.fired !== 1) throw new Error(`second press should fire exactly once more: ${JSON.stringify(pistol.second)}`);
-      if (pistol.second.reserve !== 36) throw new Error(`firing must not touch reserve: ${JSON.stringify(pistol.second)}`);
-      if (pistol.backTo !== 0) throw new Error(`switch back to smg failed: slot ${pistol.backTo}`);
-      console.log(`[pistol] OK`, JSON.stringify(pistol));
+      if (revolver.switched.slot !== 1 || revolver.switched.name !== 'REVOLVER' || revolver.switched.mag !== revolver.switched.magSize) throw new Error(`switch to revolver failed: ${JSON.stringify(revolver.switched)}`);
+      if (revolver.held.fired !== 1) throw new Error(`semi-auto should fire exactly once while held: ${JSON.stringify(revolver.held)}`);
+      if (revolver.second.fired !== 1) throw new Error(`second press should fire exactly once more: ${JSON.stringify(revolver.second)}`);
+      if (revolver.second.reserve !== 24) throw new Error(`firing must not touch reserve: ${JSON.stringify(revolver.second)}`);
+      if (revolver.backTo !== 0) throw new Error(`switch back to primary failed: slot ${revolver.backTo}`);
+      console.log(`[revolver] OK`, JSON.stringify(revolver));
     }
 
-    // 6b) Q quick-swap: toggles between the two most recently held weapons.
-    //     Digit2 records the smg as lastSlot; each Q then flips slot/lastSlot
-    //     (so Q,Q returns you where you were), and Digit1 restores the smg
-    //     for the phases below. Range only, like the other switch phases.
+    // 6b) Q quick-swap: toggles between the two most recently held POSITIONS.
+    //     Digit2 records the primary position as lastSlot; each Q then flips
+    //     slot/lastSlot (so Q,Q returns you where you were), and Digit1
+    //     restores the primary for the phases below. Range only, like the
+    //     other switch phases.
     if (sprintCheck) {
       const qswap = await page.evaluate(async () => {
         const cs = window.__cs;
@@ -418,17 +459,17 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         await wait(150);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
         await wait(150);
-        const backToSmg = { slot: cs.game.slot, last: cs.game.lastSlot };
+        const backToPrimary = { slot: cs.game.slot, last: cs.game.lastSlot };
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
         await wait(150);
-        const backToSniper = { slot: cs.game.slot };
+        const backToSecondary = { slot: cs.game.slot };
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
-        return { backToSmg, backToSniper, restored: cs.game.slot };
+        return { backToPrimary, backToSecondary, restored: cs.game.slot };
       });
-      if (qswap.backToSmg.slot !== 0 || qswap.backToSmg.last !== 1) throw new Error(`Q should return to the previous weapon: ${JSON.stringify(qswap.backToSmg)}`);
-      if (qswap.backToSniper.slot !== 1) throw new Error(`second Q should toggle back to the sniper: ${JSON.stringify(qswap.backToSniper)}`);
-      if (qswap.restored !== 0) throw new Error(`restore to smg failed: slot ${qswap.restored}`);
+      if (qswap.backToPrimary.slot !== 0 || qswap.backToPrimary.last !== 1) throw new Error(`Q should return to the previous position: ${JSON.stringify(qswap.backToPrimary)}`);
+      if (qswap.backToSecondary.slot !== 1) throw new Error(`second Q should toggle back: ${JSON.stringify(qswap.backToSecondary)}`);
+      if (qswap.restored !== 0) throw new Error(`restore to primary failed: slot ${qswap.restored}`);
       console.log(`[qswap] OK`, JSON.stringify(qswap));
     }
 
@@ -443,29 +484,29 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const wait = ms => new Promise(r => setTimeout(r, ms));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
-        const partialMag = 24; // room below magSize so a free refill can't hide
+        const partialMag = 8; // room below magSize (sniper 10) so a free refill can't hide
         cs.weapon.mag = partialMag;
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
-        await wait(150); // smg reloadTime is 2.2 s — nowhere near done
+        await wait(150); // sniper reloadTime is 3.2 s — nowhere near done
         const started = { reloading: cs.weapon.reloading };
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
         await wait(150);
         const cancelled = { slot: cs.game.slot, reloading: cs.weapon.reloading };
-        // Back to the smg: same partial mag, NOT topped up by the cancel...
+        // Back to the primary: same partial mag, NOT topped up by the cancel...
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
         const restored = { slot: cs.game.slot, mag: cs.weapon.mag, reloading: cs.weapon.reloading };
         // ...and R starts a fresh reload; let it run out so the phases below
         // see a full mag again.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
-        await wait(2600);
+        await wait(3700);
         const refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
         return { started, cancelled, restored, refilled };
       });
       if (qcancel.started.reloading !== true) throw new Error(`R did not start a reload: ${JSON.stringify(qcancel.started)}`);
       if (qcancel.cancelled.slot !== 1 || qcancel.cancelled.reloading !== false) throw new Error(`switching during a reload must cancel it: ${JSON.stringify(qcancel.cancelled)}`);
-      if (qcancel.restored.slot !== 0 || qcancel.restored.mag !== 24 || qcancel.restored.reloading !== false) throw new Error(`interrupted weapon must keep its partial mag: ${JSON.stringify(qcancel.restored)}`);
-      if (qcancel.refilled.reloading !== false || qcancel.refilled.mag !== 30) throw new Error(`a fresh reload after re-switching must still complete: ${JSON.stringify(qcancel.refilled)}`);
+      if (qcancel.restored.slot !== 0 || qcancel.restored.mag !== 8 || qcancel.restored.reloading !== false) throw new Error(`interrupted weapon must keep its partial mag: ${JSON.stringify(qcancel.restored)}`);
+      if (qcancel.refilled.reloading !== false || qcancel.refilled.mag !== 10) throw new Error(`a fresh reload after re-switching must still complete: ${JSON.stringify(qcancel.refilled)}`);
       console.log(`[qcancel] OK`, JSON.stringify(qcancel));
     }
 
@@ -752,6 +793,58 @@ async function runBotClimbCheck() {
   await page.close();
 }
 
+// Shotgun: the picker-deployed pump gun fires MULTIPLE hitscan rays per
+// trigger pull. One shell straight into the floor must punch roughly one
+// hole per pellet and consume exactly one round (semi-auto latch).
+async function runShotgunCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=range', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1500));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      // Real UI path: Play opens the picker, cards select, Deploy commits.
+      document.getElementById('playBtn').click();
+      const screen = document.getElementById('loadoutScreen');
+      if (!screen || screen.style.display !== 'flex') return { fail: 'picker did not open' };
+      const card = name => [...document.querySelectorAll('.wcard')].find(b => b.textContent.includes(name));
+      card('SHOTGUN').click();
+      card('PISTOL').click();
+      document.getElementById('deployBtn').click();
+      // Enter "playing" state headlessly, aim into the floor, fire ONE pull.
+      cs.game.started = true;
+      cs.game.locked = true;
+      await new Promise(r => requestAnimationFrame(r));
+      cs.game.pitch = -1.4;
+      const holesBefore = cs.bulletHoles.length;
+      const magBefore = cs.weapon.mag;
+      window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+      await new Promise(r => setTimeout(r, 300));
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+      return {
+        primary: cs.game.primary,
+        secondary: cs.game.secondary,
+        name: cs.weapon.name,
+        fired: magBefore - cs.weapon.mag,
+        newHoles: cs.bulletHoles.length - holesBefore,
+      };
+    });
+    if (result.fail) throw new Error(result.fail);
+    if (result.primary !== 'shotgun' || result.secondary !== 'pistol' || result.name !== 'SHOTGUN') throw new Error(`deploy did not commit the loadout: ${JSON.stringify(result)}`);
+    if (result.fired !== 1) throw new Error(`one trigger pull must consume exactly one shell: ${JSON.stringify(result)}`);
+    if (result.newHoles < 5 || result.newHoles > 8) throw new Error(`expected 5-8 pellet holes from one shell, got ${result.newHoles}`);
+    console.log('[shotgun] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[shotgun] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[shotgun] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
@@ -759,6 +852,7 @@ try {
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
+  await runShotgunCheck();
 } finally {
   await browser.close();
 }

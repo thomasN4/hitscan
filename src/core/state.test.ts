@@ -5,7 +5,8 @@
 // (Browser globals inside a state.ts *function* body are not caught here —
 // they are caught by review and by scripts/smoke-test.mjs.)
 import { describe, expect, test, beforeEach } from 'vitest';
-import { WEAPONS, ammoStore, weapon, resetAmmo, session, player } from './state';
+import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
+         sanitizeLoadout, session, player } from './state';
 
 describe('state module purity', () => {
   // main.ts overwrites session's config fields from the URL query at startup;
@@ -16,32 +17,83 @@ describe('state module purity', () => {
     expect(session.botsCt).toBe(0);
     expect(session.roundSeconds).toBe(120);
   });
+
+  test('ships with a full primary/secondary catalog split', () => {
+    // The picker's two columns and the class-validated setLoadout both rest on
+    // this split: at least two options per column, no weapon in both.
+    const primaries = Object.values(WEAPONS).filter(d => d.class === 'primary');
+    const secondaries = Object.values(WEAPONS).filter(d => d.class === 'secondary');
+    expect(primaries.length).toBeGreaterThanOrEqual(2);
+    expect(secondaries.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
-describe('resetAmmo', () => {
+describe('armLoadout', () => {
   beforeEach(() => {
-    // Dirty every field resetAmmo is responsible for restoring.
+    // Dirty every field armLoadout is responsible for restoring.
+    setLoadout('smg', 'pistol');
     ammoStore[0].mag = 3; ammoStore[0].reserve = 7;
     ammoStore[1].mag = 1; ammoStore[1].reserve = 2;
     Object.assign(weapon, { name: 'SNIPER', mag: 0, reserve: 0, reloading: true });
-    resetAmmo();
+    armLoadout();
   });
 
-  test('refills every slot to its full loadout', () => {
-    WEAPONS.forEach((def, i) => {
-      expect(ammoStore[i]!.mag).toBe(def.magSize);
-      expect(ammoStore[i]!.reserve).toBe(def.reserveMax);
-    });
+  test('refills every POSITION from its equipped def', () => {
+    expect(ammoStore[0].mag).toBe(WEAPONS[loadout.primary].magSize);
+    expect(ammoStore[0].reserve).toBe(WEAPONS[loadout.primary].reserveMax);
+    expect(ammoStore[1].mag).toBe(WEAPONS[loadout.secondary].magSize);
+    expect(ammoStore[1].reserve).toBe(WEAPONS[loadout.secondary].reserveMax);
   });
 
-  test('mirrors slot 0 into the live weapon and clears an in-flight reload', () => {
-    const smg = WEAPONS[0];
-    expect(weapon.name).toBe(smg.name);
-    expect(weapon.mag).toBe(smg.magSize);
-    expect(weapon.reserve).toBe(smg.reserveMax);
-    expect(weapon.damage).toBe(smg.damage);
-    expect(weapon.recoilRecover).toBe(smg.recoilRecover);
+  test('mirrors the PRIMARY into the live weapon and clears an in-flight reload', () => {
+    const primary = WEAPONS[loadout.primary];
+    expect(weapon.name).toBe(primary.name);
+    expect(weapon.mag).toBe(primary.magSize);
+    expect(weapon.reserve).toBe(primary.reserveMax);
+    expect(weapon.damage).toBe(primary.damage);
+    expect(weapon.recoilRecover).toBe(primary.recoilRecover);
     expect(weapon.reloading).toBe(false);
+  });
+
+  test('follows a changed loadout', () => {
+    setLoadout('shotgun', 'revolver');
+    expect(weapon.name).toBe('SHOTGUN');
+    expect(weapon.magSize).toBe(WEAPONS.shotgun.magSize);
+    expect(ammoStore[1].mag).toBe(WEAPONS.revolver.magSize);
+  });
+});
+
+describe('setLoadout', () => {
+  test('enforces the class split with a named error', () => {
+    expect(() => setLoadout('revolver', 'smg')).toThrow('not a primary');
+    expect(() => setLoadout('sniper', 'sniper')).toThrow('not a secondary');
+    // Rejected calls must not have touched state.
+    expect(loadout.primary).not.toBe('revolver');
+  });
+
+  test('records the deployment as the next picker pre-fill', () => {
+    setLoadout('sniper', 'revolver');
+    expect(lastLoadout).toEqual({ primary: 'sniper', secondary: 'revolver' });
+  });
+});
+
+describe('sanitizeLoadout', () => {
+  test('accepts a valid persisted pair', () => {
+    expect(sanitizeLoadout({ primary: 'sniper', secondary: 'revolver' }))
+      .toEqual({ primary: 'sniper', secondary: 'revolver' });
+  });
+
+  test.each([
+    undefined,
+    null,
+    'sniper',
+    {},
+    { primary: 'sniper' },
+    { primary: 'sniper', secondary: 'shotgun' },   // wrong classes
+    { primary: 'axe', secondary: 'pistol' },       // unknown ids
+    { primary: 3, secondary: 'pistol' },
+  ])('rejects %j', v => {
+    expect(sanitizeLoadout(v)).toBeUndefined();
   });
 });
 

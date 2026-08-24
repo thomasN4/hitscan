@@ -1,20 +1,23 @@
-// menu.ts — DOM for the pre-game match-config menu and the pause/death overlays.
+// menu.ts — DOM for the pre-game match-config menu, the loadout picker and
+// the pause overlay.
 //
 // Split out of main.ts alongside hud.ts's ownership rule: hud.ts writes the
 // in-game HUD, this module writes everything inside #startMenu / #pauseMenu /
-// #deathScreen.
+// #loadoutScreen.
 // Like hud.ts it grabs references through an init*() function called once by
 // main.ts (after the session config has been parsed into core/state), and a
 // missing id is a named startup error via hud.ts:requireEl.
 //
-// Commit model: settings ride ONE query string (?map=&tbots=&ctbots=&time=).
+// Commit model: match settings ride ONE query string (?map=&tbots=&ctbots=&time=).
 // Play compares the form against the applied session config — equal means the
-// page already matches, so it enters pointer lock directly; different means
+// page already matches, so it opens the loadout picker; different means
 // navigate-and-reload (map switching is a full reload, and pointer lock needs
-// a fresh gesture on the new page anyway). That makes a changed setting cost
-// two clicks total (commit, then Play) and a fresh load exactly one.
-import type { MapName } from './core/state';
-import { session } from './core/state';
+// a fresh gesture on the new page anyway). The picker is shared by BOTH entry
+// points: match start (after Play) and death (replacing the old plain death
+// screen), pre-filled with lastLoadout either way. Its Deploy click doubles as
+// the user gesture pointer lock requires — see main.ts's onDeploy handler.
+import type { LoadoutState, MapName, WeaponClass, WeaponId } from './core/state';
+import { WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
 import {
   BOTS_CT_LIMITS,
   BOTS_T_LIMITS,
@@ -35,9 +38,9 @@ const SUBTITLES: Record<MapName, string> = {
   elevation: 'Bot testbed \u2014 stairs, decks and drops: watch how the AI handles height',
 };
 
-/** What the menu does on Play/Resume/Quit — main.ts supplies the behaviors. */
+/** What the menu does on Play/Resume/Quit/Deploy — main.ts supplies the behaviors. */
 export interface MenuHandlers {
-  /** Form matches the applied session config: enter pointer lock. */
+  /** Form matches the applied session config: open the loadout picker. */
   onStart(): void;
   /** Form differs: navigate to the committed query string (full reload). */
   onCommit(query: string): void;
@@ -45,26 +48,118 @@ export interface MenuHandlers {
   onResume(): void;
   /** Pause menu Quit to Menu: reload so the scene rebuilds fresh. */
   onQuit(): void;
-  /** Death screen Respawn button: hide the screen, respawn, re-lock. */
-  onRespawn(): void;
+  /** Picker Deploy: apply the picked loadout (respawning if dead) and enter play. */
+  onDeploy(primary: WeaponId, secondary: WeaponId): void;
 }
 
 // Resolved by initMenus(); non-optional like hud.ts's refs — "read only after
 // init" is the documented contract.
-let startMenu: HTMLElement, pauseMenu: HTMLElement, deathScreen: HTMLElement, subtitleEl: HTMLElement;
+let startMenu: HTMLElement, pauseMenu: HTMLElement, loadoutScreen: HTMLElement,
+  subtitleEl: HTMLElement, loadoutTitle: HTMLElement, loadoutMsg: HTMLElement,
+  colPrimary: HTMLElement, colSecondary: HTMLElement;
+let deployBtn: HTMLButtonElement;
 let mapSel: HTMLSelectElement, botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
   timeMinIn: HTMLInputElement;
 
+// ---------- Loadout picker state ----------
+// Both columns always hold a valid selection (pre-filled from lastLoadout);
+// keyboard focus just moves which one the arrows control.
+interface CardRefs {
+  id: WeaponId;
+  el: HTMLButtonElement;
+}
+const cards: Record<WeaponClass, CardRefs[]> = { primary: [], secondary: [] };
+let sel: LoadoutState = { ...lastLoadout };
+let focusCol: WeaponClass = 'primary';
+
 /**
- * Resolve every menu element, initialize the form from the applied session
- * config, and wire Play/Resume/Quit/Respawn. Call once at startup, AFTER
- * main.ts has written the parsed config into `session`.
+ * Persisted last-deployed loadout (sessionStorage): survives map switches and
+ * quit-to-menu page reloads so the next picker opens where you left off.
+ * Storage IO lives here because state.ts must stay importable in Node —
+ * sanitizeLoadout() there owns deciding what may be applied.
+ */
+const LOADOUT_KEY = 'acsc.loadout';
+
+export function saveLoadout(l: LoadoutState): void {
+  try { sessionStorage.setItem(LOADOUT_KEY, JSON.stringify(l)); } catch { /* storage unavailable */ }
+}
+
+export function readStoredLoadout(): LoadoutState | undefined {
+  try {
+    const raw = sessionStorage.getItem(LOADOUT_KEY);
+    if (raw === null) return undefined;
+    return sanitizeLoadout(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+function refreshPickerUi(): void {
+  for (const cls of ['primary', 'secondary'] as const) {
+    for (const c of cards[cls]) c.el.classList.toggle('selected', sel[cls] === c.id);
+  }
+  colPrimary.classList.toggle('focused', focusCol === 'primary');
+  colSecondary.classList.toggle('focused', focusCol === 'secondary');
+}
+
+function moveFocus(delta: number): void {
+  const list = cards[focusCol];
+  const idx = list.findIndex(c => c.id === sel[focusCol]);
+  // findIndex above cannot miss: sel is only ever assigned ids that built a card.
+  const next = list[(idx + delta + list.length) % list.length]!;
+  sel[focusCol] = next.id;
+  refreshPickerUi();
+}
+
+/**
+ * Open the shared picker. Mode only changes copy/styling — both entries are
+ * the same deploy flow. Pre-fills from lastLoadout every time.
+ */
+export function showLoadoutPicker(mode: 'start' | 'death'): void {
+  loadoutTitle.textContent = mode === 'death' ? 'You Died' : 'Choose your loadout';
+  loadoutTitle.classList.toggle('died', mode === 'death');
+  loadoutMsg.style.display = mode === 'death' ? 'block' : 'none';
+  sel = { primary: lastLoadout.primary, secondary: lastLoadout.secondary };
+  focusCol = 'primary';
+  refreshPickerUi();
+  loadoutScreen.style.display = 'flex';
+}
+
+function buildCards(): void {
+  for (const [id, def] of Object.entries(WEAPONS)) {
+    // Object.entries widens to string; the card click handler narrows via a
+    // catalog lookup instead of trusting the attribute.
+    const el = document.createElement('button');
+    el.className = 'wcard';
+    const dps = def.pellets !== undefined ? `${def.damage}\u00d7${def.pellets}` : String(def.damage);
+    el.innerHTML =
+      `<span class="wname">${def.name}</span>` +
+      `<span class="wstats">${dps} dmg \u00b7 ${(1 / def.fireRate).toFixed(1)}/s \u00b7 ${def.magSize} rounds</span>`;
+    el.onclick = () => {
+      sel[def.class] = id as WeaponId;
+      focusCol = def.class;
+      refreshPickerUi();
+    };
+    (def.class === 'primary' ? colPrimary : colSecondary).appendChild(el);
+    cards[def.class].push({ id: id as WeaponId, el });
+  }
+}
+
+/**
+ * Resolve every menu element + build the picker cards, initialize the form
+ * from the applied session config, and wire Play/Resume/Quit/Deploy. Call
+ * once at startup, AFTER main.ts has written the parsed config into `session`.
  */
 export function initMenus(handlers: MenuHandlers): void {
   startMenu = requireEl('startMenu');
   pauseMenu = requireEl('pauseMenu');
-  deathScreen = requireEl('deathScreen');
+  loadoutScreen = requireEl('loadoutScreen');
   subtitleEl = requireEl('menuSubtitle');
+  loadoutTitle = requireEl('loadoutTitle');
+  loadoutMsg = requireEl('loadoutMsg');
+  colPrimary = requireEl('colPrimary');
+  colSecondary = requireEl('colSecondary');
+  deployBtn = requireEl('deployBtn') as HTMLButtonElement;
   mapSel = requireEl('cfgMap') as HTMLSelectElement;
   botsTIn = requireEl('cfgBotsT') as HTMLInputElement;
   botsCtIn = requireEl('cfgBotsCt') as HTMLInputElement;
@@ -77,6 +172,7 @@ export function initMenus(handlers: MenuHandlers): void {
   applyMapUi();
 
   mapSel.onchange = applyMapUi;
+  buildCards();
 
   requireEl('playBtn').onclick = () => {
     const candidate = candidateConfig();
@@ -88,7 +184,28 @@ export function initMenus(handlers: MenuHandlers): void {
   };
   requireEl('resumeBtn').onclick = () => handlers.onResume();
   requireEl('quitBtn').onclick = () => handlers.onQuit();
-  requireEl('respawnBtn').onclick = () => handlers.onRespawn();
+
+  const deploy = (): void => {
+    saveLoadout(sel);
+    handlers.onDeploy(sel.primary, sel.secondary);
+  };
+  deployBtn.onclick = deploy;
+
+  // Picker keyboard support, active only while the picker is visible. The
+  // game's own key handlers stay inert behind it: switchWeapon/tryReload gate
+  // on started/alive, which are false (match start) or alive === false (death)
+  // whenever this screen shows.
+  addEventListener('keydown', e => {
+    if (loadoutScreen.style.display !== 'flex') return;
+    if (e.code === 'ArrowUp') moveFocus(-1);
+    else if (e.code === 'ArrowDown') moveFocus(1);
+    else if (e.code === 'ArrowLeft') focusCol = 'primary';
+    else if (e.code === 'ArrowRight') focusCol = 'secondary';
+    else if (e.code === 'Enter') deploy();
+    else return;
+    e.preventDefault();
+    refreshPickerUi();
+  });
 }
 
 /** Range matches have no bots and no clock: gray those rows out live. */
@@ -112,7 +229,7 @@ function candidateConfig(): SessionConfig {
     // A cleared/garbage field keeps the currently-applied value rather than
     // forcing a retype; Number('') is 0, so emptiness must be checked first.
     botsT: Math.round(clampTo(numOr(botsTIn.value, session.botsT), BOTS_T_LIMITS)),
-    botsCt: Math.round(clampTo(numOr(botsCtIn.value, session.botsCt), BOTS_CT_LIMITS)),
+    botsCt: Math.round(clampTo(numOr(botsTIn.value, session.botsCt), BOTS_CT_LIMITS)),
     roundSeconds: Math.round(
       clampTo(numOr(timeMinIn.value, session.roundSeconds / 60) * 60, TIME_LIMITS_S),
     ),
@@ -124,12 +241,9 @@ function candidateConfig(): SessionConfig {
 export function hideAllMenus(): void {
   startMenu.style.display = 'none';
   pauseMenu.style.display = 'none';
+  loadoutScreen.style.display = 'none';
 }
 
 export function showPauseMenu(show: boolean): void {
   pauseMenu.style.display = show ? 'flex' : 'none';
-}
-
-export function showDeathScreen(show: boolean): void {
-  deathScreen.style.display = show ? 'flex' : 'none';
 }

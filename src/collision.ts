@@ -6,7 +6,8 @@
 //   collidesAt       -> feet-aware AABB overlap test against `colliders`
 //   supportHeightAt  -> highest walkable surface under a point (stairs, floors)
 //   slideMoveXZ      -> axis-separated horizontal move with wall sliding
-//   resolveVertical  -> gravity integration vs support (landing, step-up rest)
+//   resolveVertical  -> gravity integration vs support (rest, step-up,
+//                       landings, stair descent, edge-fall)
 //   findFreeSpawn    -> rejection sampling over `colliders` (spawn placement)
 //   hasLineOfSight   -> raycast against `solids` (used by bots before firing)
 //
@@ -58,7 +59,9 @@ export function collidesAt(pos: THREE.Vector3, radius: number, feetY: number, co
   const minX = pos.x - radius, maxX = pos.x + radius;
   const minZ = pos.z - radius, maxZ = pos.z + radius;
   const steppableBelow = feetY + STEP_HEIGHT + COLLISION_EPSILON;
-  const overheadAbove = feetY + HEAD_HEIGHT;
+  // Minus slack here: float32 stores bottoms LOW, and an exact-height
+  // overhead slab must still read as walkable-under.
+  const overheadAbove = feetY + HEAD_HEIGHT - COLLISION_EPSILON;
   for (const c of colliders) {
     if (minX >= c.max.x || maxX <= c.min.x) continue;
     if (minZ >= c.max.z || maxZ <= c.min.z) continue;
@@ -151,12 +154,21 @@ export interface VerticalResolve {
  * no tunneling through thin treads even at clamped-dt speeds) and walking OFF
  * edges (support drops away, next frames free-fall).
  *
+ * A GROUNDED entity additionally sticks to support within one STEP_HEIGHT
+ * below its feet: descending a flight keeps it attached tread-to-tread
+ * instead of micro-free-falling into every riser (~13 frames of near-full
+ * air-accuracy penalty per tread at walk speed), while a deeper drop (a
+ * ledge) still breaks into a fall. Callers feed back the grounded state they
+ * tracked last frame.
+ *
  * @param prevFeetY feet height before this step's gravity was applied
  * @param velY vertical velocity AFTER gravity was applied by the caller
  * @param dt delta time (s)
  * @param x/z entity centre (post horizontal move — step-up lands here)
  * @param radius half-width of the entity footprint
  * @param colliders registry from world.ts
+ * @param wasGrounded grounded last frame; default false preserves the
+ *   free-fall behavior for spawns and callers that don't track it
  */
 export function resolveVertical(
   prevFeetY: number,
@@ -166,11 +178,18 @@ export function resolveVertical(
   z: number,
   radius: number,
   colliders: THREE.Box3[],
+  wasGrounded = false,
 ): VerticalResolve {
   const newFeetY = prevFeetY + velY * dt;
   if (velY > 0) return { feetY: newFeetY, velY, onGround: false };
   const ground = supportHeightAt(x, z, radius, prevFeetY + STEP_HEIGHT, colliders);
   if (newFeetY <= ground) return { feetY: ground, velY: 0, onGround: true };
+  // Descend-stick. COLLISION_EPSILON slack because float32-noisy treads can
+  // measure a hair under exactly one STEP_HEIGHT below the feet (same
+  // ordering argument as the epsilon in collidesAt).
+  if (wasGrounded && ground >= prevFeetY - STEP_HEIGHT - COLLISION_EPSILON) {
+    return { feetY: ground, velY: 0, onGround: true };
+  }
   return { feetY: newFeetY, velY, onGround: false };
 }
 

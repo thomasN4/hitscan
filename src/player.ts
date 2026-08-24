@@ -105,10 +105,13 @@ export function updateMovement(dt: number): void {
   // Jump / gravity / support. resolveVertical owns onGround: rising frames
   // are airborne, falling frames land on the highest swept surface (which is
   // also how step-up works — the riser ahead is within STEP_HEIGHT of the
-  // feet, so its top catches them as the feet dip a hair below it).
+  // feet, so its top catches them as the feet dip a hair below it). The
+  // last-argument grounded flag lets descents stick to stairs instead of
+  // free-falling each tread.
   if (key('Space') && player.onGround) player.vel.y = JUMP_VEL;
   player.vel.y -= GRAVITY * dt;
-  const vert = resolveVertical(feetY, player.vel.y, dt, player.pos.x, player.pos.z, player.radius, colliders);
+  const vert = resolveVertical(feetY, player.vel.y, dt, player.pos.x, player.pos.z,
+    player.radius, colliders, player.onGround);
   player.pos.y = vert.feetY + player.eyeHeight;
   player.vel.y = vert.velY;
   player.onGround = vert.onGround;

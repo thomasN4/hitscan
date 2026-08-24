@@ -101,6 +101,17 @@ describe('collidesAt — blocking is relative to the feet', () => {
     const tier = slab(0, 0, 3, 6);
     expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [tier])).toBe(false);
   });
+
+  test('overhead cover built at exactly head height stays walkable-under', () => {
+    // A slab whose bottom is designed at HEAD_HEIGHT stores one float32 ULP
+    // LOW (1.9999997615814209); the overhead bound takes COLLISION_EPSILON
+    // slack like the steppable bound does, or exact-height cover walls you in.
+    const bottom = 1.9999997615814209;
+    const cover = slab(0, 0, bottom, 3);
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [cover])).toBe(false);
+    // One hair genuinely lower is real cover and still blocks.
+    expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [slab(0, 0, bottom - 0.01, 3)])).toBe(true);
+  });
 });
 
 describe('supportHeightAt', () => {
@@ -193,6 +204,63 @@ describe('resolveVertical', () => {
     const r = resolveVertical(2, -10, 0.05, 1.3, 0, PLAYER_RADIUS, [wall(0, 0)]);
     expect(r.onGround).toBe(false);
     expect(r.feetY).toBeCloseTo(1.5);
+  });
+
+  test('descending one riser while grounded sticks to the lower tread', () => {
+    // The footprint just left the upper tread (top 0.6): support is the
+    // lower tread top 0.3, but gravity has only pulled the feet down a hair,
+    // so without the stick rule they free-fall ~0.29 m every tread.
+    const lower = slab(0, 0, 0, STEP_HEIGHT);
+    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower], true);
+    expect(r.onGround).toBe(true);
+    expect(r.feetY).toBe(STEP_HEIGHT);
+    expect(r.velY).toBe(0);
+  });
+
+  test('the same descent query without wasGrounded stays airborne', () => {
+    const lower = slab(0, 0, 0, STEP_HEIGHT);
+    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower]);
+    expect(r.onGround).toBe(false);
+    expect(r.feetY).toBeGreaterThan(STEP_HEIGHT);
+  });
+
+  test('grounded descent onto a float32-noisy tread still sticks', () => {
+    // The noise direction that matters here: a "0.3" riser measuring LOW
+    // puts its top a hair OVER one STEP_HEIGHT below the feet — exactly
+    // what COLLISION_EPSILON exists for on this comparison too.
+    const noisyTop = STEP_HEIGHT - 1.7881393432617188e-7; // float32 ULP below 0.3
+    const noisyLower = slab(0, 0, 0, noisyTop);
+    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [noisyLower], true);
+    expect(r.onGround).toBe(true);
+    expect(r.feetY).toBe(noisyTop);
+  });
+
+  test('the stick budget is exactly one STEP_HEIGHT plus epsilon', () => {
+    const deep = slab(0, 0, 0, 0.29);     // 0.31 below the feet: falls
+    const shallow = slab(0, 0, 0, 0.301); // 0.299 below: sticks
+    const deepR = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [deep], true);
+    const shallowR = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [shallow], true);
+    expect(deepR.onGround).toBe(false);
+    expect(shallowR.onGround).toBe(true);
+    expect(shallowR.feetY).toBe(0.301);
+  });
+
+  test('a drop deeper than one step still goes airborne (ledge)', () => {
+    // Past the platform edge over open ground: support (0) is more than
+    // STEP_HEIGHT below the feet, so even a grounded entity falls.
+    const platform = slab(0, 0, 0, 1.0, 5); // spans x -5..5
+    const r = resolveVertical(1.0, -22 * 0.016, 0.016,
+      5 + PLAYER_RADIUS + 0.01, 0, PLAYER_RADIUS, [platform], true);
+    expect(r.onGround).toBe(false);
+    expect(r.feetY).toBeLessThan(1.0);
+  });
+
+  test('jumping off a stair tread still rises (stick never blocks ascent)', () => {
+    const lower = slab(0, 0, 0, STEP_HEIGHT);
+    const r = resolveVertical(0.6, 8, 0.05, 0, 0, PLAYER_RADIUS, [lower], true);
+    expect(r.onGround).toBe(false);
+    expect(r.velY).toBe(8);
+    expect(r.feetY).toBeCloseTo(1.0);
   });
 });
 

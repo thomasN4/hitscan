@@ -79,6 +79,8 @@ export class Bot implements BotShape {
   respawnPoint = new THREE.Vector3();
   /** Vertical velocity — bots resolve support like the player does (stairs). */
   vy = 0;
+  /** Grounded state fed back to resolveVertical so stair descents stick. */
+  onGround = true;
 
   constructor() {
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
@@ -112,6 +114,10 @@ export class Bot implements BotShape {
     );
     this.respawnPoint.copy(p);
     this.mesh.position.copy(p);
+    // Spawns are on open ground: clear vertical state carried from the life
+    // that just ended rather than relying on resolveVertical to self-heal it.
+    this.vy = 0;
+    this.onGround = true;
   }
 
   /**
@@ -152,9 +158,10 @@ export class Bot implements BotShape {
     // stairs mid-chase and land when they walk off an edge.
     this.vy -= GRAVITY * dt;
     const vert = resolveVertical(prevFeet, this.vy, dt,
-      this.mesh.position.x, this.mesh.position.z, BOT_RADIUS, colliders);
+      this.mesh.position.x, this.mesh.position.z, BOT_RADIUS, colliders, this.onGround);
     this.mesh.position.y = vert.feetY;
     this.vy = vert.velY;
+    this.onGround = vert.onGround;
 
     if (Math.random() < dt * 0.5) this.strafeDir *= -1; // ~50% chance/sec to juke
 

@@ -82,11 +82,12 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
 
     let stairs = null;
     // 2b) Stairs: step-up must carry a sprinting player up the arena stair
-    //     flight onto the raised platform (top 2.4 m) WITHOUT jumping.
-    //     Mechanics over position: poll until the feet are grounded at
-    //     platform height (deterministic at any headless FPS), then assert —
-    //     grounded arrival, no sinking below the start (no floor clipping),
-    //     and no overshoot into the absurd.
+    //     flight onto the raised platform (top 2.4 m) WITHOUT jumping — and
+    //     then back DOWN again without going airborne per tread (the
+    //     descend-stick in resolveVertical). Mechanics over position: poll
+    //     until deterministic states are reached (grounded at platform
+    //     height; grounded back on open ground), then assert — no sinking,
+    //     no overshoot, and zero airborne frames on the way down.
     if (stairsCheck) {
       stairs = await page.evaluate(async () => {
         const cs = window.__cs;
@@ -121,6 +122,39 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (stairs.climbedTo > 2.7) throw new Error(`climbed impossibly high (feet ${stairs.climbedTo} m): ${JSON.stringify(stairs)}`);
       if (stairs.sankBy > 0.05) throw new Error(`player sank ${stairs.sankBy} m below start during climb: ${JSON.stringify(stairs)}`);
       console.log(`[stairs] OK`, JSON.stringify(stairs));
+
+      // 2c) Descent: turn around and walk back down the same flight. Every
+      //     riser is exactly one STEP_HEIGHT drop, so a grounded player must
+      //     stick tread-to-tread — ANY airborne frame is the micro-hop the
+      //     descend-stick exists to prevent. Platform top (2.4) -> first
+      //     tread (2.1) and last tread (0.3) -> ground are also one-step
+      //     drops, so the whole run should stay glued.
+      const down = await page.evaluate(async () => {
+        const cs = window.__cs;
+        cs.player.hp = 100000; // bot fire must not kill the runner mid-descent
+        cs.game.pitch = 0;
+        cs.game.yaw = 0; // forward is -z: back down the flight
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        let airborneFrames = 0;
+        let reachedBottom = false;
+        const t0 = performance.now();
+        while (performance.now() - t0 < 8000) {
+          await new Promise(r => requestAnimationFrame(r));
+          if (!cs.player.onGround) airborneFrames++;
+          if ((cs.player.pos.y - 1.7) <= 0.05 && cs.player.pos.z <= 23) { reachedBottom = true; break; }
+        }
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        const result = {
+          reachedBottom,
+          endedAtFeet: +(cs.player.pos.y - 1.7).toFixed(2),
+          airborneFrames,
+        };
+        cs.player.hp = 100;
+        return result;
+      });
+      if (!down.reachedBottom || Math.abs(down.endedAtFeet) > 0.05) throw new Error(`descent never reached open ground grounded (feet ${down.endedAtFeet} m): ${JSON.stringify(down)}`);
+      if (down.airborneFrames > 0) throw new Error(`descent went airborne on ${down.airborneFrames} frames: ${JSON.stringify(down)}`);
+      console.log(`[stairs-down] OK`, JSON.stringify(down));
     }
 
     let sprint = null;

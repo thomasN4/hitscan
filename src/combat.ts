@@ -65,6 +65,9 @@ export function respawn(): void {
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
   motion.airLerp = 0;
   motion.crouchLerp = 0;
+  // Spawns sit on open ground; without this, dying on the platform would
+  // ease the camera DOWN from its stale smoothed height over the first ~100ms.
+  motion.groundSmoothY = 0;
   input.crouching = false; // else a death while crouch-toggled respawns you crouched
   wpn.adsLerp = 0;
   resetAmmo();    // refills both slots and mirrors the smg into `weapon`

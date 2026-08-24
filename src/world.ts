@@ -29,8 +29,8 @@ export const colliders: THREE.Box3[] = [];
  * bullets, but movement is bounded by other geometry instead (map.ts's
  * perimeter walls, range.ts's lane walls). Giving a flat plane an AABB would
  * not trap anyone — it would simply do nothing: a PlaneGeometry rotated -PI/2
- * measures to a ZERO-HEIGHT box at y ~ 0, entirely below TEST_BOX_MIN_Y, so
- * collidesAt could never intersect it.
+ * measures to a ZERO-HEIGHT box at y ~ 0, which collidesAt always reads as
+ * steppable floor.
  *
  * That distinction matters when you extend a map. Geometry with real HEIGHT —
  * a thick floor slab, a raised platform, a ramp — is NOT this case. Routing

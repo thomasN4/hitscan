@@ -3,6 +3,8 @@
 // Bot behavior each frame (see Bot.update):
 //   1. face the player
 //   2. move: approach if far (>14m), back off if very close (<7m), else strafe
+//      — through the same geometry gates as the player (slideMoveXZ +
+//      resolveVertical), so bots climb stairs and fall off edges too
 //   3. shoot only when a fireCooldown expires AND hasLineOfSight passes;
 //      without LOS the check retries on a short 0.3s cooldown so bots keep
 //      hunting instead of shooting through walls
@@ -14,7 +16,8 @@ import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
 import { solids, colliders } from './world';
-import { collidesAt, hasLineOfSight, findFreeSpawn } from './collision';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
+import { GRAVITY } from './sim/movement';
 import { damagePlayer, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
@@ -74,6 +77,8 @@ export class Bot implements BotShape {
   fireCooldown = 1 + Math.random() * 2; // staggered first shot
   strafeDir = Math.random() < 0.5 ? 1 : -1;
   respawnPoint = new THREE.Vector3();
+  /** Vertical velocity — bots resolve support like the player does (stairs). */
+  vy = 0;
 
   constructor() {
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
@@ -118,7 +123,7 @@ export class Bot implements BotShape {
     if (!this.alive) return;
 
     const toPlayer = new THREE.Vector3().subVectors(player.pos, this.mesh.position);
-    toPlayer.y = 0; // planar distance; Y handled implicitly since everything is ground-locked
+    toPlayer.y = 0; // planar chase distance; elevation is handled by the gates below
     const dist = toPlayer.length();
 
     // Face the player
@@ -133,10 +138,23 @@ export class Bot implements BotShape {
     const strafe = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x).normalize().multiplyScalar(this.strafeDir * 0.7);
     move.add(strafe).normalize().multiplyScalar(this.speed * dt);
 
-    const nextPos = this.mesh.position.clone().add(move);
-    nextPos.y = 0;
-    if (!collidesAt(nextPos, BOT_RADIUS, colliders)) this.mesh.position.copy(nextPos);
-    else this.strafeDir *= -1; // bumped into geometry: reverse strafe
+    // Horizontal gate: the SAME axis-separated slide the player uses, with
+    // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
+    const prevFeet = this.mesh.position.y;
+    const preX = this.mesh.position.x, preZ = this.mesh.position.z;
+    const intended = move.length();
+    slideMoveXZ(this.mesh.position, move.x, move.z, BOT_RADIUS, prevFeet, colliders);
+    if (Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ) < intended * 0.25) {
+      this.strafeDir *= -1; // pinned against geometry: reverse strafe
+    }
+
+    // Vertical: same swept support resolution as the player, so bots climb
+    // stairs mid-chase and land when they walk off an edge.
+    this.vy -= GRAVITY * dt;
+    const vert = resolveVertical(prevFeet, this.vy, dt,
+      this.mesh.position.x, this.mesh.position.z, BOT_RADIUS, colliders);
+    this.mesh.position.y = vert.feetY;
+    this.vy = vert.velY;
 
     if (Math.random() < dt * 0.5) this.strafeDir *= -1; // ~50% chance/sec to juke
 

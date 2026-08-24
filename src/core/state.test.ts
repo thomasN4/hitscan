@@ -46,7 +46,11 @@ describe('resetAmmo', () => {
 });
 
 describe('player entity', () => {
-  test('pos is the EYE position, resting at eyeHeight', () => {
+  test('pos is the EYE position; feet rest at support height (y=0 on open ground)', () => {
+    // The initial spawn sits on open ground, so eye = eyeHeight exactly.
+    // On stairs/platforms pos.y rides higher: feet = pos.y - eyeHeight is
+    // what collision.ts resolves against (see collision.test.ts).
     expect(player.pos.y).toBe(player.eyeHeight);
+    expect(player.pos.y - player.eyeHeight).toBe(0);
   });
 });

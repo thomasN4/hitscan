@@ -1,6 +1,12 @@
-// sim/movement.ts — speed tiers and the movement-accuracy input.
+// sim/movement.ts — speed tiers, gravity and the movement-accuracy input.
 //
 // Pure: every input is a parameter.
+
+/**
+ * Gravity (m/s^2) — tuned so the player's jump arc feels snappy at 60fps+.
+ * Shared by bots so both entity types fall and land identically.
+ */
+export const GRAVITY = 22;
 
 /** Base walking speed (m/s). Also the normalizer for moveLerp. */
 export const WALK_SPEED = 6.5;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { collidesAt, TEST_BOX_MIN_Y, TEST_BOX_MAX_Y } from './collision';
+import { collidesAt, findFreeSpawn, TEST_BOX_MIN_Y, TEST_BOX_MAX_Y } from './collision';
 
 /** AABB spanning y 0..height, centred on (x, z). */
 const wall = (x: number, z: number, halfW = 1, height = 4): THREE.Box3 => new THREE.Box3(
@@ -65,5 +65,41 @@ describe('collidesAt — the y span is fixed', () => {
       new THREE.Vector3(5, 6, 5),
     );
     expect(collidesAt(at(0, 0), PLAYER_RADIUS, [overhang])).toBe(false);
+  });
+});
+
+describe('findFreeSpawn', () => {
+  test('takes a clear first sample as-is', () => {
+    const clear = at(10, 10);
+    let calls = 0;
+    const p = findFreeSpawn(() => { calls++; return clear; }, PLAYER_RADIUS, [wall(0, 0)]);
+    expect(calls).toBe(1);
+    expect(p).toBe(clear);
+  });
+
+  test('rejects colliding samples until one is clear', () => {
+    // at(0,0) is inside the wall; at(1.3,0) is outside its edge but the
+    // radius reaches in (see the collidesAt contact test above).
+    const queue = [at(0, 0), at(1.3, 0), at(10, 10)];
+    const want = queue[2]!;
+    const p = findFreeSpawn(() => queue.shift()!, PLAYER_RADIUS, [wall(0, 0)]);
+    expect(p).toBe(want);
+  });
+
+  test('exhausting maxAttempts returns the last sample instead of hanging', () => {
+    const alwaysBlocked = at(0, 0);
+    let calls = 0;
+    const p = findFreeSpawn(() => { calls++; return alwaysBlocked; }, PLAYER_RADIUS, [wall(0, 0)], 5);
+    expect(calls).toBe(5);
+    expect(p).toBe(alwaysBlocked);
+  });
+
+  test('the returned position passes collidesAt at the same radius', () => {
+    const p = findFreeSpawn(
+      () => new THREE.Vector3((Math.random() - 0.5) * 20, 0, (Math.random() - 0.5) * 20),
+      PLAYER_RADIUS,
+      [wall(0, 0)],
+    );
+    expect(collidesAt(p, PLAYER_RADIUS, [wall(0, 0)])).toBe(false);
   });
 });

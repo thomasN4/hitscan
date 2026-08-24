@@ -14,13 +14,15 @@ import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
 import { solids, colliders } from './world';
-import { collidesAt, hasLineOfSight } from './collision';
+import { collidesAt, hasLineOfSight, findFreeSpawn } from './collision';
 import { damagePlayer, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
 
 const BOT_COUNT = 6;
+/** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
+const BOT_RADIUS = 0.5;
 // Shared geometries/materials — one allocation for all bots.
 const botGeo = {
   torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),
@@ -75,12 +77,20 @@ export class Bot implements BotShape {
     scene.add(this.mesh);
   }
 
-  /** Place in the far half of the map (-z side), away from player spawn. */
+  /**
+   * Place in the far half of the map (-z side), away from player spawn.
+   * Rejection-sampled against `colliders` — a blind draw lands inside a
+   * corner block or crate ~20% of the time, and a bot spawned inside
+   * geometry is stuck there for life (the move gate only blocks entering).
+   */
   spawnAtRandom(): void {
-    const x = (Math.random() - 0.5) * 90;
-    const z = -(20 + Math.random() * 35);
-    this.respawnPoint.set(x, 0, z);
-    this.mesh.position.copy(this.respawnPoint);
+    const p = findFreeSpawn(
+      () => new THREE.Vector3((Math.random() - 0.5) * 90, 0, -(20 + Math.random() * 35)),
+      BOT_RADIUS,
+      colliders,
+    );
+    this.respawnPoint.copy(p);
+    this.mesh.position.copy(p);
   }
 
   /**
@@ -109,7 +119,7 @@ export class Bot implements BotShape {
 
     const nextPos = this.mesh.position.clone().add(move);
     nextPos.y = 0;
-    if (!collidesAt(nextPos, 0.5, colliders)) this.mesh.position.copy(nextPos);
+    if (!collidesAt(nextPos, BOT_RADIUS, colliders)) this.mesh.position.copy(nextPos);
     else this.strafeDir *= -1; // bumped into geometry: reverse strafe
 
     if (Math.random() < dt * 0.5) this.strafeDir *= -1; // ~50% chance/sec to juke

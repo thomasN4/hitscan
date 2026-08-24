@@ -76,7 +76,8 @@ export interface Bot {
   alive: boolean;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
-  die(part: HitZone): void;
+  /** @param killerName display name of a bot killer; omitted for player kills */
+  die(part: HitZone, killerName?: string): void;
   spawnAtRandom(): void;
 }
 
@@ -505,11 +506,12 @@ export const wpn: WeaponDynamics = {
 
 /**
  * Match bookkeeping. Three writers, one field each: bots.ts increments
- * scoreKills on a kill, combat.ts increments scoreDeaths when the player
- * dies, main.ts's loop counts roundTime down (arena only). hud.ts renders.
+ * scoreKills on a CT-side kill (player or ally), combat.ts increments
+ * scoreDeaths when the player dies, main.ts's loop counts roundTime down
+ * (arena only). hud.ts renders.
  */
 export interface ScoreState {
-  /** Shown as the CT score. */
+  /** Shown as the CT score: player kills plus ally kills of Ts. */
   scoreKills: number;
   /** Shown as the T score. */
   scoreDeaths: number;

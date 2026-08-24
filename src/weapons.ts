@@ -281,7 +281,11 @@ export function shoot(): void {
     // length checked above; the assertion only records that fact
     const hit = hits[0]!;
     const bot = botFor(hit.object); // stamped onto each part in Bot's constructor
-    if (bot) {
+    if (bot && bot.team === 'CT') {
+      // Friendly fire is OFF: ally bodies stop the bullet (visible impact,
+      // no hitmarker, no damage) but never bleed CT score.
+      spawnImpact(hit.point);
+    } else if (bot) {
       const part = partForMesh(bot, hit.object);
       showHitmarker(part === 'head');
       damageBot(bot, damageForPart(weapon, part), part);

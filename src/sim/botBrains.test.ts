@@ -13,8 +13,10 @@ import {
   DefaultBrain,
   botDamageRoll,
   botHitChance,
+  nearestOpposing,
   type BrainParams,
   type BrainView,
+  type OpposingCandidate,
 } from './botBrains';
 
 const DT = 1 / 60;
@@ -245,5 +247,34 @@ describe('ballistic rolls', () => {
     const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([/* dir */ 0.9, /* cd */ 0.9, /* dmg */ 0.25]));
     expect(brain.hitChance(0)).toBe(DEFAULT_BRAIN_PARAMS.hitChanceNear);
     expect(brain.rollDamage()).toBeCloseTo(DEFAULT_BRAIN_PARAMS.damageMin + 0.25 * DEFAULT_BRAIN_PARAMS.damageSpan, 12);
+  });
+});
+
+describe('nearestOpposing', () => {
+  const at = (x: number, z: number, y = 0): THREE.Vector3 => new THREE.Vector3(x, y, z);
+  const cand = (x: number, z: number, alive = true, y = 0): OpposingCandidate & { tag: string } => ({
+    pos: at(x, z, y),
+    alive,
+    tag: `${x},${z}`,
+  });
+  const origin = at(0, 0);
+
+  it('returns undefined with no candidates or none alive', () => {
+    expect(nearestOpposing(origin, [])).toBeUndefined();
+    expect(nearestOpposing(origin, [cand(1, 1, false), cand(50, 50, false)])).toBeUndefined();
+  });
+
+  it('picks the planar-nearest alive candidate; height cannot outrank ground distance', () => {
+    // The (2,0) entry is nearer in the GROUND plane even though the high one
+    // would win a 3D comparison.
+    const near = cand(2, 0);
+    const farButLowY = cand(5, 0, true, 100);
+    expect(nearestOpposing(origin, [farButLowY, near])).toBe(near);
+  });
+
+  it('skips corpses between the bot and its prey', () => {
+    const corpseBetween = cand(1, 0, false);
+    const prey = cand(4, 0);
+    expect(nearestOpposing(origin, [corpseBetween, prey])).toBe(prey);
   });
 });

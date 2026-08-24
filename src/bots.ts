@@ -3,12 +3,13 @@
 // instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
-// Each frame update() builds a passive BrainView (planar vector/distance to
-// the player, a lazy LOS thunk, last frame's collision outcome), hands it to
-// decide(), then realizes the BrainIntent: attempt the returned step against
-// world geometry (reporting rejection back as moveBlocked) and loose a shot
-// if asked. All tuning of behavior lives in BrainParams / brain classes;
-// this file holds no policy numbers.
+// Each frame update() picks the nearest opposing entity (player or bot),
+// builds a passive BrainView around it (planar vector/distance, a lazy LOS
+// thunk, last frame's collision outcome), hands it to decide(), then
+// realizes the BrainIntent: attempt the returned step against world
+// geometry (reporting rejection back as moveBlocked) and loose a shot if
+// asked. All tuning of behavior lives in BrainParams / brain classes; this
+// file holds no policy numbers.
 //
 // Shot gating contract (realized by the default brain): fire only when a
 // cooldown expires AND line of sight passes; without sight it retries on a
@@ -22,11 +23,11 @@ import { scene, camera } from './core/engine';
 import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders } from './world';
 import { collidesAt, hasLineOfSight, findFreeSpawn } from './collision';
-import { damagePlayer, checkRoundEnd } from './combat';
+import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
-import { DefaultBrain } from './sim/botBrains';
+import { DefaultBrain, nearestOpposing } from './sim/botBrains';
 
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
@@ -77,6 +78,14 @@ const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.Mesh
 export function botFor(obj: THREE.Object3D): BotShape | undefined {
   return obj.userData.bot as BotShape | undefined;
 }
+
+/**
+ * One entity this bot may fight. The player and bot targets differ in how
+ * their LOS endpoint is derived and where shot damage is routed.
+ */
+type Target =
+  | { kind: 'player'; pos: THREE.Vector3; alive: boolean }
+  | { kind: 'bot'; pos: THREE.Vector3; alive: boolean; bot: BotShape };
 
 /** Concrete Bot: implements the structural `Bot` shape core/state.ts declares for the registry. */
 export class Bot implements BotShape {
@@ -143,29 +152,51 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Per-frame executor pass: build the view, take the brain's intent,
-   * realize it. No policy decisions live here.
+   * Per-frame executor pass: pick a target, build the view, take the
+   * brain's intent, realize it. No policy decisions live here.
    * @param dt delta time (s)
    * @param player the player entity
    */
   update(dt: number, player: PlayerState): void {
     if (!this.alive) return;
 
-    const toPlayer = new THREE.Vector3().subVectors(player.pos, this.mesh.position);
-    toPlayer.y = 0; // planar distance; Y handled implicitly since everything is ground-locked
-    const dist = toPlayer.length();
+    // Opposing entities: Ts fight the player and every CT; CTs fight every
+    // T. The player is listed even while dead — with ctbots=0 that keeps an
+    // enemy chasing the corpse position exactly as pre-team behavior did,
+    // while shooting stays gated off by targetAlive.
+    const enemies: Target[] = [];
+    if (this.team === 'T') enemies.push({ kind: 'player', pos: player.pos, alive: player.alive });
+    for (const b of bots) {
+      if (b === this || b.team === this.team) continue;
+      enemies.push({ kind: 'bot', pos: b.mesh.position, alive: b.alive, bot: b });
+    }
+    const target = nearestOpposing(this.mesh.position, enemies)
+      ?? enemies[0]; // no live opponent: Ts fall back to the inert player entry, CTs stand down
 
-    // Face the player
-    this.mesh.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+    if (!target) {
+      this.moveBlocked = false;
+      return;
+    }
+
+    const toTarget = new THREE.Vector3().subVectors(target.pos, this.mesh.position);
+    toTarget.y = 0; // planar distance; Y handled implicitly since everything is ground-locked
+    const dist = toTarget.length();
+
+    // Face the target
+    this.mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+
+    const losTo = target.kind === 'player'
+      ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
+      : () => hasLineOfSight(this.eyePos(), target.bot.eyePos(), solids);
 
     const intent = this.brain.decide(
       {
-        toTarget: toPlayer,
+        toTarget,
         dist,
-        targetAlive: player.alive,
+        targetAlive: target.alive,
         // Lazy on purpose: the raycast is only paid when the trigger is
         // otherwise ready — see BrainView.seeTarget.
-        seeTarget: () => hasLineOfSight(this.eyePos(), camera.position, solids),
+        seeTarget: losTo,
         selfSpeed: this.speed,
         moveBlocked: this.moveBlocked,
       },
@@ -177,7 +208,7 @@ export class Bot implements BotShape {
     this.moveBlocked = collidesAt(nextPos, BOT_RADIUS, colliders);
     if (!this.moveBlocked) this.mesh.position.copy(nextPos);
 
-    if (intent.wantShoot) this.shoot(dist);
+    if (intent.wantShoot) this.shoot(dist, target);
   }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -188,28 +219,38 @@ export class Bot implements BotShape {
   /**
    * Realize a shot the brain ordered. Hits are probabilistic (no
    * projectile): chance falls off linearly with distance so distant bots
-   * are mostly noise, and a hit deals 8-22 damage.
+   * are mostly noise; a hit routes damage by target kind — the player
+   * through damagePlayer, a bot through damageBot as a flat torso hit.
    */
-  private shoot(dist: number): void {
+  private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);
     spawnImpact(this.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0))); // cheap muzzle flash
 
-    if (Math.random() < this.brain.hitChance(dist)) {
-      damagePlayer(this.brain.rollDamage());
-    }
+    if (Math.random() >= this.brain.hitChance(dist)) return;
+    const dmg = this.brain.rollDamage();
+    if (target.kind === 'player') damagePlayer(dmg, this.name);
+    else damageBot(target.bot, dmg, 'torso', this.name);
   }
 
   /**
-   * Death: hide, score for the player, then self-respawn after 6 s of GAME
+   * Death: hide, attribute the kill, then self-respawn after 6 s of GAME
    * time — a paused match doesn't respawn bots behind the menu.
    * @param killerPart zone that landed the kill
+   * @param killerName display name of the shooting bot; omitted when the
+   *   PLAYER pulled the trigger
    */
-  die(killerPart: HitZone): void {
+  die(killerPart: HitZone, killerName?: string): void {
     this.alive = false;
     this.mesh.visible = false;
-    score.scoreKills++;
-    updateScore();
-    addKillfeed(`You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`);
+    // scoreKills is the CT score: player kills always count, and so does a
+    // CT ally downing a T. A T killing a CT has no counter (yet).
+    if (killerName === undefined || this.team === 'T') {
+      score.scoreKills++;
+      updateScore();
+    }
+    addKillfeed(killerName === undefined
+      ? `You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`
+      : `${killerName} killed ${this.name}`);
     debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();
     gameTime.schedule(6, () => {

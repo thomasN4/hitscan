@@ -82,6 +82,37 @@ export function botDamageRoll(rng: () => number, params: BrainParams): number {
   return params.damageMin + rng() * params.damageSpan;
 }
 
+/** A targetable entity as the executor presents it: position + liveness. */
+export interface OpposingCandidate {
+  /** World-space position to chase and ray at (y ignored — ground-locked sim). */
+  pos: THREE.Vector3;
+  alive: boolean;
+}
+
+/**
+ * Nearest ALIVE candidate by planar distance from `origin`, or undefined
+ * when nothing is alive. Corpses never draw fire; y is ignored so height
+ * differences can't outrank ground positioning.
+ */
+export function nearestOpposing<T extends OpposingCandidate>(
+  origin: THREE.Vector3,
+  candidates: readonly T[],
+): T | undefined {
+  let best: T | undefined;
+  let bestD2 = Infinity;
+  for (const c of candidates) {
+    if (!c.alive) continue;
+    const dx = c.pos.x - origin.x;
+    const dz = c.pos.z - origin.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = c;
+    }
+  }
+  return best;
+}
+
 /** What a brain may know about the world this frame — all executor-supplied. */
 export interface BrainView {
   /** Planar vector from the bot to its target (y stripped; ground-locked sim). */

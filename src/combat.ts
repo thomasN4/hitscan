@@ -13,8 +13,9 @@ import { showDeathScreen } from './menu';
  * Apply damage to the player. On death: awards the bot-side score,
  * releases pointer lock (which pauses the loop) and shows the death screen.
  * @param dmg raw damage; caller decides falloff/accuracy
+ * @param attackerName display name for the killfeed ('Bot' historically)
  */
-export function damagePlayer(dmg: number): void {
+export function damagePlayer(dmg: number, attackerName = 'Bot'): void {
   if (!player.alive) return;
   player.hp -= dmg;
   flashDamageVignette(dmg);
@@ -23,7 +24,7 @@ export function damagePlayer(dmg: number): void {
   if (player.hp <= 0) {
     player.alive = false;
     score.scoreDeaths++;
-    addKillfeed('Bot killed You');
+    addKillfeed(`${attackerName} killed You`);
     updateScore();
     document.exitPointerLock();
     // Wall clock ON PURPOSE: pointer lock was just released, so game time is
@@ -39,13 +40,15 @@ export function damagePlayer(dmg: number): void {
 /**
  * Apply damage to a bot and kill it if HP is exhausted.
  * @param bot instance from core/state's `bots` registry
- * @param dmg already-multiplied damage from weapons.ts
+ * @param dmg already-multiplied damage from the shooter
  * @param part hit zone, used for the killfeed text
+ * @param attackerName display name of the shooting bot; omitted when the
+ *   PLAYER pulled the trigger
  */
-export function damageBot(bot: BotShape, dmg: number, part: HitZone): void {
+export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerName?: string): void {
   if (!bot.alive) return;
   bot.hp -= dmg;
-  if (bot.hp <= 0) bot.die(part);
+  if (bot.hp <= 0) bot.die(part, attackerName);
 }
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
@@ -75,12 +78,14 @@ export function respawn(): void {
 }
 
 /**
- * Win check after each bot death: when every bot is dead at once, announce
- * the round win and bring them all back after 2.5s. Bots also self-respawn
- * 6s after dying individually, so this only fires on the brief all-clear.
+ * Win check after each bot death: when every T is dead at once, announce
+ * the round win and bring everyone (both teams) back after 2.5s. Bots also
+ * self-respawn 6s after dying individually, so this only fires on the brief
+ * all-clear. CT casualties never end a round — the wave is the enemy.
  */
 export function checkRoundEnd(): void {
-  if (bots.every(b => !b.alive)) {
+  const ts = bots.filter(b => b.team === 'T');
+  if (ts.length > 0 && ts.every(b => !b.alive)) {
     addKillfeed('★ Round won! Respawning enemies...');
     // Game time: the wave stays dead while paused.
     gameTime.schedule(2.5, () => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }));

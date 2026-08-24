@@ -269,7 +269,9 @@ declare global {
       bots: typeof bots;
       bulletHoles: typeof bulletHoles;
       colliders: typeof colliders;
+      /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */
+      gameTime: typeof gameTime;
     };
   }
 }
-window.__cs = { game, weapon, player, bots, bulletHoles, colliders };
+window.__cs = { game, weapon, player, bots, bulletHoles, colliders, gameTime };

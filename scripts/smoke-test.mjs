@@ -20,7 +20,7 @@ const browser = await puppeteer.launch({
 const errors = [];
 let failures = 0;
 
-async function runMap(name, url, { sprintCheck = false, configCheck = false } = {}) {
+async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false } = {}) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
   const mapErrors = [];
@@ -292,6 +292,53 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false } = 
     if (dead.mag !== 10) throw new Error(`firing while dead consumed ammo: mag ${dead.mag}, expected 10`);
     console.log(`[deadfire] OK`, JSON.stringify(dead));
 
+    // 8) Respawn observability (issue #17): bot revival rides the pausable
+    //    game clock, not wall time. Kill one bot, PAUSE past its full 6 s
+    //    revival delay, and it must still be dead on resume; keep simulating
+    //    and it must revive right around when the frozen delay elapses.
+    //    Also pins the id/name identity that devtools recipes and killfeeds
+    //    rely on ("the one I killed" must be identifiable).
+    if (botCheck) {
+      const resp = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        const bot = cs.bots.find(b => b.alive);
+        if (!bot) throw new Error('no alive bot found');
+        bot.die('torso');
+        const killed = {
+          alive: bot.alive,
+          t: cs.gameTime.now(),
+          feedTop: document.getElementById('killfeed')?.firstElementChild?.textContent ?? '',
+        };
+        // Pause: animate()'s simulate branch keys on locked && started, and
+        // gameTime only advances inside it — so this is a real pause of the
+        // clock the revival is scheduled against, not just a render freeze.
+        cs.game.locked = false;
+        await wait(7000); // > the entire 6 s revival delay
+        const paused = { alive: bot.alive, t: cs.gameTime.now() };
+        // Resume; poll until revival fires or well past its window.
+        cs.game.locked = true;
+        let revivedAt = -1;
+        const t0 = performance.now();
+        while (performance.now() - t0 < 9000) {
+          await new Promise(r => requestAnimationFrame(r));
+          if (bot.alive) { revivedAt = cs.gameTime.now(); break; }
+        }
+        return { name: bot.name, id: bot.id, killed, paused, revivedAt };
+      });
+      if (!/^T-\d+$/.test(resp.name) || typeof resp.id !== 'number' || resp.id < 1) {
+        throw new Error(`bot identity missing: ${JSON.stringify({ name: resp.name, id: resp.id })}`);
+      }
+      if (resp.killed.feedTop !== `You killed ${resp.name}`) throw new Error(`killfeed not named: "${resp.killed.feedTop}"`);
+      if (resp.killed.alive) throw new Error('die() did not take effect');
+      if (resp.paused.alive) throw new Error(`bot revived during pause (issue #17): paused.t=${resp.paused.t.toFixed(1)}, killed.t=${resp.killed.t.toFixed(1)}`);
+      if (resp.paused.t - resp.killed.t > 0.25) throw new Error(`gameTime advanced while paused: +${(resp.paused.t - resp.killed.t).toFixed(2)}s`);
+      if (resp.revivedAt < 0) throw new Error('bot never revived after resume within 9 s wall-clock');
+      const delay = resp.revivedAt - resp.paused.t;
+      if (delay < 5.5 || delay > 6.6) throw new Error(`revival fired at wrong game-time offset after resume: ${delay.toFixed(2)}s`);
+      console.log(`[respawn] OK`, JSON.stringify({ name: resp.name, id: resp.id, frozeFor: +(resp.paused.t - resp.killed.t).toFixed(2), revivedAfter: +delay.toFixed(2) }));
+    }
+
     console.log(`[${name}] OK`, JSON.stringify({ reload: 'ok', holes: fired.holes, magAfterBurst: fired.mag, reserve: fired.reserve, ...(sprint && { sprintDist: +sprint.dist.toFixed(2) }) }));
   } catch (e) {
     failures++;
@@ -371,7 +418,7 @@ async function runConfigCheck() {
 }
 
 try {
-  await runMap('arena', '/', { configCheck: true });
+  await runMap('arena', '/', { configCheck: true, botCheck: true });
   await runConfigCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {

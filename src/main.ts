@@ -61,7 +61,8 @@ if (RANGE) {
   buildRange();
 } else {
   buildMap();
-  spawnBots(session.botsT);
+  spawnBots(session.botsT, 'T');
+  if (session.botsCt > 0) spawnBots(session.botsCt, 'CT');
 }
 respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
 initMenus({

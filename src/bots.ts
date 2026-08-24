@@ -1,5 +1,6 @@
-// bots.ts — enemy bodies and effectors: meshes, collision-gated movement,
-// probabilistic shots, death/respawn.
+// bots.ts — bot bodies and effectors: meshes, collision-gated movement,
+// probabilistic shots, death/respawn. Both teams (T enemies, CT allies) are
+// instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
 // Each frame update() builds a passive BrainView (planar vector/distance to
@@ -18,7 +19,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState } from './core/state';
+import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders } from './world';
 import { collidesAt, hasLineOfSight, findFreeSpawn } from './collision';
 import { damagePlayer, checkRoundEnd } from './combat';
@@ -30,8 +31,10 @@ import { DefaultBrain, botDamageRoll, botHitChance } from './sim/botBrains';
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
 
-/** Serial source for Bot ids/names; 1-based per match. */
+/** Serial source for Bot ids; 1-based per match, unique across teams. */
 let nextBotId = 1;
+/** Per-team display-name counters: names are `T-1…` and `CT-1…` independently. */
+const teamSerials: Record<Team, number> = { T: 0, CT: 0 };
 
 /**
  * DEV-only lifecycle trace (issue #17): makes the pause-freeze of the
@@ -43,15 +46,25 @@ function debugLog(msg: string): void {
   if (import.meta.env.DEV) console.debug(`[bot] ${msg}`);
 }
 
-// Shared geometries/materials — one allocation for all bots.
+// Shared geometries/materials — one allocation for all bots. Two palettes:
+// T tan/brown, CT blue-gray, so sides read at a glance.
 const botGeo = {
   torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),
   head:  new THREE.BoxGeometry(0.34, 0.34, 0.34),
   legs:  new THREE.BoxGeometry(0.6, 0.9, 0.35),
 };
-const matBotBody = new THREE.MeshLambertMaterial({ color: 0x8a6b2e }); // T tan/brown
-const matBotHead = new THREE.MeshLambertMaterial({ color: 0xd8c39a });
-const matBotLegs = new THREE.MeshLambertMaterial({ color: 0x4d4436 });
+const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
+  T: {
+    body: new THREE.MeshLambertMaterial({ color: 0x8a6b2e }),
+    head: new THREE.MeshLambertMaterial({ color: 0xd8c39a }),
+    legs: new THREE.MeshLambertMaterial({ color: 0x4d4436 }),
+  },
+  CT: {
+    body: new THREE.MeshLambertMaterial({ color: 0x4a5a78 }),
+    head: new THREE.MeshLambertMaterial({ color: 0xc9d2df }),
+    legs: new THREE.MeshLambertMaterial({ color: 0x2f3646 }),
+  },
+};
 
 /**
  * The ONE cast bridging raycast hits back to the bot that owns a mesh.
@@ -75,7 +88,9 @@ export class Bot implements BotShape {
   alive = true;
   /** Stable identity for debug logs and killfeed attribution. */
   id = nextBotId++;
-  name = `T-${this.id}`;
+  /** Which side this bot fights for; drives targeting, spawns and scoring. */
+  team: Team;
+  name: string;
   /** Varied per bot so they spread out. */
   speed = 3.2 + Math.random() * 1.4;
   respawnPoint = new THREE.Vector3();
@@ -84,14 +99,21 @@ export class Bot implements BotShape {
   /** Whether last frame's intended step was rejected by world collision. */
   private moveBlocked = false;
 
-  constructor() {
+  constructor(team: Team = 'T') {
+    // Plain assignments, not a parameter property: the `name` derivation must
+    // see the team, and field initializers run before constructor-body
+    // parameter-property writes would.
+    this.team = team;
+    this.name = `${team}-${++teamSerials[team]}`;
+
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
     // raycasts can distinguish hit zones. All parts share this group's transform.
-    this.torso = new THREE.Mesh(botGeo.torso, matBotBody);
+    const palette = palettes[team];
+    this.torso = new THREE.Mesh(botGeo.torso, palette.body);
     this.torso.position.y = 1.35;
-    this.head = new THREE.Mesh(botGeo.head, matBotHead);
+    this.head = new THREE.Mesh(botGeo.head, palette.head);
     this.head.position.y = 2.0;
-    this.legs = new THREE.Mesh(botGeo.legs, matBotLegs);
+    this.legs = new THREE.Mesh(botGeo.legs, palette.legs);
     this.legs.position.y = 0.45;
     [this.torso, this.head, this.legs].forEach(p => { p.castShadow = true; this.mesh.add(p); });
     const parts = { torso: this.torso, head: this.head, legs: this.legs };
@@ -103,14 +125,16 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Place in the far half of the map (-z side), away from player spawn.
+   * Place on this bot's own half: Ts in the far band (z ∈ [-55, -20], away
+   * from player spawn), CTs mirrored onto the player's half (z ∈ [20, 55]).
    * Rejection-sampled against `colliders` — a blind draw lands inside a
    * corner block or crate ~20% of the time, and a bot spawned inside
    * geometry is stuck there for life (the move gate only blocks entering).
    */
   spawnAtRandom(): void {
+    const zSign = this.team === 'T' ? -1 : 1;
     const p = findFreeSpawn(
-      () => new THREE.Vector3((Math.random() - 0.5) * 90, 0, -(20 + Math.random() * 35)),
+      () => new THREE.Vector3((Math.random() - 0.5) * 90, 0, zSign * (20 + Math.random() * 35)),
       BOT_RADIUS,
       colliders,
     );
@@ -198,9 +222,9 @@ export class Bot implements BotShape {
   }
 }
 
-/** Create the starting wave of bots. Called once from main.ts with the menu-configured enemy count (parser clamps it to >= 1). */
-export function spawnBots(count: number): void {
-  for (let i = 0; i < count; i++) bots.push(new Bot());
+/** Create a starting wave of one team. Called from main.ts with the menu-configured counts (parser clamps Ts to >= 1, CTs to >= 0). */
+export function spawnBots(count: number, team: Team): void {
+  for (let i = 0; i < count; i++) bots.push(new Bot(team));
 }
 
 /** Advance all bot AI. Called once per frame from the main loop. */

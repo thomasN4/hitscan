@@ -57,12 +57,17 @@ export interface WeaponDef {
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
 export type HitZone = 'head' | 'torso' | 'legs';
 
-/** Structural shape of one enemy (see bots.ts for the concrete class). */
+/** Sides. The player is implicitly CT-side; Ts are the enemy wave. */
+export type Team = 'T' | 'CT';
+
+/** Structural shape of one bot (see bots.ts for the concrete class). */
 export interface Bot {
   /** Per-match serial (1-based), stamped at construction — stable across deaths. */
   id: number;
-  /** Debug-log/killfeed display name derived from id, e.g. 'T-3'. */
+  /** Debug-log/killfeed display name derived from team + per-team serial, e.g. 'T-3'. */
   name: string;
+  /** Which side this bot fights for; drives targeting, spawns and scoring. */
+  team: Team;
   mesh: THREE.Group;
   head: THREE.Mesh;
   torso: THREE.Mesh;

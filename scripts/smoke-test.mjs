@@ -20,7 +20,7 @@ const browser = await puppeteer.launch({
 const errors = [];
 let failures = 0;
 
-async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false } = {}) {
+async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = false } = {}) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
   const mapErrors = [];
@@ -79,6 +79,49 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       reserve: window.__cs.weapon.reserve,
     }));
     if (fired.holes === 0) throw new Error('expected bullet holes after firing, got 0');
+
+    let stairs = null;
+    // 2b) Stairs: step-up must carry a sprinting player up the arena stair
+    //     flight onto the raised platform (top 2.4 m) WITHOUT jumping.
+    //     Mechanics over position: poll until the feet are grounded at
+    //     platform height (deterministic at any headless FPS), then assert —
+    //     grounded arrival, no sinking below the start (no floor clipping),
+    //     and no overshoot into the absurd.
+    if (stairsCheck) {
+      stairs = await page.evaluate(async () => {
+        const cs = window.__cs;
+        cs.player.hp = 100000; // bot fire during the walk must not kill the runner
+        cs.game.pitch = 0;
+        cs.player.pos.set(26, 1.7, 22.5);
+        cs.game.yaw = Math.PI; // forward is +z: up the stairs
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        const startY = cs.player.pos.y;
+        let minY = Infinity;
+        let reached = false;
+        const t0 = performance.now();
+        while (performance.now() - t0 < 6000) {
+          await new Promise(r => requestAnimationFrame(r));
+          minY = Math.min(minY, cs.player.pos.y);
+          if ((cs.player.pos.y - 1.7) >= 2.35 && cs.player.onGround) { reached = true; break; }
+        }
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
+        const result = {
+          reached,
+          climbedTo: +(cs.player.pos.y - 1.7).toFixed(2),
+          onGround: cs.player.onGround,
+          sankBy: +(startY - minY).toFixed(3),
+        };
+        cs.player.hp = 100; // restore for later phases
+        return result;
+      });
+      if (!stairs.reached || stairs.climbedTo < 2.1) throw new Error(`step-up never gained the platform (feet ${stairs.climbedTo} m): ${JSON.stringify(stairs)}`);
+      if (!stairs.onGround) throw new Error(`stairs climb ended airborne: ${JSON.stringify(stairs)}`);
+      if (stairs.climbedTo > 2.7) throw new Error(`climbed impossibly high (feet ${stairs.climbedTo} m): ${JSON.stringify(stairs)}`);
+      if (stairs.sankBy > 0.05) throw new Error(`player sank ${stairs.sankBy} m below start during climb: ${JSON.stringify(stairs)}`);
+      console.log(`[stairs] OK`, JSON.stringify(stairs));
+    }
 
     let sprint = null;
     // 3) Hold-Shift sprint (range only — on arena, bot fire during earlier
@@ -418,7 +461,7 @@ async function runConfigCheck() {
 }
 
 try {
-  await runMap('arena', '/', { configCheck: true, botCheck: true });
+  await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: true });
   await runConfigCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {

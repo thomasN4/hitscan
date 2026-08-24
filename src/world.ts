@@ -123,6 +123,55 @@ export function addSolidBox(x: number, y: number, z: number, w: number, h: numbe
   return mesh;
 }
 
+/** Cardinal directions a stair flight can ascend along. */
+export type StairDir = 'x+' | 'x-' | 'z+' | 'z-';
+
+/**
+ * Build a flight of stairs ascending along one cardinal direction from (x, z).
+ *
+ * Each step is a FULL-HEIGHT solid box from base `y` — no floating treads —
+ * so bullets, decals and movement AABBs all behave like ordinary walls, and
+ * collision.ts's step-up logic climbs the risers automatically. The top step
+ * reaches exactly `y + count * stepH`: place the landing platform at that
+ * height with its face flush against the last step for a seamless join.
+ *
+ * Browser-only: composes addSolidBox, which touches the scene.
+ *
+ * @param x centre x of the flight's first step
+ * @param y base y — the ground the stairs stand on
+ * @param z centre z of the flight's first step
+ * @param width stair width across the direction of travel (m)
+ * @param stepH riser height per step; keep at or below STEP_HEIGHT or the
+ *        steps become walls instead of climbable floors
+ * @param stepD tread depth per step (m)
+ * @param count number of steps
+ * @param mat surface material; omitted means Mesh's own default
+ * @param dir direction of ascent; the flight advances this way step by step
+ */
+export function addStairs(
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  stepH: number,
+  stepD: number,
+  count: number,
+  mat?: THREE.Material,
+  dir: StairDir = 'z+',
+): void {
+  for (let i = 0; i < count; i++) {
+    const rise = (i + 1) * stepH;
+    const run = (i + 0.5) * stepD;
+    const cx = dir === 'x+' ? x + run : dir === 'x-' ? x - run : x;
+    const cz = dir === 'z+' ? z + run : dir === 'z-' ? z - run : z;
+    addSolidBox(cx, y, cz,
+      dir === 'z+' || dir === 'z-' ? width : stepD,
+      rise,
+      dir === 'z+' || dir === 'z-' ? stepD : width,
+      mat);
+  }
+}
+
 /** Empty both registries. Used by tests to isolate cases; not used at runtime. */
 export function resetWorld(): void {
   solids.length = 0;

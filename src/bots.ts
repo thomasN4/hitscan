@@ -23,7 +23,7 @@ import { addKillfeed, updateScore } from './hud';
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
 
-/** Serial source for Bot ids/names; 1-based per page load. */
+/** Serial source for Bot ids/names; 1-based per match. */
 let nextBotId = 1;
 
 /**
@@ -35,6 +35,7 @@ let nextBotId = 1;
 function debugLog(msg: string): void {
   if (import.meta.env.DEV) console.debug(`[bot] ${msg}`);
 }
+
 // Shared geometries/materials — one allocation for all bots.
 const botGeo = {
   torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),

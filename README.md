@@ -34,9 +34,9 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 
 ## Gameplay
 
-Two maps, chosen from the start menu (switching reloads the page with `?map=range`):
+Two maps plus the match setup (enemy/allied bot counts, round length in minutes), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…`) and reloads the page:
 
-- **Arena** (`src/map.js`) — 6 enemy bots spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
+- **Arena** (`src/map.js`) — enemy bots (menu-configured count, default 6) spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
 - **Shooting Range** (`src/range.js`) — a private lane with floor markers at 10–50 m and bot-silhouette targets (identical hitbox dimensions to real bots) wearing elliptical bullseye rings at 10–60 m. Nothing shoots back; `R` restores your full loadout without consuming reserve ammo. Use it to practice accuracy and recoil patterns.
 
 Common rules:
@@ -98,4 +98,4 @@ Launches your Brave browser headlessly (via puppeteer-core), loads the page, cap
 
 ## Debug hook
 
-While playing, live game state is exposed on the console as `window.__cs` (`{ game, weapon, player }`) for quick inspection.
+While playing, live game state is exposed on the console as `window.__cs` (`{ game, weapon, player, bots }`) for quick inspection.

@@ -8,10 +8,13 @@ import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, resetAmmo, session, player } from './state';
 
 describe('state module purity', () => {
-  // main.ts overwrites session.map from ?map= at startup; the pure default
-  // the module ships with must be the arena.
-  test('defaults to the arena map', () => {
+  // main.ts overwrites session's config fields from the URL query at startup;
+  // the pure defaults the module ships with must be the plain arena match.
+  test('ships with match-config defaults', () => {
     expect(session.map).toBe('arena');
+    expect(session.botsT).toBe(6);
+    expect(session.botsCt).toBe(0);
+    expect(session.roundSeconds).toBe(120);
   });
 });
 

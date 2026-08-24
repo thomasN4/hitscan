@@ -20,7 +20,6 @@ import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
 
-const BOT_COUNT = 6;
 /** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
 const BOT_RADIUS = 0.5;
 // Shared geometries/materials — one allocation for all bots.
@@ -180,9 +179,9 @@ export class Bot implements BotShape {
   }
 }
 
-/** Create the starting wave of bots. Called once from main.ts. */
-export function spawnBots(): void {
-  for (let i = 0; i < BOT_COUNT; i++) bots.push(new Bot());
+/** Create the starting wave of bots. Called once from main.ts with the menu-configured enemy count (parser clamps it to >= 1). */
+export function spawnBots(count: number): void {
+  for (let i = 0; i < count; i++) bots.push(new Bot());
 }
 
 /** Advance all bot AI. Called once per frame from the main loop. */

@@ -20,7 +20,7 @@ const browser = await puppeteer.launch({
 const errors = [];
 let failures = 0;
 
-async function runMap(name, url, { sprintCheck = false } = {}) {
+async function runMap(name, url, { sprintCheck = false, configCheck = false } = {}) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
   const mapErrors = [];
@@ -33,6 +33,19 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
 
     const hook = await page.evaluate(() => !!window.__cs);
     if (!hook) throw new Error('debug hook __cs missing — module failed to load?');
+
+    // Menu-config defaults on a bare URL: 6 T bots, 2:00 round. Bot count
+    // only checked on arena — the range spawns silhouettes, not registry bots.
+    if (configCheck) {
+      const cfgDefaults = await page.evaluate(() => ({
+        botsT: window.__cs.game.botsT,
+        roundSeconds: window.__cs.game.roundSeconds,
+        botCount: window.__cs.bots.length,
+      }));
+      if (cfgDefaults.botsT !== 6 || cfgDefaults.roundSeconds !== 120 || cfgDefaults.botCount !== 6) {
+        throw new Error(`default match config wrong: ${JSON.stringify(cfgDefaults)}`);
+      }
+    }
 
     // Enter "playing" state headlessly (pointer lock is unreliable in CI)
     await page.evaluate(() => {
@@ -288,8 +301,78 @@ async function runMap(name, url, { sprintCheck = false } = {}) {
   await page.close();
 }
 
+// Menu-config round trip: the committed query must drive spawn count, round
+// length and the HUD timer, and pre-fill the start-menu form. Uses time=90
+// (1.5 min) so a passing timer read can't just be stale markup ('2:00');
+// remember `time` rides the URL in SECONDS — the menu's minutes input is
+// converted before commit.
+async function runConfigCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=10&ctbots=3&time=90', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+
+    const applied = await page.evaluate(() => ({
+      botsT: window.__cs.game.botsT,
+      botsCt: window.__cs.game.botsCt,
+      roundSeconds: window.__cs.game.roundSeconds,
+      botCount: window.__cs.bots.length,
+      form: {
+        map: document.getElementById('cfgMap').value,
+        botsT: document.getElementById('cfgBotsT').value,
+        botsCt: document.getElementById('cfgBotsCt').value,
+        timeMin: document.getElementById('cfgTimeMin').value,
+      },
+    }));
+    if (applied.botsT !== 10 || applied.botsCt !== 3 || applied.roundSeconds !== 90) {
+      throw new Error(`config not parsed from query: ${JSON.stringify(applied)}`);
+    }
+    if (applied.botCount !== 10) throw new Error(`expected 10 spawned bots, got ${applied.botCount}`);
+    if (applied.form.map !== 'arena' || applied.form.botsT !== '10' || applied.form.botsCt !== '3' || applied.form.timeMin !== '1.5') {
+      throw new Error(`menu form not initialized from config: ${JSON.stringify(applied.form)}`);
+    }
+
+    // Dirty-commit path: changing a form field and pressing Play must
+    // navigate to the rebuilt query (and NOT request pointer lock), and the
+    // freshly loaded page must apply the committed values.
+    await page.evaluate(() => { document.getElementById('cfgBotsT').value = '12'; });
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 20000 }),
+      page.click('#playBtn'),
+    ]);
+    const url = page.url();
+    if (!/[?&]tbots=12&/.test(url) || !/[?&]time=90$/.test(url)) {
+      throw new Error(`Play with changed settings navigated wrong: ${url}`);
+    }
+    const recommitted = await page.evaluate(() => ({ botsT: window.__cs.game.botsT, botCount: window.__cs.bots.length }));
+    if (recommitted.botsT !== 12 || recommitted.botCount !== 12) {
+      throw new Error(`reloaded page did not apply committed config: ${JSON.stringify(recommitted)}`);
+    }
+
+    // Enter "playing" state headlessly; one simulated frame must render the
+    // configured clock into the timer widget.
+    await page.evaluate(() => { window.__cs.game.started = true; window.__cs.game.locked = true; });
+    await page.evaluate(async () => { await new Promise(r => requestAnimationFrame(r)); });
+    const timerText = await page.evaluate(() => document.getElementById('timer').textContent);
+    // The entered state has already simulated ≥1 frame, so 90 s may read as
+    // 1:30 or have ticked down to 1:29 — either proves the CONFIGURED length
+    // rendered (stale '2:00' markup would fail).
+    if (timerText !== '1:30' && timerText !== '1:29') throw new Error(`timer should show configured 90 s, got "${timerText}"`);
+    console.log('[config] OK', JSON.stringify(applied));
+  } catch (e) {
+    failures++;
+    console.log(`[config] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[config] ${e}`));
+  await page.close();
+}
+
 try {
-  await runMap('arena', '/');
+  await runMap('arena', '/', { configCheck: true });
+  await runConfigCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {
   await browser.close();

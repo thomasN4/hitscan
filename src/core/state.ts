@@ -4,8 +4,8 @@
 // simulation unit-testable): it may use THREE's math classes (Vector3,
 // Box3...) but must never touch `document`, `window`, `location`, or
 // construct a WebGLRenderer. Engine singletons live in core/engine.ts
-// instead — and browser-derived values (the ?map= param) are written in by
-// main.ts at startup rather than read here.
+// instead — and browser-derived values (the match-config query string) are
+// written in by main.ts at startup rather than read here.
 //
 // All mutable cross-module game state lives here: if you need to share new
 // state between systems (player, bots, weapons, HUD...), add it here rather
@@ -307,8 +307,26 @@ export function resetAmmo(): void {
   weapon.reloading = false;
 }
 
-/** Maps selectable from the start menu (?map= URL param). */
+/** Maps selectable from the start menu (the ?map= part of the config query). */
 export type MapName = 'arena' | 'range';
+
+/**
+ * Match-config defaults: what a bare URL (no params) means, and what every
+ * garbage/out-of-range ?tbots=/?ctbots=/?time= value falls back to
+ * (see core/sessionConfig.ts for the parser). The start-menu form initializes
+ * from these too, so they are the single source for all of it.
+ */
+export const SESSION_DEFAULTS: Readonly<{
+  map: MapName;
+  botsT: number;
+  botsCt: number;
+  roundSeconds: number;
+}> = {
+  map: 'arena',
+  botsT: 6,
+  botsCt: 0,
+  roundSeconds: 120,
+};
 
 // ---------- Owner-scoped slices ----------
 // The old single `game` bag, split by owning system. Each slice documents its
@@ -318,13 +336,25 @@ export type MapName = 'arena' | 'range';
 // delegation-only facade built at the debug hook in main.ts; gameplay code
 // imports slices directly.
 
-/** Session-level flags. Written by main.ts (startup ?map= read, pointer-lock events). */
+/**
+ * Session-level configuration + flags. The config fields are written ONCE by
+ * main.ts at startup (parsed from the committed query string); the flags are
+ * written by main.ts's pointer-lock events.
+ */
 export interface SessionState {
-  // Map is chosen at page load via ?map=range (start-menu buttons trigger a
-  // full reload); there is deliberately no hot-swapping of scenes at runtime.
-  // main.ts overwrites this from the URL at startup — reading `location` here
-  // would break this module's importability in Node.
+  // Match settings are chosen pre-game in the start menu and committed as ONE
+  // query string (?map=&tbots=&ctbots=&time=) via a full page reload — map
+  // switching is a reload and there is deliberately no hot-swapping of scenes
+  // at runtime. main.ts overwrites all four from core/sessionConfig.ts's parse
+  // of the URL at startup — reading `location` here would break this module's
+  // importability in Node.
   map: MapName;
+  /** Enemy (T-side) bot count, clamped to 1..12 by the parser. */
+  botsT: number;
+  /** Allied (CT-side) bot count, 0..12 — stored only; allies don't exist yet. */
+  botsCt: number;
+  /** Round length in seconds. score.roundTime starts here AND resets here. */
+  roundSeconds: number;
   /** Pointer lock active (Esc/menu releases it). */
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */
@@ -332,7 +362,7 @@ export interface SessionState {
 }
 
 export const session: SessionState = {
-  map: 'arena',
+  ...SESSION_DEFAULTS,
   locked: false,
   started: false,
 };
@@ -474,14 +504,16 @@ export interface ScoreState {
   scoreKills: number;
   /** Shown as the T score. */
   scoreDeaths: number;
-  /** Seconds left in the round; resets to 1:55 when it expires. */
+  /** Seconds left in the round; initialized from session.roundSeconds by
+   *  main.ts and reset there when it expires (expiry handling itself is a
+   *  known placeholder — see the roadmap). */
   roundTime: number;
 }
 
 export const score: ScoreState = {
   scoreKills: 0,
   scoreDeaths: 0,
-  roundTime: 115,
+  roundTime: SESSION_DEFAULTS.roundSeconds,
 };
 
 /** Raw keyboard state by `event.code`. Written in main.ts, read in player.ts. */

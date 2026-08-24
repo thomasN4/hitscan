@@ -6,7 +6,8 @@
 import type { Bot as BotShape, HitZone } from './core/state';
 import { player, session, aim, wpn, motion, score, bots, input, gameTime, resetAmmo } from './core/state';
 import { sfxHurt } from './audio';
-import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD, requireEl } from './hud';
+import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud';
+import { showDeathScreen } from './menu';
 
 /**
  * Apply damage to the player. On death: awards the bot-side score,
@@ -30,7 +31,7 @@ export function damagePlayer(dmg: number): void {
     // screen would never show. The delay exists to be seen while paused.
     // Small delay so the killer's shot is visible before the menu covers it.
     setTimeout(() => {
-      requireEl('deathScreen').style.display = 'flex';
+      showDeathScreen(true);
     }, 400);
   }
 }

@@ -20,7 +20,7 @@ import { colliders } from './world';
 import { BUILDERS } from './maps';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
-import { tryReload, switchWeapon, initWeaponViewmodels, updateWeapon } from './weapons';
+import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
 import { updateEffects } from './effects';
 import { respawn } from './combat';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
@@ -86,6 +86,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
   if (e.code === 'Digit3') switchWeapon(2);
+  if (e.code === 'KeyQ') switchToLast();
   // Stance keys only count during live play — same gate as the mouse
   // handlers — so nothing toggled pre-lock or behind the pause menu leaks
   // into the session. Sprint is hold-Shift; crouch is a Ctrl/C tap toggle
@@ -249,6 +250,7 @@ const game: DebugGame = {
   get recoilYaw() { return wpn.recoilYaw; }, set recoilYaw(v: number) { wpn.recoilYaw = v; },
   get adsLerp() { return wpn.adsLerp; }, set adsLerp(v: number) { wpn.adsLerp = v; },
   get slot() { return wpn.slot; }, set slot(v: WeaponSlot) { wpn.slot = v; },
+  get lastSlot() { return wpn.lastSlot; }, set lastSlot(v: WeaponSlot) { wpn.lastSlot = v; },
   get zoomLevel() { return wpn.zoomLevel; }, set zoomLevel(v: number) { wpn.zoomLevel = v; },
   get zoomScale() { return wpn.zoomScale; }, set zoomScale(v: number) { wpn.zoomScale = v; },
   get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },

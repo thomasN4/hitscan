@@ -190,15 +190,28 @@ export function tryReload(): void {
  * Switch to slot `slot` (0 smg, 1 sniper, 2 pistol). Saves the current mag/reserve
  * back into ammoStore so mugs don't refill on swap, copies the new slot's
  * stats into the live `weapon` object, converts the live recoil/spray state to
- * the incoming weapon's terms, and resets scope zoom. Blocked while reloading
- * to avoid mid-mag-swap state corruption.
+ * the incoming weapon's terms, and resets scope zoom. Cancels an in-progress
+ * reload CS-style rather than being blocked by one (see below).
  */
 export function switchWeapon(slot: WeaponSlot): void {
-  if (slot === wpn.slot || !session.started || !player.alive || weapon.reloading) return;
+  if (slot === wpn.slot || !session.started || !player.alive) return;
+  // Switching cancels an in-progress reload instead of waiting it out. Safe
+  // because no rounds have moved yet — the mag is refilled from reserve only
+  // when the timer completes in updateWeapon — and the still-partial mag is
+  // saved back into ammoStore below, so the interrupted weapon keeps exactly
+  // what it had. This clear is also the real fix for the hazard the old
+  // blanket block guarded: a reloading flag riding across the swap would run
+  // that completion check against the INCOMING weapon's stats with the stale
+  // reloadEnd — an instant free reload.
+  weapon.reloading = false;
   const saved = ammoStore[wpn.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;
   saved.reserve = weapon.reserve;
+
+  // Record the outgoing slot BEFORE re-pointing `slot`: this is what makes
+  // the Q quick-swap a two-weapon toggle (Q,Q returns you to where you were).
+  wpn.lastSlot = wpn.slot;
 
   // Recoil/spray state is weapon-RELATIVE, so the swap converts it instead of
   // carrying the raw numbers across: without this the sniper's punchRad renders
@@ -240,6 +253,16 @@ export function switchWeapon(slot: WeaponSlot): void {
     recoilRecover: def.recoilRecover,
   });
   sfxSwitch();
+}
+
+/**
+ * Quick-swap to the weapon held immediately before the current one (bound to
+ * Q). Just re-enters switchWeapon with wpn.lastSlot: when nothing has been
+ * swapped yet (or you're already holding that slot) switchWeapon's own gate
+ * no-ops, so no extra state to guard here.
+ */
+export function switchToLast(): void {
+  switchWeapon(wpn.lastSlot);
 }
 
 /**

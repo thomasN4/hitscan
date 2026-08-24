@@ -406,6 +406,69 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       console.log(`[pistol] OK`, JSON.stringify(pistol));
     }
 
+    // 6b) Q quick-swap: toggles between the two most recently held weapons.
+    //     Digit2 records the smg as lastSlot; each Q then flips slot/lastSlot
+    //     (so Q,Q returns you where you were), and Digit1 restores the smg
+    //     for the phases below. Range only, like the other switch phases.
+    if (sprintCheck) {
+      const qswap = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        await wait(150);
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
+        await wait(150);
+        const backToSmg = { slot: cs.game.slot, last: cs.game.lastSlot };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
+        await wait(150);
+        const backToSniper = { slot: cs.game.slot };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        return { backToSmg, backToSniper, restored: cs.game.slot };
+      });
+      if (qswap.backToSmg.slot !== 0 || qswap.backToSmg.last !== 1) throw new Error(`Q should return to the previous weapon: ${JSON.stringify(qswap.backToSmg)}`);
+      if (qswap.backToSniper.slot !== 1) throw new Error(`second Q should toggle back to the sniper: ${JSON.stringify(qswap.backToSniper)}`);
+      if (qswap.restored !== 0) throw new Error(`restore to smg failed: slot ${qswap.restored}`);
+      console.log(`[qswap] OK`, JSON.stringify(qswap));
+    }
+
+    // 6c) A switch cancels an in-progress reload CS-style (any switch does;
+    //     Digit2 here, but Q runs the same switchWeapon line). The partial
+    //     mag must ride into ammoStore UN-refilled by the cancel, and R after
+    //     switching back must start a fresh reload rather than resuming.
+    //     Range only, like the other switch phases.
+    if (sprintCheck) {
+      const qcancel = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        const partialMag = 24; // room below magSize so a free refill can't hide
+        cs.weapon.mag = partialMag;
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+        await wait(150); // smg reloadTime is 2.2 s — nowhere near done
+        const started = { reloading: cs.weapon.reloading };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        await wait(150);
+        const cancelled = { slot: cs.game.slot, reloading: cs.weapon.reloading };
+        // Back to the smg: same partial mag, NOT topped up by the cancel...
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+        await wait(150);
+        const restored = { slot: cs.game.slot, mag: cs.weapon.mag, reloading: cs.weapon.reloading };
+        // ...and R starts a fresh reload; let it run out so the phases below
+        // see a full mag again.
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+        await wait(2600);
+        const refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        return { started, cancelled, restored, refilled };
+      });
+      if (qcancel.started.reloading !== true) throw new Error(`R did not start a reload: ${JSON.stringify(qcancel.started)}`);
+      if (qcancel.cancelled.slot !== 1 || qcancel.cancelled.reloading !== false) throw new Error(`switching during a reload must cancel it: ${JSON.stringify(qcancel.cancelled)}`);
+      if (qcancel.restored.slot !== 0 || qcancel.restored.mag !== 24 || qcancel.restored.reloading !== false) throw new Error(`interrupted weapon must keep its partial mag: ${JSON.stringify(qcancel.restored)}`);
+      if (qcancel.refilled.reloading !== false || qcancel.refilled.mag !== 30) throw new Error(`a fresh reload after re-switching must still complete: ${JSON.stringify(qcancel.refilled)}`);
+      console.log(`[qcancel] OK`, JSON.stringify(qcancel));
+    }
+
     // 7) Dead players don't shoot. exitPointerLock() dispatches
     //    pointerlockchange asynchronously, so frames still run with
     //    alive === false and locked === true; a held LMB must not spend

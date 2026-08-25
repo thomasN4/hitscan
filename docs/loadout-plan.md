@@ -61,6 +61,29 @@ Five fixes from hands-on testing, all on the picker branch:
 - **SMG 800 RPM** (fireRate 0.075). All rate-derived tuning notes and the
   recoil.test.ts spray pins recomputed (mag-end bloom ≈ 2.15, ~4 s settle).
 
+## Playtest round 2 (backfilled from the shipped tuning notes)
+
+- **Shotgun choke widened 3x** (pelletCone 0.02 → 0.06 rad, ~1.2 m group at
+  20 m) so mid-range pulls whiff hard instead of grazing.
+- **Per-round reloads** for the shotgun (shells) and revolver (chambers):
+  one transfer per reloadTime/magSize interval, every landed round live
+  immediately, firing cancels the remainder. Pinned by the smoke shotgun
+  phase.
+
+## Playtest round 3 (same branch)
+
+- **Shotgun reticle draws its literal bound.** The shared CROSSHAIR_GAIN = 6
+  readability exaggeration applied to the shotgun's large fixed pelletCone
+  put the arms ~91 px out at 720p against ~15 px of real scatter — ~6x the
+  actual group, which playtesters read as broken next to the other weapons'
+  few-pixel gaps. `WeaponDef` gains an optional `crosshairGain` (default
+  CROSSHAIR_GAIN; `crosshairGapPx` takes it as a parameter; validateWeapons
+  floors it at 1 — arms inside the true scatter would understate the
+  spread), and the shotgun sets 1: its arms now sit exactly on the true
+  per-axis bound (~15 px standing at 720p), while movement still blooms
+  them visibly (~30 px sprinting). Verified by measuring one trigger
+  pull's bullet holes against the live `--gap` in a headless session.
+
 ## Review lessons
 
 (Tranche open — lessons append below with repo-wide continuing numbers.)

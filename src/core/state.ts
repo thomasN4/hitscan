@@ -74,6 +74,19 @@ export interface WeaponDef {
    */
   pelletCone?: number;
   /**
+   * Exaggeration applied when projecting this weapon's cone into the
+   * crosshair gap (sim/accuracy.ts:crosshairGapPx). Absent means the shared
+   * CROSSHAIR_GAIN (6) — the readability gain that keeps stance/movement
+   * deltas visible at hip-fire spreads, at the cost of arms far wider than
+   * the real group. A weapon whose cone is already large opts into 1 (the
+   * literal scatter bound) instead: the shotgun does, because 6x on its
+   * fixed pelletCone pushed the arms ~6x past the actual group and read as
+   * broken next to the other weapons' few-pixel gaps (playtest round 3).
+   * validateWeapons floors this at 1 — arms inside the true scatter would
+   * claim pellets land tighter than they do.
+   */
+  crosshairGain?: number;
+  /**
    * Reload spends `reloadTime` moving rounds ONE AT A TIME (shotgun shells,
    * revolver chambers): one round transfers every reloadTime/magSize seconds,
    * and firing cancels the remainder CS-style — you shoot whatever is already
@@ -354,6 +367,13 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                      // pelletCone above (playtest round 1: pellets used to ride
                      // inside wpn.spread, so aiming/crouching shrank the whole
                      // group — unrealistically sniper-like)
+    crosshairGain: 1, // draw the LITERAL pattern bound: the shared 6x gain on
+                      // the big pelletCone put the arms ~91 px out at 720p vs
+                      // ~15 px of real scatter — ~6x past the group, which
+                      // playtesters read as broken next to the other weapons'
+                      // few-pixel gaps (playtest round 3). The aim layer is
+                      // tiny next to the pattern, so little readability is
+                      // lost; movement still blooms the arms ~2x.
     sprayKick: 0.15, recoilKick: 5,
     sprayCap: 3,
     sprayRecover: 0.08, // sustained-fire input bound = 0.15/0.9 ≈ 0.167/s — clears

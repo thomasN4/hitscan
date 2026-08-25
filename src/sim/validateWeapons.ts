@@ -125,6 +125,14 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
         out.push(`${name}: pelletCone without pellets does nothing — single-ray weapons have no pattern to fix`);
       }
     }
+    // Crosshair gain override: below 1 the arms would sit INSIDE the true
+    // scatter, claiming pellets land tighter than they do — the one lie the
+    // proportional reticle must never tell. Absent is the common case
+    // (shared CROSSHAIR_GAIN); NaN fails the negated compare like every
+    // bound here.
+    if (def.crosshairGain !== undefined && !(def.crosshairGain >= 1)) {
+      out.push(`${name}: crosshairGain ${num(def.crosshairGain)} must be >= 1 — arms inside the true scatter would understate the spread`);
+    }
     if (!(def.reserveMax >= 0)) {
       out.push(`${name}: reserveMax ${num(def.reserveMax)} must be >= 0 — negative reserve breaks reload accounting`);
     }

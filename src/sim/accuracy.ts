@@ -21,9 +21,11 @@
 // The value this returns is consumed by BOTH the bullet direction
 // (weapons.ts:shoot) and the crosshair gap (crosshairGapPx below), so the
 // reticle tracks every change in the real cone. It does not draw the cone's
-// literal edge: crosshairGapPx exaggerates by CROSSHAIR_GAIN, so bullets land
-// well inside the arms. What the shared value buys is that the reticle can
-// never disagree with the scatter about DIRECTION or RATIO, only scale.
+// literal edge: crosshairGapPx exaggerates by the weapon's crosshair gain
+// (CROSSHAIR_GAIN unless the def overrides it), so bullets land well inside
+// the arms — except on a weapon that opts into gain 1, which draws the
+// literal bound. What the shared value buys is that the reticle can never
+// disagree with the scatter about DIRECTION or RATIO, only scale.
 
 /** Cone floor at a full crouch, before movement/spray/inherent (radians). */
 export const CROUCH_FLOOR = 0.0006;
@@ -68,11 +70,14 @@ export function computeSpread({ crouchLerp, moveLerp, airLerp, spray, inherent, 
 }
 
 /**
- * Exaggeration applied when projecting the cone to screen space.
+ * Exaggeration applied when projecting the cone to screen space — the DEFAULT
+ * gain, shared by every weapon whose def does not override `crosshairGain`.
  *
  * 1 would draw the literal cone edge, which is too subtle to read at hip-fire
  * spreads (stance deltas land sub-pixel). 6 scales every state uniformly, so
  * the ratios between stances stay truthful while the differences are visible.
+ * A weapon whose cone is already huge (the shotgun's fixed pelletCone) can
+ * opt into 1 — 6x on that cone read as broken (playtest round 3).
  */
 export const CROSSHAIR_GAIN = 6;
 /**
@@ -93,9 +98,15 @@ export const MAX_GAP_FRACTION = 0.2;
  *
  * Purely proportional — no additive floor. An earlier version added 3 px,
  * which buried the stance differences under a stance-independent baseline.
+ *
+ * `gain` defaults to CROSSHAIR_GAIN; a def passes its own `crosshairGain` to
+ * opt out (the shotgun's 1 draws the literal pattern bound). The
+ * MAX_GAP_FRACTION clamp applies to every gain: even a literal edge must
+ * stay on screen.
  */
-export function crosshairGapPx(spread: number, fovDeg: number, viewportHeight: number): number {
+export function crosshairGapPx(spread: number, fovDeg: number, viewportHeight: number,
+                               gain: number = CROSSHAIR_GAIN): number {
   const pxPerTan = viewportHeight / 2 / Math.tan(fovDeg * Math.PI / 360);
-  return Math.min(Math.tan(spread / 2) * pxPerTan * CROSSHAIR_GAIN,
+  return Math.min(Math.tan(spread / 2) * pxPerTan * gain,
     MAX_GAP_FRACTION * viewportHeight);
 }

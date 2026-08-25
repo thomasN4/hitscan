@@ -527,9 +527,26 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const restored = { slot: cs.game.slot, mag: cs.weapon.mag, reloading: cs.weapon.reloading };
         // ...and R starts a fresh reload; let it run out so the phases below
         // see a full mag again.
+        //
+        // POLLED, not slept. The reload deadline is GAME time (weapons.ts sets
+        // reloadEnd = gameTime.now() + reloadTime and checks it per frame),
+        // while a sleep spends WALL time — and main.ts advances the clock by
+        // Math.min(clock.getDelta(), 0.05), so game time can only ever lag,
+        // never lead. A frame overrunning 50 ms contributes 50 ms of game time
+        // and discards the rest. Budgeting 2600 ms of wall clock for 2.2 s of
+        // game time therefore asserted that the loop keeps within ~18% of
+        // real time, which the dt clamp exists precisely to NOT promise. One
+        // slow frame in the window and the phase failed with mag still 24.
+        // Poll for the thing being claimed instead, on a generous deadline —
+        // the pattern the [respawn] phase below already uses.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
-        await wait(3700);
-        const refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        const reloadBy = performance.now() + 8000;
+        let refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        while ((refilled.reloading || refilled.mag !== cs.weapon.magSize)
+               && performance.now() < reloadBy) {
+          await new Promise(r => requestAnimationFrame(r));
+          refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        }
         return { aimedStart, started, cancelled, restored, refilled };
       });
       if (qcancel.aimedStart.reloading !== true || qcancel.aimedStart.aiming !== false) throw new Error(`R while holding RMB must start the reload AND drop the sights: ${JSON.stringify(qcancel.aimedStart)}`);
@@ -767,11 +784,37 @@ async function runAllyCheck() {
 // OUT of the flight (a riser built over STEP_HEIGHT would block it entirely,
 // and nothing else in the suite would notice).
 //
-// How FAR the bot gets is reported, not asserted. Beyond one riser the outcome
-// is policy, not geometry: BrainView.dist is planar, so once the bot is inside
-// farBand (14 m) of the player above it the radial term drops out and it
-// circles at constant radius instead of continuing to climb. That is a finding
-// to watch during a playtest, not a regression to pin.
+// How far the bot gets is now ASSERTED. It was reported-only for as long as
+// arriving was luck rather than policy, and there turned out to be two stalls
+// stacked on top of each other — worth keeping, because the second one hid
+// behind the first for as long as this comment existed.
+//
+//   1. A COLLISION WEDGE, now fixed here. The bot drifted east until its 0.5
+//      radius overlapped the x >= 6 second-floor slab (x[6,14], y[3.2,3.6]); at
+//      feet 1.5 that slab's underside sits below its head, so collidesAt refused
+//      every direction, the ones reducing the overlap included. Frozen at one
+//      coordinate with moveBlocked set, permanently — and the same trap caught
+//      the PLAYER (verified: four cardinals plus jump, zero displacement). The
+//      [wedge] phase pins the escape.
+//
+//   2. ORBITING AT CONSTANT RADIUS, still live and steering-level. With the
+//      wedge gone the bot slides freely and climbs, then stops gaining ground
+//      and sweeps across the flight instead: inside the band the radial term
+//      drops out, so it circles rather than climbing. This is what the comment
+//      here always described. It was not wrong — it was right about a stall
+//      nobody could see yet, because the wedge stopped the bot before it ever
+//      got there.
+//
+//      3D ranging moved where it stalls but not that it stalls: the bot now
+//      reaches feet 2.4 instead of 1.5, because the overhead suppression keeps
+//      the radial term alive while the target is a level up. At 2.4 the rise
+//      is 1.2 — under climbThreshold — the suppression switches off, and the
+//      band holds it one step short of the deck.
+//
+// Both are fixed. 1 by the slideMoveXZ unwedge escape; 2 by routing on the
+// navigation graph — a bot with a target a level up follows waypoints to the
+// flight and up it, which is the thing no band around the target could
+// express. So this phase now demands the deck rather than reporting a height.
 async function runBotClimbCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -811,15 +854,222 @@ async function runBotClimbCheck() {
       };
     });
     if (result.fail) throw new Error(result.fail);
-    // The geometry gate: one riser proves the flight is climbable by a bot.
+    // The geometry gate: one riser proves the flight is climbable at all.
     if (result.maxFeet < 0.25) throw new Error(`bot never gained a single riser — is a riser taller than STEP_HEIGHT? ${JSON.stringify(result)}`);
+    // The policy gate: the bot must actually arrive.
+    if (!result.gainedDeck) throw new Error(`bot never reached the deck (feet ${result.maxFeet}) — routing regressed: ${JSON.stringify(result)}`);
     console.log('[botClimb] OK', JSON.stringify(result));
-    if (!result.gainedDeck) console.log('[botClimb] note: bot stalled below the deck — expected with planar band steering, watch this during playtests');
   } catch (e) {
     failures++;
     console.log(`[botClimb] FAIL: ${e.message}`);
   }
   errors.push(...mapErrors.map(e => `[botClimb] ${e}`));
+  await page.close();
+}
+
+// The unwedge escape, end to end (collision.ts:slideMoveXZ).
+//
+// Stands the player at the exact coordinate that used to soft-lock: riser 5 of
+// the elevation map's internal flight, radius lapping the x >= 6 second-floor
+// slab whose underside sits below head height at feet 1.5. Before the escape
+// existed, every direction was refused here — all four cardinals plus jump,
+// zero displacement, forever. This asserts you can walk back out, and that the
+// directions INTO the slab are still solid, because an escape that let you
+// through geometry would be the worse bug.
+async function runWedgeCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=0&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      cs.game.started = true; cs.game.locked = true; cs.player.hp = 100000; cs.game.pitch = 0;
+      const TRAP = { x: 6.15, feet: 1.5, z: -6.42 };
+      const attempt = async (yaw) => {
+        cs.player.pos.set(TRAP.x, TRAP.feet + cs.player.eyeHeight, TRAP.z);
+        cs.player.vel.set(0, 0, 0);
+        cs.game.yaw = yaw;
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        for (let i = 0; i < 90; i++) await new Promise(r => requestAnimationFrame(r));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        return +Math.hypot(cs.player.pos.x - TRAP.x, cs.player.pos.z - TRAP.z).toFixed(2);
+      };
+      // Away from the slab (west) must free the player; into it (east) must not.
+      const out = await attempt(Math.PI / 2);
+      const into = await attempt(-Math.PI / 2);
+      // And the slab must still stop a clean approach from open ground.
+      cs.player.pos.set(5, TRAP.feet + cs.player.eyeHeight, TRAP.z);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = -Math.PI / 2;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      for (let i = 0; i < 90; i++) await new Promise(r => requestAnimationFrame(r));
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      const approachedTo = +cs.player.pos.x.toFixed(2);
+      cs.player.hp = 100;
+      return { out, into, approachedTo };
+    });
+    if (result.out < 1) throw new Error(`player still soft-locked in the slab wedge: ${JSON.stringify(result)}`);
+    if (result.into > 0.05) throw new Error(`escape leaked THROUGH the slab — walls must stay solid: ${JSON.stringify(result)}`);
+    if (result.approachedTo > 5.55) throw new Error(`player pushed past the slab's west face: ${JSON.stringify(result)}`);
+    console.log('[wedge] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[wedge] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[wedge] ${e}`));
+  await page.close();
+}
+
+// The navigation graph, asked directly (nav.ts / sim/navGrid.ts).
+//
+// This is the one part of the bot AI whose correctness does not require
+// watching a bot move, and it is the claim everything downstream rests on: if
+// the graph cannot route the ground floor to the deck, no steering policy
+// built on it can either. Checked on the elevation map because that is where
+// the hard cases live — a two-storey interior, four flights, and doorways.
+//
+// The route asked for is the exact situation the playtest complained about: a
+// bot standing under the second-floor deck, with the player above it.
+async function runNavGraphCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1000));
+    const result = await page.evaluate(() => {
+      const cs = window.__cs;
+      const grid = cs.nav.grid();
+      if (!grid) return { fail: 'no navigation graph was built' };
+      const V = (x, y, z) => ({ x, y, z });
+      // Under the deck, on the ground -> the deck itself.
+      const up = cs.nav.route(V(4, 0, 8), V(4, 3.6, 8));
+      // Non-vacuity for the height claim: the same query with the goal on the
+      // ground must NOT need to gain any height.
+      const flat = cs.nav.route(V(4, 0, 8), V(-20, 0, 20));
+      const peak = up ? Math.max(...up.map(p => p.y)) : -1;
+      // Section D — the jump-only crates (maps/elevation.ts): 1.2 m and 2.4 m
+      // hops, over STEP_HEIGHT so nobody walks up them and under the player's
+      // jump apex so only the player gets there. Bots have no jump, and the
+      // graph must not hand them one. Their tops ARE sampled as standable, and
+      // nodes on one flat top legitimately join each other — what matters is
+      // that no route leads there from the floor, because every edge into the
+      // island is a climb bigger than STEP_HEIGHT.
+      let crateNodes = 0;
+      for (let i = 0; i < grid.count; i++) {
+        const x = grid.xs[i], y = grid.ys[i], z = grid.zs[i];
+        const lower = y > 1 && y < 1.5 && x > 16 && x < 20 && z > 6 && z < 10;
+        const upper = y > 2.2 && y < 2.6 && x > 16 && x < 20 && z > 2 && z < 6;
+        if (lower || upper) crateNodes++;
+      }
+      const ontoLowCrate = cs.nav.route(V(18, 0, 14), V(18, 1.2, 8));
+      const ontoHighCrate = cs.nav.route(V(18, 0, 14), V(18, 2.4, 4));
+      const crateReach = [ontoLowCrate, ontoHighCrate]
+        .map(p => (p ? +p[p.length - 1].y.toFixed(2) : null));
+      return {
+        nodes: grid.count,
+        edges: grid.edgeTo.length,
+        crateNodes,
+        crateReach,
+        levels: [...new Set(Array.from(grid.ys, y => +y.toFixed(2)))].sort((a, b) => a - b).slice(0, 6),
+        routeUp: up ? up.length : null,
+        reachedY: up ? +up[up.length - 1].y.toFixed(2) : null,
+        peakY: +peak.toFixed(2),
+        flatPeakY: flat ? +Math.max(...flat.map(p => p.y)).toFixed(2) : null,
+      };
+    });
+    if (result.fail) throw new Error(result.fail);
+    if (!result.routeUp) throw new Error(`no route from the floor to the deck: ${JSON.stringify(result)}`);
+    if (result.reachedY < 3.5) throw new Error(`route ends below the deck: ${JSON.stringify(result)}`);
+    // A route that gains height must have used a flight; the sampled grid
+    // cannot climb 3.6 m on its own (every edge is capped at STEP_HEIGHT).
+    if (result.peakY < 3.5) throw new Error(`route never gained the deck: ${JSON.stringify(result)}`);
+    if (result.flatPeakY > 0.5) throw new Error(`a ground-to-ground route climbed for no reason: ${JSON.stringify(result)}`);
+    if (result.levels.length < 2) throw new Error(`graph is single-level — the deck was never sampled: ${JSON.stringify(result)}`);
+    if (result.crateNodes === 0) throw new Error(`the jump-only crate tops were never sampled, so their unreachability proves nothing: ${JSON.stringify(result)}`);
+    // A route may exist to the FLOOR beside a crate — the goal snaps to the
+    // nearest reachable node — but it must never arrive on top of one.
+    for (const reached of result.crateReach) {
+      if (reached !== null && reached > 0.5) {
+        throw new Error(`a route reached a jump-only crate top (y ${reached}) — bots have no jump: ${JSON.stringify(result)}`);
+      }
+    }
+    console.log('[navGraph] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[navGraph] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[navGraph] ${e}`));
+  await page.close();
+}
+
+// The DEV debug overlay (src/debugView.ts), end to end.
+//
+// It is presentation, so nothing here claims it LOOKS right — that is a
+// playtest's job (ai-plan.md, lesson 25). What this owns is the wiring, which
+// is exactly the class the other three gates cannot see: a missing import in a
+// browser-side module is a silent ReferenceError the first time its code path
+// runs, and this overlay's code path only runs after a keypress. Toggling it on
+// for real frames, then off again, is what makes that path run.
+//
+// Also asserts the x-ray REVERTS: it mutates the map's shared materials, and a
+// toggle that left them wireframed would corrupt the session it was inspecting.
+async function runDebugViewCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=2&ctbots=1', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      cs.game.started = true;
+      cs.game.locked = true;
+      cs.player.hp = 100000;
+      const frames = async n => { for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r)); };
+      // The scene is deliberately not on __cs, and widening that hook for a
+      // DEV view is not worth it — every bot is scene-parented, so one bot's
+      // mesh.parent IS the scene.
+      const wireframeCount = () => {
+        const scene = cs.bots[0] && cs.bots[0].mesh.parent;
+        if (!scene) return -1;
+        let n = 0;
+        scene.traverse(o => {
+          const m = o.material;
+          for (const mm of Array.isArray(m) ? m : m ? [m] : []) if (mm.wireframe) n++;
+        });
+        return n;
+      };
+      const before = wireframeCount();
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
+      await frames(30);
+      const on = wireframeCount();
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
+      await frames(10);
+      const off = wireframeCount();
+      return { before, on, off, bots: cs.bots.length };
+    });
+    if (result.before === -1) throw new Error('no bot mesh to reach the scene through');
+    if (result.before !== 0) throw new Error(`level geometry was already wireframed before the toggle: ${JSON.stringify(result)}`);
+    if (result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
+    if (result.off !== 0) throw new Error(`toggling the debug view off left ${result.off} materials wireframed: ${JSON.stringify(result)}`);
+    console.log('[debugView] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[debugView] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[debugView] ${e}`));
   await page.close();
 }
 
@@ -1048,6 +1298,9 @@ try {
   await runAllyCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
+  await runNavGraphCheck();
+  await runWedgeCheck();
+  await runDebugViewCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
   await runShotgunCheck();
   await runKnifeCheck();

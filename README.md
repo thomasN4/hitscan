@@ -31,6 +31,7 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 | `Ctrl` / `C` | Crouch (tap to toggle; slower, silent — no footsteps) |
 | `Space` | Jump |
 | `Esc` | Pause / release mouse |
+| `V` | **Dev builds only** — bot debug view: wireframes the level and draws each bot's nav route and current target (`src/debugView.ts`). Stripped from production builds. |
 
 ## Gameplay
 
@@ -39,7 +40,7 @@ Before deploying you pick a **loadout**: one primary and one secondary from the 
 Three maps plus the match setup (enemy/allied bot counts, round length in minutes), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…`) and reloads the page:
 
 - **Arena** (`src/maps/arena.ts`) — enemy bots (menu-configured count, default 6) spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
-- **Elevation** (`src/maps/elevation.ts`) — a playtest map for watching how the bots cope with height: a two-story building with an internal stairwell and an external flight, an unrailed bridge to a tower, a plateau, and a jump-only route no bot can ever take. Bots have no pathfinding, so this is where you see what reactive steering does with stairs, decks and drops.
+- **Elevation** (`src/maps/elevation.ts`) — a playtest map for watching how the bots cope with height: a two-story building with an internal stairwell and an external flight, an unrailed bridge to a tower, a plateau, and a jump-only route no bot can ever take. Bots route over a navigation graph when a target is a level above them (`src/nav.ts`), so this is where you see how they find stairs, decks and drops — press `V` in a dev build to watch the routes themselves.
 - **Shooting Range** (`src/maps/range.ts`) — a private lane with floor markers at 10–50 m and bot-silhouette targets (identical hitbox dimensions to real bots) wearing elliptical bullseye rings at 10–60 m. Nothing shoots back; `R` restores your full loadout without consuming reserve ammo. Use it to practice accuracy and recoil patterns.
 
 Common rules:

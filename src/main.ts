@@ -19,10 +19,12 @@ import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders } from './world';
 import { BUILDERS } from './maps';
+import { buildNav, route, navGrid } from './nav';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
 import { updateEffects } from './effects';
+import { toggleDebugView, updateDebugView } from './debugView';
 import { respawn } from './combat';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
 import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout } from './menu';
@@ -65,6 +67,10 @@ initWeaponViewmodels();  // needs camera/scene
 // lookup because it means something narrower — "no bots, no round clock" — and
 // gates the loop below too; every other map is a full combat map.
 BUILDERS[session.map]();
+// After the builder, never before: the graph samples world.ts's registries,
+// which the builder is what fills. Map switching is a full page reload, so
+// this runs once per session.
+buildNav();
 if (!RANGE) {
   spawnBots(session.botsT, 'T');
   if (session.botsCt > 0) spawnBots(session.botsCt, 'CT');
@@ -101,6 +107,9 @@ addEventListener('keydown', e => {
   if (e.code === 'Digit2') switchWeapon(1);
   if (e.code === 'Digit3') switchWeapon(2);
   if (e.code === 'KeyQ') switchToLast();
+  // DEV bot-observation overlay (debugView.ts). Above the stance gate on
+  // purpose: pausing to study a frame is half of what it is for.
+  if (import.meta.env.DEV && e.code === 'KeyV') toggleDebugView();
   // Stance keys only count during live play — same gate as the mouse
   // handlers — so nothing toggled pre-lock or behind the pause menu leaks
   // into the session. Sprint is hold-Shift; crouch is a Ctrl/C tap toggle
@@ -240,6 +249,9 @@ function animate(): void {
 
   // Effects keep fading while paused so impacts don't freeze on screen
   updateEffects(dt);
+  // Outside the simulate block for the same reason, and after updateBots so
+  // the lines match this frame's positions rather than the previous one's.
+  if (import.meta.env.DEV) updateDebugView();
   renderer.render(scene, camera);
 }
 animate();
@@ -302,7 +314,13 @@ declare global {
       colliders: typeof colliders;
       /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */
       gameTime: typeof gameTime;
+      /**
+       * Navigation graph queries. The graph is the one part of the AI whose
+       * correctness can be checked without watching a bot move, so the smoke
+       * test asks it directly whether the deck is reachable from the floor.
+       */
+      nav: { route: typeof route; grid: typeof navGrid };
     };
   }
 }
-window.__cs = { game, weapon, player, bots, bulletHoles, colliders, gameTime };
+window.__cs = { game, weapon, player, bots, bulletHoles, colliders, gameTime, nav: { route, grid: navGrid } };

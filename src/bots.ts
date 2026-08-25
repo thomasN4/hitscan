@@ -3,9 +3,10 @@
 // instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
-// Each frame update() picks the nearest opposing entity (player or bot),
-// builds a passive BrainView around it (planar vector/distance, a lazy LOS
-// thunk, last frame's collision outcome), hands it to decide(), then
+// Each frame update() picks the best opposing entity (player or bot) under
+// the brain's own ranking, builds a passive BrainView around it (planar
+// steering vector, 3D range and rise, a lazy LOS thunk, last frame's
+// collision outcome), hands it to decide(), then
 // realizes the BrainIntent: attempt the returned step against world
 // geometry through the SAME feet-aware gates the player uses (slideMoveXZ +
 // resolveVertical, so bots climb stairs and land off edges), reporting
@@ -30,10 +31,55 @@ import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
-import { DefaultBrain, nearestOpposing } from './sim/botBrains';
+import { DefaultBrain, nearestOpposing, type BrainMode } from './sim/botBrains';
+import { NAV_RADIUS, route } from './nav';
 
-/** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
-const BOT_RADIUS = 0.5;
+/**
+ * Half-width of a bot's collision box — shared by the move gate and spawn
+ * placement, and by the navigation graph, which owns it (nav.ts:NAV_RADIUS).
+ * The graph samples what fits through gaps at this width, so a bot wider than
+ * the value its routes were built against would be promised gaps it jams in.
+ */
+const BOT_RADIUS = NAV_RADIUS;
+
+/** Length of the aim barrel (m); the muzzle sits at half this along its +z. */
+const BARREL_LEN = 0.6;
+
+/**
+ * Ceiling on how far a bot's aim tips to track a target (rad, ~69°).
+ * Presentation only — a bot's shot is probability, not a ray from the muzzle.
+ * Wide enough to read as "aiming up at the deck" from underneath, short of
+ * vertical so the barrel never disappears into the bot's own silhouette.
+ */
+const MAX_AIM_PITCH = 1.2;
+
+/**
+ * How close (m) a bot must get to a waypoint before the next one is offered.
+ * One nav cell: the path's own resolution, so a bot never chases a point it
+ * has effectively already stood on.
+ */
+const WAYPOINT_REACHED = 1;
+
+/** Seconds between route recomputes for one bot, while it wants a route. */
+const ROUTE_INTERVAL = 1;
+
+/**
+ * How far (m) off its own path a bot may drift before the route is thrown
+ * away and rebuilt — it fell, was shoved, or respawned somewhere else.
+ */
+const ROUTE_ABANDON = 6;
+
+/**
+ * At most one A* per frame across ALL bots.
+ *
+ * A route costs ~4 ms on the elevation map's 17k-node graph, so a dozen bots
+ * recomputing on the same frame is a ~50 ms spike — a dropped frame, in a
+ * loop whose dt clamp then discards the overrun as game time. Bots that miss
+ * their turn keep walking the route they already have and ask again next
+ * frame; a path one frame stale is not a problem, a stutter is. Reset once
+ * per frame in updateBots.
+ */
+let routeBudget = 1;
 
 /** Serial source for Bot ids; 1-based per match, unique across teams. */
 let nextBotId = 1;
@@ -53,10 +99,13 @@ function debugLog(msg: string): void {
 // Shared geometries/materials — one allocation for all bots. Two palettes:
 // T tan/brown, CT blue-gray, so sides read at a glance.
 const botGeo = {
-  torso: new THREE.BoxGeometry(0.7, 0.9, 0.4),
-  head:  new THREE.BoxGeometry(0.34, 0.34, 0.34),
-  legs:  new THREE.BoxGeometry(0.6, 0.9, 0.35),
+  torso:  new THREE.BoxGeometry(0.7, 0.9, 0.4),
+  head:   new THREE.BoxGeometry(0.34, 0.34, 0.34),
+  legs:   new THREE.BoxGeometry(0.6, 0.9, 0.35),
+  barrel: new THREE.BoxGeometry(0.08, 0.08, BARREL_LEN),
 };
+/** Gunmetal, shared by both teams — a weapon reads as a weapon, not as a side. */
+const matBarrel = new THREE.MeshLambertMaterial({ color: 0x23262b });
 const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
   T: {
     body: new THREE.MeshLambertMaterial({ color: 0x8a6b2e }),
@@ -85,6 +134,10 @@ export function botFor(obj: THREE.Object3D): BotShape | undefined {
 /**
  * One entity this bot may fight. The player and bot targets differ in how
  * their LOS endpoint is derived and where shot damage is routed.
+ *
+ * `pos` is the target's FEET on both arms — see OpposingCandidate. The
+ * player's own `pos` is its EYE (core/state.ts), so the player arm has to
+ * drop eyeHeight rather than pass the state vector straight through.
  */
 type Target =
   | { kind: 'player'; pos: THREE.Vector3; alive: boolean }
@@ -96,6 +149,8 @@ export class Bot implements BotShape {
   torso: THREE.Mesh;
   head: THREE.Mesh;
   legs: THREE.Mesh;
+  /** Hinge carrying the aim barrel; pitched at the target each frame. */
+  readonly aim = new THREE.Group();
   hp = 100;
   alive = true;
   /** Stable identity for debug logs and killfeed attribution. */
@@ -109,6 +164,12 @@ export class Bot implements BotShape {
   /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
   private readonly brain = new DefaultBrain();
   /**
+   * The brain's target ranking, bound once. Which enemy is worth chasing is
+   * policy, so it comes from the brain; hoisting it to a field keeps
+   * nearestOpposing from allocating a fresh closure per bot per frame.
+   */
+  private readonly targetScore = this.brain.targetScore;
+  /**
    * Whether last frame's intended step was rejected by world collision.
    *
    * Public because it is part of the structural Bot shape in core/state.ts:
@@ -121,6 +182,28 @@ export class Bot implements BotShape {
   vy = 0;
   /** Grounded state fed back to resolveVertical so stair descents stick. */
   onGround = true;
+  /**
+   * What this bot's brain is doing, for hud.ts's DEV readout.
+   *
+   * Public for the same reason moveBlocked is: it is part of the structural
+   * Bot shape and the readout renders it. Written here only.
+   */
+  mode: BrainMode = 'engage';
+  /** Waypoints the bot is currently walking, nav-graph order; empty when none. */
+  private path: THREE.Vector3[] = [];
+  /** How far along `path` the bot has got. */
+  private leg = 0;
+  /**
+   * Eye position of this frame's target, for debugView.ts's intent line.
+   *
+   * Public for the same reason `mode` is: part of the structural Bot shape,
+   * rendered by a DEV view, written here only. It holds the REFERENCE the LOS
+   * ray already uses (`camera.position`, or the target's `eyePos()` result), so
+   * it costs no allocation of its own.
+   */
+  targetEye: THREE.Vector3 | null = null;
+  /** Seconds until this bot may spend the frame's route budget again. */
+  private routeCooldown = 0;
 
   constructor(team: Team = 'T') {
     // Plain assignments, not a parameter property: the `name` derivation must
@@ -142,6 +225,25 @@ export class Bot implements BotShape {
     const parts = { torso: this.torso, head: this.head, legs: this.legs };
     // Tag every part with its owner so bullet raycasts can attribute hits.
     for (const part of Object.values(parts)) part.userData.bot = this;
+
+    // Aim pivot: a barrel on a shoulder-height hinge, so PITCH is visible.
+    // Rotating the head cube in place was not — a featureless box turning
+    // about its own centre shows nothing, which a playtest confirmed
+    // (docs/ai-plan.md, lesson 25). A barrel that swings has a direction.
+    //
+    // Deliberately NOT tagged with userData.bot, and deliberately not a field
+    // weapons.ts knows about: its raycast targets are an explicit allowlist
+    // (`bot.head, bot.torso, bot.legs`), so this stays decorative by
+    // construction. It has to — sim/damage.ts:partForMesh falls through to
+    // 'torso' for any mesh it does not recognize, so a barrel that ever
+    // reached that list would silently become a torso hit rather than error.
+    // Bot LOS rays against `solids` only, so it never blocks sight either.
+    this.aim.position.set(0.16, 1.5, 0);
+    const barrel = new THREE.Mesh(botGeo.barrel, matBarrel);
+    barrel.position.z = BARREL_LEN / 2;
+    barrel.castShadow = true;
+    this.aim.add(barrel);
+    this.mesh.add(this.aim);
 
     this.spawnAtRandom();
     scene.add(this.mesh);
@@ -183,35 +285,69 @@ export class Bot implements BotShape {
     // enemy chasing the corpse position exactly as pre-team behavior did,
     // while shooting stays gated off by targetAlive.
     const enemies: Target[] = [];
-    if (this.team === 'T') enemies.push({ kind: 'player', pos: player.pos, alive: player.alive });
+    if (this.team === 'T') {
+      enemies.push({
+        kind: 'player',
+        // Feet, not the eye that `player.pos` holds: `rise` and the brain's
+        // target ranking both compare this against bot feet, and passing
+        // the eye through would hand every bot 1.7 m of phantom height.
+        pos: new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z),
+        alive: player.alive,
+      });
+    }
     for (const b of bots) {
       if (b === this || b.team === this.team) continue;
       enemies.push({ kind: 'bot', pos: b.mesh.position, alive: b.alive, bot: b });
     }
-    const target = nearestOpposing(this.mesh.position, enemies)
+    const target = nearestOpposing(this.mesh.position, enemies, this.targetScore)
       ?? enemies[0]; // no live opponent: Ts fall back to the inert player entry, CTs stand down
 
     if (!target) {
       this.moveBlocked = false;
+      this.targetEye = null;
       return;
     }
 
     const toTarget = new THREE.Vector3().subVectors(target.pos, this.mesh.position);
-    toTarget.y = 0; // planar chase distance; elevation is handled by the gates below
+    const rise = toTarget.y; // target feet minus own feet, before y is stripped
+    toTarget.y = 0; // STEERING is planar — a step only ever moves in x/z
     const dist = toTarget.length();
 
-    // Face the target
+    // RANGING is not. The eye-to-eye distance the hit die already rolled on
+    // is what the brain's bands and engage gate read too, so a target on a
+    // deck overhead stops reading as point-blank.
+    const selfEye = this.eyePos();
+    const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
+    const dist3 = selfEye.distanceTo(targetEye);
+    this.targetEye = targetEye;
+
+    // Face the target, and tip the aim barrel at it so a bot firing up at a
+    // deck visibly aims up. The mesh yaw puts local +z on the target, and a
+    // positive x-rotation tips that forward axis DOWN — hence the negation.
     this.mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+    const pitch = Math.atan2(targetEye.y - selfEye.y, Math.max(dist, 1e-6));
+    this.aim.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_AIM_PITCH, MAX_AIM_PITCH);
 
     const losTo = target.kind === 'player'
       ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
       : () => hasLineOfSight(this.eyePos(), target.bot.eyePos(), solids);
 
+    // Clamped, not free-running: a bot that spends minutes not routing would
+    // otherwise drift the timer arbitrarily negative for no benefit, and the
+    // first request after a lull should fire immediately either way.
+    this.routeCooldown = Math.max(0, this.routeCooldown - dt);
     const intent = this.brain.decide(
       {
         toTarget,
         dist,
+        dist3,
+        rise,
+        onGround: this.onGround,
         targetAlive: target.alive,
+        // Lazy on purpose, like seeTarget: pathfinding is the expensive
+        // thing here, so it is only paid when the policy has already decided
+        // it wants to travel rather than fight where it stands.
+        nextWaypoint: () => this.waypointToward(target.pos),
         // Lazy on purpose: the raycast is only paid when the trigger is
         // otherwise ready — see BrainView.seeTarget.
         seeTarget: losTo,
@@ -241,18 +377,82 @@ export class Bot implements BotShape {
     this.vy = vert.velY;
     this.onGround = vert.onGround;
 
+    this.mode = intent.mode;
+
     if (intent.wantShoot) {
-      // The hit die rolls on true eye-to-eye range: elevation is now real,
-      // so a bot firing down from the platform shoots farther than the
-      // planar chase distance suggests (see botBrains.ts:botHitChance).
-      const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
+      // Re-measured AFTER the move, unlike the view's dist3: the bot has
+      // stepped since, and the die should roll from where it is actually
+      // shooting (see botBrains.ts:botHitChance).
       this.shoot(this.eyePos().distanceTo(targetEye), target);
     }
   }
 
+  /**
+   * Planar vector to the next waypoint on a route to `goal`, or null when the
+   * graph has none.
+   *
+   * Mechanism, not policy: this keeps and refreshes the path and decides which
+   * waypoint is "next", while the brain decides whether to walk it at all.
+   * Same split as seeTarget — the executor owns the raycast, the brain owns
+   * the trigger.
+   */
+  private waypointToward(goal: THREE.Vector3): THREE.Vector3 | null {
+    const here = this.mesh.position;
+    // Drop a path the bot is no longer on: it fell off an edge, got shoved,
+    // or respawned across the map still holding last life's route.
+    if (this.path.length > 0) {
+      const leg = this.path[Math.min(this.leg, this.path.length - 1)]!;
+      if (Math.hypot(leg.x - here.x, leg.z - here.z) > ROUTE_ABANDON) this.path = [];
+    }
+    if ((this.path.length === 0 || this.routeCooldown <= 0) && routeBudget > 0) {
+      // One A* per frame across all bots; whoever misses out keeps walking
+      // whatever it already has.
+      routeBudget--;
+      this.routeCooldown = ROUTE_INTERVAL;
+      const found = route(here, goal);
+      if (found) {
+        this.path = found;
+        this.leg = 0;
+      }
+    }
+    if (this.path.length === 0) return null;
+
+    // Consume waypoints already stood on, planar — the step is planar too.
+    while (this.leg < this.path.length - 1) {
+      const w = this.path[this.leg]!;
+      if (Math.hypot(w.x - here.x, w.z - here.z) >= WAYPOINT_REACHED) break;
+      this.leg++;
+    }
+    const w = this.path[this.leg]!;
+    const to = new THREE.Vector3(w.x - here.x, 0, w.z - here.z);
+    return to.lengthSq() < 1e-8 ? null : to;
+  }
+
+  /**
+   * Read-only views of the route state for debugView.ts.
+   *
+   * `path`/`leg` stay private — the overlay reads them, nothing outside writes
+   * them — so these are getters rather than a widened field.
+   */
+  get navPath(): readonly THREE.Vector3[] { return this.path; }
+  get navLeg(): number { return this.leg; }
+
   /** World-space eye position used for LOS checks (~head height). */
   eyePos(): THREE.Vector3 {
     return new THREE.Vector3(this.mesh.position.x, this.mesh.position.y + 1.9, this.mesh.position.z);
+  }
+
+  /**
+   * World-space barrel tip, for the muzzle flash.
+   *
+   * Flushes the group's world matrix first: update() has already written this
+   * frame's yaw and pitch, but nothing has composed them yet — the renderer
+   * does that later. Called only on firing frames, so the flush is paid at
+   * the bot's cooldown rate rather than per frame.
+   */
+  private muzzlePos(): THREE.Vector3 {
+    this.mesh.updateMatrixWorld(true);
+    return this.aim.localToWorld(new THREE.Vector3(0, 0, BARREL_LEN));
   }
 
   /**
@@ -265,7 +465,7 @@ export class Bot implements BotShape {
    */
   private shoot(dist: number, target: Target): void {
     sfxEnemyShoot(this.mesh.position);
-    spawnImpact(this.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0))); // cheap muzzle flash
+    spawnImpact(this.muzzlePos()); // cheap muzzle flash, from the barrel tip
 
     if (!this.brain.rollHit(dist)) return;
     const dmg = this.brain.rollDamage();
@@ -299,6 +499,13 @@ export class Bot implements BotShape {
       this.alive = true;
       this.mesh.visible = true;
       this.spawnAtRandom();
+      // The brain outlived the body: re-arm its spawn stagger so a revived
+      // bot does not open fire on whatever cooldown its corpse was carrying.
+      this.brain.onRespawn();
+      this.path = [];
+      this.leg = 0;
+      this.mode = 'engage';
+      this.targetEye = null;
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }
@@ -311,5 +518,7 @@ export function spawnBots(count: number, team: Team): void {
 
 /** Advance all bot AI. Called once per frame from the main loop. */
 export function updateBots(dt: number, player: PlayerState): void {
+  // One route per frame, shared out first-come: see routeBudget.
+  routeBudget = 1;
   bots.forEach(b => b.update(dt, player));
 }

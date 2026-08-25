@@ -34,6 +34,8 @@ function bot(over: Partial<DebugBotView> = {}): DebugBotView {
     navPath: [],
     navLeg: 0,
     targetEye: null,
+    targetInRange: false,
+    targetLOS: null,
     eyePos: () => new THREE.Vector3(position.x, position.y + 1.9, position.z),
     ...over,
   };
@@ -97,6 +99,38 @@ describe('buildDebugSegments', () => {
     const routing = [col[0], col[1], col[2]];
     buildDebugSegments([bot({ mode: 'engage', targetEye: target })], pos, col, VIEW);
     expect([col[0], col[1], col[2]]).not.toEqual(routing);
+  });
+
+  // Issue #46: the old single-brightness line read as "everyone is engaging
+  // me through walls". The shot gates must grade the tint — hue stays the
+  // mode's, brightness says whether this bot can actually fire.
+  describe('shot-gate brightness tiers', () => {
+    /** First vertex colour written for one bot with the given gates. */
+    function tierColor(over: Partial<DebugBotView>): number[] {
+      const { pos, col } = buffers();
+      buildDebugSegments(
+        [bot({ targetEye: new THREE.Vector3(3, 3, 3), ...over })],
+        pos, col, VIEW,
+      );
+      return [col[0]!, col[1]!, col[2]!]; // intent line's first endpoint (no route precedes it)
+    }
+
+    it('full brightness only when in range AND sight is proven', () => {
+      const shoot = tierColor({ targetInRange: true, targetLOS: true });
+      expect(shoot).toEqual([1.0, 0.0, 0.0]); // engage red, unmodified
+    });
+
+    it('mid tier when in range but sight is blocked or unproven', () => {
+      const blocked = tierColor({ targetInRange: true, targetLOS: false });
+      expect(blocked).toEqual([0.5, 0, 0]);
+      const unproven = tierColor({ targetInRange: true, targetLOS: null });
+      expect(unproven).toEqual(blocked); // null means "no probe taken", not "clear"
+    });
+
+    it('dims a bot whose target is beyond engage range, whatever the sight', () => {
+      expect(tierColor({ targetInRange: false, targetLOS: true })).toEqual([0.25, 0, 0]);
+      expect(tierColor({ targetInRange: false, targetLOS: false })).toEqual([0.25, 0, 0]);
+    });
   });
 
   it('colours routes by team', () => {

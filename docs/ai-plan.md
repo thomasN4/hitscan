@@ -306,6 +306,35 @@ Two things it taught immediately, both about presentation rather than routing:
 a DEV readout renders it, written here only" contract `mode` and `moveBlocked`
 already carry.
 
+### Shot-gate grading on the overlay (issue #46)
+
+The playtest report behind this issue — *"the bots are almost always engaging,
+probably because they can see their enemies through walls"* — was the overlay
+lying by omission. One bit, brain mode, carried everything it drew, and
+`engage` means *not routing*, not *can shoot*: a bot 80 m away behind three
+walls drew the same solid intent line as one mid-gunfight. The gates were
+already honest (`dist3 < engageRange`, then `seeTarget()`); nothing could SEE
+that.
+
+Now the tint carries what the hue cannot. The intent line and marker grade by
+the actual shot gates — full = inside engage range with sight proven this
+frame, half = in range but sight unproven or blocked, quarter = tracking a
+target beyond engage range — while the hue stays the mode's.
+
+- `BotBrain.inRange(dist)` exposes the trigger's exclusive comparison so the
+  executor never reads params, same rationale as `hitChance`.
+- The two halves cost differently and are treated differently:
+  `Bot.targetInRange` is a comparison, fresh every frame; `Bot.targetLOS`
+  costs a real raycast, so it is taken only while `session.debugView` is up.
+  Policy's own probe stays lazy — at most once per cooldown window — exactly
+  as the issue required: a deliberate choice to pay while inspecting, never a
+  side effect. Both reset alongside `targetEye` on no-target and respawn.
+- Smoke `[debugView]` pins the gating end-to-end: zero probes before any V
+  press, every live bot probing while up, none after down, resumed on
+  re-toggle. Dead bots are excluded from the census — their `update()`
+  early-returns, so a corpse killed mid-overlay legitimately keeps the last
+  value it took.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
@@ -385,3 +414,14 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
    flake, and the first explanation reached for was GC pressure from a new
    allocation. That was a cause of slow frames, not the bug — the bug is that a
    slow frame mattered at all. Lesson 24's shape again.
+27. **A constant headed for Float32 storage should be chosen to survive it.**
+    The overlay's brightness tiers were first drafted as 1 / 0.55 / 0.25, and
+    the pin asserting the mid tier failed — not because the maths was wrong
+    but because the color buffer is a `Float32Array`, and 0.55 has no exact
+    float32 representation: it round-trips as 0.550000011920929, while 1,
+    0.5 and 0.25 are exact. The fix was to pick the value the storage can hold
+    (0.5 reads identically) rather than loosen the assertion with a tolerance;
+    an exact pin that survives is worth more than a fuzzy one that passes.
+    Same family as the LIFT comment in debugView.test.ts about 1.9 rounding —
+    but that one tolerated at read time, where this could be fixed at write
+    time, which is always the better end of the pipe.

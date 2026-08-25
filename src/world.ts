@@ -172,6 +172,31 @@ export type StairDir = 'x+' | 'x-' | 'z+' | 'z-';
  * @param mat surface material; omitted means Mesh's own default
  * @param dir direction of ascent; the flight advances this way step by step
  */
+export function addStairs(
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  stepH: number,
+  stepD: number,
+  count: number,
+  mat?: THREE.Material,
+  dir: StairDir = 'z+',
+): void {
+  navLinks.push(stairLink(x, y, z, stepH, stepD, count, dir));
+  for (let i = 0; i < count; i++) {
+    const rise = (i + 1) * stepH;
+    const run = (i + 0.5) * stepD;
+    const cx = dir === 'x+' ? x + run : dir === 'x-' ? x - run : x;
+    const cz = dir === 'z+' ? z + run : dir === 'z-' ? z - run : z;
+    addSolidBox(cx, y, cz,
+      dir === 'z+' || dir === 'z-' ? width : stepD,
+      rise,
+      dir === 'z+' || dir === 'z-' ? stepD : width,
+      mat);
+  }
+}
+
 /**
  * The endpoints addStairs would build a flight between, without building it.
  *
@@ -201,31 +226,6 @@ export function stairLink(
       dir === 'z+' ? z + run : dir === 'z-' ? z - run : z,
     ),
   };
-}
-
-export function addStairs(
-  x: number,
-  y: number,
-  z: number,
-  width: number,
-  stepH: number,
-  stepD: number,
-  count: number,
-  mat?: THREE.Material,
-  dir: StairDir = 'z+',
-): void {
-  navLinks.push(stairLink(x, y, z, stepH, stepD, count, dir));
-  for (let i = 0; i < count; i++) {
-    const rise = (i + 1) * stepH;
-    const run = (i + 0.5) * stepD;
-    const cx = dir === 'x+' ? x + run : dir === 'x-' ? x - run : x;
-    const cz = dir === 'z+' ? z + run : dir === 'z-' ? z - run : z;
-    addSolidBox(cx, y, cz,
-      dir === 'z+' || dir === 'z-' ? width : stepD,
-      rise,
-      dir === 'z+' || dir === 'z-' ? stepD : width,
-      mat);
-  }
 }
 
 /** Empty both registries. Used by tests to isolate cases; not used at runtime. */

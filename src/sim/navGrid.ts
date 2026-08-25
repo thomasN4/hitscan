@@ -176,7 +176,7 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
             const to = nodes[b]!;
             if (!walkable(from, to, stepHeight, probe)) continue;
             edges[a]!.push(b);
-            costs[a]!.push(Math.hypot(to.x - from.x, to.z - from.z));
+            costs[a]!.push(edgeLength(from, to));
           }
         }
       }
@@ -187,7 +187,7 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     const a = nearestOf(nodes, link.bottom);
     const b = nearestOf(nodes, link.top);
     if (a < 0 || b < 0 || a === b) continue;
-    const cost = Math.hypot(nodes[b]!.x - nodes[a]!.x, nodes[b]!.z - nodes[a]!.z);
+    const cost = edgeLength(nodes[a]!, nodes[b]!);
     // Both ways: a flight is as walkable down as up.
     edges[a]!.push(b); costs[a]!.push(cost);
     edges[b]!.push(a); costs[b]!.push(cost);
@@ -228,6 +228,25 @@ function compact(
     }
   }
   return { cell, count, xs, ys, zs, edgeStart, edgeTo, edgeCost };
+}
+
+/**
+ * Cost of traversing between two nodes: the true 3D length of the segment.
+ *
+ * Every edge cost in the graph MUST be this, links included, and findPath's
+ * heuristic must stay the straight-line 3D distance. That pairing is what
+ * makes the heuristic admissible — a straight line is never longer than a
+ * path of segments — and admissibility is what makes A* return the shortest
+ * route rather than merely a route.
+ *
+ * Charging only the planar run, as this first did, breaks it the moment a
+ * link has any rise at all: at the foot of the elevation map's internal
+ * flight the true cost to the top is its 9 m run, while a heuristic adding
+ * |Δy| asks for 12.6. Not a future-steep-staircase hazard — it was wrong for
+ * the maps already in the repo.
+ */
+function edgeLength(from: NavNode, to: NavNode): number {
+  return Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
 }
 
 /** Whether one node can step to another: small rise, and standable on arrival. */
@@ -286,7 +305,8 @@ function nearestOf(nodes: readonly NavNode[], to: THREE.Vector3): number {
 
 /**
  * Shortest walk between two world points, as waypoints to steer at, or null
- * when the graph holds no route.
+ * when the graph holds no route. Shortest, not merely valid — see the
+ * heuristic below for the invariant that buys that.
  *
  * Endpoints snap to their nearest node, so a caller standing slightly off-grid
  * still gets a path; the returned list starts at the first node and ends at
@@ -299,8 +319,13 @@ export function findPath(grid: NavGrid, from: THREE.Vector3, to: THREE.Vector3):
   if (start === goal) return [nodeVec(grid, goal)];
 
   const tx = grid.xs[goal]!, ty = grid.ys[goal]!, tz = grid.zs[goal]!;
+  // Straight-line 3D distance, which is admissible because every edge costs
+  // its own 3D length (see edgeLength). Keep the two in step: an edge cheaper
+  // than the distance it covers, or a heuristic charging for something edges
+  // do not, silently turns A* into "finds a path" instead of "finds the
+  // shortest path", with nothing anywhere reporting it.
   const heuristic = (i: number): number =>
-    Math.hypot(grid.xs[i]! - tx, grid.zs[i]! - tz) + Math.abs(grid.ys[i]! - ty);
+    Math.hypot(grid.xs[i]! - tx, grid.ys[i]! - ty, grid.zs[i]! - tz);
 
   const best = new Float64Array(grid.count).fill(Infinity);
   const cameFrom = new Int32Array(grid.count).fill(-1);

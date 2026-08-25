@@ -151,7 +151,3 @@ export function route(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] |
   return grid ? findPath(grid, from, to) : null;
 }
 
-/** Drop the built graph. Tests only, alongside world.ts:resetWorld. */
-export function resetNav(): void {
-  grid = undefined;
-}

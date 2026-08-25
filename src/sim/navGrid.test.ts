@@ -151,6 +151,75 @@ describe('nav links', () => {
   });
 });
 
+/** Dijkstra over the CSR arrays: the true optimum, with no heuristic involved. */
+function optimalCost(grid: NavGrid, from: THREE.Vector3, to: THREE.Vector3): number {
+  const start = nearestNode(grid, from);
+  const goal = nearestNode(grid, to);
+  const dist = new Float64Array(grid.count).fill(Infinity);
+  const seen = new Uint8Array(grid.count);
+  dist[start] = 0;
+  for (;;) {
+    let u = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < grid.count; i++) {
+      if (!seen[i] && dist[i]! < bestD) { bestD = dist[i]!; u = i; }
+    }
+    if (u === -1) break;
+    seen[u] = 1;
+    for (let e = grid.edgeStart[u]!; e < grid.edgeStart[u + 1]!; e++) {
+      const v = grid.edgeTo[e]!;
+      const nd = dist[u]! + grid.edgeCost[e]!;
+      if (nd < dist[v]!) dist[v] = nd;
+    }
+  }
+  return dist[goal]!;
+}
+
+/** Summed 3D length of a returned path — the cost its edges charged. */
+const pathCost = (path: THREE.Vector3[]): number =>
+  path.slice(1).reduce((sum, p, i) => sum + p.distanceTo(path[i]!), 0);
+
+// A* returns the SHORTEST route, not merely a route — which holds only while
+// the heuristic stays admissible, i.e. never exceeds the true remaining cost.
+// Pinned against brute force because the failure is silent: an inadmissible
+// heuristic still returns a valid path, and nothing anywhere reports that a
+// cheaper one existed. The first version of this file charged links their
+// planar run while the heuristic charged |dy| as well, which overestimates by
+// the full rise of every flight in the repo.
+describe('findPath optimality', () => {
+  const twoWaysUp = () => world(
+    [{ minX: 0, maxX: 10, minZ: 6, maxZ: 6.9 }],
+    [{ minX: 0, maxX: 10, minZ: 7, maxZ: 10, y: 3, bottom: 2.8 }],
+  );
+  const links = [
+    { bottom: at(0.5, 5.5), top: at(0.5, 7.5, 3) },
+    { bottom: at(9.5, 5.5), top: at(9.5, 7.5, 3) },
+  ];
+
+  test('matches brute force when two flights compete', () => {
+    const grid = build(twoWaysUp(), links);
+    for (const goal of [at(1.5, 9.5, 3), at(8.5, 9.5, 3), at(5.5, 7.5, 3)]) {
+      const path = findPath(grid, at(5.5, 0.5), goal)!;
+      expect(path).not.toBeNull();
+      expect(pathCost(path)).toBeCloseTo(optimalCost(grid, at(5.5, 0.5), goal), 6);
+    }
+  });
+
+  test('matches brute force on one level, around an obstacle', () => {
+    const grid = build(world([{ minX: 4.4, maxX: 5.6, minZ: 0, maxZ: 6 }]));
+    const path = findPath(grid, at(3, 3), at(7, 3))!;
+    expect(pathCost(path)).toBeCloseTo(optimalCost(grid, at(3, 3), at(7, 3)), 6);
+  });
+
+  test('a climb costs its rise, not just its run', () => {
+    // The invariant the heuristic leans on: an edge charges the 3D length of
+    // the segment it spans, so a 3 m lift is never free.
+    const grid = build(twoWaysUp(), [links[0]!]);
+    const up = findPath(grid, at(0.5, 5.5), at(0.5, 7.5, 3))!;
+    expect(pathCost(up)).toBeGreaterThan(3);
+  });
+});
+
 describe('findPath', () => {
   test('returns waypoints ending at the goal', () => {
     const grid = build(world());

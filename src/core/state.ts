@@ -81,6 +81,12 @@ export interface Bot {
   moveBlocked: boolean;
   /** What the bot's brain is doing, for the DEV readout. Display only. */
   mode: BrainMode;
+  /** Waypoints of the route the bot is walking, nav-graph order; empty when it is steering directly. Display only. */
+  readonly navPath: readonly THREE.Vector3[];
+  /** How far along `navPath` the bot has got — waypoints before this are consumed. Display only. */
+  readonly navLeg: number;
+  /** Eye position of whatever the bot is currently targeting, or null when it has none. Display only. */
+  readonly targetEye: THREE.Vector3 | null;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
   /** @param killerName display name of a bot killer; omitted for player kills */

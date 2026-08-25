@@ -193,6 +193,15 @@ export class Bot implements BotShape {
   private path: THREE.Vector3[] = [];
   /** How far along `path` the bot has got. */
   private leg = 0;
+  /**
+   * Eye position of this frame's target, for debugView.ts's intent line.
+   *
+   * Public for the same reason `mode` is: part of the structural Bot shape,
+   * rendered by a DEV view, written here only. It holds the REFERENCE the LOS
+   * ray already uses (`camera.position`, or the target's `eyePos()` result), so
+   * it costs no allocation of its own.
+   */
+  targetEye: THREE.Vector3 | null = null;
   /** Seconds until this bot may spend the frame's route budget again. */
   private routeCooldown = 0;
 
@@ -295,6 +304,7 @@ export class Bot implements BotShape {
 
     if (!target) {
       this.moveBlocked = false;
+      this.targetEye = null;
       return;
     }
 
@@ -309,6 +319,7 @@ export class Bot implements BotShape {
     const selfEye = this.eyePos();
     const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
     const dist3 = selfEye.distanceTo(targetEye);
+    this.targetEye = targetEye;
 
     // Face the target, and tip the aim barrel at it so a bot firing up at a
     // deck visibly aims up. The mesh yaw puts local +z on the target, and a
@@ -417,6 +428,15 @@ export class Bot implements BotShape {
     return to.lengthSq() < 1e-8 ? null : to;
   }
 
+  /**
+   * Read-only views of the route state for debugView.ts.
+   *
+   * `path`/`leg` stay private — the overlay reads them, nothing outside writes
+   * them — so these are getters rather than a widened field.
+   */
+  get navPath(): readonly THREE.Vector3[] { return this.path; }
+  get navLeg(): number { return this.leg; }
+
   /** World-space eye position used for LOS checks (~head height). */
   eyePos(): THREE.Vector3 {
     return new THREE.Vector3(this.mesh.position.x, this.mesh.position.y + 1.9, this.mesh.position.z);
@@ -485,6 +505,7 @@ export class Bot implements BotShape {
       this.path = [];
       this.leg = 0;
       this.mode = 'engage';
+      this.targetEye = null;
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }

@@ -940,6 +940,68 @@ async function runNavGraphCheck() {
   await page.close();
 }
 
+// The DEV debug overlay (src/debugView.ts), end to end.
+//
+// It is presentation, so nothing here claims it LOOKS right — that is a
+// playtest's job (ai-plan.md, lesson 25). What this owns is the wiring, which
+// is exactly the class the other three gates cannot see: a missing import in a
+// browser-side module is a silent ReferenceError the first time its code path
+// runs, and this overlay's code path only runs after a keypress. Toggling it on
+// for real frames, then off again, is what makes that path run.
+//
+// Also asserts the x-ray REVERTS: it mutates the map's shared materials, and a
+// toggle that left them wireframed would corrupt the session it was inspecting.
+async function runDebugViewCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=2&ctbots=1', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      cs.game.started = true;
+      cs.game.locked = true;
+      cs.player.hp = 100000;
+      const frames = async n => { for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r)); };
+      // The scene is deliberately not on __cs, and widening that hook for a
+      // DEV view is not worth it — every bot is scene-parented, so one bot's
+      // mesh.parent IS the scene.
+      const wireframeCount = () => {
+        const scene = cs.bots[0] && cs.bots[0].mesh.parent;
+        if (!scene) return -1;
+        let n = 0;
+        scene.traverse(o => {
+          const m = o.material;
+          for (const mm of Array.isArray(m) ? m : m ? [m] : []) if (mm.wireframe) n++;
+        });
+        return n;
+      };
+      const before = wireframeCount();
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
+      await frames(30);
+      const on = wireframeCount();
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
+      await frames(10);
+      const off = wireframeCount();
+      return { before, on, off, bots: cs.bots.length };
+    });
+    if (result.before === -1) throw new Error('no bot mesh to reach the scene through');
+    if (result.before !== 0) throw new Error(`level geometry was already wireframed before the toggle: ${JSON.stringify(result)}`);
+    if (result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
+    if (result.off !== 0) throw new Error(`toggling the debug view off left ${result.off} materials wireframed: ${JSON.stringify(result)}`);
+    console.log('[debugView] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[debugView] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[debugView] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
@@ -948,6 +1010,7 @@ try {
   await runBotClimbCheck();
   await runNavGraphCheck();
   await runWedgeCheck();
+  await runDebugViewCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {
   await browser.close();

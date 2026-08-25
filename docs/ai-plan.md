@@ -260,6 +260,41 @@ Budget: one A* per frame across all bots, since a route costs ~4 ms and a dozen
 bots recomputing together is a dropped frame. With 12 bots all wanting routes,
 p50 frame time moves 16.9 → 18.4 ms and p95/p99 do not regress.
 
+#### Watching it, rather than tracing it
+
+Every finding above was won by instrumentation: position traces, `[botClimb]`
+console phases, the `#botDebug` text block, straightness histograms. None of them
+show WHERE a bot thinks it is going, and the map is opaque — a bot routing to a
+staircase does it behind a wall. Lessons 24 and 26 are both cases of an
+explanation surviving because nobody could look at the thing it described.
+
+`src/debugView.ts` closes that: a DEV-only overlay on `V` that wireframes the
+level (so bots and routes are visible through geometry, and the 40–140 m fog goes
+off with it), draws each bot's REMAINING route as a polyline, and draws a line
+from each bot's eye to its current target tinted by `mode`. Both call sites in
+`main.ts` are `import.meta.env.DEV`-guarded, so it leaves production builds
+entirely — verified by grepping `dist/`.
+
+Two things it taught immediately, both about presentation rather than routing:
+
+- **1 px is all a line gets, so contrast is the only lever.** WebGL caps
+  `LineBasicMaterial` width at 1 px on every platform that matters. The first
+  palette used team amber and steel blue, which are perfectly sensible team
+  colours and completely invisible against a dusty-tan scene (`0xbfae8f`)
+  wireframed in brown. Magenta and electric blue read instantly. Lesson 25
+  again — the maths was never in question, the visibility was.
+- **An intent line pointing at the camera has no length.** A bot targeting the
+  PLAYER draws a line straight down the view axis, which is a dot. The overlay
+  is therefore most informative with CTs in play, where the bot-vs-bot lines
+  cross the view and show who is fighting whom. That is a property of the
+  projection, not a fixable defect.
+
+`path`/`leg` stay private on `Bot`; the overlay reads them through `navPath`/
+`navLeg` getters, and `targetEye` is a new display-only field written where
+`update()` already computes the value for its LOS ray — the same "public because
+a DEV readout renders it, written here only" contract `mode` and `moveBlocked`
+already carry.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —

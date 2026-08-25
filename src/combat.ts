@@ -44,7 +44,11 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     // Small delay so the killer's shot is visible before the menu covers it.
     setTimeout(() => {
       // The match can end inside this window (a simultaneous elimination or
-      // expiry): the end screen outranks the death picker.
+      // expiry): the end screen outranks the death picker. The reverse —
+      // picker already up when the match ends — cannot happen (dying dropped
+      // pointer lock, freezing the sim before another end condition can
+      // fire); were that ever wrong, #endScreen would cover #loadoutScreen
+      // by DOM order alone (both .menu).
       if (!session.matchOver) showLoadoutPicker('death');
     }, 400);
   }
@@ -121,11 +125,13 @@ export function respawn(): void {
 export function checkRoundEnd(): void {
   const ts = bots.filter(b => b.team === 'T');
   if (ts.length > 0 && ts.every(b => !b.alive)) {
-    if (eliminationEndsMatch(session.botsT)) {
+    // Live wave count, not session.botsT: debug tooling can remove bots, and
+    // the decision should read what's actually on the field.
+    if (eliminationEndsMatch(ts.length)) {
       addKillfeed('★ All Ts eliminated!');
       endMatch('CT');
     } else {
-      addKillfeed('★ Round won! Respawning all bots...');
+      addKillfeed('★ Bot down — respawning...');
       // Game time: the wave stays dead while paused.
       gameTime.schedule(2.5, () => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }));
     }

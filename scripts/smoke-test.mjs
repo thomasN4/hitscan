@@ -1260,8 +1260,8 @@ async function runKnifeCheck() {
         swings,
         hpAfterSwing1,
         // Head/torso depends on which part took the final swing, and the
-        // round-win banner may prepend above either (one bot = an instant
-        // round) — so match anywhere in the feed.
+        // respawn banner may prepend above either (one bot = an instant
+        // wave reset) — so match anywhere in the feed.
         feedHasKill: /You (killed|☠ headshot) T-\d+/.test(document.getElementById('killfeed')?.textContent ?? ''),
         magStillZero,
       };

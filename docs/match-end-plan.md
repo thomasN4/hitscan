@@ -22,9 +22,12 @@ never resolved into a win, and there was nowhere to see them at the end.
   gate) and reveals the screen on a WALL-clock beat for the same reason
   damagePlayer's death picker uses one.
 - **1v1 keeps the wave loop.** With a single enemy, elimination would end the
-  match seconds after every spawn, so `eliminationEndsMatch(botsT)` is false
-  for tbots ≤ 1 and the old "Round won! Respawning all bots..." behavior
-  stays; only the clock can end such a match.
+  match seconds after every spawn, so `eliminationEndsMatch(ts.length)` is
+  false for tbots ≤ 1 and the old wave-respawn behavior stays — killfeed line
+  reworded to "★ Bot down — respawning..." (review of this PR: nothing is won
+  in a 1v1, so "Round won!" overstated it); only the clock can end such a
+  match. The check passes the LIVE wave count, not session.botsT, so debug
+  tooling removing bots can't leave one survivor ending the match.
 - **Winner decided by the CALLER**, passed into endMatch as `'CT' | 'T' |
   'draw'`: elimination knows its winner outright; expiry computes from the
   scores. endMatch owns state + presentation only.

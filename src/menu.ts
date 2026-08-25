@@ -159,7 +159,9 @@ export function showEndScreen(winner: MatchWinner): void {
     { name: 'You', team: 'CT', kills: score.playerKills, deaths: score.playerDeaths, you: true },
     ...bots.map(b => ({ name: b.name, team: b.team, kills: b.kills, deaths: b.deaths, you: false })),
   ];
-  rows.sort((a, b) => b.kills - a.kills);
+  // Explicit you-first tie-break: ES2019 sorts are stable, but the documented
+  // "You first among equals" should not ride on insertion order.
+  rows.sort((a, b) => b.kills - a.kills || (a.you ? -1 : b.you ? 1 : 0));
 
   scoreboardBody.replaceChildren(...rows.map(r => {
     const tr = document.createElement('tr');

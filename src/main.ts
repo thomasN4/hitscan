@@ -23,6 +23,7 @@ import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
 import { updateEffects } from './effects';
+import { toggleDebugView, updateDebugView } from './debugView';
 import { respawn } from './combat';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
 import { initMenus, hideAllMenus, showPauseMenu, showDeathScreen } from './menu';
@@ -92,6 +93,9 @@ addEventListener('keydown', e => {
   if (e.code === 'Digit2') switchWeapon(1);
   if (e.code === 'Digit3') switchWeapon(2);
   if (e.code === 'KeyQ') switchToLast();
+  // DEV bot-observation overlay (debugView.ts). Above the stance gate on
+  // purpose: pausing to study a frame is half of what it is for.
+  if (import.meta.env.DEV && e.code === 'KeyV') toggleDebugView();
   // Stance keys only count during live play — same gate as the mouse
   // handlers — so nothing toggled pre-lock or behind the pause menu leaks
   // into the session. Sprint is hold-Shift; crouch is a Ctrl/C tap toggle
@@ -221,6 +225,9 @@ function animate(): void {
 
   // Effects keep fading while paused so impacts don't freeze on screen
   updateEffects(dt);
+  // Outside the simulate block for the same reason, and after updateBots so
+  // the lines match this frame's positions rather than the previous one's.
+  if (import.meta.env.DEV) updateDebugView();
   renderer.render(scene, camera);
 }
 animate();

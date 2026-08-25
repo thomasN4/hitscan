@@ -37,6 +37,12 @@ export interface NavLink {
   bottom: THREE.Vector3;
   /** Landing at the top, level with whatever the flight serves. */
   top: THREE.Vector3;
+  /**
+   * Half the flight's width across the line of travel (m). Navigation uses it
+   * to recognise which sampled nodes are ON the flight, so a bot partway up
+   * can route onward instead of back to the mouth.
+   */
+  halfWidth: number;
 }
 
 /** Traversable level changes, one per flight. Populated by addStairs. */
@@ -183,7 +189,7 @@ export function addStairs(
   mat?: THREE.Material,
   dir: StairDir = 'z+',
 ): void {
-  navLinks.push(stairLink(x, y, z, stepH, stepD, count, dir));
+  navLinks.push(stairLink(x, y, z, width, stepH, stepD, count, dir));
   for (let i = 0; i < count; i++) {
     const rise = (i + 1) * stepH;
     const run = (i + 0.5) * stepD;
@@ -209,6 +215,7 @@ export function stairLink(
   x: number,
   y: number,
   z: number,
+  width: number,
   stepH: number,
   stepD: number,
   count: number,
@@ -219,6 +226,7 @@ export function stairLink(
   // The far edge of the last step is count treads along, at count risers up.
   const run = count * stepD;
   return {
+    halfWidth: width / 2,
     bottom: new THREE.Vector3(x, y, z),
     top: new THREE.Vector3(
       dir === 'x+' ? x + run : dir === 'x-' ? x - run : x,

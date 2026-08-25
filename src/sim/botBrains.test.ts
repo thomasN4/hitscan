@@ -55,6 +55,10 @@ function view(overrides: Partial<BrainView> = {}): BrainView {
     // meaning exactly what it meant before the brain learned about height.
     dist3: dist,
     rise: 0,
+    onGround: true,
+    // No route by default: every pre-routing test describes a bot fighting
+    // where it stands, and the brain only asks when it wants to travel.
+    nextWaypoint: () => null,
     targetAlive: true,
     seeTarget: () => true,
     selfSpeed: 4,
@@ -171,6 +175,130 @@ describe('DefaultBrain strafe steering', () => {
     const dt = 1;
     expect(brain.decide(view(), dt).step.z).toBeCloseTo(4 * dt, 12);
     expect(brain.decide(view(), dt).step.z).toBeCloseTo(4 * dt, 12);
+  });
+});
+
+// Routing — following the executor's path instead of steering at the target.
+//
+// dt 0.1 makes the timers whole frames: stuckTime 0.25 is 3 frames (0.3 > 0.25),
+// commitTime 0.5 is 5. The waypoint points due +z so a routing step reads on
+// step.z alone, and any step.x at all would be drift that must not be there.
+describe('DefaultBrain routing', () => {
+  const STEP_DT = 0.1;
+  const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
+  /** Target a level up, with a route available. */
+  const onRoute = (overrides: Partial<BrainView> = {}): BrainView =>
+    view({ dist: 20, rise: 3.6, nextWaypoint: () => NORTH(), ...overrides });
+
+  it('walks the waypoint, not the target, and adds no drift', () => {
+    const { step, mode } = calmBrain().decide(onRoute(), STEP_DT);
+    expect(mode).toBe('route');
+    // Pure heading: the waypoint is due +z, so a drift-free step is too.
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('ignores a route while the target is on this level', () => {
+    let asked = 0;
+    const level = view({ dist: 20, rise: 0, nextWaypoint: () => { asked++; return NORTH(); } });
+    const { step, mode } = calmBrain().decide(level, STEP_DT);
+    expect(mode).toBe('engage');
+    expect(step.x).toBeGreaterThan(0); // approaching the target, with drift
+    // Lazy like seeTarget: no path is asked for when none is wanted.
+    expect(asked).toBe(0);
+  });
+
+  it('falls back to engaging when the graph offers no route', () => {
+    const { mode } = calmBrain().decide(onRoute({ nextWaypoint: () => null }), STEP_DT);
+    expect(mode).toBe('engage');
+  });
+
+  it('keeps routing below the entry threshold, down to climbExit', () => {
+    const brain = calmBrain();
+    expect(brain.decide(onRoute(), STEP_DT).mode).toBe('route');
+    // Partway up a flight: under climbThreshold (1.5) but well over climbExit
+    // (0.45). Exiting here is the stall this replaced — one step short.
+    expect(brain.decide(onRoute({ rise: 1.2 }), STEP_DT).mode).toBe('route');
+    expect(brain.decide(onRoute({ rise: 0.5 }), STEP_DT).mode).toBe('route');
+    // Arrived: rise closed.
+    expect(brain.decide(onRoute({ rise: 0.4 }), STEP_DT).mode).toBe('engage');
+  });
+
+  it('does not start routing at a rise it would only continue at', () => {
+    // The other half of the hysteresis: 1.2 continues a route but never starts one.
+    expect(calmBrain().decide(onRoute({ rise: 1.2 }), STEP_DT).mode).toBe('engage');
+  });
+
+  it('slides sideways once geometry keeps refusing the step', () => {
+    const brain = calmBrain();
+    const jammed = onRoute({ moveBlocked: true });
+    for (let f = 1; f <= 2; f++) {
+      // Still pushing at the waypoint: a brush is not a jam.
+      expect(brain.decide(jammed, STEP_DT).step.z, `frame ${f}`).toBeCloseTo(4 * STEP_DT, 12);
+    }
+    const slide = brain.decide(jammed, STEP_DT); // blockedFor reaches 0.3
+    expect(slide.mode).toBe('route');
+    // Perpendicular to the heading: all x, no forward component at all.
+    expect(Math.abs(slide.step.x)).toBeCloseTo(4 * STEP_DT, 12);
+    expect(slide.step.z).toBeCloseTo(0, 12);
+  });
+
+  it('commits to one side rather than re-deciding every frame', () => {
+    const brain = calmBrain();
+    const jammed = onRoute({ moveBlocked: true });
+    for (let f = 1; f <= 3; f++) brain.decide(jammed, STEP_DT);
+    const sides = [];
+    for (let f = 4; f <= 7; f++) sides.push(Math.sign(brain.decide(jammed, STEP_DT).step.x));
+    expect(new Set(sides).size).toBe(1);
+  });
+
+  it('tries the other side on the next attempt', () => {
+    const brain = calmBrain();
+    const jammed = onRoute({ moveBlocked: true });
+    let first = 0;
+    for (let f = 1; f <= 3; f++) first = Math.sign(brain.decide(jammed, STEP_DT).step.x);
+    let second = first;
+    for (let f = 4; f <= 12; f++) {
+      const x = Math.sign(brain.decide(jammed, STEP_DT).step.x);
+      if (x !== 0) second = x;
+    }
+    expect(second).toBe(-first);
+  });
+
+  it('never slides in mid-air', () => {
+    const brain = calmBrain();
+    const falling = onRoute({ moveBlocked: true, onGround: false });
+    for (let f = 1; f <= 20; f++) {
+      expect(brain.decide(falling, STEP_DT).step.z, `frame ${f}`).toBeCloseTo(4 * STEP_DT, 12);
+    }
+  });
+
+  it('a frame that moves resets the jam counter', () => {
+    const brain = calmBrain();
+    for (let f = 1; f <= 2; f++) brain.decide(onRoute({ moveBlocked: true }), STEP_DT);
+    brain.decide(onRoute(), STEP_DT); // one clean frame
+    for (let f = 1; f <= 2; f++) {
+      expect(brain.decide(onRoute({ moveBlocked: true }), STEP_DT).step.z).toBeCloseTo(4 * STEP_DT, 12);
+    }
+  });
+
+  it('onRespawn drops a committed slide', () => {
+    const brain = calmBrain();
+    const jammed = onRoute({ moveBlocked: true });
+    for (let f = 1; f <= 3; f++) brain.decide(jammed, STEP_DT);
+    expect(Math.abs(brain.decide(jammed, STEP_DT).step.x)).toBeGreaterThan(0);
+    brain.onRespawn();
+    // Fresh body: back to pushing at the waypoint, not still sliding.
+    expect(brain.decide(jammed, STEP_DT).step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('onRespawn resets the hysteresis to the entry threshold', () => {
+    const brain = calmBrain();
+    brain.decide(onRoute(), STEP_DT); // routing, entered at 3.6
+    expect(brain.decide(onRoute({ rise: 1.2 }), STEP_DT).mode).toBe('route');
+    brain.onRespawn();
+    // A rise that only CONTINUES a route must not start one on a fresh life.
+    expect(brain.decide(onRoute({ rise: 1.2 }), STEP_DT).mode).toBe('engage');
   });
 });
 

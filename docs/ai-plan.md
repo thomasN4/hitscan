@@ -215,6 +215,97 @@ Two things worth knowing before building on it:
   be staggered and bounded, or a dozen bots re-routing on the same frame will
   be felt.
 
+#### Bots follow the graph
+
+Routing is gated on height alone — `rise > climbThreshold` to enter, held down
+to a much lower `climbExit` (0.45) because a bot partway up a flight still
+reads a rise of a metre and dropping it back to band steering there IS the
+stall this replaces. Same-level routing waits on evidence that same-level bots
+actually fail to arrive.
+
+**Result: going-nowhere windows 7/40 → 3/40**, and the remaining ones changed
+character — they are mostly bots at `feetY 3.6, rise 0.0`, on the deck orbiting
+at combat range, which is the engage band working rather than a navigation
+failure. `[botClimb]` went from reporting 2.4 m after ~900 grounded frames of
+milling to asserting arrival at 3.6 m in ~90.
+
+Two findings from step 0, which handed a bot a perfect path before any policy
+existed:
+
+- **The perpendicular drift is load-bearing, and that was backwards from the
+  plan.** Steering straight at waypoints with no drift jams on a doorway jamb
+  and stays there, blocked 96% of frames. But high drift jams too, elsewhere:
+  0.7 and 0.35 fail approaching the external stair, 0.15–0.2 fail on the
+  internal flight's west edge, and only ~0.1 cleared all four test routes — a
+  value holding by luck, not design. Drift is combat maneuvering that
+  accidentally unsticks things.
+  So routing uses NO drift plus an explicit recovery: sustained rejection
+  commits the bot to sliding one way along whatever blocks it, alternating side
+  between attempts. All four routes then complete at zero drift.
+- **That vindicates the stuck-detector dropped from the earlier tranche.** It
+  fired on 0% of frames under normal steering because the drift was already
+  doing the job. Under path-following the jam is real — a stuck path-follower
+  is blocked 60–100% of frames, against 1% in ordinary play. The mechanism was
+  right; it was keyed to a situation that did not arise.
+
+And one from measuring the result rather than trusting it: a coarse grid gives
+a flight one link edge, mouth to landing, so **a bot partway up routes back
+DOWN** to reach the only edge that climbs, then walks up, then is re-routed
+down. Observed as a bot frozen two risers up for fifteen seconds, never
+blocked. Fixed by joining every node ON a flight to both its ends — a staircase
+is traversable from anywhere along it, which is why `NavLink` carries the
+flight's width.
+
+Budget: one A* per frame across all bots, since a route costs ~4 ms and a dozen
+bots recomputing together is a dropped frame. With 12 bots all wanting routes,
+p50 frame time moves 16.9 → 18.4 ms and p95/p99 do not regress.
+
+#### Watching it, rather than tracing it
+
+Every finding above was won by instrumentation: position traces, `[botClimb]`
+console phases, the `#botDebug` text block, straightness histograms. None of them
+show WHERE a bot thinks it is going, and the map is opaque — a bot routing to a
+staircase does it behind a wall. Lessons 24 and 26 are both cases of an
+explanation surviving because nobody could look at the thing it described.
+
+`src/debugView.ts` closes that: a DEV-only overlay on `V` that wireframes the
+level (so bots and routes are visible through geometry, and the 40–140 m fog goes
+off with it), draws each bot's REMAINING route as a polyline, and draws a line
+from each bot's eye to its current target tinted by `mode`. Both call sites in
+`main.ts` are `import.meta.env.DEV`-guarded, so it leaves production builds
+entirely — verified by grepping `dist/`.
+
+Two things it taught immediately, both about presentation rather than routing:
+
+- **1 px is all a line gets, so contrast is the only lever.** WebGL caps
+  `LineBasicMaterial` width at 1 px on every platform that matters. The first
+  palette used team amber and steel blue, which are perfectly sensible team
+  colours and completely invisible against a dusty-tan scene (`0xbfae8f`)
+  wireframed in brown. Magenta and electric blue read instantly. Lesson 25
+  again — the maths was never in question, the visibility was.
+- **An intent line ending at the viewpoint has no length — at any angle.** A
+  bot targeting the PLAYER gets `targetEye = camera.position`, and every point
+  on a segment ending at the projection centre maps to the same image point.
+  Measured, with the bot 345 px off screen-centre: sampling that line at
+  t = 0, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999 gives the identical pixel every
+  time, while moving the far endpoint 2 m sideways sweeps the same line clean
+  off the screen. The condition is not "the player is looking ALONG the line"
+  — that is rare, and it is what puts the bot mid-screen. It is "the player is
+  standing at the END of it", which is always true. So the one case worth
+  seeing most, *this bot is coming for me*, was the one case the line could
+  never show, and no adjustment to the line fixes it: shortening it or drawing
+  a fixed-length stub keeps it collinear with the same ray.
+  The fix is a screen-facing marker — a diamond built in the camera's own
+  right/up basis above each bot, mode-tinted, scaled by its own distance so it
+  holds a constant apparent size. It carries the mode the line cannot, and
+  costs the builder one extra parameter (the camera basis) to stay pure.
+
+`path`/`leg` stay private on `Bot`; the overlay reads them through `navPath`/
+`navLeg` getters, and `targetEye` is a new display-only field written where
+`update()` already computes the value for its LOS ray — the same "public because
+a DEV readout renders it, written here only" contract `mode` and `moveBlocked`
+already carry.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —

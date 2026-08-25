@@ -156,6 +156,14 @@ export interface Bot {
   readonly navLeg: number;
   /** Eye position of whatever the bot is currently targeting, or null when it has none. Display only. */
   readonly targetEye: THREE.Vector3 | null;
+  /** Whether that target sits inside the brain's engage range. Display only. */
+  readonly targetInRange: boolean;
+  /**
+   * Result of a line-of-sight probe against the current target this frame,
+   * or null when none was taken (overlay off, or no live target). Display
+   * only — the probe itself is DEV-gated; see bots.ts.
+   */
+  readonly targetLOS: boolean | null;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
   /** @param killerName display name of a bot killer; omitted for player kills */

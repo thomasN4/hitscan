@@ -257,6 +257,13 @@ export interface BotBrain {
   rollHit(dist: number): boolean;
   /** Draw one landed-shot damage from this brain's ballistic params. */
   rollDamage(): number;
+  /**
+   * Whether a target at eye-to-eye 3D `dist` passes this brain's engage
+   * gate — the same exclusive comparison decide()'s trigger applies before
+   * it ever probes sight. Exposed so a display-only consumer can report
+   * "would fire" without reading params, like hitChance above.
+   */
+  inRange(dist: number): boolean;
 }
 
 /** The shipped bot policy, parameterized for future variants. */
@@ -312,6 +319,10 @@ export class DefaultBrain implements BotBrain {
 
   rollDamage(): number {
     return botDamageRoll(this.rng, this.params);
+  }
+
+  inRange(dist: number): boolean {
+    return dist < this.params.engageRange;
   }
 
   /**

@@ -713,9 +713,10 @@ async function runAllyCheck() {
 // OUT of the flight (a riser built over STEP_HEIGHT would block it entirely,
 // and nothing else in the suite would notice).
 //
-// How FAR the bot gets is reported, not asserted, and there turned out to be TWO
-// stalls stacked on top of each other — worth recording, because the second one
-// hid behind the first for as long as this comment has existed.
+// How far the bot gets is now ASSERTED. It was reported-only for as long as
+// arriving was luck rather than policy, and there turned out to be two stalls
+// stacked on top of each other — worth keeping, because the second one hid
+// behind the first for as long as this comment existed.
 //
 //   1. A COLLISION WEDGE, now fixed here. The bot drifted east until its 0.5
 //      radius overlapped the x >= 6 second-floor slab (x[6,14], y[3.2,3.6]); at
@@ -739,10 +740,10 @@ async function runAllyCheck() {
 //      is 1.2 — under climbThreshold — the suppression switches off, and the
 //      band holds it one step short of the deck.
 //
-// Fixing 2 for good is stair navigation: a bot has to head for the TOP OF THE
-// FLIGHT and keep heading there until the level actually changes, which no
-// band around the target can express. Report the number here; assert it once
-// bots are actually meant to arrive.
+// Both are fixed. 1 by the slideMoveXZ unwedge escape; 2 by routing on the
+// navigation graph — a bot with a target a level up follows waypoints to the
+// flight and up it, which is the thing no band around the target could
+// express. So this phase now demands the deck rather than reporting a height.
 async function runBotClimbCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -782,10 +783,11 @@ async function runBotClimbCheck() {
       };
     });
     if (result.fail) throw new Error(result.fail);
-    // The geometry gate: one riser proves the flight is climbable by a bot.
+    // The geometry gate: one riser proves the flight is climbable at all.
     if (result.maxFeet < 0.25) throw new Error(`bot never gained a single riser — is a riser taller than STEP_HEIGHT? ${JSON.stringify(result)}`);
+    // The policy gate: the bot must actually arrive.
+    if (!result.gainedDeck) throw new Error(`bot never reached the deck (feet ${result.maxFeet}) — routing regressed: ${JSON.stringify(result)}`);
     console.log('[botClimb] OK', JSON.stringify(result));
-    if (!result.gainedDeck) console.log(`[botClimb] note: bot never gained the deck (feet ${result.maxFeet}) — stall 2 above, steering-level follow-up`);
   } catch (e) {
     failures++;
     console.log(`[botClimb] FAIL: ${e.message}`);
@@ -883,9 +885,29 @@ async function runNavGraphCheck() {
       // ground must NOT need to gain any height.
       const flat = cs.nav.route(V(4, 0, 8), V(-20, 0, 20));
       const peak = up ? Math.max(...up.map(p => p.y)) : -1;
+      // Section D — the jump-only crates (maps/elevation.ts): 1.2 m and 2.4 m
+      // hops, over STEP_HEIGHT so nobody walks up them and under the player's
+      // jump apex so only the player gets there. Bots have no jump, and the
+      // graph must not hand them one. Their tops ARE sampled as standable, and
+      // nodes on one flat top legitimately join each other — what matters is
+      // that no route leads there from the floor, because every edge into the
+      // island is a climb bigger than STEP_HEIGHT.
+      let crateNodes = 0;
+      for (let i = 0; i < grid.count; i++) {
+        const x = grid.xs[i], y = grid.ys[i], z = grid.zs[i];
+        const lower = y > 1 && y < 1.5 && x > 16 && x < 20 && z > 6 && z < 10;
+        const upper = y > 2.2 && y < 2.6 && x > 16 && x < 20 && z > 2 && z < 6;
+        if (lower || upper) crateNodes++;
+      }
+      const ontoLowCrate = cs.nav.route(V(18, 0, 14), V(18, 1.2, 8));
+      const ontoHighCrate = cs.nav.route(V(18, 0, 14), V(18, 2.4, 4));
+      const crateReach = [ontoLowCrate, ontoHighCrate]
+        .map(p => (p ? +p[p.length - 1].y.toFixed(2) : null));
       return {
         nodes: grid.count,
         edges: grid.edgeTo.length,
+        crateNodes,
+        crateReach,
         levels: [...new Set(Array.from(grid.ys, y => +y.toFixed(2)))].sort((a, b) => a - b).slice(0, 6),
         routeUp: up ? up.length : null,
         reachedY: up ? +up[up.length - 1].y.toFixed(2) : null,
@@ -901,6 +923,14 @@ async function runNavGraphCheck() {
     if (result.peakY < 3.5) throw new Error(`route never gained the deck: ${JSON.stringify(result)}`);
     if (result.flatPeakY > 0.5) throw new Error(`a ground-to-ground route climbed for no reason: ${JSON.stringify(result)}`);
     if (result.levels.length < 2) throw new Error(`graph is single-level — the deck was never sampled: ${JSON.stringify(result)}`);
+    if (result.crateNodes === 0) throw new Error(`the jump-only crate tops were never sampled, so their unreachability proves nothing: ${JSON.stringify(result)}`);
+    // A route may exist to the FLOOR beside a crate — the goal snaps to the
+    // nearest reachable node — but it must never arrive on top of one.
+    for (const reached of result.crateReach) {
+      if (reached !== null && reached > 0.5) {
+        throw new Error(`a route reached a jump-only crate top (y ${reached}) — bots have no jump: ${JSON.stringify(result)}`);
+      }
+    }
     console.log('[navGraph] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

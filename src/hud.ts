@@ -174,8 +174,10 @@ export function updateHUD(): void {
 // ---------- Bot elevation readout (DEV, elevation map only) ----------
 // The elevation map exists to make bot-vs-height behavior observable, and the
 // three numbers that explain what a bot is doing on a staircase — how high its
-// feet are, whether it is grounded, whether geometry just rejected its step —
-// are otherwise only reachable by pausing in devtools. Rendered as one cached
+// feet are, whether it is grounded, whether geometry just rejected its step,
+// and which behavior its brain is running — are otherwise only reachable by
+// pausing in devtools. `route` with `blk` flickering is a bot squeezing past
+// something; `route` that never becomes `engage` means it is not arriving. Rendered as one cached
 // string because updateHUD runs every frame; a bot standing still must not
 // touch the DOM. Mesh y IS the bot's feet height (bots.ts positions by feet).
 let lastBotDebug = '';
@@ -184,6 +186,7 @@ function updateBotDebug(): void {
   const text = bots
     .map(b => `${b.name.padEnd(5)} y=${b.mesh.position.y.toFixed(2).padStart(5)}` +
               `${b.onGround ? '  G' : '  -'}${b.moveBlocked ? ' blk' : '    '}` +
+              ` ${b.mode.padEnd(6)}` +
               `${b.alive ? '' : ' dead'}`)
     .join('\n');
   if (text === lastBotDebug) return;

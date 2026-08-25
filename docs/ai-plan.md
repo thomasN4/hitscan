@@ -215,6 +215,51 @@ Two things worth knowing before building on it:
   be staggered and bounded, or a dozen bots re-routing on the same frame will
   be felt.
 
+#### Bots follow the graph
+
+Routing is gated on height alone — `rise > climbThreshold` to enter, held down
+to a much lower `climbExit` (0.45) because a bot partway up a flight still
+reads a rise of a metre and dropping it back to band steering there IS the
+stall this replaces. Same-level routing waits on evidence that same-level bots
+actually fail to arrive.
+
+**Result: going-nowhere windows 7/40 → 3/40**, and the remaining ones changed
+character — they are mostly bots at `feetY 3.6, rise 0.0`, on the deck orbiting
+at combat range, which is the engage band working rather than a navigation
+failure. `[botClimb]` went from reporting 2.4 m after ~900 grounded frames of
+milling to asserting arrival at 3.6 m in ~90.
+
+Two findings from step 0, which handed a bot a perfect path before any policy
+existed:
+
+- **The perpendicular drift is load-bearing, and that was backwards from the
+  plan.** Steering straight at waypoints with no drift jams on a doorway jamb
+  and stays there, blocked 96% of frames. But high drift jams too, elsewhere:
+  0.7 and 0.35 fail approaching the external stair, 0.15–0.2 fail on the
+  internal flight's west edge, and only ~0.1 cleared all four test routes — a
+  value holding by luck, not design. Drift is combat maneuvering that
+  accidentally unsticks things.
+  So routing uses NO drift plus an explicit recovery: sustained rejection
+  commits the bot to sliding one way along whatever blocks it, alternating side
+  between attempts. All four routes then complete at zero drift.
+- **That vindicates the stuck-detector dropped from the earlier tranche.** It
+  fired on 0% of frames under normal steering because the drift was already
+  doing the job. Under path-following the jam is real — a stuck path-follower
+  is blocked 60–100% of frames, against 1% in ordinary play. The mechanism was
+  right; it was keyed to a situation that did not arise.
+
+And one from measuring the result rather than trusting it: a coarse grid gives
+a flight one link edge, mouth to landing, so **a bot partway up routes back
+DOWN** to reach the only edge that climbs, then walks up, then is re-routed
+down. Observed as a bot frozen two risers up for fifteen seconds, never
+blocked. Fixed by joining every node ON a flight to both its ends — a staircase
+is traversable from anywhere along it, which is why `NavLink` carries the
+flight's width.
+
+Budget: one A* per frame across all bots, since a route costs ~4 ms and a dozen
+bots recomputing together is a dropped frame. With 12 bots all wanting routes,
+p50 frame time moves 16.9 → 18.4 ms and p95/p99 do not regress.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —

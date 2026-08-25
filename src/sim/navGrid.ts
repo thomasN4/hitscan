@@ -37,6 +37,8 @@ export interface NavProbe {
 export interface NavLinkSpec {
   bottom: THREE.Vector3;
   top: THREE.Vector3;
+  /** Half the traversable width across the line of travel (m). */
+  halfWidth: number;
 }
 
 /** Rectangular XZ extent the graph covers. */
@@ -187,10 +189,33 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     const a = nearestOf(nodes, link.bottom);
     const b = nearestOf(nodes, link.top);
     if (a < 0 || b < 0 || a === b) continue;
-    const cost = edgeLength(nodes[a]!, nodes[b]!);
-    // Both ways: a flight is as walkable down as up.
-    edges[a]!.push(b); costs[a]!.push(cost);
-    edges[b]!.push(a); costs[b]!.push(cost);
+    const join = (i: number, j: number): void => {
+      const cost = edgeLength(nodes[i]!, nodes[j]!);
+      // Both ways: a flight is as walkable down as up.
+      edges[i]!.push(j); costs[i]!.push(cost);
+      edges[j]!.push(i); costs[j]!.push(cost);
+    };
+    join(a, b);
+
+    // …and every node ON the flight joins both ends, because a staircase is
+    // traversable from anywhere along it, not only from its mouth.
+    //
+    // Without this a bot partway up is stranded: treads are 0.75 m apart and
+    // cells are 1 m, so consecutive tread nodes differ by more than
+    // STEP_HEIGHT and the sampled grid refuses to connect them. The tread
+    // nodes become isolated islands, and A* — correctly, given that graph —
+    // routes a mid-flight bot back DOWN to the mouth to reach the one edge
+    // that climbs. It then walks up, gets re-routed down, and oscillates in
+    // place. Observed as a bot frozen two risers up for fifteen seconds,
+    // never blocked.
+    for (let i = 0; i < nodes.length; i++) {
+      if (i === a || i === b) continue;
+      const n = nodes[i]!;
+      if (n.y <= link.bottom.y + 1e-6 || n.y >= link.top.y - 1e-6) continue;
+      if (distanceToSegmentXZ(n, link.bottom, link.top) > link.halfWidth) continue;
+      join(i, a);
+      join(i, b);
+    }
   }
 
   return compact(cell, nodes, edges, costs);
@@ -253,6 +278,14 @@ function edgeLength(from: NavNode, to: NavNode): number {
 function walkable(from: NavNode, to: NavNode, stepHeight: number, probe: NavProbe): boolean {
   if (Math.abs(to.y - from.y) > stepHeight + 1e-6) return false;
   return probe.canStand(to.x, to.z, from.y);
+}
+
+/** Planar distance from a node to the segment between two points. */
+function distanceToSegmentXZ(n: NavNode, from: THREE.Vector3, to: THREE.Vector3): number {
+  const vx = to.x - from.x, vz = to.z - from.z;
+  const len2 = vx * vx + vz * vz;
+  const t = len2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((n.x - from.x) * vx + (n.z - from.z) * vz) / len2));
+  return Math.hypot(n.x - (from.x + t * vx), n.z - (from.z + t * vz));
 }
 
 /** Whether ANY node in a neighbouring column is a legal step from `from`. */

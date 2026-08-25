@@ -7,7 +7,7 @@
 // a collider, a mesh or a scene anywhere in sight.
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { buildNavGrid, findPath, navNode, nearestNode, type NavGrid, type NavProbe } from './navGrid';
+import { buildNavGrid, findPath, navNode, nearestNode, type NavGrid, type NavLinkSpec, type NavProbe } from './navGrid';
 
 const STEP = 0.3;
 const HEAD = 2;
@@ -49,7 +49,7 @@ function world(walls: Wall[] = [], floors: Floor[] = []): NavProbe {
 }
 
 const bounds = { minX: 0, maxX: 10, minZ: 0, maxZ: 10 };
-const build = (probe: NavProbe, links?: { bottom: THREE.Vector3; top: THREE.Vector3 }[]) =>
+const build = (probe: NavProbe, links?: NavLinkSpec[]) =>
   buildNavGrid({ bounds, cell: 1, stepHeight: STEP, probe, links });
 
 /** Whether the graph holds any route between two world points. */
@@ -134,7 +134,7 @@ describe('nav links', () => {
   );
 
   test('a link joins levels the sampled grid cannot', () => {
-    const link = { bottom: at(1.5, 5.5), top: at(1.5, 7.5, 3) };
+    const link = { bottom: at(1.5, 5.5), top: at(1.5, 7.5, 3), halfWidth: 1 };
     const grid = build(twoLevels(), [link]);
     expect(connected(grid, at(5, 1), at(8, 8, 3))).toBe(true);
   });
@@ -145,7 +145,7 @@ describe('nav links', () => {
   });
 
   test('links are traversable in both directions', () => {
-    const link = { bottom: at(1.5, 5.5), top: at(1.5, 7.5, 3) };
+    const link = { bottom: at(1.5, 5.5), top: at(1.5, 7.5, 3), halfWidth: 1 };
     const grid = build(twoLevels(), [link]);
     expect(connected(grid, at(8, 8, 3), at(5, 1))).toBe(true);
   });
@@ -191,9 +191,9 @@ describe('findPath optimality', () => {
     [{ minX: 0, maxX: 10, minZ: 6, maxZ: 6.9 }],
     [{ minX: 0, maxX: 10, minZ: 7, maxZ: 10, y: 3, bottom: 2.8 }],
   );
-  const links = [
-    { bottom: at(0.5, 5.5), top: at(0.5, 7.5, 3) },
-    { bottom: at(9.5, 5.5), top: at(9.5, 7.5, 3) },
+  const links: NavLinkSpec[] = [
+    { bottom: at(0.5, 5.5), top: at(0.5, 7.5, 3), halfWidth: 1 },
+    { bottom: at(9.5, 5.5), top: at(9.5, 7.5, 3), halfWidth: 1 },
   ];
 
   test('matches brute force when two flights compete', () => {

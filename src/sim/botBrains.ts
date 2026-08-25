@@ -48,9 +48,24 @@ export interface BrainParams {
    * Rise (m) above which a target counts as on ANOTHER LEVEL rather than
    * merely up a kerb — above what the executor's feet-aware step-up
    * (collision.ts:STEP_HEIGHT) resolves by walking into it. Gates the
-   * back-off suppression below.
+   * back-off suppression below, and entry into route mode.
    */
   climbThreshold: number;
+  /**
+   * Rise (m) at which routing stops. Deliberately far below climbThreshold:
+   * a bot partway up a flight has already closed most of the gap, and exiting
+   * at the entry threshold drops it back to band steering with a metre still
+   * to climb — which is precisely where bots used to stall, one step short of
+   * the deck.
+   */
+  climbExit: number;
+  /**
+   * Seconds of sustained step rejection before a routing bot decides it is
+   * jammed rather than brushing past something.
+   */
+  stuckTime: number;
+  /** Seconds a jammed bot commits to sliding one way along whatever blocks it. */
+  commitTime: number;
   /**
    * How much a metre of height counts against a metre of ground when
    * ranking targets. Above 1 because height is not distance: reaching it
@@ -82,6 +97,9 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   firstDelayMin: 1,
   firstDelaySpan: 2,
   climbThreshold: 1.5, // ≈ 5 risers; well clear of STEP_HEIGHT's 0.3
+  climbExit: 0.45,     // just over one riser — keep routing to the last step
+  stuckTime: 0.25,
+  commitTime: 0.5,
   verticalWeight: 2,   // a deck 3.6 m up ranks like 7.2 m of extra ground
   hitChanceNear: 0.65,
   hitChanceDivisor: 80,
@@ -168,6 +186,12 @@ export interface BrainView {
   dist3: number;
   /** Target feet minus this bot's feet (m). Positive: the target is above. */
   rise: number;
+  /**
+   * Resting on support this frame; false while airborne. Read by the jam
+   * recovery below, which must not fire mid-fall: a falling bot's steps are
+   * refused for reasons no amount of sliding sideways will fix.
+   */
+  onGround: boolean;
   targetAlive: boolean;
   /**
    * Line-of-sight probe to the target. A THUNK on purpose: the raycast
@@ -179,7 +203,26 @@ export interface BrainView {
   selfSpeed: number;
   /** Whether LAST frame's step was rejected by world collision. */
   moveBlocked: boolean;
+  /**
+   * Planar vector to the next waypoint on the executor's route, or null when
+   * it has none. A THUNK for the same reason seeTarget is: pathfinding is the
+   * expensive thing here, so it is only asked for when the policy has already
+   * decided it wants to travel.
+   *
+   * Relative, like toTarget — a brain never learns where it is, only which
+   * way to go.
+   */
+  nextWaypoint(): THREE.Vector3 | null;
 }
+
+/**
+ * What a brain is doing this frame, in one word.
+ *
+ * Reported for OBSERVABILITY, not consumed by the executor: hud.ts renders it
+ * in the DEV bot readout, because "why is that bot doing that" is otherwise
+ * only answerable by pausing in devtools.
+ */
+export type BrainMode = 'engage' | 'route';
 
 /** What a brain wants done this frame. */
 export interface BrainIntent {
@@ -187,6 +230,8 @@ export interface BrainIntent {
   step: THREE.Vector3;
   /** Loose a shot THIS frame; the executor owes it when true. */
   wantShoot: boolean;
+  /** What the brain thinks it is doing; display only. */
+  mode: BrainMode;
 }
 
 /** The decision half of a bot. Instances own per-bot state; executors are stateless shells. */
@@ -218,6 +263,14 @@ export interface BotBrain {
 export class DefaultBrain implements BotBrain {
   private strafeDir: 1 | -1;
   private cooldown: number;
+  /** True while following the executor's route rather than steering at the target. */
+  private routing = false;
+  /** Seconds of CONSECUTIVE refused steps while routing; any frame that moves resets it. */
+  private blockedFor = 0;
+  /** Seconds left on a committed sideways slide past whatever is jamming us. */
+  private commitLeft = 0;
+  /** Which way the last slide went; the next one takes the other. */
+  private slideDir: 1 | -1 = 1;
 
   constructor(
     private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
@@ -244,6 +297,9 @@ export class DefaultBrain implements BotBrain {
     */
   onRespawn(): void {
     this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
+    this.routing = false;
+    this.blockedFor = 0;
+    this.commitLeft = 0;
   }
 
   hitChance(dist: number): number {
@@ -256,6 +312,44 @@ export class DefaultBrain implements BotBrain {
 
   rollDamage(): number {
     return botDamageRoll(this.rng, this.params);
+  }
+
+  /**
+   * Walk the route: straight at the waypoint, with an explicit recovery when
+   * geometry keeps refusing the step.
+   *
+   * NO perpendicular drift here, unlike engage. Measured on the elevation map
+   * over four start positions: steering at waypoints with the shipped 0.7
+   * drift jams approaching the external stair, 0.15–0.2 jams on the internal
+   * flight's west edge, and only ~0.1 cleared every route — a single magic
+   * value holding by luck. Drift is combat maneuvering that happens to
+   * unstick things; it is not a recovery, and leaning on it as one is what
+   * made the working value so narrow.
+   *
+   * The designed recovery is below: sustained rejection commits the bot to
+   * sliding one way along whatever blocks it, alternating side between
+   * attempts. With it, all four routes complete at zero drift.
+   */
+  private travel(step: THREE.Vector3, waypoint: THREE.Vector3, view: BrainView, dt: number): void {
+    if (view.moveBlocked) this.blockedFor += dt;
+    else this.blockedFor = 0;
+
+    if (this.commitLeft > 0) {
+      this.commitLeft -= dt;
+    } else if (this.blockedFor >= this.params.stuckTime && view.onGround) {
+      // Airborne is excluded: a falling bot's steps are refused for reasons
+      // sliding sideways cannot fix.
+      this.commitLeft = this.params.commitTime;
+      this.slideDir = this.slideDir === 1 ? -1 : 1;
+    }
+
+    const heading = waypoint.clone().setY(0).normalize();
+    if (this.commitLeft > 0) {
+      step.set(-heading.z * this.slideDir, 0, heading.x * this.slideDir);
+    } else {
+      step.copy(heading);
+    }
+    step.normalize().multiplyScalar(view.selfSpeed * dt);
   }
 
   decide(view: BrainView, dt: number): BrainIntent {
@@ -275,14 +369,40 @@ export class DefaultBrain implements BotBrain {
     // Back-off is suppressed outright while the target is a level above —
     // you cannot reverse away from something overhead, and trying only
     // widens the gap to whatever flight reaches it.
+    // Route when the target is a level up and the executor has a way there.
+    // Hysteresis is wide on purpose: entry needs climbThreshold, but exit
+    // waits for climbExit, because a bot partway up a flight still reads a
+    // rise of a metre or so and dropping it back to band steering there is
+    // exactly the stall this replaces — orbiting one step short of the deck.
+    const wantRoute = this.routing
+      ? view.rise > this.params.climbExit
+      : view.rise > this.params.climbThreshold;
+    const waypoint = wantRoute ? view.nextWaypoint() : null;
+    this.routing = waypoint !== null;
+
     const step = new THREE.Vector3();
-    const overhead = view.rise > this.params.climbThreshold;
-    if (view.dist3 > this.params.farBand || overhead) step.add(dir);
-    else if (view.dist3 < this.params.nearBand) step.sub(dir);
-    const strafe = new THREE.Vector3(-view.toTarget.z, 0, view.toTarget.x)
-      .normalize()
-      .multiplyScalar(this.strafeDir * this.params.strafeFactor);
-    step.add(strafe).normalize().multiplyScalar(view.selfSpeed * dt);
+    if (this.routing) {
+      this.travel(step, waypoint!, view, dt);
+    } else {
+      this.blockedFor = 0;
+      this.commitLeft = 0;
+      // Movement blend: radial band preference plus a perpendicular drift
+      // component, normalized and scaled to the realized speed.
+      //
+      // The band reads dist3, not the planar dist: a target on a deck 3.6 m up
+      // is 3.6 m away even when standing on your head, and ranging it as 0
+      // is what made bots retreat from the building they needed to enter.
+      // Back-off is suppressed outright while the target is a level above —
+      // you cannot reverse away from something overhead, and trying only
+      // widens the gap to whatever flight reaches it.
+      const overhead = view.rise > this.params.climbThreshold;
+      if (view.dist3 > this.params.farBand || overhead) step.add(dir);
+      else if (view.dist3 < this.params.nearBand) step.sub(dir);
+      const strafe = new THREE.Vector3(-view.toTarget.z, 0, view.toTarget.x)
+        .normalize()
+        .multiplyScalar(this.strafeDir * this.params.strafeFactor);
+      step.add(strafe).normalize().multiplyScalar(view.selfSpeed * dt);
+    }
 
     // Random juke (~jukeRate flips/sec); drawn after the step like the
     // original statement order, so it steers from the NEXT frame on.
@@ -304,6 +424,6 @@ export class DefaultBrain implements BotBrain {
       }
     }
 
-    return { step, wantShoot };
+    return { step, wantShoot, mode: this.routing ? 'route' : 'engage' };
   }
 }

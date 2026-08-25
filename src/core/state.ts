@@ -12,6 +12,7 @@
 // than reaching across modules.
 import * as THREE from 'three';
 import { GameClock } from '../sim/gameClock';
+import type { BrainMode } from '../sim/botBrains';
 
 // ---------- Domain vocabulary ----------
 /**
@@ -78,6 +79,8 @@ export interface Bot {
   onGround: boolean;
   /** Whether LAST frame's step was rejected by world collision — the brain's obstacle feedback. */
   moveBlocked: boolean;
+  /** What the bot's brain is doing, for the DEV readout. Display only. */
+  mode: BrainMode;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
   /** @param killerName display name of a bot killer; omitted for player kills */

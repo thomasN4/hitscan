@@ -143,7 +143,7 @@ describe('stairLink', () => {
   const STEP_H = 0.3, STEP_D = 0.75;
 
   test("elevation's internal flight: 12 risers to the slab's south edge", () => {
-    const link = stairLink(4, 0, -9, STEP_H, STEP_D, 12, 'z+');
+    const link = stairLink(4, 0, -9, 4, STEP_H, STEP_D, 12, 'z+');
     expect([link.bottom.x, link.bottom.y, link.bottom.z]).toEqual([4, 0, -9]);
     expect(link.top.x).toBeCloseTo(4, 12);
     expect(link.top.y).toBeCloseTo(3.6, 12); // DECK_Y
@@ -151,32 +151,35 @@ describe('stairLink', () => {
   });
 
   test("elevation's external flight ascends z- to the building face", () => {
-    const link = stairLink(8, 0, 21.5, STEP_H, STEP_D, 12, 'z-');
+    const link = stairLink(8, 0, 21.5, 4, STEP_H, STEP_D, 12, 'z-');
     expect(link.top.y).toBeCloseTo(3.6, 12);
     expect(link.top.z).toBeCloseTo(12.5, 12);
   });
 
   test("elevation's tower flight abuts the tower's south face", () => {
-    const link = stairLink(35, 0, 15.5, STEP_H, STEP_D, 12, 'z-');
+    const link = stairLink(35, 0, 15.5, 4, STEP_H, STEP_D, 12, 'z-');
     expect(link.top.y).toBeCloseTo(3.6, 12);
     expect(link.top.z).toBeCloseTo(6.5, 12);
   });
 
   test("elevation's plateau flight ascends x- to the plateau's east face", () => {
-    const link = stairLink(-19.5, 0, -30, STEP_H, STEP_D, 10, 'x-');
+    // 6 m wide, unlike the 4 m flights — navigation reads halfWidth to tell
+    // which sampled nodes count as being ON the flight.
+    const link = stairLink(-19.5, 0, -30, 6, STEP_H, STEP_D, 10, 'x-');
+    expect(link.halfWidth).toBe(3);
     expect(link.top.x).toBeCloseTo(-27, 12);
     expect(link.top.y).toBeCloseTo(3, 12); // the plateau's lower tier
     expect(link.top.z).toBeCloseTo(-30, 12);
   });
 
   test("arena's flight reaches the 2.4 m platform", () => {
-    const link = stairLink(26, 0, 24, STEP_H, STEP_D, 8, 'z+');
+    const link = stairLink(26, 0, 24, 4, STEP_H, STEP_D, 8, 'z+');
     expect(link.top.y).toBeCloseTo(2.4, 12);
     expect(link.top.z).toBeCloseTo(30, 12);
   });
 
   test('a flight based above ground carries its base into both ends', () => {
-    const link = stairLink(0, 5, 0, STEP_H, STEP_D, 4, 'x+');
+    const link = stairLink(0, 5, 0, 4, STEP_H, STEP_D, 4, 'x+');
     expect(link.bottom.y).toBe(5);
     expect(link.top.y).toBeCloseTo(6.2, 12);
     expect(link.top.x).toBeCloseTo(3, 12);
@@ -187,7 +190,7 @@ describe('resetWorld', () => {
   test('empties every registry in place', () => {
     const before = { solids, colliders, navLinks };
     registerSolidBox(box());
-    navLinks.push(stairLink(0, 0, 0, 0.3, 0.75, 4, 'z+'));
+    navLinks.push(stairLink(0, 0, 0, 4, 0.3, 0.75, 4, 'z+'));
     resetWorld();
     expect(solids).toHaveLength(0);
     expect(colliders).toHaveLength(0);

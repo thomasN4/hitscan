@@ -31,8 +31,8 @@ import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
-import { DefaultBrain, nearestOpposing } from './sim/botBrains';
-import { NAV_RADIUS } from './nav';
+import { DefaultBrain, nearestOpposing, type BrainMode } from './sim/botBrains';
+import { NAV_RADIUS, route } from './nav';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -52,6 +52,34 @@ const BARREL_LEN = 0.6;
  * vertical so the barrel never disappears into the bot's own silhouette.
  */
 const MAX_AIM_PITCH = 1.2;
+
+/**
+ * How close (m) a bot must get to a waypoint before the next one is offered.
+ * One nav cell: the path's own resolution, so a bot never chases a point it
+ * has effectively already stood on.
+ */
+const WAYPOINT_REACHED = 1;
+
+/** Seconds between route recomputes for one bot, while it wants a route. */
+const ROUTE_INTERVAL = 1;
+
+/**
+ * How far (m) off its own path a bot may drift before the route is thrown
+ * away and rebuilt — it fell, was shoved, or respawned somewhere else.
+ */
+const ROUTE_ABANDON = 6;
+
+/**
+ * At most one A* per frame across ALL bots.
+ *
+ * A route costs ~4 ms on the elevation map's 17k-node graph, so a dozen bots
+ * recomputing on the same frame is a ~50 ms spike — a dropped frame, in a
+ * loop whose dt clamp then discards the overrun as game time. Bots that miss
+ * their turn keep walking the route they already have and ask again next
+ * frame; a path one frame stale is not a problem, a stutter is. Reset once
+ * per frame in updateBots.
+ */
+let routeBudget = 1;
 
 /** Serial source for Bot ids; 1-based per match, unique across teams. */
 let nextBotId = 1;
@@ -154,6 +182,19 @@ export class Bot implements BotShape {
   vy = 0;
   /** Grounded state fed back to resolveVertical so stair descents stick. */
   onGround = true;
+  /**
+   * What this bot's brain is doing, for hud.ts's DEV readout.
+   *
+   * Public for the same reason moveBlocked is: it is part of the structural
+   * Bot shape and the readout renders it. Written here only.
+   */
+  mode: BrainMode = 'engage';
+  /** Waypoints the bot is currently walking, nav-graph order; empty when none. */
+  private path: THREE.Vector3[] = [];
+  /** How far along `path` the bot has got. */
+  private leg = 0;
+  /** Seconds until this bot may spend the frame's route budget again. */
+  private routeCooldown = 0;
 
   constructor(team: Team = 'T') {
     // Plain assignments, not a parameter property: the `name` derivation must
@@ -280,13 +321,22 @@ export class Bot implements BotShape {
       ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
       : () => hasLineOfSight(this.eyePos(), target.bot.eyePos(), solids);
 
+    // Clamped, not free-running: a bot that spends minutes not routing would
+    // otherwise drift the timer arbitrarily negative for no benefit, and the
+    // first request after a lull should fire immediately either way.
+    this.routeCooldown = Math.max(0, this.routeCooldown - dt);
     const intent = this.brain.decide(
       {
         toTarget,
         dist,
         dist3,
         rise,
+        onGround: this.onGround,
         targetAlive: target.alive,
+        // Lazy on purpose, like seeTarget: pathfinding is the expensive
+        // thing here, so it is only paid when the policy has already decided
+        // it wants to travel rather than fight where it stands.
+        nextWaypoint: () => this.waypointToward(target.pos),
         // Lazy on purpose: the raycast is only paid when the trigger is
         // otherwise ready — see BrainView.seeTarget.
         seeTarget: losTo,
@@ -316,12 +366,55 @@ export class Bot implements BotShape {
     this.vy = vert.velY;
     this.onGround = vert.onGround;
 
+    this.mode = intent.mode;
+
     if (intent.wantShoot) {
       // Re-measured AFTER the move, unlike the view's dist3: the bot has
       // stepped since, and the die should roll from where it is actually
       // shooting (see botBrains.ts:botHitChance).
       this.shoot(this.eyePos().distanceTo(targetEye), target);
     }
+  }
+
+  /**
+   * Planar vector to the next waypoint on a route to `goal`, or null when the
+   * graph has none.
+   *
+   * Mechanism, not policy: this keeps and refreshes the path and decides which
+   * waypoint is "next", while the brain decides whether to walk it at all.
+   * Same split as seeTarget — the executor owns the raycast, the brain owns
+   * the trigger.
+   */
+  private waypointToward(goal: THREE.Vector3): THREE.Vector3 | null {
+    const here = this.mesh.position;
+    // Drop a path the bot is no longer on: it fell off an edge, got shoved,
+    // or respawned across the map still holding last life's route.
+    if (this.path.length > 0) {
+      const leg = this.path[Math.min(this.leg, this.path.length - 1)]!;
+      if (Math.hypot(leg.x - here.x, leg.z - here.z) > ROUTE_ABANDON) this.path = [];
+    }
+    if ((this.path.length === 0 || this.routeCooldown <= 0) && routeBudget > 0) {
+      // One A* per frame across all bots; whoever misses out keeps walking
+      // whatever it already has.
+      routeBudget--;
+      this.routeCooldown = ROUTE_INTERVAL;
+      const found = route(here, goal);
+      if (found) {
+        this.path = found;
+        this.leg = 0;
+      }
+    }
+    if (this.path.length === 0) return null;
+
+    // Consume waypoints already stood on, planar — the step is planar too.
+    while (this.leg < this.path.length - 1) {
+      const w = this.path[this.leg]!;
+      if (Math.hypot(w.x - here.x, w.z - here.z) >= WAYPOINT_REACHED) break;
+      this.leg++;
+    }
+    const w = this.path[this.leg]!;
+    const to = new THREE.Vector3(w.x - here.x, 0, w.z - here.z);
+    return to.lengthSq() < 1e-8 ? null : to;
   }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -389,6 +482,9 @@ export class Bot implements BotShape {
       // The brain outlived the body: re-arm its spawn stagger so a revived
       // bot does not open fire on whatever cooldown its corpse was carrying.
       this.brain.onRespawn();
+      this.path = [];
+      this.leg = 0;
+      this.mode = 'engage';
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }
@@ -401,5 +497,7 @@ export function spawnBots(count: number, team: Team): void {
 
 /** Advance all bot AI. Called once per frame from the main loop. */
 export function updateBots(dt: number, player: PlayerState): void {
+  // One route per frame, shared out first-come: see routeBudget.
+  routeBudget = 1;
   bots.forEach(b => b.update(dt, player));
 }

@@ -17,7 +17,7 @@
 // lines is that nothing can shoot, walk into or see through them. They are
 // never registered as solids or colliders.
 import * as THREE from 'three';
-import { scene } from './core/engine';
+import { scene, camera } from './core/engine';
 import { solids } from './world';
 import { bots } from './core/state';
 import type { BrainMode } from './sim/botBrains';
@@ -57,6 +57,16 @@ const MODE_COLOR: Record<BrainMode, readonly [number, number, number]> = {
   engage: [1.0, 0.0, 0.0],  // red
 };
 
+/**
+ * Marker half-size as a fraction of the distance to it, so it holds a constant
+ * SCREEN size instead of shrinking away. A world-sized marker on a bot across
+ * the map is a pixel, which is the problem it exists to solve.
+ */
+const MARKER_SCALE = 0.022;
+
+/** How far above a bot's feet the marker floats — clear of the 2.17 m head cube. */
+const MARKER_HEIGHT = 2.6;
+
 let active = false;
 let overlay: THREE.LineSegments | undefined;
 let positions: Float32Array | undefined;
@@ -65,6 +75,24 @@ let colors: Float32Array | undefined;
 const wireframed = new Set<THREE.Material>();
 /** The scene's own fog while the x-ray has it switched off. */
 let savedFog: THREE.Scene['fog'] = null;
+/** Reused every frame — the overlay allocates nothing per frame by design. */
+const basis: DebugViewBasis = {
+  right: new THREE.Vector3(),
+  up: new THREE.Vector3(),
+  eye: new THREE.Vector3(),
+};
+
+/**
+ * The camera basis the screen-facing marker is built in.
+ *
+ * Passed in rather than read off `camera` so the builder stays pure: `right`
+ * and `up` are the camera's world-space x/y axes, `eye` its world position.
+ */
+export interface DebugViewBasis {
+  right: THREE.Vector3;
+  up: THREE.Vector3;
+  eye: THREE.Vector3;
+}
 
 /**
  * What the segment builder needs off a bot — the structural `Bot` from
@@ -94,12 +122,26 @@ export interface DebugBotView {
  * (src/debugView.test.ts). Returns the vertex count written, which the caller
  * hands to setDrawRange; nothing is allocated.
  *
- * Per living bot: the REMAINING route (feet -> path[leg] -> ... -> last
- * waypoint), then an intent line from its eye to whatever it is targeting.
- * Waypoints already consumed are skipped because the question this answers is
- * "where is it going", not "where has it been".
+ * Per living bot, in this order: the REMAINING route (feet -> path[leg] -> ...
+ * -> last waypoint), an intent line from its eye to whatever it is targeting,
+ * and a mode-tinted marker floating above it. Waypoints already consumed are
+ * skipped because the question this answers is "where is it going", not "where
+ * has it been".
+ *
+ * The marker is not decoration. A bot targeting the PLAYER draws an intent line
+ * that ends at the camera position, and every point on a segment ending at the
+ * viewpoint projects to the same pixel — measured: sampling that line at
+ * t = 0..0.999 gives one identical pixel, with the bot 345 px off screen-centre.
+ * So the one case you most want to see, "this bot is coming for me", is the one
+ * case the line cannot show. The marker carries the mode instead, because it is
+ * built in the camera's own basis and therefore always faces the screen.
  */
-export function buildDebugSegments(list: readonly DebugBotView[], pos: Float32Array, col: Float32Array): number {
+export function buildDebugSegments(
+  list: readonly DebugBotView[],
+  pos: Float32Array,
+  col: Float32Array,
+  view: DebugViewBasis,
+): number {
   let v = 0;
   const push = (
     ax: number, ay: number, az: number,
@@ -132,8 +174,24 @@ export function buildDebugSegments(list: readonly DebugBotView[], pos: Float32Ar
     }
 
     const eye = b.eyePos();
+    const modeCol = MODE_COLOR[b.mode];
     const t = b.targetEye;
-    if (t) push(eye.x, eye.y, eye.z, t.x, t.y, t.z, MODE_COLOR[b.mode]);
+    if (t) push(eye.x, eye.y, eye.z, t.x, t.y, t.z, modeCol);
+
+    // Screen-facing diamond: four segments in the camera's right/up plane, so
+    // it presents the same shape from every angle. Scaled by its own distance
+    // to hold a constant apparent size.
+    const mx = feet.x, my = feet.y + MARKER_HEIGHT, mz = feet.z;
+    const s = MARKER_SCALE * Math.hypot(mx - view.eye.x, my - view.eye.y, mz - view.eye.z);
+    const rx = view.right.x * s, ry = view.right.y * s, rz = view.right.z * s;
+    const ux = view.up.x * s, uy = view.up.y * s, uz = view.up.z * s;
+    const corner = (dr: number, du: number): [number, number, number] =>
+      [mx + rx * dr + ux * du, my + ry * dr + uy * du, mz + rz * dr + uz * du];
+    const [r0, r1, r2, r3] = [corner(1, 0), corner(0, 1), corner(-1, 0), corner(0, -1)];
+    push(r0[0], r0[1], r0[2], r1[0], r1[1], r1[2], modeCol);
+    push(r1[0], r1[1], r1[2], r2[0], r2[1], r2[2], modeCol);
+    push(r2[0], r2[1], r2[2], r3[0], r3[1], r3[2], modeCol);
+    push(r3[0], r3[1], r3[2], r0[0], r0[1], r0[2], modeCol);
   }
   return v;
 }
@@ -202,7 +260,15 @@ export function toggleDebugView(): void {
  */
 export function updateDebugView(): void {
   if (!active || !overlay || !positions || !colors) return;
-  const verts = buildDebugSegments(bots, positions, colors);
+  // renderer.render() is what normally refreshes this, and that has not run
+  // yet this frame — without the flush the marker would face where the camera
+  // pointed last frame.
+  camera.updateMatrixWorld();
+  const m = camera.matrixWorld.elements;
+  basis.right.set(m[0]!, m[1]!, m[2]!);
+  basis.up.set(m[4]!, m[5]!, m[6]!);
+  basis.eye.copy(camera.position);
+  const verts = buildDebugSegments(bots, positions, colors, basis);
   overlay.geometry.setDrawRange(0, verts);
   overlay.geometry.attributes.position!.needsUpdate = true;
   overlay.geometry.attributes.color!.needsUpdate = true;

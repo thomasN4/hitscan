@@ -283,11 +283,22 @@ Two things it taught immediately, both about presentation rather than routing:
   colours and completely invisible against a dusty-tan scene (`0xbfae8f`)
   wireframed in brown. Magenta and electric blue read instantly. Lesson 25
   again — the maths was never in question, the visibility was.
-- **An intent line pointing at the camera has no length.** A bot targeting the
-  PLAYER draws a line straight down the view axis, which is a dot. The overlay
-  is therefore most informative with CTs in play, where the bot-vs-bot lines
-  cross the view and show who is fighting whom. That is a property of the
-  projection, not a fixable defect.
+- **An intent line ending at the viewpoint has no length — at any angle.** A
+  bot targeting the PLAYER gets `targetEye = camera.position`, and every point
+  on a segment ending at the projection centre maps to the same image point.
+  Measured, with the bot 345 px off screen-centre: sampling that line at
+  t = 0, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999 gives the identical pixel every
+  time, while moving the far endpoint 2 m sideways sweeps the same line clean
+  off the screen. The condition is not "the player is looking ALONG the line"
+  — that is rare, and it is what puts the bot mid-screen. It is "the player is
+  standing at the END of it", which is always true. So the one case worth
+  seeing most, *this bot is coming for me*, was the one case the line could
+  never show, and no adjustment to the line fixes it: shortening it or drawing
+  a fixed-length stub keeps it collinear with the same ray.
+  The fix is a screen-facing marker — a diamond built in the camera's own
+  right/up basis above each bot, mode-tinted, scaled by its own distance so it
+  holds a constant apparent size. It carries the mode the line cannot, and
+  costs the builder one extra parameter (the camera basis) to stay pure.
 
 `path`/`leg` stay private on `Bot`; the overlay reads them through `navPath`/
 `navLeg` getters, and `targetEye` is a new display-only field written where

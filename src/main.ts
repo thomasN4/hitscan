@@ -25,10 +25,11 @@ import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
 import { updateEffects } from './effects';
 import { toggleDebugView, updateDebugView } from './debugView';
-import { respawn } from './combat';
-import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
+import { respawn, endMatch } from './combat';
+import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, addKillfeed } from './hud';
 import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout } from './menu';
 import { sfxZoom } from './audio';
+import { decideWinner } from './sim/match';
 import { validateWeapons } from './sim/validateWeapons';
 
 // ---------- Startup ----------
@@ -81,6 +82,12 @@ initMenus({
   onCommit: query => { location.href = location.pathname + query; },
   onResume: lock,
   onQuit: () => { location.reload(); },
+  // End screen Rematch: same config query, fresh match — a reload IS the
+  // restart, since every slice initializes from defaults at module scope.
+  onRematch: () => { location.reload(); },
+  // End screen Back to Menu: bare path drops the config query so the start
+  // menu opens with SESSION_DEFAULTS.
+  onExitToMenu: () => { location.href = location.pathname; },
   // Deploy: commit the picked loadout (the picker saved it to sessionStorage),
   // respawn first when deploying from death, then enter play. The click itself
   // is the user gesture pointer lock needs.
@@ -184,7 +191,7 @@ function lock(): void {
     if (p instanceof Promise) p.catch(() => { /* cooldown/headless: recovered by canvas click */ });
   } catch { /* same recovery path */ }
 }
-renderer.domElement.addEventListener('click', () => { if (!session.locked && player.alive && session.started) lock(); });
+renderer.domElement.addEventListener('click', () => { if (!session.locked && !session.matchOver && player.alive && session.started) lock(); });
 
 document.addEventListener('pointerlockchange', () => {
   session.locked = document.pointerLockElement === renderer.domElement;
@@ -195,6 +202,10 @@ document.addEventListener('pointerlockchange', () => {
   if (session.locked) {
     session.started = true;
     hideAllMenus();
+  } else if (session.matchOver) {
+    // endMatch just released the lock: the score screen owns the display
+    // (revealed on its own wall-clock beat), never the pause menu.
+    showPauseMenu(false);
   } else if (session.started && player.alive) {
     // Losing lock while alive means Esc was pressed -> pause menu.
     // Losing lock while dead is handled by damagePlayer's death screen.
@@ -235,13 +246,19 @@ function animate(): void {
     updateViewmodel();
     if (!RANGE) updateBots(dt, player);
 
-    // Round timer: arena only — meaningless on the range, so freeze it there.
-    // Expiry currently restarts the configured length; what a real round end
-    // looks like is deferred to a later PR (see roadmap).
+    // Round clock: arena only — meaningless on the range, so freeze it there.
+    // Clamped at 0 rather than reset: expiry ENDS the match (combat.ts:endMatch),
+    // winner by kill score (sim/match.ts:decideWinner). The matchOver check is
+    // redundant with the lock gate in the normal flow (endMatch releases the
+    // pointer), but keeps a same-frame double-fire impossible if lock release
+    // ever becomes async.
     if (!RANGE) {
-      score.roundTime -= dt;
-      if (score.roundTime <= 0) score.roundTime = session.roundSeconds;
+      score.roundTime = Math.max(0, score.roundTime - dt);
       setTimer(score.roundTime);
+      if (score.roundTime <= 0 && !session.matchOver) {
+        addKillfeed('⏱ Time expired');
+        endMatch(decideWinner(score.scoreKills, score.scoreDeaths));
+      }
     }
 
     updateHUD();
@@ -277,6 +294,7 @@ const game: DebugGame = {
   get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
   get started() { return session.started; }, set started(v: boolean) { session.started = v; },
   get debugView() { return session.debugView; }, set debugView(v: boolean) { session.debugView = v; },
+  get matchOver() { return session.matchOver; }, set matchOver(v: boolean) { session.matchOver = v; },
   get shooting() { return input.shooting; }, set shooting(v: boolean) { input.shooting = v; },
   get aiming() { return input.aiming; }, set aiming(v: boolean) { input.aiming = v; },
   get running() { return input.running; }, set running(v: boolean) { input.running = v; },
@@ -301,6 +319,8 @@ const game: DebugGame = {
   get bobAmt() { return motion.bobAmt; }, set bobAmt(v: number) { motion.bobAmt = v; },
   get scoreKills() { return score.scoreKills; }, set scoreKills(v: number) { score.scoreKills = v; },
   get scoreDeaths() { return score.scoreDeaths; }, set scoreDeaths(v: number) { score.scoreDeaths = v; },
+  get playerKills() { return score.playerKills; }, set playerKills(v: number) { score.playerKills = v; },
+  get playerDeaths() { return score.playerDeaths; }, set playerDeaths(v: number) { score.playerDeaths = v; },
   get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
 };
 

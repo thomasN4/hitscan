@@ -1283,8 +1283,8 @@ async function runKnifeCheck() {
         swings,
         hpAfterSwing1,
         // Head/torso depends on which part took the final swing, and the
-        // round-win banner may prepend above either (one bot = an instant
-        // round) — so match anywhere in the feed.
+        // respawn banner may prepend above either (one bot = an instant
+        // wave reset) — so match anywhere in the feed.
         feedHasKill: /You (killed|☠ headshot) T-\d+/.test(document.getElementById('killfeed')?.textContent ?? ''),
         magStillZero,
       };
@@ -1315,6 +1315,113 @@ async function runKnifeCheck() {
   await page.close();
 }
 
+// Match end: BOTH win conditions must reach the score screen, with correct
+// winner, counters and buttons. Runs twice on the arena — once per condition:
+//
+//   elimination — wipe the Ts via Bot.die (the same entry point bullets use),
+//                 which must credit the PLAYER personally (killerName omitted)
+//                 AND the CT team, end the match outright, and reveal the
+//                 screen on endMatch's 600 ms wall-clock beat;
+//   clock       — force roundTime to ~one frame with the T side ahead, which
+//                 must freeze the readout at 0:00 and award the higher score.
+//
+// Pointer lock is faked (started/locked flags), as everywhere above — the
+// browser never fires pointerlockchange here, so endMatch's exitPointerLock
+// is a no-op and the pause-menu-suppression branch stays un-exercisable E2E.
+async function runMatchEndCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    // ---- Elimination: CT wins outright when the wave is wiped ----
+    await page.goto(BASE + '/?map=arena&tbots=3&ctbots=0&time=30', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    await page.evaluate(() => {
+      window.__cs.game.started = true;
+      window.__cs.game.locked = true;
+    });
+    await page.evaluate(() => {
+      for (const b of window.__cs.bots.filter(b => b.team === 'T')) b.die('torso');
+    });
+    await new Promise(r => setTimeout(r, 1000)); // endMatch's reveal beat is 600 ms wall time
+    const elim = await page.evaluate(() => {
+      const g = window.__cs.game;
+      const rows = [...document.querySelectorAll('#scoreboardBody tr')];
+      return {
+        matchOver: g.matchOver,
+        screenShown: document.getElementById('endScreen').style.display === 'flex',
+        banner: document.getElementById('endTitle').textContent,
+        bannerCtClass: document.getElementById('endTitle').classList.contains('ct'),
+        feedElimLine: /All Ts eliminated/.test(document.getElementById('killfeed').textContent),
+        rowCount: rows.length,
+        youRow: rows.find(r => r.className.includes('you'))?.children[0].textContent ?? null,
+        youKills: rows.find(r => r.className.includes('you'))?.children[1].textContent ?? null,
+        teamCT: document.getElementById('endScoreCT').textContent,
+        playerKillsState: g.playerKills,
+      };
+    });
+    if (!elim.matchOver || !elim.screenShown) throw new Error(`elimination did not reach the score screen: ${JSON.stringify(elim)}`);
+    if (elim.banner !== 'Counter-Terrorists Win' || !elim.bannerCtClass) throw new Error(`wrong winner banner: ${JSON.stringify(elim)}`);
+    if (!elim.feedElimLine) throw new Error('killfeed missing the elimination line');
+    if (elim.rowCount !== 4) throw new Error(`scoreboard should have You + 3 bots = 4 rows, got ${elim.rowCount}`);
+    if (elim.youRow !== 'You' || elim.youKills !== '3' || elim.playerKillsState !== 3) {
+      throw new Error(`player attribution wrong: ${JSON.stringify(elim)}`);
+    }
+    if (elim.teamCT !== 'CT 3') throw new Error(`team score wrong: ${elim.teamCT}`);
+
+    // Rematch: reload with the SAME query, state back to fresh.
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 20000 }),
+      page.click('#rematchBtn'),
+    ]);
+    await new Promise(r => setTimeout(r, 800));
+    const rematch = await page.evaluate(() => ({
+      matchOver: window.__cs.game.matchOver,
+      hidden: document.getElementById('endScreen').style.display !== 'flex',
+      urlTime: /[?&]time=30/.test(location.search),
+    }));
+    if (rematch.matchOver !== false) throw new Error(`rematch kept matchOver=true: ${JSON.stringify(rematch)}`);
+    if (!rematch.hidden) throw new Error('end screen visible after rematch reload');
+    if (!rematch.urlTime) throw new Error(`rematch lost the config query: ${location.search}`);
+
+    // ---- Clock expiry: higher score wins, readout freezes at 0:00 ----
+    await page.goto(BASE + '/?map=arena&tbots=2&ctbots=0&time=30', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    await page.evaluate(() => {
+      const g = window.__cs.game;
+      g.started = true;
+      g.locked = true;
+      g.scoreKills = 1;   // T side ahead: expiry must crown the Ts...
+      g.scoreDeaths = 4;
+      g.roundTime = 0.05; // ...about one simulated frame later
+    });
+    await new Promise(r => setTimeout(r, 1000));
+    const clock = await page.evaluate(() => {
+      const g = window.__cs.game;
+      return {
+        matchOver: g.matchOver,
+        screenShown: document.getElementById('endScreen').style.display === 'flex',
+        banner: document.getElementById('endTitle').textContent,
+        bannerTClass: document.getElementById('endTitle').classList.contains('t'),
+        timer: document.getElementById('timer').textContent,
+        scoreCT: document.getElementById('endScoreCT').textContent,
+        scoreT: document.getElementById('endScoreT').textContent,
+      };
+    });
+    if (!clock.matchOver || !clock.screenShown) throw new Error(`clock expiry did not reach the score screen: ${JSON.stringify(clock)}`);
+    if (clock.banner !== 'Terrorists Win' || !clock.bannerTClass) throw new Error(`expiry picked wrong winner: ${JSON.stringify(clock)}`);
+    if (clock.timer !== '0:00') throw new Error(`timer did not freeze at 0:00: "${clock.timer}"`);
+    if (clock.scoreCT !== 'CT 1' || clock.scoreT !== '4 T') throw new Error(`final score line wrong: ${JSON.stringify(clock)}`);
+    console.log('[matchend] OK', JSON.stringify({ elim, clock }));
+  } catch (e) {
+    failures++;
+    console.log(`[matchend] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[matchend] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
@@ -1327,6 +1434,7 @@ try {
   await runMap('range', '/?map=range', { sprintCheck: true });
   await runShotgunCheck();
   await runKnifeCheck();
+  await runMatchEndCheck();
 } finally {
   await browser.close();
 }

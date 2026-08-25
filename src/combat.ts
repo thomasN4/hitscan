@@ -1,13 +1,17 @@
-// combat.ts — damage resolution, player respawn, round-end detection.
+// combat.ts — damage resolution, player respawn, match-end detection.
 //
 // This module is the single place where HP crosses 0: bots call
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
-// makes the kill/score/respawn rules easy to audit.
+// makes the kill/score/respawn rules easy to audit. It also owns endMatch,
+// the one transition into the finished state both win conditions converge
+// on (clock expiry from main.ts, elimination from checkRoundEnd).
 import type { Bot as BotShape, HitZone, MapName } from './core/state';
 import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout } from './core/state';
+import type { MatchWinner } from './sim/match';
+import { eliminationEndsMatch } from './sim/match';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud';
-import { showLoadoutPicker } from './menu';
+import { showLoadoutPicker, showEndScreen } from './menu';
 
 /**
  * Apply damage to the player. On death: awards the bot-side score,
@@ -18,7 +22,9 @@ import { showLoadoutPicker } from './menu';
  *   'Bot killed You' wording
  */
 export function damagePlayer(dmg: number, attackerName: string): void {
-  if (!player.alive) return;
+  // A finished match's scores are final: bots may still loose a shot in the
+  // same frame the match ended, and it must not touch the scoreboard.
+  if (!player.alive || session.matchOver) return;
   player.hp -= dmg;
   flashDamageVignette(dmg);
   sfxHurt();
@@ -26,6 +32,9 @@ export function damagePlayer(dmg: number, attackerName: string): void {
   if (player.hp <= 0) {
     player.alive = false;
     score.scoreDeaths++;
+    score.playerDeaths++;
+    const attacker = bots.find(b => b.name === attackerName);
+    if (attacker) attacker.kills++;
     addKillfeed(`${attackerName} killed You`);
     updateScore();
     document.exitPointerLock();
@@ -34,7 +43,13 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     // screen would never show. The delay exists to be seen while paused.
     // Small delay so the killer's shot is visible before the menu covers it.
     setTimeout(() => {
-      showLoadoutPicker('death');
+      // The match can end inside this window (a simultaneous elimination or
+      // expiry): the end screen outranks the death picker. The reverse —
+      // picker already up when the match ends — cannot happen (dying dropped
+      // pointer lock, freezing the sim before another end condition can
+      // fire); were that ever wrong, #endScreen would cover #loadoutScreen
+      // by DOM order alone (both .menu).
+      if (!session.matchOver) showLoadoutPicker('death');
     }, 400);
   }
 }
@@ -100,16 +115,45 @@ export function respawn(): void {
 }
 
 /**
- * Win check after each bot death: when every T is dead at once, announce
- * the round win and bring everyone (both teams) back after 2.5s. Bots also
- * self-respawn 6s after dying individually, so this only fires on the brief
- * all-clear. CT casualties never end a round — the wave is the enemy.
+ * Win check after each bot death. With two or more Ts, wiping the enemy
+ * team wins the match outright (endMatch). In a 1v1 there is no wave to
+ * speak of — the arena would end seconds after every spawn — so the old
+ * behavior stays: announce the clear and bring everyone back after 2.5s,
+ * leaving only the clock to end the match. CT casualties never end anything
+ * — the wave is the enemy.
  */
 export function checkRoundEnd(): void {
   const ts = bots.filter(b => b.team === 'T');
   if (ts.length > 0 && ts.every(b => !b.alive)) {
-    addKillfeed('★ Round won! Respawning all bots...');
-    // Game time: the wave stays dead while paused.
-    gameTime.schedule(2.5, () => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }));
+    // Live wave count, not session.botsT: debug tooling can remove bots, and
+    // the decision should read what's actually on the field.
+    if (eliminationEndsMatch(ts.length)) {
+      addKillfeed('★ All Ts eliminated!');
+      endMatch('CT');
+    } else {
+      addKillfeed('★ Bot down — respawning...');
+      // Game time: the wave stays dead while paused.
+      gameTime.schedule(2.5, () => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }));
+    }
   }
+}
+
+/**
+ * End the match and move to the score screen. One-shot: both win conditions
+ * converge here, and whichever fires first owns the transition. Winner is
+ * decided by the caller — 'CT' outright on elimination, or by kill score
+ * when the clock runs out (sim/match.ts:decideWinner); callers announce
+ * their own killfeed line first.
+ *
+ * Pointer lock is released first so the loop stops simulating; the screen
+ * then reveals on a WALL-clock delay for the same reason damagePlayer's
+ * death picker uses one — game time freezes the moment lock drops, so a
+ * pausable schedule here would never fire. The beat lets the final
+ * killfeed line land before it is covered.
+ */
+export function endMatch(winner: MatchWinner): void {
+  if (session.matchOver) return;
+  session.matchOver = true;
+  document.exitPointerLock();
+  setTimeout(() => showEndScreen(winner), 600);
 }

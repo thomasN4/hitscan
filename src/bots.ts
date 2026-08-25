@@ -153,6 +153,9 @@ export class Bot implements BotShape {
   readonly aim = new THREE.Group();
   hp = 100;
   alive = true;
+  /** Scoreboard counters for the end screen (state.ts:Bot docs). */
+  kills = 0;
+  deaths = 0;
   /** Stable identity for debug logs and killfeed attribution. */
   id = nextBotId++;
   /** Which side this bot fights for; drives targeting, spawns and scoring. */
@@ -483,11 +486,20 @@ export class Bot implements BotShape {
   die(killerPart: HitZone, killerName?: string): void {
     this.alive = false;
     this.mesh.visible = false;
-    // scoreKills is the CT score (player kills and CT allies downing a T);
-    // scoreDeaths is the T score, so a T downing a CT counts there — the
-    // same counter combat.ts bumps when a T downs the player.
+    this.deaths++;
+    // Team scores: scoreKills is the CT score (player kills and CT allies
+    // downing a T); scoreDeaths is the T score, so a T downing a CT counts
+    // there — the same counter combat.ts bumps when a T downs the player.
     if (killerName === undefined || this.team === 'T') score.scoreKills++;
     else score.scoreDeaths++;
+    // Scoreboard attribution: the player's own kills get a personal counter;
+    // a bot killer is resolved by display name (unique per team serial).
+    if (killerName === undefined) {
+      score.playerKills++;
+    } else {
+      const killer = bots.find(b => b.name === killerName);
+      if (killer) killer.kills++;
+    }
     updateScore();
     addKillfeed(killerName === undefined
       ? `You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`

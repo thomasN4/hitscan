@@ -242,3 +242,19 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
    swings. Confirming that a presentation change is CORRECT is not the same
    as confirming it is VISIBLE, and only one of those can be done by reading
    code. Look at it.
+26. **A fixed sleep asserts a frame rate, not a behavior.** The `[qcancel]`
+   smoke phase budgeted 2600 ms of WALL clock for a reload whose deadline is
+   2.2 s of GAME time. Game time advances by `Math.min(clock.getDelta(), 0.05)`
+   — the clamp exists so heavy frames do not fast-forward gameplay — so it can
+   only ever lag wall time, never lead it. The phase was really asserting "the
+   loop keeps within 18% of real time", which nothing promises, and one slow
+   frame anywhere in the window failed it with `mag` still 24. Reproduced
+   deterministically by starving the loop: the sleep ends at `reloading: true,
+   mag: 24`, while polling for completion under identical stalls finishes in
+   4.5 s. Wherever a deadline lives on the game clock, POLL for the thing being
+   claimed and put the wall clock only in the give-up bound — which the
+   `[respawn]` phase in the same file already did.
+   Worth noting how it was found: it surfaced as an unattributable one-in-three
+   flake, and the first explanation reached for was GC pressure from a new
+   allocation. That was a cause of slow frames, not the bug — the bug is that a
+   slow frame mattered at all. Lesson 24's shape again.

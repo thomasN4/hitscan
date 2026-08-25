@@ -656,9 +656,11 @@ export const session: SessionState = {
 
 /**
  * Raw button state (LMB/RMB/sprint/crouch). Written by main.ts's event
- * handlers — plus one weapons.ts write (`shoot()` clears `aiming` on
- * unscopeOnShot) — and read by player/weapons/hud. Tracked as state rather
- * than one-shot events because firing is continuous in updateWeapon.
+ * handlers — plus two weapons.ts writes (`shoot()` clears `aiming` on
+ * unscopeOnShot, and `tryReload()` clears it when a reload starts while the
+ * sights are up: one motion at a time) — and read by player/weapons/hud.
+ * Tracked as state rather than one-shot events because firing is continuous
+ * in updateWeapon.
  */
 export interface InputState {
   /** LMB held. */

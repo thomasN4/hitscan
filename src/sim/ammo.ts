@@ -50,3 +50,41 @@ export function roundTransfer(mag: number, magSize: number, reserve: number): Ro
   const newReserve = reserve - took;
   return { mag: newMag, reserve: newReserve, done: newMag === magSize || newReserve <= 0 };
 }
+
+// ---------- Reload intent ----------
+// Whether pressing R begins a reload — and whether beginning one drops the
+// sights. This is the whole gate that weapons.ts:tryReload enforces; it lives
+// here so the Node suite can pin the rules (and their interaction with aim)
+// without reaching into browser-side state.
+
+/** Everything planReload weighs, in the shape of the live slices. */
+export interface ReloadRequest {
+  /** The match is live (session.started). */
+  started: boolean;
+  alive: boolean;
+  reloading: boolean;
+  mag: number;
+  magSize: number;
+  reserve: number;
+  /** RMB held: iron sights / scope raised right now. */
+  aiming: boolean;
+}
+
+/** What a keypress of R amounts to. */
+export interface ReloadDecision {
+  start: boolean;
+  /**
+   * A STARTED reload drops iron sights / the scope — one motion at a time,
+   * and a fresh RMB press re-raises afterwards (same semantics as
+   * unscopeOnShot: clearing input.aiming beats a still-held button). False
+   * whenever `start` is false: a REFUSED reload must never touch the aim.
+   */
+  dropAim: boolean;
+}
+
+/** A request that starts reloading: partial mag, rounds available, live player. */
+export function planReload(r: ReloadRequest): ReloadDecision {
+  const start = r.started && r.alive && !r.reloading &&
+    r.mag < r.magSize && r.reserve > 0;
+  return { start, dropAim: start && r.aiming };
+}

@@ -19,7 +19,7 @@ import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
-import { roundInterval, roundTransfer } from './sim/ammo';
+import { roundInterval, roundTransfer, planReload } from './sim/ammo';
 import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
@@ -291,7 +291,16 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
 }
 
 /**
- * Start reloading if possible. Bound to R and to firing an empty mag.
+ * Start reloading if possible. Bound to R and to firing an empty mag (the
+ * dry-fire auto-reload — which is why a reload STARTS while aiming rather
+ * than being blocked: an aimed empty gun must not click and do nothing).
+ *
+ * The whole gate lives in sim/ammo.ts:planReload so the Node suite can pin
+ * it; this binding only applies the decision. Starting a reload while the
+ * sights are up DROPS them (dropAim): one motion at a time, and like
+ * unscopeOnShot, clearing input.aiming means a fresh RMB press is needed to
+ * re-raise even if the button is still held. A REFUSED reload leaves the aim
+ * exactly as it was.
  *
  * Whole-mag weapons (no `perRound`): one timer, the mag refills once at
  * reloadEnd. Per-round weapons (shotgun/revolver): reloadTime is spread
@@ -303,7 +312,17 @@ export function tryReload(): void {
   // A blade holds no rounds — R is inert while knifing, before any of the
   // mag guards below could misfire on the knife's zeroed magSize.
   if (currentDef().melee) return;
-  if (!session.started || !player.alive || weapon.reloading || weapon.mag === weapon.magSize || weapon.reserve <= 0) return;
+  const d = planReload({
+    started: session.started,
+    alive: player.alive,
+    reloading: weapon.reloading,
+    mag: weapon.mag,
+    magSize: weapon.magSize,
+    reserve: weapon.reserve,
+    aiming: input.aiming,
+  });
+  if (!d.start) return;
+  if (d.dropAim) input.aiming = false; // one motion at a time; fresh RMB to re-raise
   weapon.reloading = true;
   if (currentDef().perRound) {
     weapon.nextRoundAt = gameTime.now() + roundInterval(weapon.reloadTime, weapon.magSize);

@@ -403,9 +403,20 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         await wait(800); // adsLerp needs ~0.16 s to cross the overlay threshold
         const rescope = { aiming: cs.game.aiming, overlay: document.getElementById('scopeOverlay').style.display };
         window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+        // R WHILE SCOPED (recoil settled — the rescope just passed the gate):
+        // starting the reload must DROP the scope in the same motion, not
+        // reload underneath a live reticle.
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+        await wait(200);
+        const scopedReload = {
+          mag: cs.weapon.mag,
+          reloading: cs.weapon.reloading,
+          aiming: cs.game.aiming,
+          overlay: document.getElementById('scopeOverlay').style.display,
+        };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' })); // also cancels the reload
         await wait(150);
-        return { switched, hintFull, zoomed, shot, gated, rescope, backTo: cs.game.slot };
+        return { switched, hintFull, zoomed, shot, gated, rescope, scopedReload, backTo: cs.game.slot };
       });
       if (sniper.switched.slot !== 0 || sniper.switched.name !== 'SNIPER') throw new Error(`switch to sniper (primary position) failed: ${JSON.stringify(sniper.switched)}`);
       if (sniper.hintFull.mag !== sniper.hintFull.magSize || sniper.hintFull.vis !== 'hidden') throw new Error(`reload hint shown with a FULL mag (issue #10): ${JSON.stringify(sniper.hintFull)}`);
@@ -414,6 +425,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (sniper.shot.aimingAfter !== false) throw new Error(`shot should exit the scope: ${JSON.stringify(sniper.shot)}`);
       if (sniper.gated.aiming !== false || sniper.gated.overlay !== 'none') throw new Error(`re-scope during recoil settle must stay blocked: ${JSON.stringify(sniper.gated)}`);
       if (sniper.rescope.aiming !== true || sniper.rescope.overlay !== 'block') throw new Error(`re-scope after settle failed: ${JSON.stringify(sniper.rescope)}`);
+      if (sniper.scopedReload.reloading !== true || sniper.scopedReload.aiming !== false || sniper.scopedReload.overlay !== 'none') throw new Error(`R while scoped must start the reload AND drop the scope: ${JSON.stringify(sniper.scopedReload)}`);
       if (sniper.backTo !== 1) throw new Error(`switch back to secondary position failed: slot ${sniper.backTo}`);
       console.log(`[sniper] OK`, JSON.stringify(sniper));
     }
@@ -497,8 +509,14 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         await wait(150);
         const partialMag = 8; // room below magSize (sniper 10) so a free refill can't hide
         cs.weapon.mag = partialMag;
+        // Plain-firearm variant of the drop rule: hold RMB (no scopeGate on
+        // the smg), then R — the reload must start AND clear input.aiming.
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+        await wait(150);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
-        await wait(150); // sniper reloadTime is 3.2 s — nowhere near done
+        await wait(150);
+        const aimedStart = { reloading: cs.weapon.reloading, aiming: cs.game.aiming };
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
         const started = { reloading: cs.weapon.reloading };
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
         await wait(150);
@@ -512,8 +530,9 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
         await wait(3700);
         const refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
-        return { started, cancelled, restored, refilled };
+        return { aimedStart, started, cancelled, restored, refilled };
       });
+      if (qcancel.aimedStart.reloading !== true || qcancel.aimedStart.aiming !== false) throw new Error(`R while holding RMB must start the reload AND drop the sights: ${JSON.stringify(qcancel.aimedStart)}`);
       if (qcancel.started.reloading !== true) throw new Error(`R did not start a reload: ${JSON.stringify(qcancel.started)}`);
       if (qcancel.cancelled.slot !== 1 || qcancel.cancelled.reloading !== false) throw new Error(`switching during a reload must cancel it: ${JSON.stringify(qcancel.cancelled)}`);
       if (qcancel.restored.slot !== 0 || qcancel.restored.mag !== 8 || qcancel.restored.reloading !== false) throw new Error(`interrupted weapon must keep its partial mag: ${JSON.stringify(qcancel.restored)}`);
@@ -890,6 +909,7 @@ async function runShotgunCheck() {
 // inert R/RMB paths (a blade holds no rounds and raises no sights), the
 // ABSENCE of a knife card in the picker, and an actual kill: two swings at
 // a teleported bot must drop it through the melee arc without touching ammo.
+// Swapping back to a firearm must re-reveal the readout with FRESH numbers.
 async function runKnifeCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -966,8 +986,26 @@ async function runKnifeCheck() {
         if (swings === 1) hpAfterSwing1 = bot.hp;
         await new Promise(r => setTimeout(r, 180));
       }
+      // Ammo untouched by the swings — must be sampled BEFORE the swap-back
+      // below, which arms the SMG and would mask the knife's zeros.
+      const magStillZero = cs.weapon.mag === 0 && cs.weapon.reserve === 0;
+      // Swap-back freshness: leaving the knife must REVEAL the readout with
+      // text matching live state immediately — the exact surface whose
+      // textContent writes once went stale ("30/90" forever, all firearms).
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+      await wait(150);
+      const swapBack = {
+        slot: cs.game.slot,
+        name: cs.weapon.name,
+        visible: document.getElementById('magText').style.display !== 'none',
+        domMag: document.getElementById('magText').textContent,
+        domReserve: document.getElementById('ammoReserve').textContent,
+        mag: cs.weapon.mag,
+        reserve: cs.weapon.reserve,
+      };
       return {
         swapped, reloadInert, rmbInert,
+        swapBack,
         killed: !bot.alive,
         swings,
         hpAfterSwing1,
@@ -975,7 +1013,7 @@ async function runKnifeCheck() {
         // round-win banner may prepend above either (one bot = an instant
         // round) — so match anywhere in the feed.
         feedHasKill: /You (killed|☠ headshot) T-\d+/.test(document.getElementById('killfeed')?.textContent ?? ''),
-        magStillZero: cs.weapon.mag === 0 && cs.weapon.reserve === 0,
+        magStillZero,
       };
     });
     if (result.fail) throw new Error(result.fail);
@@ -988,6 +1026,11 @@ async function runKnifeCheck() {
     // Exactly two: 55 x 2 = 110 with NO head premium. One swing means a
     // headshot multiplier crept back in; three means damage regressed.
     if (result.swings !== 2) throw new Error(`expected exactly 2 swings to kill, got ${result.swings} (swing 1 hp: ${result.hpAfterSwing1})`);
+    if (result.swapBack.slot !== 0 || result.swapBack.name !== 'SMG') throw new Error(`Digit1 swap-back failed: ${JSON.stringify(result.swapBack)}`);
+    if (!result.swapBack.visible) throw new Error('ammo readout did not reappear after swapping off the knife');
+    if (result.swapBack.domMag !== String(result.swapBack.mag) || result.swapBack.domReserve !== String(result.swapBack.reserve)) {
+      throw new Error(`swap-back revealed stale ammo text: shows ${result.swapBack.domMag}/${result.swapBack.domReserve}, state ${result.swapBack.mag}/${result.swapBack.reserve}`);
+    }
     if (!result.feedHasKill) throw new Error('killfeed missing the knife kill line');
     if (!result.magStillZero) throw new Error(`swinging consumed ammo: ${JSON.stringify({ mag: result.swapped })}`);
     console.log('[knife] OK', JSON.stringify(result));

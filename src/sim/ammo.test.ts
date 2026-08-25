@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { isLowAmmo, roundInterval, roundTransfer } from './ammo';
+import { isLowAmmo, roundInterval, roundTransfer, planReload } from './ammo';
 import { WEAPONS, type WeaponId } from '../core/state';
 
 /** Catalog weapons with real ammo semantics (the knife's mag holds nothing). */
@@ -34,6 +34,35 @@ describe('isLowAmmo', () => {
   test('sniper prompts below a third of its 10-round mag (floor → <=3)', () => {
     expect(isLowAmmo(3, WEAPONS.sniper.magSize)).toBe(true);
     expect(isLowAmmo(4, WEAPONS.sniper.magSize)).toBe(false);
+  });
+});
+
+describe('planReload', () => {
+  // A live SMG mid-mag: the everything-fine baseline every refusal flips.
+  const live = { started: true, alive: true, reloading: false, mag: 10, magSize: 30, reserve: 90, aiming: false };
+
+  test('a partial mag with reserve starts reloading', () => {
+    expect(planReload(live)).toEqual({ start: true, dropAim: false });
+  });
+
+  test.each([
+    ['unstarted match', { started: false }],
+    ['dead player', { alive: false }],
+    ['reload already running', { reloading: true }],
+    ['full mag', { mag: 30 }],
+    ['dry reserve', { reserve: 0 }],
+  ])('%s refuses — and never touches the aim', (_name, mut) => {
+    const d = planReload({ ...live, aiming: true, ...mut });
+    expect(d).toEqual({ start: false, dropAim: false });
+  });
+
+  test('starting a reload while the sights are up DROPS them', () => {
+    expect(planReload({ ...live, aiming: true })).toEqual({ start: true, dropAim: true });
+  });
+
+  test('the drop rides the START decision, not the button', () => {
+    // Same held RMB, but nothing to reload: aim stays exactly as it was.
+    expect(planReload({ ...live, aiming: true, mag: live.magSize })).toEqual({ start: false, dropAim: false });
   });
 });
 

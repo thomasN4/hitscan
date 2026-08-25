@@ -852,12 +852,71 @@ async function runWedgeCheck() {
   await page.close();
 }
 
+// The navigation graph, asked directly (nav.ts / sim/navGrid.ts).
+//
+// This is the one part of the bot AI whose correctness does not require
+// watching a bot move, and it is the claim everything downstream rests on: if
+// the graph cannot route the ground floor to the deck, no steering policy
+// built on it can either. Checked on the elevation map because that is where
+// the hard cases live — a two-storey interior, four flights, and doorways.
+//
+// The route asked for is the exact situation the playtest complained about: a
+// bot standing under the second-floor deck, with the player above it.
+async function runNavGraphCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+
+  try {
+    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1000));
+    const result = await page.evaluate(() => {
+      const cs = window.__cs;
+      const grid = cs.nav.grid();
+      if (!grid) return { fail: 'no navigation graph was built' };
+      const V = (x, y, z) => ({ x, y, z });
+      // Under the deck, on the ground -> the deck itself.
+      const up = cs.nav.route(V(4, 0, 8), V(4, 3.6, 8));
+      // Non-vacuity for the height claim: the same query with the goal on the
+      // ground must NOT need to gain any height.
+      const flat = cs.nav.route(V(4, 0, 8), V(-20, 0, 20));
+      const peak = up ? Math.max(...up.map(p => p.y)) : -1;
+      return {
+        nodes: grid.count,
+        edges: grid.edgeTo.length,
+        levels: [...new Set(Array.from(grid.ys, y => +y.toFixed(2)))].sort((a, b) => a - b).slice(0, 6),
+        routeUp: up ? up.length : null,
+        reachedY: up ? +up[up.length - 1].y.toFixed(2) : null,
+        peakY: +peak.toFixed(2),
+        flatPeakY: flat ? +Math.max(...flat.map(p => p.y)).toFixed(2) : null,
+      };
+    });
+    if (result.fail) throw new Error(result.fail);
+    if (!result.routeUp) throw new Error(`no route from the floor to the deck: ${JSON.stringify(result)}`);
+    if (result.reachedY < 3.5) throw new Error(`route ends below the deck: ${JSON.stringify(result)}`);
+    // A route that gains height must have used a flight; the sampled grid
+    // cannot climb 3.6 m on its own (every edge is capped at STEP_HEIGHT).
+    if (result.peakY < 3.5) throw new Error(`route never gained the deck: ${JSON.stringify(result)}`);
+    if (result.flatPeakY > 0.5) throw new Error(`a ground-to-ground route climbed for no reason: ${JSON.stringify(result)}`);
+    if (result.levels.length < 2) throw new Error(`graph is single-level — the deck was never sampled: ${JSON.stringify(result)}`);
+    console.log('[navGraph] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[navGraph] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[navGraph] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
+  await runNavGraphCheck();
   await runWedgeCheck();
   await runMap('range', '/?map=range', { sprintCheck: true });
 } finally {

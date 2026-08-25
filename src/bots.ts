@@ -32,9 +32,15 @@ import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
 import { DefaultBrain, nearestOpposing } from './sim/botBrains';
+import { NAV_RADIUS } from './nav';
 
-/** Half-width of a bot's collision box — shared by the move gate and spawn placement. */
-const BOT_RADIUS = 0.5;
+/**
+ * Half-width of a bot's collision box — shared by the move gate and spawn
+ * placement, and by the navigation graph, which owns it (nav.ts:NAV_RADIUS).
+ * The graph samples what fits through gaps at this width, so a bot wider than
+ * the value its routes were built against would be promised gaps it jams in.
+ */
+const BOT_RADIUS = NAV_RADIUS;
 
 /** Length of the aim barrel (m); the muzzle sits at half this along its +z. */
 const BARREL_LEN = 0.6;

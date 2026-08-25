@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import {
-  solids, colliders, resetWorld,
+  solids, colliders, navLinks, resetWorld, stairLink,
   createSolidBox, registerSolid, registerSolidBox, registerGroupParts,
 } from './world';
 
@@ -131,15 +131,70 @@ describe('createSolidBox', () => {
   });
 });
 
+// stairLink — the endpoints navigation aims at.
+//
+// Every expectation below is the coordinate the MAP states in its own
+// comments, not a number re-derived from the formula: maps/elevation.ts says
+// its internal flight "tops out at exactly DECK_Y, flush with the slab's south
+// edge at z = 0" and its external one lands "against the building at z = 12.5".
+// If the arithmetic here and the geometry there ever disagree, bots route to a
+// point no staircase reaches, and nothing else in the suite would notice.
+describe('stairLink', () => {
+  const STEP_H = 0.3, STEP_D = 0.75;
+
+  test("elevation's internal flight: 12 risers to the slab's south edge", () => {
+    const link = stairLink(4, 0, -9, STEP_H, STEP_D, 12, 'z+');
+    expect([link.bottom.x, link.bottom.y, link.bottom.z]).toEqual([4, 0, -9]);
+    expect(link.top.x).toBeCloseTo(4, 12);
+    expect(link.top.y).toBeCloseTo(3.6, 12); // DECK_Y
+    expect(link.top.z).toBeCloseTo(0, 12);
+  });
+
+  test("elevation's external flight ascends z- to the building face", () => {
+    const link = stairLink(8, 0, 21.5, STEP_H, STEP_D, 12, 'z-');
+    expect(link.top.y).toBeCloseTo(3.6, 12);
+    expect(link.top.z).toBeCloseTo(12.5, 12);
+  });
+
+  test("elevation's tower flight abuts the tower's south face", () => {
+    const link = stairLink(35, 0, 15.5, STEP_H, STEP_D, 12, 'z-');
+    expect(link.top.y).toBeCloseTo(3.6, 12);
+    expect(link.top.z).toBeCloseTo(6.5, 12);
+  });
+
+  test("elevation's plateau flight ascends x- to the plateau's east face", () => {
+    const link = stairLink(-19.5, 0, -30, STEP_H, STEP_D, 10, 'x-');
+    expect(link.top.x).toBeCloseTo(-27, 12);
+    expect(link.top.y).toBeCloseTo(3, 12); // the plateau's lower tier
+    expect(link.top.z).toBeCloseTo(-30, 12);
+  });
+
+  test("arena's flight reaches the 2.4 m platform", () => {
+    const link = stairLink(26, 0, 24, STEP_H, STEP_D, 8, 'z+');
+    expect(link.top.y).toBeCloseTo(2.4, 12);
+    expect(link.top.z).toBeCloseTo(30, 12);
+  });
+
+  test('a flight based above ground carries its base into both ends', () => {
+    const link = stairLink(0, 5, 0, STEP_H, STEP_D, 4, 'x+');
+    expect(link.bottom.y).toBe(5);
+    expect(link.top.y).toBeCloseTo(6.2, 12);
+    expect(link.top.x).toBeCloseTo(3, 12);
+  });
+});
+
 describe('resetWorld', () => {
-  test('empties both registries in place', () => {
-    const before = { solids, colliders };
+  test('empties every registry in place', () => {
+    const before = { solids, colliders, navLinks };
     registerSolidBox(box());
+    navLinks.push(stairLink(0, 0, 0, 0.3, 0.75, 4, 'z+'));
     resetWorld();
     expect(solids).toHaveLength(0);
     expect(colliders).toHaveLength(0);
+    expect(navLinks).toHaveLength(0);
     // Same array identities — importers hold references to these.
     expect(before.solids).toBe(solids);
     expect(before.colliders).toBe(colliders);
+    expect(before.navLinks).toBe(navLinks);
   });
 });

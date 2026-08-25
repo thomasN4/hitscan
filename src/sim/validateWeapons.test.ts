@@ -142,6 +142,14 @@ describe('static bounds', () => {
     // A fixed pattern on a single-ray weapon does nothing — flag the dead field.
     expect(matching([tuned({ pelletCone: 0.02, pellets: undefined }, SHOTGUN)], 'SHOTGUN', 'pelletCone')).toHaveLength(1);
   });
+
+  test('crosshairGain: absent passes, below 1 (NaN included) is flagged', () => {
+    // The shotgun's shipped override is 1 and clears the table gate above;
+    // anything under 1 would put the arms inside the true scatter.
+    expect(matching([tuned({ crosshairGain: 0.5 })], 'crosshairGain')).toHaveLength(1);
+    expect(matching([tuned({ crosshairGain: NaN })], 'crosshairGain')).toHaveLength(1);
+    expect(matching([tuned({ crosshairGain: 1 })], 'crosshairGain')).toHaveLength(0);
+  });
 });
 
 describe('melee weapons', () => {

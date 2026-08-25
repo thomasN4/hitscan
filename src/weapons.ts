@@ -687,8 +687,10 @@ export function updateWeapon(dt: number): void {
   // The model itself (and its tuning constants) lives in sim/accuracy.ts;
   // this just feeds it live state. wpn.spread is consumed by shoot(), and the
   // crosshair gap derives from the SAME value, so the arms move with every
-  // change in the real cone — deliberately exaggerated by CROSSHAIR_GAIN, so
-  // they read as a proportional indicator, not the edge of the group.
+  // change in the real cone — exaggerated by the weapon's crosshair gain
+  // (CROSSHAIR_GAIN unless the def overrides; the shotgun draws its literal
+  // bound), so they read as a proportional indicator, not the edge of the
+  // group.
   wpn.spread = computeSpread({
     crouchLerp: motion.crouchLerp,
     moveLerp: motion.moveLerp,
@@ -702,5 +704,5 @@ export function updateWeapon(dt: number): void {
   // that is the situational cone PLUS the fixed pattern (pelletCone) — their
   // per-axis sum is the true outer bound of a pellet's deflection.
   const displaySpread = wpn.spread + (def.pelletCone ?? 0); // documented default: no pattern
-  setCrosshairGap(crosshairGapPx(displaySpread, camera.fov, window.innerHeight));
+  setCrosshairGap(crosshairGapPx(displaySpread, camera.fov, window.innerHeight, def.crosshairGain));
 }

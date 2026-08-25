@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   computeSpread, crosshairGapPx,
-  MIN_SPREAD, MAX_GAP_FRACTION, AIR_PENALTY, MOVE_EXPONENT,
+  MIN_SPREAD, MAX_GAP_FRACTION, AIR_PENALTY, MOVE_EXPONENT, CROSSHAIR_GAIN,
 } from './accuracy';
 import { WEAPONS } from '../core/state';
 import type { WeaponDef } from '../core/state';
@@ -162,5 +162,17 @@ describe('crosshairGapPx', () => {
       expect(crosshairGapPx(airborne, 75, h))
         .toBeGreaterThan(crosshairGapPx(sprint, 80, h));
     }
+  });
+
+  test('defaults to the shared CROSSHAIR_GAIN', () => {
+    expect(crosshairGapPx(0.01, 75, 800)).toBe(crosshairGapPx(0.01, 75, 800, CROSSHAIR_GAIN));
+  });
+
+  test('a per-weapon gain of 1 draws the literal cone edge', () => {
+    // The shotgun exception (playtest round 3): 6x on its large fixed
+    // pelletCone read as broken, so its def passes gain 1 and the arms sit
+    // exactly on the true per-axis scatter bound.
+    const shared = crosshairGapPx(0.01, 75, 800);
+    expect(crosshairGapPx(0.01, 75, 800, 1)).toBeCloseTo(shared / 6, 9);
   });
 });

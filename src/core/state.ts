@@ -660,7 +660,7 @@ export const SESSION_DEFAULTS: Readonly<{
  * Session-level configuration + flags. The config fields are written ONCE by
  * main.ts at startup (parsed from the committed query string); locked/started
  * are written by main.ts's pointer-lock events, matchOver once by
- * combat.ts:endMatch.
+ * combat.ts:endMatch, and `debugView` by debugView.ts's toggle.
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
@@ -680,6 +680,13 @@ export interface SessionState {
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */
   started: boolean;
+  /**
+   * DEV only: the bot-observation wireframe overlay (V, debugView.ts) is up.
+   * hud.ts's bot readout rides the same flag so the text block shows and hides
+   * with the routes. Always false in production — the key handler never calls
+   * the toggle there — so this costs one boolean check per frame at most.
+   */
+  debugView: boolean;
   /** The match has ended (clock expiry or elimination); written once by combat.ts:endMatch. */
   matchOver: boolean;
 }
@@ -688,6 +695,7 @@ export const session: SessionState = {
   ...SESSION_DEFAULTS,
   locked: false,
   started: false,
+  debugView: false,
   matchOver: false,
 };
 

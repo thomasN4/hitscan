@@ -9,8 +9,10 @@
 // are visible through geometry.
 //
 // Toggled by main.ts on a key, behind `import.meta.env.DEV` at both call sites
-// so it leaves production builds entirely (same idiom as hud.ts:updateBotDebug
-// and bots.ts:debugLog).
+// so it leaves production builds entirely (same idiom as bots.ts:debugLog).
+// On/off lives in session.debugView, and hud.ts:updateBotDebug — the per-bot
+// y/G/blk/mode text block — rides that flag, so the numbers and the routes
+// appear and vanish together.
 //
 // This is the one place that adds meshes to the scene without going through
 // world.ts, deliberately: world.ts owns LEVEL GEOMETRY, and the point of these
@@ -19,7 +21,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots } from './core/state';
+import { bots, session } from './core/state';
 import type { BrainMode } from './sim/botBrains';
 import type { Team } from './core/state';
 
@@ -67,7 +69,6 @@ const MARKER_SCALE = 0.022;
 /** How far above a bot's feet the marker floats — clear of the 2.17 m head cube. */
 const MARKER_HEIGHT = 2.6;
 
-let active = false;
 let overlay: THREE.LineSegments | undefined;
 let positions: Float32Array | undefined;
 let colors: Float32Array | undefined;
@@ -242,13 +243,13 @@ function setXray(on: boolean): void {
 
 /** Flip the overlay on or off. Builds its geometry on first use, not at import. */
 export function toggleDebugView(): void {
-  active = !active;
+  session.debugView = !session.debugView;
   if (!overlay) {
     overlay = build();
     scene.add(overlay);
   }
-  overlay.visible = active;
-  setXray(active);
+  overlay.visible = session.debugView;
+  setXray(session.debugView);
 }
 
 /**
@@ -259,7 +260,7 @@ export function toggleDebugView(): void {
  * simply stop changing, which is what you want when you hit Esc to study a frame.
  */
 export function updateDebugView(): void {
-  if (!active || !overlay || !positions || !colors) return;
+  if (!session.debugView || !overlay || !positions || !colors) return;
   // renderer.render() is what normally refreshes this, and that has not run
   // yet this frame — without the flush the marker would face where the camera
   // pointed last frame.

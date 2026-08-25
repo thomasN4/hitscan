@@ -1022,6 +1022,12 @@ async function runNavGraphCheck() {
 //
 // Also asserts the x-ray REVERTS: it mutates the map's shared materials, and a
 // toggle that left them wireframed would corrupt the session it was inspecting.
+//
+// And the bot readout (hud.ts's #botDebug) riding the same flag: hidden until
+// the first press, shown with text while up, hidden again after — and shown
+// AGAIN on re-press, which pins the inactive path clearing hud.ts's string
+// cache (an unchanged string must rewrite, not early-return against a hidden
+// element).
 async function runDebugViewCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -1051,19 +1057,36 @@ async function runDebugViewCheck() {
         });
         return n;
       };
+      // hud.ts:updateBotDebug rides session.debugView, so the same keypresses
+      // drive the text block. Text is only asserted non-empty — bots may die
+      // mid-check and append " dead", which is fine.
+      const readoutState = () => {
+        const el = document.getElementById('botDebug');
+        return el && { shown: getComputedStyle(el).display !== 'none', text: el.textContent };
+      };
       const before = wireframeCount();
+      const roBefore = readoutState();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(30);
       const on = wireframeCount();
+      const roOn = readoutState();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(10);
       const off = wireframeCount();
-      return { before, on, off, bots: cs.bots.length };
+      const roOff = readoutState();
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
+      await frames(10);
+      const roBackOn = readoutState();
+      return { before, on, off, bots: cs.bots.length, roBefore, roOn, roOff, roBackOn };
     });
     if (result.before === -1) throw new Error('no bot mesh to reach the scene through');
     if (result.before !== 0) throw new Error(`level geometry was already wireframed before the toggle: ${JSON.stringify(result)}`);
     if (result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
     if (result.off !== 0) throw new Error(`toggling the debug view off left ${result.off} materials wireframed: ${JSON.stringify(result)}`);
+    if (!result.roBefore || result.roBefore.shown) throw new Error(`bot readout was visible before any V press: ${JSON.stringify(result)}`);
+    if (!result.roOn || !result.roOn.shown || result.roOn.text === '') throw new Error(`bot readout did not show with text while the debug view was up: ${JSON.stringify(result)}`);
+    if (!result.roOff || result.roOff.shown) throw new Error(`bot readout stayed visible after the debug view went down: ${JSON.stringify(result)}`);
+    if (!result.roBackOn || !result.roBackOn.shown) throw new Error(`bot readout stayed hidden on re-toggle — the inactive path must clear hud.ts's string cache: ${JSON.stringify(result)}`);
     console.log('[debugView] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

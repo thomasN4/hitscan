@@ -145,8 +145,12 @@ export function updateHUD(): void {
   healthFill.style.width = Math.max(0, player.hp) + '%';
   // Color shifts green -> orange -> red as HP drops.
   healthFill.style.background = player.hp > 60 ? '#4caf50' : player.hp > 25 ? '#ffab40' : '#ff5252';
-  // The knife holds no rounds: the mag/reserve readout and reload hint hide
-  // while it is live (the separator between the two numbers goes with them).
+  magText.textContent = String(weapon.mag);
+  ammoReserve.textContent = String(weapon.reserve);
+  // The knife holds no rounds: the readout hides while it is live (the
+  // separator between the two numbers goes with it). The text above keeps
+  // updating regardless — hidden or not, it must never go stale, because
+  // swapping back to a firearm re-reveals whatever this frame's state is.
   const meleeHeld = WEAPONS[equippedId(wpn.slot)].melee === true;
   const ammoDisplay = meleeHeld ? 'none' : 'inline';
   magText.style.display = ammoDisplay;

@@ -95,8 +95,16 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       holes: window.__cs.bulletHoles.length,
       mag: window.__cs.weapon.mag,
       reserve: window.__cs.weapon.reserve,
+      // The HUD must HONESTLY mirror state: the knife work once dropped these
+      // textContent writes and every gun's indicator froze at "30/90" while
+      // state moved on — state-only reads never noticed.
+      domMag: document.getElementById('magText').textContent,
+      domReserve: document.getElementById('ammoReserve').textContent,
     }));
     if (fired.holes === 0) throw new Error('expected bullet holes after firing, got 0');
+    if (fired.domMag !== String(fired.mag) || fired.domReserve !== String(fired.reserve)) {
+      throw new Error(`ammo indicator stale: shows ${fired.domMag}/${fired.domReserve}, state is ${fired.mag}/${fired.reserve}`);
+    }
 
     let stairs = null;
     // 2b) Stairs: step-up must carry a sprinting player up the map's stair

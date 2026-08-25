@@ -628,7 +628,75 @@ export function sanitizeLoadout(v: unknown): LoadoutState | undefined {
 }
 
 /** Maps selectable from the start menu (the ?map= part of the config query). */
-export type MapName = 'arena' | 'range' | 'elevation';
+export type MapName = 'arena' | 'range' | 'elevation' | 'warehouse';
+
+/**
+ * A map's sky, fog and light colours.
+ *
+ * Lighting used to be four colour literals inlined in `initEngine()`, which
+ * made every map share the arena's desert sun — fine while every map WAS a
+ * sunlit desert, wrong the moment one is a steel warehouse. The table lives
+ * here rather than in `core/engine.ts` because it is pure data over MapName:
+ * that keeps it unit-testable (engine.ts is browser-only and banned from the
+ * test suite by eslint's no-restricted-imports) and puts it beside the other
+ * per-map Records the compiler already polices.
+ */
+export interface Ambience {
+  /** Scene background AND fog colour — they must match or the horizon banding shows. */
+  background: number;
+  /** Distance (m) at which fog starts. */
+  fogNear: number;
+  /** Distance (m) at which fog is total. Keep under the camera's far plane (300). */
+  fogFar: number;
+  /** Directional "sun" colour. */
+  sunColor: number;
+  /** Hemisphere light sky colour (lights upward-facing surfaces). */
+  hemiSky: number;
+  /** Hemisphere light ground colour (bounce onto downward-facing surfaces). */
+  hemiGround: number;
+}
+
+/**
+ * The dusty outdoor look every map shipped with before ambience was per-map.
+ * These are the exact values `initEngine()` used to hardcode, so the three
+ * maps that reference it render identically to before (pinned in state.test.ts).
+ */
+export const DESERT_AMBIENCE: Ambience = {
+  background: 0xbfae8f,
+  fogNear: 40,
+  fogFar: 140,
+  sunColor: 0xffeecc,
+  hemiSky: 0xfff3e0,
+  hemiGround: 0x8a7a5c,
+};
+
+/**
+ * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN_Z /
+ * SUBTITLES: adding a MapName must fail to compile until the new map says what
+ * it looks like, rather than silently inheriting the desert.
+ */
+export const AMBIENCE: Record<MapName, Ambience> = {
+  arena: DESERT_AMBIENCE,
+  range: DESERT_AMBIENCE,
+  elevation: DESERT_AMBIENCE,
+  // Overcast daylight through a shed roof: cool grey-blue rather than sand.
+  // Fog starts at 60 rather than 40 because a racking aisle runs the better
+  // part of 90 m and the far end has to stay readable; 200 is still well
+  // inside the camera's far plane.
+  warehouse: {
+    background: 0x9aa3ad,
+    fogNear: 60,
+    fogFar: 200,
+    sunColor: 0xf2f4f8,
+    hemiSky: 0xdfe6ee,
+    // Bright for a "ground" colour, and deliberately so: this is the only
+    // light reaching faces the sun does not, and a concrete floor bounces a
+    // lot. Taken down to a realistic dark grey it renders every shaded face
+    // — parapets, stair risers, the dock lip — as a black silhouette you
+    // cannot read the shape of.
+    hemiGround: 0x7a828b,
+  },
+};
 
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every

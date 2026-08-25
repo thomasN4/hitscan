@@ -79,6 +79,7 @@ const SPAWN_Z: Record<MapName, number> = {
   arena: 48,
   range: 8,       // behind the firing line
   elevation: 48,  // open ground south of the two-story building
+  warehouse: 40,  // dock yard floor, 5 m clear of the south dock's face at z = 45
 };
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */

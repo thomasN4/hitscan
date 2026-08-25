@@ -178,6 +178,32 @@ describe('stairLink', () => {
     expect(link.top.z).toBeCloseTo(30, 12);
   });
 
+  test("warehouse's south mezzanine flight lands on the slab's south edge", () => {
+    // maps/warehouse.ts: "17 - 9 = 8 south", flush with the slab edge at z = 8.
+    const link = stairLink(0, 0, 17, 4, STEP_H, STEP_D, 12, 'z-');
+    expect(link.top.y).toBeCloseTo(3.6, 12); // DECK_Y
+    expect(link.top.z).toBeCloseTo(8, 12);
+  });
+
+  test("warehouse's north mezzanine flight mirrors it across z = 0", () => {
+    // The mirror is the map's fairness claim — if these two stop being
+    // reflections, one team is closer to the high ground than the other.
+    const south = stairLink(0, 0, 17, 4, STEP_H, STEP_D, 12, 'z-');
+    const north = stairLink(0, 0, -17, 4, STEP_H, STEP_D, 12, 'z+');
+    expect(north.top.y).toBeCloseTo(south.top.y, 12);
+    expect(north.top.z).toBeCloseTo(-south.top.z, 12);
+    expect(north.bottom.z).toBeCloseTo(-south.bottom.z, 12);
+  });
+
+  test("warehouse's dock flight reaches the 1.2 m lip", () => {
+    // 4 risers, not 12: the dock is a step-up height, so the flight exists
+    // purely so bots (which cannot jump) are not shut out of it.
+    const link = stairLink(24, 0, 42, 6, STEP_H, STEP_D, 4, 'z+');
+    expect(link.halfWidth).toBe(3);
+    expect(link.top.y).toBeCloseTo(1.2, 12);
+    expect(link.top.z).toBeCloseTo(45, 12); // the dock platform's inner face
+  });
+
   test('a flight based above ground carries its base into both ends', () => {
     const link = stairLink(0, 5, 0, 4, STEP_H, STEP_D, 4, 'x+');
     expect(link.bottom.y).toBe(5);

@@ -6,7 +6,8 @@
 // they are caught by review and by scripts/smoke-test.mjs.)
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
-         sanitizeLoadout, session, player, equippedId } from './state';
+         sanitizeLoadout, session, player, equippedId,
+         AMBIENCE, DESERT_AMBIENCE } from './state';
 
 describe('state module purity', () => {
   // main.ts overwrites session's config fields from the URL query at startup;
@@ -138,5 +139,35 @@ describe('player entity', () => {
     // what collision.ts resolves against (see collision.test.ts).
     expect(player.pos.y).toBe(player.eyeHeight);
     expect(player.pos.y - player.eyeHeight).toBe(0);
+  });
+});
+
+describe('AMBIENCE', () => {
+  // Lighting moved out of initEngine() so the warehouse could stop rendering
+  // under the arena's desert sun. The refactor is only safe if it changed
+  // NOTHING for the maps that shipped before it — and nothing else in the
+  // suite can see engine.ts, which eslint bars unit tests from importing.
+  test.each(['arena', 'range', 'elevation'] as const)(
+    '%s still uses the pre-refactor desert palette',
+    map => {
+      expect(AMBIENCE[map]).toBe(DESERT_AMBIENCE);
+    },
+  );
+
+  test('the desert palette holds the exact literals initEngine used to inline', () => {
+    expect(DESERT_AMBIENCE).toEqual({
+      background: 0xbfae8f,
+      fogNear: 40,
+      fogFar: 140,
+      sunColor: 0xffeecc,
+      hemiSky: 0xfff3e0,
+      hemiGround: 0x8a7a5c,
+    });
+  });
+
+  test("the warehouse departs from it, and its fog stays inside the camera's far plane", () => {
+    expect(AMBIENCE.warehouse).not.toBe(DESERT_AMBIENCE);
+    expect(AMBIENCE.warehouse.fogNear).toBeLessThan(AMBIENCE.warehouse.fogFar);
+    expect(AMBIENCE.warehouse.fogFar).toBeLessThan(300);
   });
 });

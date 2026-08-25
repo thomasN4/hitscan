@@ -61,7 +61,7 @@ if (import.meta.env.DEV) {
   for (const v of validateWeapons(Object.values(WEAPONS))) console.error(v);
 }
 
-initEngine();
+initEngine(session.map);
 initHUD();
 initWeaponViewmodels();  // needs camera/scene
 // Geometry first, then the wave. RANGE stays a separate flag from the builder

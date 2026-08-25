@@ -1,4 +1,4 @@
-// smoke-test.mjs — headless E2E check for both maps.
+// smoke-test.mjs — headless E2E check across every map.
 //
 // Usage: start `npm run dev` in another terminal, then:
 //   node scripts/smoke-test.mjs
@@ -36,6 +36,8 @@ const STAIRS = {
   // Deliberately the outside one — it is the flight a player uses without
   // entering the building, so this phase stays independent of the interior.
   elevation: { start: [8, 1.7, 22.5], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 22, bottomDir: 1 },
+  // warehouse: the south mezzanine flight, mouth at z = 17 ascending z-.
+  warehouse: { start: [0, 1.7, 18], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 17.5, bottomDir: 1 },
 };
 
 async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = null } = {}) {
@@ -1431,6 +1433,8 @@ try {
   await runNavGraphCheck();
   await runWedgeCheck();
   await runDebugViewCheck();
+  await runMap('warehouse', '/?map=warehouse', { botCheck: true, stairsCheck: STAIRS.warehouse });
+
   await runMap('range', '/?map=range', { sprintCheck: true });
   await runShotgunCheck();
   await runKnifeCheck();

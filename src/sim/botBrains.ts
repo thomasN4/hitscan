@@ -360,15 +360,6 @@ export class DefaultBrain implements BotBrain {
     // flipped between frames, not within one).
     if (view.moveBlocked) this.strafeDir = this.strafeDir === 1 ? -1 : 1;
 
-    // Movement blend: radial band preference plus a perpendicular drift
-    // component, normalized and scaled to the realized speed.
-    //
-    // The band reads dist3, not the planar dist: a target on a deck 3.6 m up
-    // is 3.6 m away even when standing on your head, and ranging it as 0
-    // is what made bots retreat from the building they needed to enter.
-    // Back-off is suppressed outright while the target is a level above —
-    // you cannot reverse away from something overhead, and trying only
-    // widens the gap to whatever flight reaches it.
     // Route when the target is a level up and the executor has a way there.
     // Hysteresis is wide on purpose: entry needs climbThreshold, but exit
     // waits for climbExit, because a bot partway up a flight still reads a

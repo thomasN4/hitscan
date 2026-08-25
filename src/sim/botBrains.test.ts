@@ -302,6 +302,122 @@ describe('DefaultBrain routing', () => {
   });
 });
 
+// The flat-routing latch (issue #44): evidence that band steering cannot
+// close hands the problem to the graph. Same replay style as the routing
+// describes; CADENCE_DT makes the hand-computed timer arithmetic exact
+// quarters (noProgressTime 0.5 is two frames).
+describe('DefaultBrain flat-routing latch', () => {
+  const CADENCE_DT = 0.25;
+  const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
+  /** Same-level target beyond farBand, graph available. */
+  const stalled = (overrides: Partial<BrainView> = {}): BrainView =>
+    view({ dist: 20, rise: 0, nextWaypoint: () => NORTH(), ...overrides });
+  const latchParams = (): BrainParams => ({ ...moveParams(), noProgressTime: 0.5 });
+
+  // Latch timing, hand-derived: the FIRST stalled frame only ADOPTS the
+  // baseline (from Infinity), so with noProgressTime 0.5 the accrual reaches
+  // it on the THIRD cadence frame (0.25 + 0.25). Two frames can never arm.
+  it('routes once closure stalls beyond farBand', () => {
+    const brain = calmBrain(latchParams());
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('engage'); // baseline adopted
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('engage'); // 0.25
+    const routed = brain.decide(stalled(), CADENCE_DT);              // 0.50 → latch
+    expect(routed.mode).toBe('route');
+    // Heads at the WAYPOINT (due +z), drift-free — travel(), not band steering.
+    expect(routed.step.x).toBeCloseTo(0, 12);
+    expect(routed.step.z).toBeCloseTo(4 * CADENCE_DT, 12);
+  });
+
+  it('ordinary approach outruns the timer: real-speed closure never routes', () => {
+    // Full-speed approach shrinks dist by selfSpeed·dt (~0.067 m) per frame;
+    // the baseline crossing lands every ~4th frame, well inside the 1.5 s a
+    // default timer needs. This is the false-positive pin.
+    const brain = calmBrain();
+    let d = 20;
+    for (let f = 1; f <= 200; f++) {
+      d -= 4 * DT;
+      expect(brain.decide(view({ dist: d }), DT).mode, `frame ${f}`).toBe('engage');
+    }
+  });
+
+  it('closure past the epsilon re-arms the accrual mid-chase', () => {
+    const brain = calmBrain(latchParams());
+    let d = 20;
+    for (let f = 1; f <= 12; f++) {
+      d -= 0.5; // clears noProgressEpsilon every frame
+      expect(brain.decide(view({ dist: d }), CADENCE_DT).mode, `frame ${f}`).toBe('engage');
+    }
+  });
+
+  it('a goal pulling away re-baselines instead of arming', () => {
+    const brain = calmBrain(latchParams());
+    let d = 20;
+    for (let f = 1; f <= 12; f++) {
+      d += 3; // ≥ fleeReset every frame: running, not stalling
+      expect(brain.decide(view({ dist: d }), CADENCE_DT).mode, `frame ${f}`).toBe('engage');
+    }
+  });
+
+  it('slow drift backward (under fleeReset) still counts as stalled', () => {
+    const brain = calmBrain(latchParams());
+    let d = 20;
+    expect(brain.decide(stalled({ dist: d }), CADENCE_DT).mode).toBe('engage'); // baseline
+    // 0.5 m farther is neither closure nor flight: the accrual survives…
+    d += 0.5;
+    brain.decide(stalled({ dist: d }), CADENCE_DT);
+    // …and holding there routes, proving fleeReset is not "any growth resets".
+    expect(brain.decide(stalled({ dist: d }), CADENCE_DT).mode).toBe('route');
+  });
+
+  it('in-band pacing is engagement, not stagnation', () => {
+    const brain = calmBrain(latchParams());
+    for (let f = 1; f <= 12; f++) {
+      // Constant-radius strafing (#45's hold) must never read as failure.
+      expect(brain.decide(view({ dist: 10 }), CADENCE_DT).mode, `frame ${f}`).toBe('engage');
+    }
+  });
+
+  it('the latch releases inside farBand and needs fresh evidence to re-arm', () => {
+    const brain = calmBrain(latchParams());
+    brain.decide(stalled(), CADENCE_DT);
+    brain.decide(stalled(), CADENCE_DT);
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('route');
+    // Arrived into the band: steering owns it again, pure strafe hold.
+    const released = brain.decide(view({ dist: 13, rise: 0, nextWaypoint: () => NORTH() }), CADENCE_DT);
+    expect(released.mode).toBe('engage');
+    expect(released.step.x).toBeCloseTo(0, 12);
+    expect(released.step.z).toBeCloseTo(4 * CADENCE_DT, 12);
+    // Re-baselined AT THE IN-BAND DISTANCE (13): the first stalled frame
+    // reads as fleeReset (20 ≥ 13+2) and only re-baselines…
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('engage');
+    // …the second accrues, the third latches again.
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('engage');
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('route');
+  });
+
+  it('onRespawn clears the latch', () => {
+    const brain = calmBrain(latchParams());
+    brain.decide(stalled(), CADENCE_DT);
+    brain.decide(stalled(), CADENCE_DT);
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('route');
+    brain.onRespawn();
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('engage');
+  });
+
+  it('the jam recovery is reachable from an engage-origin route', () => {
+    const brain = calmBrain(latchParams());
+    brain.decide(stalled(), CADENCE_DT);
+    brain.decide(stalled(), CADENCE_DT);
+    expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('route');
+    // Geometry refuses the waypoint step long enough to be a jam, not a
+    // brush: stuckTime 0.25 is one cadence frame…
+    const slide = brain.decide(stalled({ moveBlocked: true }), CADENCE_DT);
+    // …which commits the slide: perpendicular to the heading, all x.
+    expect(Math.abs(slide.step.x)).toBeCloseTo(4 * CADENCE_DT, 12);
+    expect(slide.step.z).toBeCloseTo(0, 12);
+  });
+});
+
 describe('DefaultBrain trigger', () => {
   /** dt 0.25 makes the hand-computed frame arithmetic exact quarters. */
   const CADENCE_DT = 0.25;

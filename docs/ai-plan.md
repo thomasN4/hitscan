@@ -221,7 +221,8 @@ Routing is gated on height alone — `rise > climbThreshold` to enter, held down
 to a much lower `climbExit` (0.45) because a bot partway up a flight still
 reads a rise of a metre and dropping it back to band steering there IS the
 stall this replaces. Same-level routing waits on evidence that same-level bots
-actually fail to arrive.
+actually fail to arrive. *(That evidence arrived: issue #44, and the flat
+latch below is its answer.)*
 
 **Result: going-nowhere windows 7/40 → 3/40**, and the remaining ones changed
 character — they are mostly bots at `feetY 3.6, rise 0.0`, on the deck orbiting
@@ -346,6 +347,52 @@ target beyond engage range — while the hue stays the mode's.
   keys on any live bot with any target probing, which a range-gated probe
   would break, and the cost cannot ship outside DEV. Revisit only if
   profiling ever shows it.
+
+### Flat routing (issue #44)
+
+The nav graph has covered the whole map since tranche 5, but the brain only
+asked it for routes UP: `wantRoute` keyed on `rise` alone, so every wall,
+crate and building on the flat was left to band steering — which knows the
+direction to its target and whether last frame's step was refused, and nothing
+else. Issue #44's playtest was that design failing exactly as documented:
+bots pacing ±3 m at a wall face with no `blk`, because sliding keeps ~0.7 of
+the intended step and step-rejection cannot see a stall it never causes. The
+measured case was stark enough to gate the fix on: against pre-fix main, a T
+teleported south of arena's mid wall with the player on the CT half ground to
+a halt at (−9.6, −1.5) — pressed into the wall's face, never in route mode,
+still there 45 s later.
+
+The latch, in `DefaultBrain`: while NOT routed by the climb gate and beyond
+`farBand`, planar distance is tracked against a baseline. Closing by more than
+`noProgressEpsilon` (0.25 m — several frames' worth; per-frame closure is only
+~0.07 m, so a per-frame test arms the timer mid-approach) or retreating by
+more than `fleeReset` (2 m — a fleeing goal is not stagnation; without this,
+chasing anything faster latches permanently) re-baselines and resets.
+Otherwise the accrual grows; at `noProgressTime` (1.5 s) routing engages
+regardless of rise, and stays engaged until `dist3` comes back inside farBand
+— the same evidence-then-hand-over shape as climbThreshold/climbExit, with
+the band boundary playing climbExit's role.
+
+What it buys:
+
+- The graph now covers the flat, and `travel()`'s jam recovery — built and
+  validated in tranche 5 but unreachable from engage mode, because engage
+  zeroed `blockedFor`/`commitLeft` every frame — finally fires in the
+  situations playtesters were reporting.
+- Smoke `[flatRoute]` pins it end-to-end on arena: same teleport, poll for
+  feet crossing z ≥ 2 AND route mode observed en route (strafe-luck cannot
+  satisfy it). Fix: crossed at x = 3.5 — through the wall's east gap, the
+  only path — in 8 s, `sawRoute: true`. Pre-fix main fails the phase with the
+  bot still south of the wall.
+- Nine unit tests pin the latch's edges: adoption frame arithmetic (the first
+  stalled frame establishes the baseline and accrues nothing), approach and
+  flight re-baselining, in-band pacing staying engagement (#45's hold must
+  not read as failure), release-and-fresh-evidence, respawn clearing, and
+  jam-recovery reachability from an engage-origin route.
+
+Deliberately deferred to the band-steering fixes (#45/#43): routing when SIGHT
+has been blocked long enough. This latch keys on distance progress, not sight;
+the two compose but are separate evidence streams.
 
 ## Deferred
 

@@ -53,8 +53,37 @@ export const sfxShoot = (): void => playGunshot(0.4, 1400, 0.14);
 /** Sniper: deeper boom with a longer tail than the smg crack. */
 export const sfxSniper = (): void => playGunshot(0.5, 500, 0.3);
 
+/** Shotgun: big low boom, longer tail — a powder charge, not a cartridge crack. */
+export const sfxShotgun = (): void => playGunshot(0.55, 380, 0.28);
+
 /** Pistol: sharper, shorter crack than the smg burst. */
 export const sfxPistol = (): void => playGunshot(0.35, 1100, 0.09);
+
+/** Revolver: louder, fuller bark than the pistol — more powder, longer barrel. */
+export const sfxRevolver = (): void => playGunshot(0.48, 750, 0.18);
+
+/**
+ * Knife swing: an airy whoosh, not a crack — bandpassed noise sweeping down,
+ * no lowpass "powder" thump underneath.
+ */
+export function sfxKnife(): void {
+  const ctx = ac();
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx, 0.12);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.Q.value = 1.2;
+  filter.frequency.setValueAtTime(2400, ctx.currentTime);
+  filter.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.12);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.18, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.start();
+}
+
+/** Knife connect: dull, meaty thunk — the swing's payoff. */
+export const sfxKnifeHit = (): void => playGunshot(0.25, 300, 0.09);
 
 /** Weapon switch: short metallic click. */
 export const sfxSwitch = (): void => playGunshot(0.1, 1800, 0.04);
@@ -78,6 +107,11 @@ export function sfxReload(): void {
   playGunshot(0.12, 500, 0.06);   // click 1: immediately
   gameTime.schedule(0.25, () => playGunshot(0.12, 800, 0.06));    // click 2
   gameTime.schedule(1.1, () => playGunshot(0.15, 1000, 0.08));  // final clack (~halfway through 2.2s reload)
+}
+
+/** One shell/chamber seating home — the per-round reload's transfer click. */
+export function sfxShell(): void {
+  playGunshot(0.13, 900, 0.05);
 }
 
 /** Soft footstep; randomized pitch/level so repeats don't sound mechanical. */

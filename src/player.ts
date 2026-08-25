@@ -23,7 +23,7 @@ import { player, input, aim, wpn, motion, keys, gameTime } from './core/state';
 import { slideMoveXZ, resolveVertical } from './collision';
 import { colliders } from './world';
 import { sfxFootstep } from './audio';
-import { gunGroup, currentAimPitch, currentAimYaw } from './weapons';
+import { gunGroup, currentAimPitch, currentAimYaw, viewmodelAimOffset } from './weapons';
 import { crosshair } from './hud';
 import { speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
 import { approach, deadZone } from './sim/smoothing';
@@ -191,11 +191,15 @@ export function updateViewmodel(): void {
   if (!player.alive) return;
 
   // Blend hip-fire offset -> centered iron sights with adsLerp; add bob and
-  // recoil kick on top.
-  gunGroup.position.x = -0.25 * wpn.adsLerp;
+  // recoil kick on top. The ADS delta is per-weapon data (each viewmodel has
+  // its own rest offset and sight height — see weapons.ts VIEWMODELS), not a
+  // hardcoded shift: one global value centered the smg but left the pistols'
+  // sight lines visibly off screen-center.
+  const aimOffset = viewmodelAimOffset();
+  gunGroup.position.x = aimOffset.x * wpn.adsLerp;
   // Bob phase runs on game time so a pause doesn't snap the weapon to an
   // arbitrary point of the cycle on resume.
-  gunGroup.position.y = 0.14 * wpn.adsLerp + Math.sin(gameTime.now() * 10) * motion.bobAmt;
+  gunGroup.position.y = aimOffset.y * wpn.adsLerp + Math.sin(gameTime.now() * 10) * motion.bobAmt;
   gunGroup.position.z = wpn.recoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
   gunGroup.rotation.x = wpn.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
                                              // so a full climb must stay a nudge, not a tilt

@@ -2,8 +2,9 @@ import { describe, expect, test } from 'vitest';
 import { validateWeapons } from './validateWeapons';
 import { WEAPONS, RECOIL_CAP, type WeaponDef } from '../core/state';
 
-const SMG = WEAPONS[0];
-const SNIPER = WEAPONS[1];
+const SMG = WEAPONS.smg;
+const SNIPER = WEAPONS.sniper;
+const KNIFE = WEAPONS.knife;
 
 /** The numeric fields — exactly the ones a NaN can poison. */
 type NumericField = {
@@ -30,25 +31,25 @@ describe('the shipped table', () => {
     // The hard gate: any retune that breaks an invariant fails npm test.
     // The sniper's over-drain passes BECAUSE of the semiAuto exemption —
     // see the live-branch tests below.
-    expect(validateWeapons(WEAPONS)).toEqual([]);
+    expect(validateWeapons(Object.values(WEAPONS))).toEqual([]);
   });
 });
 
 describe('sustained-fire bounds', () => {
   test('vertical recoil at/above the per-second input is flagged', () => {
-    // smg input = 1 kick / 0.105 s ≈ 9.52/s
-    expect(matching([tuned({ recoilRecover: 12 })], 'SMG', 'recoilRecover')).toHaveLength(1);
+    // smg input = 1 kick / 0.075 s ≈ 13.3/s (800 RPM)
+    expect(matching([tuned({ recoilRecover: 14 })], 'SMG', 'recoilRecover')).toHaveLength(1);
   });
 
   test('spray applies to EVERY weapon, semiAuto included', () => {
-    expect(matching([tuned({ sprayRecover: 0.6 })], 'SMG', 'sprayRecover')).toHaveLength(1);
+    expect(matching([tuned({ sprayRecover: 0.9 })], 'SMG', 'sprayRecover')).toHaveLength(1); // input = 0.06/0.075 = 0.8/s
     expect(matching([tuned({ sprayRecover: 0.3 }, SNIPER)], 'SNIPER', 'sprayRecover')).toHaveLength(1); // input ≈ 0.227/s
   });
 
   test('horizontal yaw is sized against the MEAN kick, not the max', () => {
-    // 2 × 0.105 = 0.21 ≥ yawKick/2 = 0.2 — the drain per shot interval beats
+    // 3 × 0.075 = 0.225 ≥ yawKick/2 = 0.2 — the drain per shot interval beats
     // the average kick even though it never beats the full one.
-    expect(matching([tuned({ yawRecover: 2 })], 'SMG', 'yawRecover')).toHaveLength(1);
+    expect(matching([tuned({ yawRecover: 3 })], 'SMG', 'yawRecover')).toHaveLength(1);
   });
 });
 
@@ -132,6 +133,48 @@ describe('static bounds', () => {
   test('punchRad climbing past ~10° over the cap is flagged', () => {
     // 0.03 rad × 6 units ≈ 10.3°
     expect(matching([tuned({ punchRad: 0.03 })], 'SMG', 'punchRad')).toHaveLength(1);
+  });
+
+  test('pellets and pelletCone: present means positive, cone needs pellets', () => {
+    const SHOTGUN = WEAPONS.shotgun;
+    expect(matching([tuned({ pellets: 0 }, SHOTGUN)], 'SHOTGUN', 'pellets')).toHaveLength(1);
+    expect(matching([tuned({ pelletCone: 0 }, SHOTGUN)], 'SHOTGUN', 'pelletCone')).toHaveLength(1);
+    // A fixed pattern on a single-ray weapon does nothing — flag the dead field.
+    expect(matching([tuned({ pelletCone: 0.02, pellets: undefined }, SHOTGUN)], 'SHOTGUN', 'pelletCone')).toHaveLength(1);
+  });
+});
+
+describe('melee weapons', () => {
+  test('the shipped knife produces zero violations', () => {
+    // The shipped-table gate above already covers the knife via
+    // Object.values; this pins the def in isolation so a knife-specific
+    // regression names itself instead of hiding among five guns.
+    expect(validateWeapons([KNIFE])).toEqual([]);
+  });
+
+  test('zero mag/reload is exempt ONLY while melee — flip it off and they flag', () => {
+    expect(matching([KNIFE], 'magSize')).toHaveLength(0);
+    expect(matching([KNIFE], 'reloadTime')).toHaveLength(0);
+    expect(matching([tuned({ melee: false }, KNIFE)], 'KNIFE', 'magSize')).toHaveLength(1);
+    expect(matching([tuned({ melee: false }, KNIFE)], 'KNIFE', 'reloadTime')).toHaveLength(1);
+  });
+
+  test('reach fields exist exactly when the def swings', () => {
+    expect(matching([tuned({ range: undefined }, KNIFE)], 'KNIFE', 'range')).toHaveLength(1);
+    expect(matching([tuned({ arcRad: undefined }, KNIFE)], 'KNIFE', 'arcRad')).toHaveLength(1);
+    expect(matching([tuned({ range: 0 }, KNIFE)], 'KNIFE', 'range')).toHaveLength(1);
+    // Past a half-turn the cone would strike behind the eye.
+    expect(matching([tuned({ arcRad: Math.PI + 0.1 }, KNIFE)], 'KNIFE', 'arcRad')).toHaveLength(1);
+  });
+
+  test('reach fields on a firearm are a dead field, like pelletCone without pellets', () => {
+    expect(matching([tuned({ range: 2 })], 'SMG', 'range/arcRad')).toHaveLength(1);
+    expect(matching([tuned({ arcRad: 0.6 })], 'SMG', 'range/arcRad')).toHaveLength(1);
+  });
+
+  test('NaN reach cannot slip through the pairing bounds', () => {
+    expect(matching([tuned({ range: NaN }, KNIFE)], 'KNIFE', 'range')).toHaveLength(1);
+    expect(matching([tuned({ arcRad: NaN }, KNIFE)], 'KNIFE', 'arcRad')).toHaveLength(1);
   });
 });
 

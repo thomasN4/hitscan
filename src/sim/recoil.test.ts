@@ -13,13 +13,13 @@ describe('aimPitch', () => {
   });
 
   test('a full smg spray climbs to roughly 4 degrees', () => {
-    const deg = aimPitch(0, RECOIL_CAP, WEAPONS[0].punchRad) * 180 / Math.PI;
+    const deg = aimPitch(0, RECOIL_CAP, WEAPONS.smg.punchRad) * 180 / Math.PI;
     expect(deg).toBeGreaterThan(3.5);
     expect(deg).toBeLessThan(4.5);
   });
 
   test('one sniper shot kicks roughly 4.6 degrees', () => {
-    const sniper = WEAPONS[1];
+    const sniper = WEAPONS.sniper;
     const deg = aimPitch(0, sniper.recoilKick, sniper.punchRad) * 180 / Math.PI;
     expect(deg).toBeGreaterThan(4.0);
     expect(deg).toBeLessThan(5.2);
@@ -41,7 +41,7 @@ describe('aimYaw', () => {
   });
 
   test('a maxed-out smg walk stays around 2 degrees of wander', () => {
-    const deg = aimYaw(0, RECOIL_YAW_CAP, WEAPONS[0].punchRad) * 180 / Math.PI;
+    const deg = aimYaw(0, RECOIL_YAW_CAP, WEAPONS.smg.punchRad) * 180 / Math.PI;
     expect(deg).toBeGreaterThan(1.5);
     expect(deg).toBeLessThan(2.5);
   });
@@ -57,7 +57,7 @@ describe('decayRecoil', () => {
   });
 
   test('the smg clears a full climb in about a second', () => {
-    const smg = WEAPONS[0];
+    const smg = WEAPONS.smg;
     let recoil = RECOIL_CAP;
     let elapsed = 0;
     const dt = 1 / 60;
@@ -81,19 +81,20 @@ describe('decaySpray', () => {
     expect(decaySpray(3, 1, 0.5)).toBeCloseTo(2.5, 12);
   });
 
-  test('a full smg magazine blooms the cone to about 1.9x', () => {
+  test('a full smg magazine blooms the cone to about 2.15x', () => {
     // Simulated against the REAL fire loop, not a hand-seeded end state: decay
     // runs concurrently with fire, so the net per shot is
     // sprayKick − sprayRecover × fireRate, well under sprayKick. An earlier
     // version of this test seeded 1 + 30 × sprayKick = 2.8 and measured pure
     // decay from there — a value the game could not produce, which is how a
-    // spray that only reached 1.28 shipped green.
-    const smg = WEAPONS[0];
-    expect(magazineSprayPeak(smg)).toBeCloseTo(1.9, 1);
+    // spray that only reached 1.28 shipped green. (Figure updated for the
+    // 800 RPM rate: net ≈ +0.0383/shot × 30 rounds.)
+    const smg = WEAPONS.smg;
+    expect(magazineSprayPeak(smg)).toBeCloseTo(2.15, 1);
   });
 
-  test('that bloom settles back in about three seconds', () => {
-    const smg = WEAPONS[0];
+  test('that bloom settles back in about four seconds', () => {
+    const smg = WEAPONS.smg;
     let spray = magazineSprayPeak(smg);
     let elapsed = 0;
     const dt = 1 / 60;
@@ -101,8 +102,8 @@ describe('decaySpray', () => {
       spray = decaySpray(spray, dt, smg.sprayRecover);
       elapsed += dt;
     }
-    expect(elapsed).toBeGreaterThan(2.7);
-    expect(elapsed).toBeLessThan(3.5);
+    expect(elapsed).toBeGreaterThan(3.6);
+    expect(elapsed).toBeLessThan(4.4);
   });
 
   test('a sustained smg spray outruns its own recovery', () => {
@@ -110,7 +111,7 @@ describe('decaySpray', () => {
     // per-second input, or the spray never accumulates at all. Necessary but
     // NOT sufficient — 0.45 satisfied it and still barely bloomed, which is
     // what the magazine simulation above exists to catch.
-    const smg = WEAPONS[0];
+    const smg = WEAPONS.smg;
     expect(smg.sprayRecover).toBeLessThan(smg.sprayKick / smg.fireRate);
   });
 });
@@ -148,7 +149,7 @@ describe('decayToward', () => {
   });
 
   test('a maxed sniper walk settles in well under a second', () => {
-    const sniper = WEAPONS[1];
+    const sniper = WEAPONS.sniper;
     let yaw = RECOIL_YAW_CAP;
     let elapsed = 0;
     const dt = 1 / 60;
@@ -194,7 +195,7 @@ function magazineYawAtShots(def: WeaponDef, seed: number): number[] {
 }
 
 describe('yawRecover — the horizontal walk actually walks', () => {
-  const smg = WEAPONS[0];
+  const smg = WEAPONS.smg;
   const deg = (units: number) => units * smg.punchRad * 180 / Math.PI;
 
   test('the drain per shot stays under the MEAN kick, not the max', () => {
@@ -233,7 +234,7 @@ describe('yawRecover — the horizontal walk actually walks', () => {
     // The semiAuto exemption AGENTS.md records for recoilRecover applies here
     // too: a 1.1 s bolt cycle against a 13/s drain means the jolt is visual
     // only. Pinned as intent so it reads as a choice, not the bug above.
-    const sniper = WEAPONS[1];
+    const sniper = WEAPONS.sniper;
     expect(sniper.yawRecover * sniper.fireRate).toBeGreaterThan(sniper.yawKick);
     expect(magazineYawAtShots(sniper, 12345).every(v => v === 0)).toBe(true);
   });
@@ -247,8 +248,8 @@ function punchDeg(recoil: number, def: WeaponDef): number {
 const CAPS = { recoil: RECOIL_CAP, recoilYaw: RECOIL_YAW_CAP };
 
 describe('convertOnSwap — the view punch survives a weapon swap', () => {
-  const smg = WEAPONS[0];
-  const sniper = WEAPONS[1];
+  const smg = WEAPONS.smg;
+  const sniper = WEAPONS.sniper;
   const rest = { recoil: 0, recoilYaw: 0, spray: 1 };
 
   test('the rendered angle is unchanged, which is the whole contract', () => {
@@ -342,8 +343,8 @@ function roundTripRecoil(hold: number, startRecoil = RECOIL_CAP): number {
   return convertOnSwap(s, sniperDef, smgDef, CAPS).recoil;
 }
 
-const smgDef = WEAPONS[0];
-const sniperDef = WEAPONS[1];
+const smgDef = WEAPONS.smg;
+const sniperDef = WEAPONS.sniper;
 
 describe('convertOnSwap — what a swap actually returns once decay runs', () => {
   test('the incoming weapon owns the drain, so its rate is what erases the climb', () => {

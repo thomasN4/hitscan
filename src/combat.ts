@@ -4,10 +4,10 @@
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit.
 import type { Bot as BotShape, HitZone, MapName } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, resetAmmo } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout } from './core/state';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud';
-import { showDeathScreen } from './menu';
+import { showLoadoutPicker } from './menu';
 
 /**
  * Apply damage to the player. On death: awards the bot-side score,
@@ -34,7 +34,7 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     // screen would never show. The delay exists to be seen while paused.
     // Small delay so the killer's shot is visible before the menu covers it.
     setTimeout(() => {
-      showDeathScreen(true);
+      showLoadoutPicker('death');
     }, 400);
   }
 }
@@ -87,9 +87,13 @@ export function respawn(): void {
   motion.groundSmoothY = 0;
   input.crouching = false; // else a death while crouch-toggled respawns you crouched
   wpn.adsLerp = 0;
-  resetAmmo();    // refills both slots and mirrors the smg into `weapon`
+  armLoadout();   // refills both loadout positions and mirrors the primary into `weapon`
   wpn.slot = 0;
-  wpn.lastSlot = 0; // Q target resets with the slot: no swap has happened yet
+  // Spawn Q-READY: switchWeapon only records lastSlot on a REAL swap, so
+  // pinning it to the primary here made the first Q a self-targeted no-op —
+  // Q did nothing until you'd switched once by hand (playtest round 1).
+  // Pre-seeding the secondary position makes the first Q take it.
+  wpn.lastSlot = 1;
   wpn.zoomLevel = 0;
   updateHUD();
   clearVignette();

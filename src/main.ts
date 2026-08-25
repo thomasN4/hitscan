@@ -12,9 +12,10 @@
 // The per-frame stage order lives in animate() at the bottom of this file
 // and is load-bearing — see the comment there before reordering anything.
 import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
-               MapName, WeaponSlot, LiveWeapon, PlayerState } from './core/state';
+               LoadoutState,
+               MapName, WeaponSlot, WeaponId, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders } from './world';
 import { BUILDERS } from './maps';
@@ -26,7 +27,7 @@ import { updateEffects } from './effects';
 import { toggleDebugView, updateDebugView } from './debugView';
 import { respawn } from './combat';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD } from './hud';
-import { initMenus, hideAllMenus, showPauseMenu, showDeathScreen } from './menu';
+import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout } from './menu';
 import { sfxZoom } from './audio';
 import { validateWeapons } from './sim/validateWeapons';
 
@@ -40,6 +41,10 @@ import { validateWeapons } from './sim/validateWeapons';
 // shared state before anything reads session — initMenus initializes the
 // form from it.
 Object.assign(session, parseSessionConfig(new URLSearchParams(location.search)));
+// Restore the last-deployed loadout (sessionStorage, validated by
+// sanitizeLoadout) so this session starts where the previous one deployed.
+const storedLoadout = readStoredLoadout();
+if (storedLoadout) setLoadout(storedLoadout.primary, storedLoadout.secondary);
 score.roundTime = session.roundSeconds;
 // Render the configured length once at startup: setTimer otherwise only runs
 // inside the locked-only simulate branch, so a fresh load (and the range,
@@ -52,7 +57,7 @@ const RANGE = session.map === 'range';
 // mis-tuned constant — the console names weapon, field and consequence,
 // and the game still runs.
 if (import.meta.env.DEV) {
-  for (const v of validateWeapons(WEAPONS)) console.error(v);
+  for (const v of validateWeapons(Object.values(WEAPONS))) console.error(v);
 }
 
 initEngine();
@@ -72,11 +77,18 @@ if (!RANGE) {
 }
 respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
 initMenus({
-  onStart: lock,
+  onStart: () => showLoadoutPicker('start'),
   onCommit: query => { location.href = location.pathname + query; },
   onResume: lock,
   onQuit: () => { location.reload(); },
-  onRespawn: () => { showDeathScreen(false); respawn(); lock(); },
+  // Deploy: commit the picked loadout (the picker saved it to sessionStorage),
+  // respawn first when deploying from death, then enter play. The click itself
+  // is the user gesture pointer lock needs.
+  onDeploy: (primary, secondary) => {
+    setLoadout(primary, secondary);
+    if (!player.alive) respawn();
+    lock();
+  },
 });
 
 // ---------- Input ----------
@@ -89,6 +101,8 @@ addEventListener('resize', () => {
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') tryReload();
+  // Keys 1/2/3 switch WEAPON POSITIONS (primary/secondary/knife), not specific
+  // weapons — 0/1 resolve through the loadout slice; 2 is always the knife.
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
   if (e.code === 'Digit3') switchWeapon(2);
@@ -131,12 +145,14 @@ document.addEventListener('mousemove', e => {
   aim.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, aim.pitch));
 });
 
-// Wheel = scope zoom steps, only while scoped with the sniper (slot 1).
-// Scroll up zooms in, scroll down zooms out, wrapping through the levels.
+// Wheel = scope zoom steps, only while scoped with a multi-step-zoom weapon
+// (the sniper's zoomFovs). Scroll up zooms in, scroll down zooms out, wrapping
+// through the levels; single-entry weapons (iron sights) have nothing to cycle.
 addEventListener('wheel', e => {
-  if (!session.locked || !player.alive || wpn.slot !== 1 || !input.aiming) return;
-  const n = WEAPONS[1].zoomFovs.length; // tuple index — slot 1 exists by type
-  wpn.zoomLevel = (wpn.zoomLevel + (e.deltaY < 0 ? 1 : -1) + n) % n;
+  if (!session.locked || !player.alive || !input.aiming) return;
+  const fovs = WEAPONS[equippedId(wpn.slot)].zoomFovs;
+  if (fovs.length < 2) return;
+  wpn.zoomLevel = (wpn.zoomLevel + (e.deltaY < 0 ? 1 : -1) + fovs.length) % fovs.length;
   sfxZoom();
 });
 
@@ -147,7 +163,7 @@ addEventListener('mousedown', e => {
   // A fresh RMB press can't enter the scope while recoil is still settling
   // (sniper bolt-action feel); a press already held is unaffected.
   if (e.button === 2 && session.locked && player.alive) {
-    const gate = WEAPONS[wpn.slot].scopeGate; // undefined = no gate (smg)
+    const gate = WEAPONS[equippedId(wpn.slot)].scopeGate; // undefined = no gate (smg)
     if (gate === undefined || wpn.recoil < gate) input.aiming = true;
   }
 });
@@ -158,7 +174,16 @@ addEventListener('mouseup', e => {
 addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 
 // ---------- Pointer lock / menus ----------
-function lock(): void { void renderer.domElement.requestPointerLock(); }
+function lock(): void {
+  // Chrome's requestPointerLock returns a promise that REJECTS when the
+  // browser-enforced cooldown (or headless CI) blocks the request; an
+  // unhandled rejection here would surface as a page error. Failure is
+  // recoverable — the canvas click handler re-locks — so swallow it.
+  try {
+    const p = renderer.domElement.requestPointerLock() as unknown;
+    if (p instanceof Promise) p.catch(() => { /* cooldown/headless: recovered by canvas click */ });
+  } catch { /* same recovery path */ }
+}
 renderer.domElement.addEventListener('click', () => { if (!session.locked && player.alive && session.started) lock(); });
 
 document.addEventListener('pointerlockchange', () => {
@@ -169,7 +194,6 @@ document.addEventListener('pointerlockchange', () => {
   if (!session.locked) setScopeOverlay(false);
   if (session.locked) {
     session.started = true;
-    showDeathScreen(false);
     hideAllMenus();
   } else if (session.started && player.alive) {
     // Losing lock while alive means Esc was pressed -> pause menu.
@@ -241,10 +265,12 @@ animate();
 // smoke test both read `__cs.game.x` — and holds no state of its own:
 // every access round-trips to a slice. Gameplay code imports the slices
 // directly; do not route logic through this object.
-type DebugGame = SessionState & InputState & AimState & WeaponDynamics & MotionState & ScoreState;
+type DebugGame = SessionState & InputState & AimState & WeaponDynamics & MotionState & ScoreState & LoadoutState;
 
 const game: DebugGame = {
   get map() { return session.map; }, set map(v: MapName) { session.map = v; },
+  get primary() { return loadout.primary; }, set primary(v: WeaponId) { loadout.primary = v; },
+  get secondary() { return loadout.secondary; }, set secondary(v: WeaponId) { loadout.secondary = v; },
   get botsT() { return session.botsT; }, set botsT(v: number) { session.botsT = v; },
   get botsCt() { return session.botsCt; }, set botsCt(v: number) { session.botsCt = v; },
   get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },

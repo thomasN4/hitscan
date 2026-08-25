@@ -68,7 +68,21 @@
   .menu button:hover { background: #ffe099; }
   .keys { margin-top: 34px; font-size: 13px; color: #777; line-height: 1.9; text-align: center; }
   .keys b { color: #bbb; }
-  #deathScreen h1 { color: #ff5252; }
+  #loadoutScreen h1.died { color: #ff5252; }
+
+  /* Loadout picker: two columns of weapon cards, one selection each */
+  .wcols { display: flex; gap: 34px; margin-bottom: 30px; }
+  .wcol { display: flex; flex-direction: column; gap: 8px; min-width: 240px;
+          padding: 10px; border: 1px solid transparent; border-radius: 4px; }
+  .wcol.focused { border-color: #ffcc66; }
+  .wcolTitle { font-size: 12px; color: #aaa; letter-spacing: 3px; text-transform: uppercase; text-align: center; margin-bottom: 4px; }
+  .wcard { pointer-events: auto; background: #161a20; border: 1px solid #333a44; color: #eee;
+           padding: 10px 14px; cursor: pointer; border-radius: 3px; text-align: left; }
+  .wcard:hover { background: #1d232c; }
+  .wcard .wname { display: block; font-weight: bold; letter-spacing: 2px; }
+  .wcard .wstats { display: block; font-size: 12px; color: #8aa; margin-top: 3px; }
+  .wcard.selected { border-color: #ffcc66; background: #232a35; }
+  .wcard.selected .wname { color: #ffcc66; }
 
   /* Match-config form (start menu) */
   .cfg { display: grid; grid-template-columns: auto 110px; gap: 12px 18px; align-items: center; margin-bottom: 30px; }
@@ -113,7 +127,7 @@
     </div>
     <div id="ammoBox">
       <div id="weaponName">SMG</div>
-      <span id="magText">30</span> <span style="color:#aaa;font-size:20px">/</span> <span id="ammoReserve">90</span>
+      <span id="magText">30</span> <span id="ammoSep" style="color:#aaa;font-size:20px">/</span> <span id="ammoReserve">90</span>
       <span id="zoomText"></span>
       <div id="reloadHint">PRESS [R] TO RELOAD</div>
     </div>
@@ -149,7 +163,7 @@
   <button id="playBtn">Play</button>
   <div class="keys">
     <b>WASD</b> move &nbsp;&middot;&nbsp; <b>Mouse</b> aim &nbsp;&middot;&nbsp; <b>LMB</b> fire &nbsp;&middot;&nbsp; <b>RMB</b> iron sights / scope &nbsp;&middot;&nbsp; <b>R</b> reload<br>
-    <b>1/2/3</b> smg / sniper / pistol &nbsp;&middot;&nbsp; <b>Q</b> last weapon &nbsp;&middot;&nbsp; <b>Wheel</b> scope zoom (scoped) &nbsp;&middot;&nbsp; <b>Shift</b> run &nbsp;&middot;&nbsp; <b>Ctrl/C</b> crouch toggle (silent) &nbsp;&middot;&nbsp; <b>Space</b> jump &nbsp;&middot;&nbsp; <b>Esc</b> pause
+    <b>1/2/3</b> primary / secondary / knife &nbsp;&middot;&nbsp; <b>Q</b> last weapon &nbsp;&middot;&nbsp; <b>Wheel</b> scope zoom (scoped) &nbsp;&middot;&nbsp; <b>Shift</b> run &nbsp;&middot;&nbsp; <b>Ctrl/C</b> crouch toggle (silent) &nbsp;&middot;&nbsp; <b>Space</b> jump &nbsp;&middot;&nbsp; <b>Esc</b> pause
   </div>
 </div>
 
@@ -162,10 +176,22 @@
   </div>
 </div>
 
-<div class="menu" id="deathScreen" style="display:none">
-  <h1>You Died</h1>
-  <p id="deathMsg">Better luck next round.</p>
-  <button id="respawnBtn">Respawn</button>
+<div class="menu" id="loadoutScreen" style="display:none">
+  <h1 id="loadoutTitle">Choose your loadout</h1>
+  <p id="loadoutMsg" style="display:none">Better luck next round.</p>
+  <div class="wcols">
+    <div class="wcol" id="colPrimary">
+      <div class="wcolTitle">Primary</div>
+    </div>
+    <div class="wcol" id="colSecondary">
+      <div class="wcolTitle">Secondary</div>
+    </div>
+  </div>
+  <button id="deployBtn">Deploy</button>
+  <p class="cfgNote">A knife rides along as your fallback &mdash; press <b>3</b> once deployed.</p>
+  <div class="keys">
+    <b>Click</b> or <b>&uarr;&darr;&larr;&rarr;</b> select &nbsp;&middot;&nbsp; <b>Enter</b> deploy
+  </div>
 </div>
 
 <script type="module" src="/src/main.ts"></script>

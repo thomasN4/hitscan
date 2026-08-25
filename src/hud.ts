@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId } from './core/state';
 import { isLowAmmo } from './sim/ammo';
 
 /**
@@ -31,7 +31,7 @@ export function requireEl(id: string): HTMLElement {
 const el = requireEl;
 
 let hitmarkerEl: HTMLElement, killfeedEl: HTMLElement, hpText: HTMLElement,
-  healthFill: HTMLElement, magText: HTMLElement,
+  healthFill: HTMLElement, magText: HTMLElement, ammoSep: HTMLElement,
   ammoReserve: HTMLElement, reloadHint: HTMLElement, scopeOverlay: HTMLElement,
   zoomText: HTMLElement, weaponName: HTMLElement, botDebug: HTMLElement;
 
@@ -52,6 +52,7 @@ export function initHUD(): void {
   hpText = el('hpText');
   healthFill = el('healthFill');
   magText = el('magText');
+  ammoSep = el('ammoSep');
   ammoReserve = el('ammoReserve');
   reloadHint = el('reloadHint');
   scopeOverlay = el('scopeOverlay');
@@ -146,7 +147,16 @@ export function updateHUD(): void {
   healthFill.style.background = player.hp > 60 ? '#4caf50' : player.hp > 25 ? '#ffab40' : '#ff5252';
   magText.textContent = String(weapon.mag);
   ammoReserve.textContent = String(weapon.reserve);
-  reloadHint.style.visibility = (!weapon.reloading && isLowAmmo(weapon.mag, weapon.magSize)) ? 'visible' : 'hidden';
+  // The knife holds no rounds: the readout hides while it is live (the
+  // separator between the two numbers goes with it). The text above keeps
+  // updating regardless — hidden or not, it must never go stale, because
+  // swapping back to a firearm re-reveals whatever this frame's state is.
+  const meleeHeld = WEAPONS[equippedId(wpn.slot)].melee === true;
+  const ammoDisplay = meleeHeld ? 'none' : 'inline';
+  magText.style.display = ammoDisplay;
+  ammoSep.style.display = ammoDisplay;
+  ammoReserve.style.display = ammoDisplay;
+  reloadHint.style.visibility = (!meleeHeld && !weapon.reloading && isLowAmmo(weapon.mag, weapon.magSize)) ? 'visible' : 'hidden';
   if (weapon.reloading) reloadHint.textContent = 'RELOADING...';
   else reloadHint.textContent = 'PRESS [R] TO RELOAD';
   // Weapon name + scope zoom label; cached so unchanged values don't touch
@@ -155,14 +165,19 @@ export function updateHUD(): void {
     lastName = weapon.name;
     weaponName.textContent = weapon.name;
   }
-  // The WEAPONS read needs no guard (tuple + WeaponSlot), but zoomFovs is a
-  // plain array indexed by the unbounded wpn.zoomLevel, so that read is still
-  // `T | undefined`. weapons.ts:aimFovFor CLAMPS the same index because it owes
-  // its caller a number; the HUD degrades to no label instead, because a view
-  // must never throw mid-frame over a cosmetic string. Both are unreachable in
-  // play — zoomLevel is wheel-wrapped mod n and reset to 0 on swap — but they
-  // are deliberately different answers to the same miss, so change them together.
-  const zoomFov = input.aiming && wpn.slot === 1 ? WEAPONS[wpn.slot].zoomFovs[wpn.zoomLevel] : undefined;
+  // The WEAPONS read needs no guard (Record keyed by WeaponId), but zoomFovs
+  // is a plain array indexed by the unbounded wpn.zoomLevel, so that read is
+  // still `T | undefined`. weapons.ts:aimFovFor CLAMPS the same index because
+  // it owes its caller a number; the HUD degrades to no label instead, because
+  // a view must never throw mid-frame over a cosmetic string. Both are
+  // unreachable in play — zoomLevel is wheel-wrapped mod n and reset to 0 on
+  // swap — but they are deliberately different answers to the same miss, so
+  // change them together. The label only applies to multi-step zooms: a
+  // single-entry weapon (iron sights / bead) has nothing to cycle.
+  const liveDef = WEAPONS[equippedId(wpn.slot)];
+  const zoomFov = input.aiming && liveDef.zoomFovs.length > 1
+    ? liveDef.zoomFovs[wpn.zoomLevel]
+    : undefined;
   const zoomLabel = zoomFov !== undefined ? Math.round(BASE_FOV / zoomFov) + 'x' : '';
   if (zoomLabel !== lastZoomLabel) {
     lastZoomLabel = zoomLabel;

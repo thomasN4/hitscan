@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { shotDirection, EULER_ORDER } from './ballistics';
+import { shotDirection, pelletShotDirection, EULER_ORDER } from './ballistics';
 
 /** Forward vector of a camera posed like player.ts does. */
 function cameraForward(pitch: number, yaw: number, order: THREE.EulerOrder) {
@@ -74,3 +74,48 @@ describe('recoil climb between consecutive shots', () => {
     expect(first.angleTo(second)).toBeCloseTo(recoilKick * punchRad, 6);
   });
 });
+
+describe('pelletShotDirection — two-layer cone', () => {
+  test('zero situational spread + centered rng is a dead-on shot', () => {
+    const dir = pelletShotDirection(0.2, 0.3, 0, 0.02, () => 0.5);
+    const forward = cameraForward(0.2, 0.3, 'YXZ');
+    expect(dir.distanceTo(forward)).toBeLessThan(1e-12);
+  });
+
+  test('a perfectly aimed shot still scatters pellets — the pattern never tightens to a laser', () => {
+    // The property the shotgun rebalance rests on: with the situational cone
+    // fully zeroed (perfectly steady ADS-crouched aim), the fixed pattern
+    // layer still deflects pellets away from the crosshair.
+    const perfectAim = pelletShotDirection(0, 0, 0, 0.02, () => 1);
+    const center = cameraForward(0, 0, 'YXZ');
+    expect(perfectAim.angleTo(center)).toBeGreaterThan(1e-6);
+  });
+
+  test('with no pattern it matches shotDirection given equivalent draws', () => {
+    // The cone layer's rng draws are consumed even when the cone is zero, so
+    // equivalence means neutralizing them at 0.5 (the no-offset draw): the
+    // situational layers then see identical values and the vectors agree
+    // exactly — nothing about single-ray behavior changes when cone = 0.
+    const pitch = -0.3, yaw = 2;
+    const pellet = pelletShotDirection(pitch, yaw, 0.05, 0, seq(0.3, 0.5, 0.3, 0.5));
+    const plain = shotDirection(pitch, yaw, 0.05, seq(0.3, 0.3));
+    expect(pellet.distanceTo(plain)).toBeLessThan(1e-12);
+  });
+
+  test('deflections stay inside the (spread + cone) bound', () => {
+    const spread = 0.04, cone = 0.02;
+    // rng extremes on BOTH axes: each axis sits at −(spread+cone)/2 in view
+    // space before rotation, so the worst-case corner is √2 × that per-axis
+    // figure off forward.
+    const extreme = pelletShotDirection(0, 0, spread, cone, () => 0);
+    const center = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, 0, 0, EULER_ORDER));
+    const maxAngle = Math.atan((Math.SQRT2 * (spread + cone)) / 2);
+    expect(extreme.angleTo(center)).toBeLessThanOrEqual(maxAngle + 1e-9);
+  });
+});
+
+/** Deterministic rng cycling through the given values. */
+function seq(...values: number[]): () => number {
+  let i = 0;
+  return () => values[i++ % values.length]!;
+}

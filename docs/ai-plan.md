@@ -335,15 +335,22 @@ target beyond engage range — while the hue stays the mode's.
   none after down, resumed on re-toggle. Dead bots are excluded from the
   census — their `update()` early-returns, so a corpse killed mid-overlay
   legitimately keeps the last value it took.
+- Two carriers for one state (PR 1.5), because neither survives contact with
+  eyes alone: brightness tiers are hard to tell apart at a glance and not
+  colorblind-trivial, so `hud.ts:updateBotDebug` now renders the same gates
+  as an `r`/`s` text column beside the mode — `rs` can fire, `r-` in range
+  but sight unproven or blocked, `--` tracking beyond engage range.
+- Cost accounting for that DEV probe, stated plainly: it is paid per bot per
+  frame while the view is up EVEN WHEN THE TARGET IS OUT OF RANGE, where the
+  result cannot change the tier. Kept eager deliberately — the smoke census
+  keys on any live bot with any target probing, which a range-gated probe
+  would break, and the cost cannot ship outside DEV. Revisit only if
+  profiling ever shows it.
 
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
   construct brains with different `BrainParams` per bot or team.
-- **Gate state in the bot readout text**: the shot-gate grading above rides
-  brightness alone, and full vs half vs quarter red may be hard to tell apart
-  at a glance (and is not colorblind-trivial). A cheap follow-up is a
-  range/LOS column in `hud.ts:updateBotDebug`'s per-bot lines.
 - **T-side score naming**: `scoreDeaths` doubles as the T score (it now
   counts all T-side kills, not just player deaths — review finding, fixed
   in-tranche); renaming the field pair to team-named counters is HUD/state

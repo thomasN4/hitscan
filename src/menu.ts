@@ -1,9 +1,9 @@
-// menu.ts — DOM for the pre-game match-config menu, the loadout picker and
-// the pause overlay.
+// menu.ts — DOM for the pre-game match-config menu, the loadout picker, the
+// pause overlay and the match-end score screen.
 //
 // Split out of main.ts alongside hud.ts's ownership rule: hud.ts writes the
 // in-game HUD, this module writes everything inside #startMenu / #pauseMenu /
-// #loadoutScreen.
+// #loadoutScreen / #endScreen.
 // Like hud.ts it grabs references through an init*() function called once by
 // main.ts (after the session config has been parsed into core/state), and a
 // missing id is a named startup error via hud.ts:requireEl.
@@ -17,7 +17,8 @@
 // screen), pre-filled with lastLoadout either way. Its Deploy click doubles as
 // the user gesture pointer lock requires — see main.ts's onDeploy handler.
 import type { LoadoutState, MapName, WeaponClass, WeaponId } from './core/state';
-import { WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
+import { bots, score, WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
+import type { MatchWinner } from './sim/match';
 import {
   BOTS_CT_LIMITS,
   BOTS_T_LIMITS,
@@ -48,15 +49,20 @@ export interface MenuHandlers {
   onResume(): void;
   /** Pause menu Quit to Menu: reload so the scene rebuilds fresh. */
   onQuit(): void;
+  /** End screen Rematch: reload with the same committed config query. */
+  onRematch(): void;
+  /** End screen Back to Menu: navigate to the bare path (default config). */
+  onExitToMenu(): void;
   /** Picker Deploy: apply the picked loadout (respawning if dead) and enter play. */
   onDeploy(primary: WeaponId, secondary: WeaponId): void;
 }
 
 // Resolved by initMenus(); non-optional like hud.ts's refs — "read only after
 // init" is the documented contract.
-let startMenu: HTMLElement, pauseMenu: HTMLElement, loadoutScreen: HTMLElement,
+let startMenu: HTMLElement, pauseMenu: HTMLElement, loadoutScreen: HTMLElement, endScreen: HTMLElement,
   subtitleEl: HTMLElement, loadoutTitle: HTMLElement, loadoutMsg: HTMLElement,
-  colPrimary: HTMLElement, colSecondary: HTMLElement;
+  colPrimary: HTMLElement, colSecondary: HTMLElement,
+  endTitle: HTMLElement, endScoreCT: HTMLElement, endScoreT: HTMLElement, scoreboardBody: HTMLElement;
 let deployBtn: HTMLButtonElement;
 let mapSel: HTMLSelectElement, botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
   timeMinIn: HTMLInputElement;
@@ -128,6 +134,50 @@ export function showLoadoutPicker(mode: 'start' | 'death'): void {
   loadoutScreen.style.display = 'flex';
 }
 
+/**
+ * Reveal the match-end score screen. Called once per match by combat.ts's
+ * endMatch (on its wall-clock delay), so the table is rebuilt every time
+ * from the final counters — a static snapshot; nothing simulates behind it.
+ * Rows: You first among equals, everyone sorted by kills descending.
+ */
+export function showEndScreen(winner: MatchWinner): void {
+  const banner: Record<MatchWinner, string> = {
+    CT: 'Counter-Terrorists Win',
+    T: 'Terrorists Win',
+    draw: 'Draw',
+  };
+  endTitle.textContent = banner[winner];
+  // Color the banner like the winning side; a draw gets a neutral tone.
+  endTitle.classList.toggle('ct', winner === 'CT');
+  endTitle.classList.toggle('t', winner === 'T');
+  endTitle.classList.toggle('draw', winner === 'draw');
+  endScoreCT.textContent = 'CT ' + score.scoreKills;
+  endScoreT.textContent = score.scoreDeaths + ' T';
+
+  interface Row { name: string; team: 'T' | 'CT'; kills: number; deaths: number; you: boolean }
+  const rows: Row[] = [
+    { name: 'You', team: 'CT', kills: score.playerKills, deaths: score.playerDeaths, you: true },
+    ...bots.map(b => ({ name: b.name, team: b.team, kills: b.kills, deaths: b.deaths, you: false })),
+  ];
+  rows.sort((a, b) => b.kills - a.kills);
+
+  scoreboardBody.replaceChildren(...rows.map(r => {
+    const tr = document.createElement('tr');
+    if (r.you) tr.className = 'you';
+    const nameTd = document.createElement('td');
+    nameTd.className = 'name ' + r.team.toLowerCase();
+    nameTd.textContent = r.name;
+    const kTd = document.createElement('td');
+    kTd.textContent = String(r.kills);
+    const dTd = document.createElement('td');
+    dTd.textContent = String(r.deaths);
+    tr.append(nameTd, kTd, dTd);
+    return tr;
+  }));
+
+  endScreen.style.display = 'flex';
+}
+
 function buildCards(): void {
   for (const [id, def] of Object.entries(WEAPONS)) {
     // Melee defs build no card: the knife is carried always and picked never
@@ -165,12 +215,17 @@ export function initMenus(handlers: MenuHandlers): void {
   startMenu = requireEl('startMenu');
   pauseMenu = requireEl('pauseMenu');
   loadoutScreen = requireEl('loadoutScreen');
+  endScreen = requireEl('endScreen');
   subtitleEl = requireEl('menuSubtitle');
   loadoutTitle = requireEl('loadoutTitle');
   loadoutMsg = requireEl('loadoutMsg');
   colPrimary = requireEl('colPrimary');
   colSecondary = requireEl('colSecondary');
   deployBtn = requireEl('deployBtn') as HTMLButtonElement;
+  endTitle = requireEl('endTitle');
+  endScoreCT = requireEl('endScoreCT');
+  endScoreT = requireEl('endScoreT');
+  scoreboardBody = requireEl('scoreboardBody');
   mapSel = requireEl('cfgMap') as HTMLSelectElement;
   botsTIn = requireEl('cfgBotsT') as HTMLInputElement;
   botsCtIn = requireEl('cfgBotsCt') as HTMLInputElement;
@@ -195,6 +250,8 @@ export function initMenus(handlers: MenuHandlers): void {
   };
   requireEl('resumeBtn').onclick = () => handlers.onResume();
   requireEl('quitBtn').onclick = () => handlers.onQuit();
+  requireEl('rematchBtn').onclick = () => handlers.onRematch();
+  requireEl('endMenuBtn').onclick = () => handlers.onExitToMenu();
 
   const deploy = (): void => {
     saveLoadout(sel);
@@ -253,6 +310,7 @@ export function hideAllMenus(): void {
   startMenu.style.display = 'none';
   pauseMenu.style.display = 'none';
   loadoutScreen.style.display = 'none';
+  endScreen.style.display = 'none';
 }
 
 export function showPauseMenu(show: boolean): void {

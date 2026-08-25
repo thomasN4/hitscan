@@ -140,6 +140,10 @@ export interface Bot {
   legs: THREE.Mesh;
   hp: number;
   alive: boolean;
+  /** Kills credited to this bot this match (any opposing casualty it dealt) — scoreboard only. */
+  kills: number;
+  /** Times this bot died this match — scoreboard only. */
+  deaths: number;
   /** Resting on support this frame; false while airborne. Written by the executor's vertical stage. */
   onGround: boolean;
   /** Whether LAST frame's step was rejected by world collision — the brain's obstacle feedback. */
@@ -654,8 +658,9 @@ export const SESSION_DEFAULTS: Readonly<{
 
 /**
  * Session-level configuration + flags. The config fields are written ONCE by
- * main.ts at startup (parsed from the committed query string); the flags are
- * written by main.ts's pointer-lock events.
+ * main.ts at startup (parsed from the committed query string); locked/started
+ * are written by main.ts's pointer-lock events, matchOver once by
+ * combat.ts:endMatch.
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
@@ -675,12 +680,15 @@ export interface SessionState {
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */
   started: boolean;
+  /** The match has ended (clock expiry or elimination); written once by combat.ts:endMatch. */
+  matchOver: boolean;
 }
 
 export const session: SessionState = {
   ...SESSION_DEFAULTS,
   locked: false,
   started: false,
+  matchOver: false,
 };
 
 /**
@@ -829,25 +837,34 @@ export const wpn: WeaponDynamics = {
 };
 
 /**
- * Match bookkeeping. Three writers: bots.ts increments scoreKills on a
- * CT-side kill (player or ally) and scoreDeaths when a T downs a CT,
- * combat.ts increments scoreDeaths when the player dies, main.ts's loop
- * counts roundTime down (arena only). hud.ts renders.
+ * Match bookkeeping. Team counters have three writers: bots.ts increments
+ * scoreKills on a CT-side kill (player or ally) and scoreDeaths when a T
+ * downs a CT, combat.ts increments scoreDeaths when the player dies,
+ * main.ts's loop counts roundTime down (arena only). The player counters
+ * are the scoreboard's "You" row: bots.ts bumps playerKills on the player's
+ * own kills and combat.ts bumps playerDeaths when the player dies. hud.ts
+ * renders the top bar; menu.ts renders the end screen.
  */
 export interface ScoreState {
   /** Shown as the CT score: player kills plus ally kills of Ts. */
   scoreKills: number;
   /** Shown as the T score: T-side kills — the player's deaths plus CT allies'. */
   scoreDeaths: number;
+  /** Kills credited to YOU personally (excludes ally kills). */
+  playerKills: number;
+  /** Times YOU died personally (excludes ally deaths). */
+  playerDeaths: number;
   /** Seconds left in the round; initialized from session.roundSeconds by
-   *  main.ts and reset there when it expires (expiry handling itself is a
-   *  known placeholder — see the roadmap). */
+   *  main.ts. Expiry ends the match via combat.ts:endMatch — it is clamped
+   *  at 0 rather than reset. */
   roundTime: number;
 }
 
 export const score: ScoreState = {
   scoreKills: 0,
   scoreDeaths: 0,
+  playerKills: 0,
+  playerDeaths: 0,
   roundTime: SESSION_DEFAULTS.roundSeconds,
 };
 

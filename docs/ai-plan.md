@@ -330,15 +330,20 @@ target beyond engage range — while the hue stays the mode's.
   as the issue required: a deliberate choice to pay while inspecting, never a
   side effect. Both reset alongside `targetEye` on no-target and respawn.
 - Smoke `[debugView]` pins the gating end-to-end: zero probes before any V
-  press, every live bot probing while up, none after down, resumed on
-  re-toggle. Dead bots are excluded from the census — their `update()`
-  early-returns, so a corpse killed mid-overlay legitimately keeps the last
-  value it took.
+  press, at least one live bot probing while up (the pin asserts ≥1, not
+  every — a bot whose target died mid-phase legitimately holds `null`),
+  none after down, resumed on re-toggle. Dead bots are excluded from the
+  census — their `update()` early-returns, so a corpse killed mid-overlay
+  legitimately keeps the last value it took.
 
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
   construct brains with different `BrainParams` per bot or team.
+- **Gate state in the bot readout text**: the shot-gate grading above rides
+  brightness alone, and full vs half vs quarter red may be hard to tell apart
+  at a glance (and is not colorblind-trivial). A cheap follow-up is a
+  range/LOS column in `hud.ts:updateBotDebug`'s per-bot lines.
 - **T-side score naming**: `scoreDeaths` doubles as the T score (it now
   counts all T-side kills, not just player deaths — review finding, fixed
   in-tranche); renaming the field pair to team-named counters is HUD/state

@@ -276,6 +276,7 @@ const game: DebugGame = {
   get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
   get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
   get started() { return session.started; }, set started(v: boolean) { session.started = v; },
+  get debugView() { return session.debugView; }, set debugView(v: boolean) { session.debugView = v; },
   get shooting() { return input.shooting; }, set shooting(v: boolean) { input.shooting = v; },
   get aiming() { return input.aiming; }, set aiming(v: boolean) { input.aiming = v; },
   get running() { return input.running; }, set running(v: boolean) { input.running = v; },

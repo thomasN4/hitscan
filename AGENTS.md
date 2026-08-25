@@ -14,7 +14,7 @@ Default loop for every non-trivial change: **plan → worktree → implement →
 2. **Worktree** — every branch is developed in its own git worktree, never directly in the shared primary checkout (which stays on `main`). One session per worktree; never run two sessions against one working copy:
 
    ```sh
-   git worktree add ../cs-demo-<slug> -b feat/<short-slug>
+   git worktree add ../acsc-<slug> -b feat/<short-slug>
    ```
 
 3. **Implement** — on a feature branch cut from `main` (inside its worktree):

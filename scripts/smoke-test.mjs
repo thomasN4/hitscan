@@ -457,9 +457,26 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const restored = { slot: cs.game.slot, mag: cs.weapon.mag, reloading: cs.weapon.reloading };
         // ...and R starts a fresh reload; let it run out so the phases below
         // see a full mag again.
+        //
+        // POLLED, not slept. The reload deadline is GAME time (weapons.ts sets
+        // reloadEnd = gameTime.now() + reloadTime and checks it per frame),
+        // while a sleep spends WALL time — and main.ts advances the clock by
+        // Math.min(clock.getDelta(), 0.05), so game time can only ever lag,
+        // never lead. A frame overrunning 50 ms contributes 50 ms of game time
+        // and discards the rest. Budgeting 2600 ms of wall clock for 2.2 s of
+        // game time therefore asserted that the loop keeps within ~18% of
+        // real time, which the dt clamp exists precisely to NOT promise. One
+        // slow frame in the window and the phase failed with mag still 24.
+        // Poll for the thing being claimed instead, on a generous deadline —
+        // the pattern the [respawn] phase below already uses.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
-        await wait(2600);
-        const refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        const reloadBy = performance.now() + 8000;
+        let refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        while ((refilled.reloading || refilled.mag !== cs.weapon.magSize)
+               && performance.now() < reloadBy) {
+          await new Promise(r => requestAnimationFrame(r));
+          refilled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        }
         return { started, cancelled, restored, refilled };
       });
       if (qcancel.started.reloading !== true) throw new Error(`R did not start a reload: ${JSON.stringify(qcancel.started)}`);

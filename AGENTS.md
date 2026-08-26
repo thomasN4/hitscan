@@ -40,6 +40,11 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      present — removing the prefix is what marks a PR ready for review.
    - PR body: what changed, why, and verification results.
 5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR.
+   - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
+     (`.github/workflows/review.yml`): a headless `claude -p` reads the diff and
+     posts a comment-review as `claude-bot`, once per head commit. It is
+     advisory and gates nothing — `npm run lint`/`typecheck`/`test`/`build` in
+     `ci.yml` remain the only checks that can fail a PR.
 
 Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 
@@ -63,6 +68,17 @@ Four static/sim layers, deliberately split:
 
 - **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit. When a browser-side module holds pure logic the suite cannot reach, split out a seam rather than mocking — `sim/recoil.ts:convertOnSwap()` is the worked example, and lesson 19 is what it cost to learn twice. The suite also carries one repo-hygiene check that is not simulation logic: `scripts/lessonNumbering.test.mjs`, which reads `docs/*-plan.md` off disk and fails if a review-lesson number moves out from under the comments citing it (see Roadmap).
 - **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, all three maps. This is the layer that catches wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`. Note Vitest resolves through its own bundled Vite (8.x), not the workspace Vite 5 — a resolution edge must work under both.
+
+A fifth layer reads rather than runs: the CI reviewer in
+`.github/workflows/review.yml`. Its standing instructions are
+`scripts/review-prompt.md` — edit that file, not the workflow, to change what
+the reviewer looks for, and iterate on it locally without pushing:
+
+```sh
+claude -p "Review the pull request whose base commit is $(git merge-base main HEAD) and head commit is HEAD" \
+  --append-system-prompt "$(cat scripts/review-prompt.md)" \
+  --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+```
 
 ## Architecture rules
 

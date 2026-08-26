@@ -32,6 +32,13 @@ Review only what changed between the base and head commits you were given. Read
 the surrounding code freely to verify a finding — a diff hunk alone rarely proves
 one — but do not report pre-existing problems the PR did not touch.
 
+One exception, and it is most of the point of **Stale claims** below: a claim
+this change makes false is in scope wherever that claim lives. What the PR
+introduced is the contradiction, not the file, so a line in `AGENTS.md` or a
+`docs/*-plan.md` the diff never touches is still a finding — anchor it at the
+claim's own `file:line`. That is where the load-bearing claims are, and a code
+PR rarely edits them, so without this the category would miss its best cases.
+
 Report three kinds of thing:
 
 - **Bugs** — correctness defects. Every one needs a concrete failure scenario:

@@ -59,8 +59,8 @@ export function initEngine(map: MapName): void {
   // zoom targets, down to ~6° at full sniper zoom).
   camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.1, 300);
 
-  scene.add(new THREE.HemisphereLight(amb.hemiSky, amb.hemiGround, 0.85));
-  const sun = new THREE.DirectionalLight(amb.sunColor, 1.4);
+  scene.add(new THREE.HemisphereLight(amb.hemiSky, amb.hemiGround, amb.hemiIntensity));
+  const sun = new THREE.DirectionalLight(amb.sunColor, amb.sunIntensity);
   sun.position.set(40, 60, 25);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);

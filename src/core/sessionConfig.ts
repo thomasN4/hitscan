@@ -98,7 +98,8 @@ const IS_MAP_NAME: Record<MapName, true> = {
   arena: true,
   range: true,
   elevation: true,
-  warehouse: true,
+  warehouse1: true,
+  warehouse2: true,
 };
 
 export function asMapName(raw: string | null | undefined): MapName {

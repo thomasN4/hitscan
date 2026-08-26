@@ -275,26 +275,33 @@ export function resolveVertical(
  * Sample spawn candidates until one is clear of level geometry.
  *
  * `sample()` proposes a position (usually a random draw from the map's spawn
- * band); each is tested with collidesAt at the entity's radius, feet on open
- * ground (both maps sample spawns from y = 0 floor level). Bounded so a
+ * zone); each is tested with collidesAt at the entity's radius. Bounded so a
  * pathological registry can never hang the respawn scheduler — on exhaustion
  * the LAST candidate is returned, degrading to unvalidated placement rather
  * than inventing a coordinate no sampler produced. With ~80% of the arena
  * band open floor, 32 consecutive misses is ~1e-22 probability.
  *
+ * `feetY` defaults to 0 because every spawn zone was floor-level when this was
+ * written. It is a parameter now because maps/warehouse2.ts spawns a whole
+ * team ON the catwalk: tested at y = 0 those candidates are checked against
+ * the ground-floor geometry UNDER the ring, which rejects the good ones and
+ * accepts positions the body cannot actually occupy.
+ *
  * @param sample produces the next candidate position
  * @param radius half-width of the entity to place
  * @param colliders registry from world.ts
  * @param maxAttempts sampling budget before giving up
+ * @param feetY height the candidate's feet sit at; 0 is open ground
  */
 export function findFreeSpawn(
   sample: () => THREE.Vector3,
   radius: number,
   colliders: THREE.Box3[],
   maxAttempts = 32,
+  feetY = 0,
 ): THREE.Vector3 {
   let pos = sample();
-  for (let i = 1; i < maxAttempts && collidesAt(pos, radius, 0, colliders); i++) pos = sample();
+  for (let i = 1; i < maxAttempts && collidesAt(pos, radius, feetY, colliders); i++) pos = sample();
   return pos;
 }
 

@@ -1,0 +1,303 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layout D — vertical stack greybox</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161a; overflow: hidden;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  #stage { position: absolute; inset: 0; }
+  canvas { display: block; }
+  #hud { position: absolute; top: 14px; left: 14px; color: #aeb4bd; font-size: 12px;
+    line-height: 1.6; background: rgba(20,22,26,.82); border: 1px solid #2c3138;
+    padding: 12px 14px; max-width: 240px; }
+  #hud h1 { margin: 0 0 2px; font-size: 12px; font-weight: 500; color: #e6e9ed; letter-spacing: .04em; }
+  #hud .sub { color: #6f7680; margin-bottom: 10px; }
+  #hud hr { border: 0; border-top: 1px solid #2c3138; margin: 10px 0; }
+  .sw { display: inline-block; width: 9px; height: 9px; margin-right: 7px; vertical-align: 1px; }
+  button { display: block; width: 100%; margin-top: 6px; padding: 5px 8px; text-align: left;
+    background: #1d2026; color: #aeb4bd; border: 1px solid #2c3138; cursor: pointer;
+    font: inherit; font-size: 11px; }
+  button:hover { background: #252931; color: #e6e9ed; }
+  button:focus-visible { outline: 2px solid #EF9F27; outline-offset: 1px; }
+  button[aria-pressed="true"] { border-color: #EF9F27; color: #EF9F27; }
+  #hint { position: absolute; bottom: 14px; left: 14px; color: #565c65; font-size: 11px; }
+</style>
+<div id="stage"></div>
+<div id="hud">
+  <h1>Layout D — vertical stack</h1>
+  <div class="sub">60 &times; 40 m shell, fenced yard, 5 m floor-to-floor</div>
+  <div><span class="sw" style="background:#378ADD"></span>ground spawn (yard)</div>
+  <div><span class="sw" style="background:#D85A30"></span>catwalk spawn</div>
+  <div><span class="sw" style="background:#EF9F27"></span>cargo lift (one-way up)</div>
+  <div><span class="sw" style="background:#7d868f"></span>open stair (walk under)</div>
+  <div><span class="sw" style="background:#4a5058"></span>cover volume</div>
+  <hr>
+  <button id="btn-roof" aria-pressed="false">Hide roof</button>
+  <button id="btn-mezz" aria-pressed="false">Hide catwalk ring</button>
+  <button id="btn-walls" aria-pressed="false">Hide shell walls</button>
+  <button id="btn-fence" aria-pressed="false">Hide fence</button>
+  <button id="btn-top">Top-down view</button>
+  <button id="btn-reset">Reset view</button>
+</div>
+<div id="hint">drag to orbit &middot; scroll to zoom &middot; right-drag to pan</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const C = {
+  floor: 0x3a3f46, yard: 0x2f3339, wall: 0x2b2f35, rack: 0x4a5058, crate: 0x545a63,
+  slab: 0x565d66, stair: 0x7d868f, rail: 0x8a929b, fence: 0x6b7280,
+  roof: 0x424851, beam: 0x353a41, glass: 0x8fa8bd,
+  lift: 0xEF9F27, spawnA: 0x378ADD, spawnB: 0xD85A30
+};
+const HW = 30, HD = 20;
+const FW = 44, FD = 34;
+const RING = 8;
+const H2 = 5, WALL_H = 10;
+const AX = HW - RING, AZ = HD - RING;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14161a);
+scene.fog = new THREE.Fog(0x14161a, 130, 340);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.5, 800);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.getElementById('stage').appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbfd4e8, 0x1a1d22, 0.85));
+const key = new THREE.DirectionalLight(0xffffff, 0.55);
+key.position.set(60, 80, 40);
+scene.add(key);
+
+const grid = new THREE.GridHelper(200, 100, 0x2c3138, 0x21252b);
+grid.position.y = -0.35;
+scene.add(grid);
+
+const mats = {};
+function mat(hex, opacity) {
+  const k = hex + '_' + (opacity || 1);
+  if (!mats[k]) mats[k] = new THREE.MeshLambertMaterial({
+    color: hex, transparent: opacity < 1, opacity: opacity || 1,
+    side: opacity < 1 ? THREE.DoubleSide : THREE.FrontSide
+  });
+  return mats[k];
+}
+function box(parent, w, h, d, x, y, z, hex, opacity, noEdge) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(hex, opacity));
+  m.position.set(x, y, z);
+  parent.add(m);
+  if (!noEdge) m.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(m.geometry),
+    new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28 })
+  ));
+  return m;
+}
+
+const yard = new THREE.Group();
+const ground = new THREE.Group();
+const mezz = new THREE.Group();
+const walls = new THREE.Group();
+const fence = new THREE.Group();
+const roof = new THREE.Group();
+scene.add(yard, ground, mezz, walls, fence, roof);
+
+box(yard, FW * 2, 0.3, FD * 2, 0, -0.3, 0, C.yard);
+box(ground, HW * 2, 0.3, HD * 2, 0, -0.1, 0, C.floor);
+
+function run(axis, fixed, from, to, y0, y1, gaps) {
+  const cuts = [from];
+  gaps.forEach(g => cuts.push(g[0], g[1]));
+  cuts.push(to);
+  for (let i = 0; i < cuts.length; i += 2) {
+    const a = cuts[i], b = cuts[i + 1];
+    if (b - a < 0.05) continue;
+    const len = b - a, c = (a + b) / 2, h = y1 - y0, cy = (y0 + y1) / 2;
+    if (axis === 'x') box(walls, len, h, 0.4, c, cy, fixed, C.wall, 0.92);
+    else box(walls, 0.4, h, len, fixed, cy, c, C.wall, 0.92);
+  }
+}
+run('x', -HD, -HW, HW, 0, H2, [[-17, -12]]);
+run('x', -HD, -HW, HW, H2, WALL_H, [[-26, -22], [-6, -2], [14, 18]]);
+run('x',  HD, -HW, HW, 0, H2, [[12, 17]]);
+run('x',  HD, -HW, HW, H2, WALL_H, [[-18, -14], [2, 6], [22, 26]]);
+run('z', -HW, -HD, HD, 0, H2, [[6, 11]]);
+run('z', -HW, -HD, HD, H2, WALL_H, [[-16, -12], [-2, 2]]);
+run('z',  HW, -HD, HD, 0, H2, [[-11, -6]]);
+run('z',  HW, -HD, HD, H2, WALL_H, [[-3, 3], [12, 16]]);
+
+const SY = H2 - 0.2;
+box(mezz, HW * 2, 0.4, RING, 0, SY, -(HD - RING / 2), C.slab);
+box(mezz, HW * 2, 0.4, RING, 0, SY,  (HD - RING / 2), C.slab);
+box(mezz, RING, 0.4, AZ * 2, -(HW - RING / 2), SY, 0, C.slab);
+box(mezz, RING, 0.4, AZ * 2,  (HW - RING / 2), SY, 0, C.slab);
+
+function rail(w, d, x, z) { box(mezz, w, 1.1, d, x, H2 + 0.55, z, C.rail, 0.75); }
+rail(AX - 10, 0.16, -(AX + 10) / 2, -AZ);
+rail(AX + 6, 0.16, (AX - 6) / 2 + 3, -AZ);
+rail(AX + 6, 0.16, -((AX - 6) / 2 + 3), AZ);
+rail(AX - 10, 0.16, (AX + 10) / 2, AZ);
+rail(0.16, AZ + 6, -AX, -(AZ - 6) / 2 - 3);
+rail(0.16, AZ - 10, -AX, (AZ + 10) / 2);
+rail(0.16, AZ + 6, AX, (AZ - 6) / 2 + 3);
+rail(0.16, AZ - 10, AX, -(AZ + 10) / 2);
+
+box(roof, HW * 2 + 0.8, 0.4, HD * 2 + 0.8, 0, WALL_H + 0.2, 0, C.roof, 0.24);
+for (let z = -16; z <= 16; z += 8) box(roof, HW * 2, 0.55, 0.7, 0, WALL_H - 0.3, z, C.beam, 0.9);
+box(roof, 40, 0.12, 3, 0, WALL_H + 0.22, -6, C.glass, 0.3, true);
+box(roof, 40, 0.12, 3, 0, WALL_H + 0.22,  6, C.glass, 0.3, true);
+
+[-3, 3].forEach(z => box(ground, 34, 3, 2, 0, 1.5, z, C.rack));
+box(ground, 6, 3, 4, 0, 1.5, -9, C.crate);
+box(ground, 6, 3, 4, 0, 1.5, 9, C.crate);
+[[-26, -16], [26, 16], [-26, 16], [26, -16]].forEach(p =>
+  box(ground, 3, 2.4, 3, p[0], 1.2, p[1], C.crate));
+
+function flightX(parent, x0, x1, z, top, steps, width) {
+  const dx = x1 - x0, len = Math.abs(dx);
+  const angle = Math.atan2(top, len);
+  for (let i = 0; i < steps; i++) {
+    const t = (i + 0.5) / steps;
+    box(parent, len / steps + 0.06, 0.16, width,
+        x0 + dx * t, top * (i + 1) / steps - 0.08, z, C.stair);
+  }
+  [-1, 1].forEach(s => {
+    const m = box(parent, Math.hypot(len, top), 0.34, 0.22,
+                  x0 + dx / 2, top / 2 - 0.28, z + s * (width / 2 - 0.12), C.stair, 0.95, true);
+    m.rotation.z = Math.sign(dx) * angle;
+  });
+}
+function flightZ(parent, z0, z1, x, top, steps, width) {
+  const dz = z1 - z0, len = Math.abs(dz);
+  const angle = Math.atan2(top, len);
+  for (let i = 0; i < steps; i++) {
+    const t = (i + 0.5) / steps;
+    box(parent, width, 0.16, len / steps + 0.06,
+        x, top * (i + 1) / steps - 0.08, z0 + dz * t, C.stair);
+  }
+  [-1, 1].forEach(s => {
+    const m = box(parent, 0.22, 0.34, Math.hypot(len, top),
+                  x + s * (width / 2 - 0.12), top / 2 - 0.28, z0 + dz / 2, C.stair, 0.95, true);
+    m.rotation.x = -Math.sign(dz) * angle;
+  });
+}
+
+flightX(ground, -8, -AX, -8, H2, 14, 3.6);
+flightX(ground, 8, AX, 8, H2, 14, 3.6);
+
+flightZ(yard, 17, 3, 32.5, H2, 14, 3.6);
+box(yard, 5.4, 0.35, 6, 32.4, H2 - 0.18, 0, C.stair);
+box(yard, 0.18, 1.1, 6, 35.1, H2 + 0.55, 0, C.rail, 0.75);
+box(yard, 0.18, 1.1, 14, 34.2, H2 * 0.55, 10, C.rail, 0.6);
+
+function lift(x, z) {
+  box(ground, 4, 0.35, 4, x, 0.18, z, C.lift);
+  box(ground, 4, H2, 4, x, H2 / 2, z, C.lift, 0.15, true);
+  const c = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.4, 4), mat(C.lift, 0.9));
+  c.position.set(x, 3.2, z);
+  ground.add(c);
+}
+lift(8, -AZ + 2);
+lift(-8, AZ - 2);
+
+box(yard, 10, 0.25, 8, 0, 0, 27, C.spawnA);
+box(mezz, 10, 0.25, 6, 0, H2 + 0.12, -(HD - RING / 2), C.spawnB);
+
+function container(x, z, alongX, stack) {
+  const w = alongX ? 12 : 2.9, d = alongX ? 2.9 : 12;
+  box(yard, w, 2.6, d, x, 1.3, z, C.crate);
+  if (stack) box(yard, w, 2.6, d, x, 3.9, z, C.crate);
+}
+container(-20, 27, true); container(20, 26, true, true); container(34, 30, true);
+container(-16, -27, true); container(14, -26, true); container(32, -29, true, true);
+container(-37, -9, false); container(-37, 9, false, true);
+container(38.5, 12, false); container(38.5, -8, false);
+
+function fenceSide(axis, fixed, from, to) {
+  const len = to - from, c = (from + to) / 2;
+  if (axis === 'x') box(fence, len, 4, 0.12, c, 2, fixed, C.fence, 0.13, true);
+  else box(fence, 0.12, 4, len, fixed, 2, c, C.fence, 0.13, true);
+  for (let p = from; p <= to + 0.01; p += 8) {
+    if (axis === 'x') box(fence, 0.35, 4.3, 0.35, p, 2.15, fixed, C.fence, 0.85);
+    else box(fence, 0.35, 4.3, 0.35, fixed, 2.15, p, C.fence, 0.85);
+  }
+}
+fenceSide('x', -FD, -FW, FW);
+fenceSide('x',  FD, -FW, FW);
+fenceSide('z', -FW, -FD, FD);
+fenceSide('z',  FW, -FD, FD);
+
+const target = new THREE.Vector3(0, 3, 0);
+const home = { r: 138, theta: -0.7, phi: 0.95 };
+let r = home.r, theta = home.theta, phi = home.phi;
+
+function apply() {
+  phi = Math.max(0.06, Math.min(Math.PI / 2 - 0.02, phi));
+  r = Math.max(24, Math.min(360, r));
+  camera.position.set(
+    target.x + r * Math.sin(phi) * Math.sin(theta),
+    target.y + r * Math.cos(phi),
+    target.z + r * Math.sin(phi) * Math.cos(theta)
+  );
+  camera.lookAt(target);
+}
+
+let drag = null;
+const el = renderer.domElement;
+el.addEventListener('contextmenu', e => e.preventDefault());
+el.addEventListener('pointerdown', e => {
+  drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey };
+  el.setPointerCapture(e.pointerId);
+});
+el.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.pan) {
+    const s = r * 0.0016;
+    target.x -= (dx * Math.cos(theta) - dy * Math.sin(theta) * Math.cos(phi)) * s;
+    target.z += (dx * Math.sin(theta) + dy * Math.cos(theta) * Math.cos(phi)) * s;
+  } else {
+    theta -= dx * 0.005;
+    phi -= dy * 0.005;
+  }
+  apply();
+});
+addEventListener('pointerup', () => { drag = null; });
+el.addEventListener('wheel', e => {
+  e.preventDefault(); r *= 1 + Math.sign(e.deltaY) * 0.09; apply();
+}, { passive: false });
+
+function bindToggle(id, group, onLabel, offLabel) {
+  const btn = document.getElementById(id);
+  const sync = () => {
+    btn.setAttribute('aria-pressed', String(!group.visible));
+    btn.textContent = group.visible ? onLabel : offLabel;
+  };
+  btn.addEventListener('click', () => { group.visible = !group.visible; sync(); });
+  sync();
+  return sync;
+}
+const syncRoof = bindToggle('btn-roof', roof, 'Hide roof', 'Show roof');
+bindToggle('btn-mezz', mezz, 'Hide catwalk ring', 'Show catwalk ring');
+bindToggle('btn-walls', walls, 'Hide shell walls', 'Show shell walls');
+bindToggle('btn-fence', fence, 'Hide fence', 'Show fence');
+document.getElementById('btn-top').addEventListener('click', () => {
+  roof.visible = false; syncRoof();
+  r = 112; theta = 0; phi = 0.08; target.set(0, 0, 0); apply();
+});
+document.getElementById('btn-reset').addEventListener('click', () => {
+  r = home.r; theta = home.theta; phi = home.phi; target.set(0, 3, 0); apply();
+});
+
+function resize() {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+addEventListener('resize', resize);
+resize();
+apply();
+
+(function loop() {
+  requestAnimationFrame(loop);
+  renderer.render(scene, camera);
+})();
+</script>

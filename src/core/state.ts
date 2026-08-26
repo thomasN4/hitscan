@@ -628,10 +628,10 @@ export function sanitizeLoadout(v: unknown): LoadoutState | undefined {
 }
 
 /** Maps selectable from the start menu (the ?map= part of the config query). */
-export type MapName = 'arena' | 'range' | 'elevation' | 'warehouse';
+export type MapName = 'arena' | 'range' | 'elevation' | 'warehouse1' | 'warehouse2';
 
 /**
- * A map's sky, fog and light colours.
+ * A map's sky, fog and lighting.
  *
  * Lighting used to be four colour literals inlined in `initEngine()`, which
  * made every map share the arena's desert sun — fine while every map WAS a
@@ -654,6 +654,17 @@ export interface Ambience {
   hemiSky: number;
   /** Hemisphere light ground colour (bounce onto downward-facing surfaces). */
   hemiGround: number;
+  /**
+   * Directional "sun" intensity.
+   *
+   * Here rather than hardcoded in initEngine for the same reason the colours
+   * are: maps/warehouse2.ts has a ROOF, so its interior gets no sun at all and
+   * has to be lit by the hemisphere alone. A map that changes what light
+   * reaches it has to be able to say so.
+   */
+  sunIntensity: number;
+  /** Hemisphere light intensity — the only light under a roof. */
+  hemiIntensity: number;
 }
 
 /**
@@ -668,6 +679,8 @@ export const DESERT_AMBIENCE: Ambience = {
   sunColor: 0xffeecc,
   hemiSky: 0xfff3e0,
   hemiGround: 0x8a7a5c,
+  sunIntensity: 1.4,
+  hemiIntensity: 0.85,
 };
 
 /**
@@ -683,7 +696,7 @@ export const AMBIENCE: Record<MapName, Ambience> = {
   // Fog starts at 60 rather than 40 because a racking aisle runs the better
   // part of 90 m and the far end has to stay readable; 200 is still well
   // inside the camera's far plane.
-  warehouse: {
+  warehouse1: {
     background: 0x9aa3ad,
     fogNear: 60,
     fogFar: 200,
@@ -695,6 +708,100 @@ export const AMBIENCE: Record<MapName, Ambience> = {
     // — parapets, stair risers, the dock lip — as a black silhouette you
     // cannot read the shape of.
     hemiGround: 0x7a828b,
+    // Unchanged from when initEngine hardcoded them, so warehouse1 renders
+    // exactly as it did before intensities became per-map.
+    sunIntensity: 1.4,
+    hemiIntensity: 0.85,
+  },
+  // Roofed shed inside a fenced yard. The sky colour is what you see over the
+  // fence, so it stays an outdoor overcast; fog is tighter than warehouse1's
+  // because the whole level fits in a 111 m diagonal rather than a 90 m aisle.
+  //
+  // The intensities are the point of this entry. The roof blocks the
+  // directional sun over the entire interior, so indoors is lit by the
+  // hemisphere ALONE — no direction, no shadows. Raising hemiIntensity past
+  // the outdoor 0.85 is what stops the shell reading as a black box, and the
+  // sun is kept at full strength because the yard is still open to it.
+  warehouse2: {
+    background: 0x8e99a6,
+    fogNear: 45,
+    fogFar: 170,
+    sunColor: 0xf4f6fa,
+    hemiSky: 0xd6dfe8,
+    // Same argument as warehouse1's, and stronger: under a roof EVERY
+    // interior face is a shaded face, so this colour is doing all the work.
+    hemiGround: 0x848d97,
+    sunIntensity: 1.4,
+    hemiIntensity: 2.4,
+  },
+};
+
+/**
+ * The box a team's bots are drawn from when they enter or re-enter the world.
+ *
+ * `y` is what makes this more than the hardcoded band it replaces: it is the
+ * FEET height of the zone, so a zone can sit on a catwalk rather than the
+ * floor. maps/warehouse2.ts spawns one whole team five metres up, which is the
+ * reason this type exists.
+ *
+ * The box must lie entirely over standable surface. Nothing here checks that —
+ * bots.ts rejection-samples against `colliders`, which catches a candidate
+ * INSIDE geometry but not one over thin air, and a zone hanging over a void
+ * simply drops its bots.
+ */
+export interface SpawnZone {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  /** Feet height of the zone's floor. 0 is open ground. */
+  y: number;
+}
+
+/**
+ * Where each team enters, per map.
+ *
+ * bots.ts used to draw every spawn from one hardcoded band — x ±45, |z| 20..55
+ * — for every map, which is why maps/warehouse1.ts had to adopt the arena's
+ * exact 120 x 120 footprint rather than the footprint it wanted
+ * (maps/warehouse1.ts:25-27). A map smaller than that band strands bots
+ * outside its own geometry.
+ *
+ * A full Record for the same reason as BUILDERS / SPAWN_Z / AMBIENCE: adding a
+ * MapName must fail to compile until the new map says where its bots start.
+ *
+ * The first four entries reproduce that old band exactly — `x ∈ [-45, 45]`,
+ * `|z| ∈ [20, 55]`, Ts on -z away from the player spawn and CTs mirrored —
+ * so making this per-map changed nothing about the maps that predate it.
+ * state.test.ts pins that.
+ */
+export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
+  arena: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  range: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  elevation: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  warehouse1: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  // The asymmetric one, and the reason the table has a `y`. CTs muster in the
+  // +z yard between the shell and the fence and have to come THROUGH a
+  // doorway; Ts start already on the catwalk ring's -z band, five metres up.
+  // Bounds are inset from the geometry by more than NAV_RADIUS so no draw
+  // straddles an edge: the yard band stops short of the fence at z = 34 and
+  // the shell wall at z = 20.5, the catwalk band short of the wall at
+  // z = -19.5 and the void lip at z = -12.
+  warehouse2: {
+    T:  { minX: -28, maxX: 28, minZ: -19, maxZ: -13, y: 5.1 },
+    CT: { minX: -26, maxX: 26, minZ:  23, maxZ:  32, y: 0 },
   },
 };
 

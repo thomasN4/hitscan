@@ -1,4 +1,4 @@
-// warehouse.ts — a distribution-warehouse combat map.
+// warehouse1.ts — a distribution-warehouse combat map.
 //
 // The second full combat map after arena.ts, built on a different spatial
 // grammar: where the arena is blocks scattered in open ground, this is an
@@ -74,7 +74,7 @@ const AISLE_MIN = 4;
 const W = 60, T = 2, H = 8;
 
 /** Build the warehouse. Called once, via the maps/index.ts registry. */
-export function buildWarehouse(): void {
+export function buildWarehouse1(): void {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), matFloor);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -279,7 +279,7 @@ function checkAisles(): void {
   ];
   for (const [name, width] of lanes) {
     if (width < AISLE_MIN) {
-      console.error(`[warehouse] ${name} is ${width} m, under AISLE_MIN ${AISLE_MIN}`
+      console.error(`[warehouse1] ${name} is ${width} m, under AISLE_MIN ${AISLE_MIN}`
         + ' — bots will not route through it');
     }
   }

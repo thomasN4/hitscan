@@ -36,11 +36,18 @@ const STAIRS = {
   // Deliberately the outside one — it is the flight a player uses without
   // entering the building, so this phase stays independent of the interior.
   elevation: { start: [8, 1.7, 22.5], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 22, bottomDir: 1 },
-  // warehouse: the south mezzanine flight, mouth at z = 17 ascending z-.
-  warehouse: { start: [0, 1.7, 18], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 17.5, bottomDir: 1 },
+  // warehouse1: the south mezzanine flight, mouth at z = 17 ascending z-.
+  warehouse1: { start: [0, 1.7, 18], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 17.5, bottomDir: 1 },
+  // warehouse2: the YARD flight, mouth at z = 15.75 on x = 32.5, ascending z-.
+  // Deliberately the outdoor one, for the same reason as elevation's: it is
+  // the flight a player uses without entering the building, so this phase
+  // stays independent of the interior — and it is the map's only SOLID flight,
+  // which keeps the shared climb/descend assertions honest against a normal
+  // addStairs staircase rather than the open ones in the void.
+  warehouse2: { start: [32.5, 1.7, 17], upYaw: 0, deckFeet: 5.1, downYaw: Math.PI, bottomZ: 16.25, bottomDir: 1 },
 };
 
-async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = null } = {}) {
+async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = null, liftCheck = null } = {}) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
   const mapErrors = [];
@@ -186,6 +193,63 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (!down.reachedBottom || Math.abs(down.endedAtFeet) > 0.05) throw new Error(`descent never reached open ground grounded (feet ${down.endedAtFeet} m): ${JSON.stringify(down)}`);
       if (down.airborneFrames > 0) throw new Error(`descent went airborne on ${down.airborneFrames} frames: ${JSON.stringify(down)}`);
       console.log(`[stairs-down] OK`, JSON.stringify(down));
+    }
+
+    // 2d) Cargo lift (maps/warehouse2.ts). The map's second way up, and the
+    //     only mechanic in the game that moves a body without the body asking:
+    //     world.ts:addLiftPad registers a pad, sim/lift.ts decides it fires,
+    //     and player.ts/bots.ts apply it after their vertical resolve.
+    //
+    //     Three claims, and the third is the one that actually breaks. Apex
+    //     alone is easy to hit; what matters is that the arc leaves enough
+    //     time ABOVE the deck to travel onto it, because until a body clears
+    //     the slab its head is underneath and slideMoveXZ refuses to let it
+    //     move over. A pad tuned to just beat DECK_Y drops you back in the
+    //     void, which looks exactly like a broken pad rather than a changed
+    //     constant.
+    if (liftCheck) {
+      const lift = await page.evaluate(async (spec) => {
+        const cs = window.__cs;
+        cs.player.hp = 100000;
+        cs.game.pitch = 0;
+        const feet = () => cs.player.pos.y - cs.player.eyeHeight;
+
+        // Beside the pad on open floor: must just stand there. The pad fires on
+        // FOOTPRINT OVERLAP, and the exact edge cases for that live in
+        // sim/lift.test.ts; what this phase is for is the wiring — that the
+        // registry player.ts consults is the map's and not every solid in it.
+        cs.player.pos.set(spec.beside[0], cs.player.eyeHeight, spec.beside[1]);
+        cs.player.vel.set(0, 0, 0);
+        for (let i = 0; i < 30; i++) await new Promise(r => requestAnimationFrame(r));
+        const besideFeet = +feet().toFixed(2);
+
+        // On the pad, walking toward the band it serves.
+        cs.player.pos.set(spec.pad[0], spec.padTop + cs.player.eyeHeight, spec.pad[1]);
+        cs.player.vel.set(0, 0, 0);
+        cs.game.yaw = spec.rideYaw;
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        let apex = -1;
+        const t0 = performance.now();
+        while (performance.now() - t0 < 6000) {
+          await new Promise(r => requestAnimationFrame(r));
+          apex = Math.max(apex, feet());
+          if (apex > spec.deckFeet && cs.player.onGround && feet() >= spec.deckFeet - 0.05) break;
+        }
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r));
+        const result = {
+          besideFeet,
+          apex: +apex.toFixed(2),
+          restFeet: +feet().toFixed(2),
+          onGround: cs.player.onGround,
+        };
+        cs.player.hp = 100;
+        return result;
+      }, liftCheck);
+      if (lift.besideFeet > liftCheck.padTop) throw new Error(`standing beside the pad launched the player: ${JSON.stringify(lift)}`);
+      if (lift.apex <= liftCheck.deckFeet) throw new Error(`lift arc never cleared the deck it serves: ${JSON.stringify(lift)}`);
+      if (!lift.onGround || Math.abs(lift.restFeet - liftCheck.deckFeet) > 0.05) throw new Error(`lift did not put the player down on the catwalk: ${JSON.stringify(lift)}`);
+      console.log(`[lift] OK`, JSON.stringify(lift));
     }
 
     let sprint = null;
@@ -1433,7 +1497,14 @@ try {
   await runNavGraphCheck();
   await runWedgeCheck();
   await runDebugViewCheck();
-  await runMap('warehouse', '/?map=warehouse', { botCheck: true, stairsCheck: STAIRS.warehouse });
+  await runMap('warehouse1', '/?map=warehouse1', { botCheck: true, stairsCheck: STAIRS.warehouse1 });
+  await runMap('warehouse2', '/?map=warehouse2', {
+    botCheck: true,
+    stairsCheck: STAIRS.warehouse2,
+    // Pad A at (8, -10), which serves the -z band; yaw 0 faces -z, so holding
+    // W through the arc carries the player onto it.
+    liftCheck: { pad: [8, -10], beside: [0, -10], padTop: 0.25, deckFeet: 5.1, rideYaw: 0 },
+  });
 
   await runMap('range', '/?map=range', { sprintCheck: true });
   await runShotgunCheck();

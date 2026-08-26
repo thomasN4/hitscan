@@ -39,6 +39,8 @@ export interface NavLinkSpec {
   top: THREE.Vector3;
   /** Half the traversable width across the line of travel (m). */
   halfWidth: number;
+  /** Upward only. Omitted means both ways, which is what a flight of stairs is. */
+  oneWay?: boolean;
 }
 
 /** Rectangular XZ extent the graph covers. */
@@ -191,8 +193,12 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     if (a < 0 || b < 0 || a === b) continue;
     const join = (i: number, j: number): void => {
       const cost = edgeLength(nodes[i]!, nodes[j]!);
-      // Both ways: a flight is as walkable down as up.
       edges[i]!.push(j); costs[i]!.push(cost);
+      // Both ways: a flight is as walkable down as up. A one-way link is not —
+      // a cargo lift throws a body upward and offers nothing on the way back,
+      // and an edge claiming otherwise routes bots off the deck and onto the
+      // pad, which launches them again.
+      if (link.oneWay) return;
       edges[j]!.push(i); costs[j]!.push(cost);
     };
     join(a, b);

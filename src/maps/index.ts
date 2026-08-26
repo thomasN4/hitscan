@@ -19,12 +19,14 @@ import type { MapName } from '../core/state';
 import { buildArena } from './arena';
 import { buildRange } from './range';
 import { buildElevation } from './elevation';
-import { buildWarehouse } from './warehouse';
+import { buildWarehouse1 } from './warehouse1';
+import { buildWarehouse2 } from './warehouse2';
 
 /** Every map's geometry builder, keyed by the name the config query carries. */
 export const BUILDERS: Record<MapName, () => void> = {
   arena: buildArena,
   range: buildRange,
   elevation: buildElevation,
-  warehouse: buildWarehouse,
+  warehouse1: buildWarehouse1,
+  warehouse2: buildWarehouse2,
 };

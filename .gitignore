@@ -5,3 +5,9 @@
 # link. Keep these bare.
 node_modules
 dist
+
+# The review job writes the model's markdown here before posting it
+# (.github/workflows/review.yml), and AGENTS.md documents running the same
+# command locally — so without this, a `git add -A` commits a review into the
+# repo.
+review.md

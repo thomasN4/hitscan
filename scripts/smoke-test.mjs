@@ -1066,25 +1066,48 @@ async function runDebugViewCheck() {
         const el = document.getElementById('botDebug');
         return el && { shown: getComputedStyle(el).display !== 'none', text: el.textContent };
       };
+      // The shot-gate readout (issue #46): while the view is up, bots pay one
+      // LOS raycast per frame and report it; while it is down, live bots must
+      // hold NO fresh probe — the raycast is DEV-only and lazy everywhere else.
+      // Dead bots are excluded: their update() early-returns, so a corpse that
+      // died mid-overlay legitimately keeps the last value it took.
+      const gateCensus = () => {
+        let probed = 0, alive = 0;
+        for (const b of cs.bots) {
+          if (!b.alive) continue;
+          alive++;
+          if (b.targetLOS !== null) probed++;
+        }
+        return { probed, alive };
+      };
       const before = wireframeCount();
       const roBefore = readoutState();
+      const gatesBefore = gateCensus();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(30);
       const on = wireframeCount();
       const roOn = readoutState();
+      const gatesOn = gateCensus();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(10);
       const off = wireframeCount();
       const roOff = readoutState();
+      const gatesOff = gateCensus();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(10);
       const roBackOn = readoutState();
-      return { before, on, off, bots: cs.bots.length, roBefore, roOn, roOff, roBackOn };
+      const gatesBackOn = gateCensus();
+      return { before, on, off, bots: cs.bots.length, roBefore, roOn, roOff, roBackOn,
+               gatesBefore, gatesOn, gatesOff, gatesBackOn };
     });
     if (result.before === -1) throw new Error('no bot mesh to reach the scene through');
     if (result.before !== 0) throw new Error(`level geometry was already wireframed before the toggle: ${JSON.stringify(result)}`);
     if (result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
     if (result.off !== 0) throw new Error(`toggling the debug view off left ${result.off} materials wireframed: ${JSON.stringify(result)}`);
+    if (result.gatesBefore.probed !== 0) throw new Error(`bots took LOS probes before any V press — the raycast must be gated on session.debugView: ${JSON.stringify(result)}`);
+    if (result.gatesOn.alive > 0 && result.gatesOn.probed === 0) throw new Error(`no live bot reported a sight probe while the debug view was up: ${JSON.stringify(result)}`);
+    if (result.gatesOff.probed !== 0) throw new Error(`live bots kept fresh LOS probes after the debug view went down: ${JSON.stringify(result)}`);
+    if (result.gatesBackOn.alive > 0 && result.gatesBackOn.probed === 0) throw new Error(`no live bot resumed sight probes on re-toggle: ${JSON.stringify(result)}`);
     if (!result.roBefore || result.roBefore.shown) throw new Error(`bot readout was visible before any V press: ${JSON.stringify(result)}`);
     if (!result.roOn || !result.roOn.shown || result.roOn.text === '') throw new Error(`bot readout did not show with text while the debug view was up: ${JSON.stringify(result)}`);
     if (!result.roOff || result.roOff.shown) throw new Error(`bot readout stayed visible after the debug view went down: ${JSON.stringify(result)}`);

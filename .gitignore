@@ -1,2 +1,7 @@
-node_modules/
-dist/
+# No trailing slash: a trailing slash restricts the pattern to DIRECTORIES,
+# and git treats a symlink as a file. A `node_modules -> ../acsc-main/node_modules`
+# symlink (the way parallel worktrees share one install) therefore slipped past
+# `node_modules/` and was committed to main, so every fresh clone got a dangling
+# link. Keep these bare.
+node_modules
+dist

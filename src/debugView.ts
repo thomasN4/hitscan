@@ -60,6 +60,18 @@ const MODE_COLOR: Record<BrainMode, readonly [number, number, number]> = {
 };
 
 /**
+ * Brightness tiers over the mode tint, by whether THIS bot could actually
+ * fire at its target (issue #46): full = inside engage range with sight
+ * proven this frame; mid = inside range but sight unproven or blocked; dim
+ * = has a target beyond engage range. Hue stays the mode's — the gates ride
+ * brightness alone, so one legend covers both. Without the grading, every
+ * bot with a live target drew an identical line however far away it was and
+ * however many walls stood between, which read as "everyone is engaging me
+ * through walls".
+ */
+const GATE_BRIGHTNESS = { shoot: 1, range: 0.5, track: 0.25 } as const;
+
+/**
  * Marker half-size as a fraction of the distance to it, so it holds a constant
  * SCREEN size instead of shrinking away. A world-sized marker on a bot across
  * the map is a pixel, which is the problem it exists to solve.
@@ -112,6 +124,10 @@ export interface DebugBotView {
   navPath: readonly THREE.Vector3[];
   navLeg: number;
   targetEye: THREE.Vector3 | null;
+  /** Whether that target is inside the brain's engage range (issue #46). */
+  targetInRange: boolean;
+  /** Fresh LOS probe result for this frame, or null when none was taken. */
+  targetLOS: boolean | null;
   eyePos(): THREE.Vector3;
 }
 
@@ -125,9 +141,10 @@ export interface DebugBotView {
  *
  * Per living bot, in this order: the REMAINING route (feet -> path[leg] -> ...
  * -> last waypoint), an intent line from its eye to whatever it is targeting,
- * and a mode-tinted marker floating above it. Waypoints already consumed are
- * skipped because the question this answers is "where is it going", not "where
- * has it been".
+ * and a mode-tinted marker floating above it — both graded dimmer unless the
+ * bot could actually fire at its target (GATE_BRIGHTNESS). Waypoints already
+ * consumed are skipped because the question this answers is "where is it
+ * going", not "where has it been".
  *
  * The marker is not decoration. A bot targeting the PLAYER draws an intent line
  * that ends at the camera position, and every point on a segment ending at the
@@ -176,8 +193,14 @@ export function buildDebugSegments(
 
     const eye = b.eyePos();
     const modeCol = MODE_COLOR[b.mode];
+    // The shot gates grade the tint; the hue stays the mode's.
+    const bright = b.targetLOS === true && b.targetInRange ? GATE_BRIGHTNESS.shoot
+      : b.targetInRange ? GATE_BRIGHTNESS.range
+      : GATE_BRIGHTNESS.track;
+    const gateCol: readonly [number, number, number] =
+      [modeCol[0] * bright, modeCol[1] * bright, modeCol[2] * bright];
     const t = b.targetEye;
-    if (t) push(eye.x, eye.y, eye.z, t.x, t.y, t.z, modeCol);
+    if (t) push(eye.x, eye.y, eye.z, t.x, t.y, t.z, gateCol);
 
     // Screen-facing diamond: four segments in the camera's right/up plane, so
     // it presents the same shape from every angle. Scaled by its own distance
@@ -189,10 +212,10 @@ export function buildDebugSegments(
     const corner = (dr: number, du: number): [number, number, number] =>
       [mx + rx * dr + ux * du, my + ry * dr + uy * du, mz + rz * dr + uz * du];
     const [r0, r1, r2, r3] = [corner(1, 0), corner(0, 1), corner(-1, 0), corner(0, -1)];
-    push(r0[0], r0[1], r0[2], r1[0], r1[1], r1[2], modeCol);
-    push(r1[0], r1[1], r1[2], r2[0], r2[1], r2[2], modeCol);
-    push(r2[0], r2[1], r2[2], r3[0], r3[1], r3[2], modeCol);
-    push(r3[0], r3[1], r3[2], r0[0], r0[1], r0[2], modeCol);
+    push(r0[0], r0[1], r0[2], r1[0], r1[1], r1[2], gateCol);
+    push(r1[0], r1[1], r1[2], r2[0], r2[1], r2[2], gateCol);
+    push(r2[0], r2[1], r2[2], r3[0], r3[1], r3[2], gateCol);
+    push(r3[0], r3[1], r3[2], r0[0], r0[1], r0[2], gateCol);
   }
   return v;
 }

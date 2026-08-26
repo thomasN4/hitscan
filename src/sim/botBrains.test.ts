@@ -414,6 +414,15 @@ describe('DefaultBrain trigger', () => {
     for (let f = 0; f < 4; f++) expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(false);
     expect(probes).toBe(0);
   });
+
+  it('inRange mirrors the trigger\'s exclusive engageRange comparison', () => {
+    // The DEV overlay reports this predicate as "could fire" (issue #46), so
+    // it must agree with decide() exactly — same bound, same exclusivity.
+    const brain = new DefaultBrain({ ...DEFAULT_BRAIN_PARAMS, engageRange: 45 }, calmRng);
+    expect(brain.inRange(44.9)).toBe(true);
+    expect(brain.inRange(45)).toBe(false);
+    expect(brain.inRange(80)).toBe(false);
+  });
 });
 
 describe('ballistic rolls', () => {

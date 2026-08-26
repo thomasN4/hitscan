@@ -32,12 +32,20 @@ Review only what changed between the base and head commits you were given. Read
 the surrounding code freely to verify a finding — a diff hunk alone rarely proves
 one — but do not report pre-existing problems the PR did not touch.
 
-Report two kinds of thing:
+Report three kinds of thing:
 
 - **Bugs** — correctness defects. Every one needs a concrete failure scenario:
   specific inputs or state, leading to a specific wrong output, crash, or
   violated invariant. If you cannot construct that scenario, you do not have a
   bug; drop it.
+- **Stale claims** — a comment or repo document asserting something the code no
+  longer does. This codebase leans on its comments: they carry the review-lesson
+  citations, the pinned commit SHAs and the "why this order is load-bearing"
+  rationale AGENTS.md tells the next agent to trust, so one that lies misleads
+  the next reader as reliably as a broken test would. The evidence is a pair —
+  quote the claim, then name the code that contradicts it. A stale claim has no
+  failure scenario at runtime and that is fine; the contradiction is what makes
+  it falsifiable, and without one you have a wording opinion, excluded below.
 - **Cleanups** — reuse, simplification, efficiency. Prefer ones that point at an
   existing helper the change should have used: `src/world.ts` owns level
   geometry registration, `src/sim/` owns gameplay math, `src/core/state.ts` owns
@@ -48,10 +56,7 @@ Report two kinds of thing:
 - Formatting, naming style, import order. Every one of these has a mechanical
   answer or none at all, so a finding is an opinion you cannot settle.
 - Comment and prose *style* — wording, tone, length. A comment that makes a
-  false claim about the code is NOT this: comments here carry the
-  review-lesson citations and the rationale AGENTS.md tells the next agent to
-  trust, so a stale or wrong one is a finding at the same bar as any other
-  defect.
+  false claim about the code is not this; report it as a **Stale claim** above.
 - Anything `npm run lint` or `npm run typecheck` already gates — missing imports,
   `any`, `@ts-ignore`, unused bindings, unchecked index reads. CI runs both on
   this same commit; duplicating them is noise.
@@ -68,14 +73,16 @@ Report two kinds of thing:
 
 ## Output
 
-Markdown, no top-level heading. `## Bugs` first, then `## Cleanups`; omit either
-heading if it would be empty. Most severe first, at most seven findings total —
-if you have more, you are reporting noise, so keep the strongest.
+Markdown, no top-level heading. `## Bugs`, then `## Stale claims`, then
+`## Cleanups`; omit any heading that would be empty. Most severe first within
+each, at most seven findings total — if you have more, you are reporting noise,
+so keep the strongest.
 
 Each finding is one bullet:
 
-- **`path/to/file.ts:42`** — one sentence stating the defect. Then the failure
-  scenario, or for a cleanup, what to use instead.
+- **`path/to/file.ts:42`** — one sentence stating the defect. Then its evidence:
+  the failure scenario for a bug, the quoted claim and the code contradicting it
+  for a stale claim, what to use instead for a cleanup.
 
 Be willing to find nothing. If the change is sound, output exactly:
 

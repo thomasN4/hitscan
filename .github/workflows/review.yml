@@ -75,11 +75,6 @@ jobs:
       # Deliberately no `npm ci`. This job reads code, it does not run the suite
       # (ci.yml owns that on the same commit), and gitea-review.mjs is written
       # against Node built-ins and global fetch so it needs no install.
-      # Pinned, like actions/checkout@v7 and node-version above. Unpinned, a CLI
-      # release that renames a flag or changes what `-p` writes to stdout would
-      # change this reviewer's behavior with no diff in this repo to explain it.
-      - name: Install Claude Code
-        run: npm i -g @anthropic-ai/claude-code@2.1.246
 
       # `edited` also fires when the PR *description* changes, so without this
       # a typo fix in the body would post a second review of identical code.
@@ -94,6 +89,17 @@ jobs:
         run: |
           reviewed="$(node scripts/gitea-review.mjs already-reviewed)"
           echo "reviewed=$reviewed" >> "$GITHUB_OUTPUT"
+
+      # Below the dedupe check, and gated on it: the skip path (an `edited` event
+      # on an already-reviewed commit) then costs one GET rather than a global
+      # npm install. The dedupe step itself needs only the Node from setup-node.
+      #
+      # Pinned, like actions/checkout@v7 and node-version above. Unpinned, a CLI
+      # release that renames a flag or changes what `-p` writes to stdout would
+      # change this reviewer's behavior with no diff in this repo to explain it.
+      - name: Install Claude Code
+        if: steps.dedupe.outputs.reviewed != 'true'
+        run: npm i -g @anthropic-ai/claude-code@2.1.246
 
       - name: Review
         if: steps.dedupe.outputs.reviewed != 'true'

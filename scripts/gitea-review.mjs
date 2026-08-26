@@ -69,7 +69,11 @@ async function alreadyReviewed() {
     }
     const reviews = await res.json();
     if (reviews.some((review) => typeof review.body === 'string' && review.body.includes(marker(sha)))) return true;
-    if (reviews.length < PAGE_LIMIT) return false;
+    // Stops on an EMPTY page, not a short one: PAGE_LIMIT only matches Gitea's
+    // default, and on an instance configured below it every page comes back
+    // short — which would end the walk at page 1 and silently restore the
+    // duplicate-post this scan exists to prevent. Costs one extra request.
+    if (reviews.length === 0) return false;
   }
 }
 

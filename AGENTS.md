@@ -72,14 +72,10 @@ Four static/sim layers, deliberately split:
 A fifth layer reads rather than runs: the CI reviewer in
 `.github/workflows/review.yml`. Its standing instructions are
 `scripts/review-prompt.md` — edit that file, not the workflow, to change what
-the reviewer looks for, and iterate on it locally without pushing:
-
-```sh
-claude -p "Review the pull request whose base commit is $(git merge-base main HEAD) and head commit is HEAD" \
-  --model claude-opus-5 \
-  --append-system-prompt "$(cat scripts/review-prompt.md)" \
-  --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
-```
+the reviewer looks for. That file's header carries the by-hand invocation for
+iterating on it locally without pushing; it lives there and not here because the
+snippet has to track the workflow's actual `claude -p` call, and two copies
+drifted apart within one PR the first time there were two.
 
 ## Architecture rules
 

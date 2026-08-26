@@ -6,6 +6,11 @@ Guidance for AI agents (and humans) working in this repository.
 
 Browser FPS demo: Three.js + Vite, TypeScript throughout `src/`, no framework. All game code lives in `src/`; markup/CSS in `index.html`. Intra-`src/` imports are extensionless (`from './core/state'`) — that is what let files rename to `.ts` one at a time without touching importers (Vite only maps a `'./x.js'` specifier onto `x.ts` when the *importer* is TS).
 
+The canonical remote is a self-hosted Gitea instance on the LAN:
+`http://192.168.2.161:3000/thomasN4/another-cs-clone` (`origin`). GitHub is no
+longer the source of truth — `gh` is the wrong tool here; use `tea` (configured
+login: `gitea-lan`).
+
 ## Workflow
 
 Default loop for every non-trivial change: **plan → worktree → implement → open draft PR**.
@@ -29,9 +34,12 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    Fix missing player import breaking reload; add smoke test and debug hook
    ```
 4. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
-   - `gh pr create --draft --title "<imperative summary>" --body "..."`
+   - `tea pr create --draft --title "<imperative summary>" --description "..."`
+   - Gitea has no draft flag on the pull request itself. `--draft` prepends
+     `WIP: ` to the title and Gitea refuses to merge while that prefix is
+     present — removing the prefix is what marks a PR ready for review.
    - PR body: what changed, why, and verification results.
-5. **Review** — the user merges personally in the GitHub UI. Do NOT run `gh pr merge` or `gh pr ready` unless explicitly instructed for that specific PR.
+5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR.
 
 Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 

@@ -775,6 +775,87 @@ async function runAllyCheck() {
   await page.close();
 }
 
+// Flat routing (issue #44): band steering has no representation of obstacles,
+// so a same-level target behind the arena's mid wall used to be unreachable —
+// the bot paced at the wall face (no `blk`: sliding keeps ~0.7 of its step)
+// and never arrived. The stagnation latch must hand the problem to the graph.
+//
+// Geometry: the player spawns at (0, 48); T-1 is teleported to ≈(−6, −10).
+// Their straight line crosses z = 0 inside the west mid wall's span
+// (x ∈ [−52.5, 2.5]), so steering alone cannot arrive; the wall's east gap
+// (x ≈ [2.5, 15]) is only metres away. The claim is POLLED (lesson 26): feet
+// crossing to the CT side of the wall, with route mode observed en route so
+// strafe-luck cannot satisfy it. The wall clock appears only in the give-up
+// bound. Non-vacuity: against pre-fix main this phase times out with the bot
+// still south of z = 0.
+async function runFlatRouteCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      cs.game.started = true;
+      cs.game.locked = true;
+      cs.player.hp = 100000;
+
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+
+      // Collider-free placement, [allies]' margin: an embedded bot is stuck
+      // for life and would poison everything measured after the teleport.
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      const spot = [-6, -10];
+      if (blocked(...spot)) return { fail: 'teleport spot is inside geometry' };
+      bot.mesh.position.set(spot[0], 0, spot[1]);
+      bot.vy = 0;      // clear vertical state carried from wherever it spawned,
+      bot.onGround = true; // like Bot.spawnAtRandom does
+      // path/leg are TS-private ("written here only" in bots.ts); the harness
+      // reaches past that on purpose — a teleport is not a flow the executor
+      // otherwise sees, and without this the stale route survives until the
+      // ROUTE_ABANDON drift check drops it a frame later.
+      bot.path = [];
+      bot.leg = 0;
+
+      const t0 = performance.now();
+      let sawRoute = false;
+      while (performance.now() - t0 < 45000) { // give-up bound, not the claim
+        await wait(150);
+        if (!bot.alive) return { fail: 'bot died before crossing', sawRoute };
+        if (bot.mode === 'route') sawRoute = true;
+        if (bot.mesh.position.z >= 2) {
+          return {
+            crossedZ: +bot.mesh.position.z.toFixed(2),
+            crossedX: +bot.mesh.position.x.toFixed(1),
+            sawRoute,
+            elapsedS: +((performance.now() - t0) / 1000).toFixed(1),
+          };
+        }
+      }
+      return {
+        fail: 'bot never crossed the mid wall',
+        finalX: +bot.mesh.position.x.toFixed(1),
+        finalZ: +bot.mesh.position.z.toFixed(1),
+        sawRoute,
+      };
+    });
+    if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
+    if (!result.sawRoute) throw new Error(`crossed without ever entering route mode — strafe luck, not routing: ${JSON.stringify(result)}`);
+    console.log('[flatRoute] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[flatRoute] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[flatRoute] ${e}`));
+  await page.close();
+}
+
 // Bots and stairs — the question the elevation map exists to answer.
 //
 // A T bot is placed at the foot of the two-story building's INTERNAL flight
@@ -1449,6 +1530,7 @@ try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
+  await runFlatRouteCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();

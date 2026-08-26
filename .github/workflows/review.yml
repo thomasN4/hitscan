@@ -1,6 +1,7 @@
 name: AI review
 
-# An advisory PR reviewer: routes between Claude and Codex, runs the selected
+# An advisory PR reviewer: selects Codex by default or Claude by explicit repo
+# variable override, runs the selected
 # CLI headlessly against the diff, and posts the result as a Gitea comment-review.
 # Deliberately a SEPARATE workflow from
 # ci.yml — a flaky reviewer must never read as a failed build, and it is not on
@@ -12,15 +13,15 @@ name: AI review
 # instructions in scripts/review-prompt.md — both runnable by hand, see their
 # headers.
 #
-# Two secrets, both set in the repo's Settings -> Actions -> Secrets:
-#   CLAUDE_CODE_OAUTH_TOKEN  from `claude setup-token` (subscription auth; the
-#                            portable form of what `/login` writes to ~/.claude,
-#                            which a fresh job container does not have)
+# One required secret, set in the repo's Settings -> Actions -> Secrets:
 #   REVIEW_BOT_TOKEN         a PAT for a dedicated `review-bot` Gitea account,
 #                            added as a collaborator. Not the auto-injected
 #                            GITEA_TOKEN: that acts as the triggering user, and
 #                            Gitea restricts reviewing a PR you authored — which
 #                            here is every PR.
+# Claude is an opt-in override. Set the repo Actions variable AI_REVIEWER to
+# `claude`, then also set CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`.
+# Leave AI_REVIEWER unset (or set it to `codex`) for the default Codex route.
 #
 # Codex uses personal ChatGPT subscription auth from a private, persistent
 # runner bind mount at /codex-home. Set CODEX_HOME to that mount, run
@@ -97,14 +98,16 @@ jobs:
           reviewed="$(node scripts/gitea-review.mjs already-reviewed)"
           echo "reviewed=$reviewed" >> "$GITHUB_OUTPUT"
 
-      # The quota API is the same undocumented endpoint Claude Code 2.1.246 uses
-      # for its own usage display. Any auth, network or schema failure selects
-      # Codex: do not spend Claude capacity when the remaining amount is unknown.
+      # AI_REVIEWER is intentionally optional: unset selects Codex, while
+      # `claude` is a manual override. Invalid values fail rather than silently
+      # selecting an unintended subscription. Issue #59 tracks restoring the
+      # original automatic quota-aware selection once supported headless auth
+      # can read Claude subscription usage.
       - name: Select reviewer
         id: route
         if: steps.dedupe.outputs.reviewed != 'true'
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          AI_REVIEWER: ${{ vars.AI_REVIEWER }}
         run: |
           reviewer="$(node scripts/review-route.mjs)"
           echo "reviewer=$reviewer" >> "$GITHUB_OUTPUT"

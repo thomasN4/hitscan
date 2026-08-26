@@ -159,6 +159,25 @@ describe('DefaultBrain strafe steering', () => {
     expect(brain.decide(view(), DT).step.z).toBeCloseTo(-4 * DT, 12);
   });
 
+  it('flips once per CONTACT EVENT, not once per blocked frame', () => {
+    // Level-triggered flipping was issue #43: against a wall face the drift
+    // reversed ~60×/s, cancelled itself to zero, and the bot ground along
+    // the wall instead of peeling off. Edge-triggering gives one committed
+    // direction per contact — the principle travel()'s slide already uses.
+    const brain = calmBrain();
+    expect(brain.decide(view(), DT).step.z).toBeCloseTo(4 * DT, 12);
+    expect(brain.decide(view({ moveBlocked: true }), DT).step.z).toBeCloseTo(-4 * DT, 12);
+    for (let f = 1; f <= 5; f++) {
+      expect(
+        brain.decide(view({ moveBlocked: true }), DT).step.z,
+        `held frame ${f}`,
+      ).toBeCloseTo(-4 * DT, 12);
+    }
+    brain.decide(view(), DT); // released
+    // A fresh contact event flips again.
+    expect(brain.decide(view({ moveBlocked: true }), DT).step.z).toBeCloseTo(4 * DT, 12);
+  });
+
   it('jukes at jukeRate·dt probability, affecting movement from the NEXT frame', () => {
     // Draws: [dir+, cooldown]; F1 juke 0.4 < 0.5·1 → flip AFTER F1's step.
     const brain = new DefaultBrain(
@@ -175,6 +194,77 @@ describe('DefaultBrain strafe steering', () => {
     const dt = 1;
     expect(brain.decide(view(), dt).step.z).toBeCloseTo(4 * dt, 12);
     expect(brain.decide(view(), dt).step.z).toBeCloseTo(4 * dt, 12);
+  });
+});
+
+// Issue #45's corner trap: a bot holding band range with cover between it
+// and its target paced across the occlusion forever — the band hold is PURE
+// strafe, and the juke flipped it symmetrically while blocked-sight retries
+// only shortened a cooldown. Now each failed probe records sightBlocked and
+// the juke stands down, committing the strafe one way so the bot walks
+// around the cover instead of across its face. dt = 1 makes the juke
+// threshold 0.5, so scripted draws below it are unambiguous flips; the
+// trigger needs an expired cooldown, so constructor draw 0 puts the first
+// probe on frame 1.
+describe('DefaultBrain blocked-sight strafe', () => {
+  const dt = 1;
+
+  it('stands down the juke while probes come back blocked', () => {
+    const v = view({ dist: 10, seeTarget: () => false });
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
+      0.9, 0,          // dir+, stagger 1.0 s → probe fires on F1
+      /* F1 */ 0.9,    // pre-probe draw: no flip regardless
+      /* F2 */ 0.4,    // WOULD flip; probe failed on F1 → suppressed
+      /* F3 */ 0.4,    // ditto
+    ]));
+    const signs = [1, 2, 3].map(() => Math.sign(brain.decide(v, dt).step.z));
+    expect(signs).toEqual([1, 1, 1]);
+  });
+
+  it('the same draws flip freely when nothing probes', () => {
+    // Out of engageRange the trigger short-circuits BEFORE probing, so
+    // sightBlocked is never set: isolates the suppression to blocked probes
+    // rather than the draw sequence.
+    const far = view({ dist: 100, dist3: 100 });
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
+      0.9, 0, 0.9, 0.4, 0.4,
+    ]));
+    const signs = [1, 2, 3].map(() => Math.sign(brain.decide(far, dt).step.z));
+    // F2's 0.4 flips AFTER its own step (steers from F3), so signs lag by one.
+    expect(signs).toEqual([1, 1, -1]);
+  });
+
+  it('a successful probe re-arms the juke', () => {
+    let sight = false;
+    const v = view({ dist: 10, seeTarget: () => sight });
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
+      0.9, 0,          // dir+, stagger 1.0 s
+      /* F1 */ 0.9,    // pre-probe draw; probe fails → committed
+      /* F2 */ 0.4,    // sight cleared BEFORE this frame, but the juke draw
+                       // runs BEFORE the probe (one-frame lag, like
+                       // moveBlocked): still suppressed…
+      /* F2 shot */ 0.5, // …then the probe succeeds and consumes its reroll
+      /* F3 */ 0.1,    // sightBlocked is false now: flips, steering from F4
+      /* F4 */ 0.9,
+    ]));
+    sight = true; // just before F2: the lag means it only matters from F3 on
+    const signs = [1, 2, 3, 4].map(() => Math.sign(brain.decide(v, dt).step.z));
+    expect(signs).toEqual([1, 1, 1, -1]);
+  });
+
+  it('onRespawn clears the commitment', () => {
+    const v = view({ dist: 10, seeTarget: () => false });
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
+      0.9, 0,          // dir+, stagger 1.0 s
+      /* F1 */ 0.9,    // probe fails → sightBlocked; would-be flips stay dead
+      /* respawn */ 0.9, // fresh stagger ≈ 2.08 s: no early probe to re-block
+      /* F2 */ 0.4,    // juke resumes (flag cleared) — steers from F3
+      /* F3 */ 0.9,
+    ]));
+    expect(Math.sign(brain.decide(v, dt).step.z)).toBe(1); // F1: commit
+    brain.onRespawn();
+    expect(Math.sign(brain.decide(v, dt).step.z)).toBe(1); // F2: flag cleared, flip drawn
+    expect(Math.sign(brain.decide(v, dt).step.z)).toBe(-1); // F3: F2's resumed juke lands
   });
 });
 

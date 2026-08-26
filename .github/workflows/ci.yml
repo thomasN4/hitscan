@@ -24,10 +24,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # No `cache: npm` here. On the self-hosted Gitea runner the Actions cache
+      # server is reachable only at act_runner's own docker-bridge address, which
+      # the job container cannot route to; both the restore and the save then sit
+      # in a connect timeout. That cost ~9 minutes of a 12.5-minute run, against
+      # an `npm ci` that finishes in about 12 seconds. Re-add it only alongside a
+      # runner whose cache host the job container can actually reach.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
 
       - run: npm ci
 

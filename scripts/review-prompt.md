@@ -45,7 +45,13 @@ Report two kinds of thing:
 
 ## Do not report
 
-- Formatting, naming style, comment wording, import order.
+- Formatting, naming style, import order. Every one of these has a mechanical
+  answer or none at all, so a finding is an opinion you cannot settle.
+- Comment and prose *style* — wording, tone, length. A comment that makes a
+  false claim about the code is NOT this: comments here carry the
+  review-lesson citations and the rationale AGENTS.md tells the next agent to
+  trust, so a stale or wrong one is a finding at the same bar as any other
+  defect.
 - Anything `npm run lint` or `npm run typecheck` already gates — missing imports,
   `any`, `@ts-ignore`, unused bindings, unchecked index reads. CI runs both on
   this same commit; duplicating them is noise.

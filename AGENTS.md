@@ -41,10 +41,12 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    - PR body: what changed, why, and verification results.
 5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
-     (`.github/workflows/review.yml`): a headless `claude -p` reads the diff and
-     posts a comment-review as `claude-bot`, once per head commit. It is
-     advisory and gates nothing — `npm run lint`/`typecheck`/`test`/`build` in
-     `ci.yml` remain the only checks that can fail a PR.
+     (`.github/workflows/review.yml`): the selected headless reviewer reads the
+     diff and posts a comment-review as `review-bot`, once per head commit.
+     Codex is the default; the repo Actions variable `AI_REVIEWER=claude`
+     selects Claude manually. It is advisory and gates nothing — `npm run lint`,
+     `npm run typecheck`, `npm test`, and `npm run build` in `ci.yml` remain the
+     only checks that can fail a PR.
 
 Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 
@@ -74,8 +76,8 @@ A fifth layer reads rather than runs: the CI reviewer in
 `scripts/review-prompt.md` — edit that file, not the workflow, to change what
 the reviewer looks for. That file's header carries the by-hand invocation for
 iterating on it locally without pushing; it lives there and not here because the
-snippet has to track the workflow's actual `claude -p` call, and two copies
-drifted apart within one PR the first time there were two.
+snippets have to track the workflow's actual Claude and Codex calls, and two
+copies drifted apart within one PR the first time there were two.
 
 ## Architecture rules
 

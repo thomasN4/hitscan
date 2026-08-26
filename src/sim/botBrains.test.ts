@@ -247,8 +247,31 @@ describe('DefaultBrain blocked-sight strafe', () => {
       /* F3 */ 0.1,    // sightBlocked is false now: flips, steering from F4
       /* F4 */ 0.9,
     ]));
-    sight = true; // just before F2: the lag means it only matters from F3 on
-    const signs = [1, 2, 3, 4].map(() => Math.sign(brain.decide(v, dt).step.z));
+    const signs = [1, 2, 3, 4].map((f) => {
+      if (f === 2) sight = true; // clear just before F2; the juke resumes from F3
+      return Math.sign(brain.decide(v, dt).step.z);
+    });
+    expect(signs).toEqual([1, 1, 1, -1]);
+  });
+
+  it.each([
+    ['the target leaves engage range', view({ dist: 100, dist3: 100 })],
+    ['the target dies', view({ dist: 10, targetAlive: false })],
+  ])('re-arms the juke when %s', (_reason, released) => {
+    const blocked = view({ dist: 10, seeTarget: () => false });
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
+      0.9, 0,          // dir+, stagger 1.0 s
+      /* F1 */ 0.9,    // probe fails → sightBlocked
+      /* F2 */ 0.4,    // gate clears AFTER this suppressed draw
+      /* F3 */ 0.4,    // juke resumes, steering from F4
+      /* F4 */ 0.9,
+    ]));
+    const signs = [
+      Math.sign(brain.decide(blocked, dt).step.z),
+      Math.sign(brain.decide(released, dt).step.z),
+      Math.sign(brain.decide(released, dt).step.z),
+      Math.sign(brain.decide(released, dt).step.z),
+    ];
     expect(signs).toEqual([1, 1, 1, -1]);
   });
 

@@ -424,9 +424,10 @@ only shortened a cooldown. But those probes already fire every
 discarded. Now each failed probe records `sightBlocked`, and while it holds
 the juke is suppressed: the band hold COMMITS one way and walks around
 whatever occludes instead of pacing across its face. Any successful probe
-clears it; respawn clears it; the draw is still consumed so scripted rng
-sequences are unchanged. One frame of lag is deliberate — the probe lands
-after this frame's step, like `moveBlocked`.
+clears it; leaving the trigger's range/alive gate clears it; respawn clears
+it; the draw is still consumed so scripted rng sequences are unchanged. One
+frame of lag is deliberate — the observation lands after this frame's step,
+like `moveBlocked`.
 
 Measured with `[cornerTrap]`, a new smoke phase built for the trap: player
 and T-1 placed 12 m apart — dead centre of the band hold — either side of
@@ -436,9 +437,13 @@ directly observable). Main paced at the wall for the full 75 s budget twice,
 drifting to (−26.7, −2.1) and (−28.7, −6.2), sight never clearing. The fix
 regained LOS in **7.1 s**: committed WEST along the face, rounded the wall's
 west tip, sight cleared — `sawRoute: false`, i.e. band steering alone solved
-it without ever invoking the nav graph. That was the point of bundling:
-neither half gets credit alone, since #43's per-frame flips would have
-cancelled any commitment #45 tried to make.
+it without ever invoking the nav graph. The west tip is only 12.5 m from the
+setup, so those randomized runs are observations, not the regression pin: the
+smoke phase now forces every juke draw below threshold. Without suppression
+the bot re-flips continuously and times out; with it the draws are consumed
+but ignored and the bot commits. That was the point of bundling: neither half
+gets credit alone, since #43's per-frame flips would have cancelled any
+commitment #45 tried to make.
 
 ## Deferred
 

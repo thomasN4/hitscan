@@ -869,13 +869,15 @@ async function runFlatRouteCheck() {
 // (x ∈ [-52.5, 2.5], z ∈ [-1, 1]); T-1 at (-40, -10) on the south side.
 // Planar distance is 12 m — dead centre of the [7, 14] band hold — and the
 // straight line crosses the wall, so LOS cannot clear without leaving the
-// south side. The wall reaches past the west perimeter into solid rock and
-// its east gap sits ~42 m away, so neither symmetric juking nor luck rounds
-// it in the budget; what CAN is a committed strafe (#45) whose contact flips
-// now fire once per event instead of per frame (#43). The #44 latch may also
-// take over once committed sliding carries the bot beyond farBand against
-// the wall — either escape satisfies the claim, which is recorded via
-// sawRoute for exactly that reason.
+// south side. The west tip is 12.5 m away and the east gap ~42.5 m away, so a
+// lucky uninterrupted westward juke could otherwise satisfy LOS by rounding
+// the nearby tip. The harness removes that false pass: its test-only reach
+// into the brain makes every frame request a juke flip. Without #45 those
+// flips cancel the drift; with blocked-sight suppression they are consumed
+// but ignored, so the strafe commits. The #44 latch may also take over once
+// committed sliding carries the bot beyond farBand against the wall — either
+// escape satisfies the claim, which is recorded via sawRoute for exactly
+// that reason.
 //
 // The acceptance sensor is PR #50's overlay readout: with the debug view up,
 // Bot.targetLOS carries a fresh sight probe each frame, so "regained a
@@ -896,7 +898,9 @@ async function runCornerTrapCheck() {
       cs.game.started = true;
       cs.game.locked = true;
       cs.player.hp = 100000;
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' })); // debug view: fresh LOS probes
+      // Use the testing facade directly: KeyV is correctly DEV-only, while
+      // this acceptance sensor also needs to work against `vite preview`.
+      cs.game.debugView = true; // fresh LOS probes
       await wait(100);
 
       const bot = cs.bots.find(b => b.team === 'T' && b.alive);
@@ -914,13 +918,22 @@ async function runCornerTrapCheck() {
       bot.onGround = true;
       bot.path = [];
       bot.leg = 0;
+      // Test-only private-field reach, like path/leg above: make the first
+      // blocked probe land this frame and leave its post-step flip pointing
+      // WEST. A zero draw then requests another flip every simulated frame.
+      // The unfixed policy re-flips continuously; sightBlocked must suppress
+      // those requests for the bot to keep the westward commitment and escape.
+      bot.brain.rng = () => 0;
+      bot.brain.cooldown = 0;
+      bot.brain.strafeDir = -1;
+      bot.brain.sightBlocked = false;
 
       const planar = Math.hypot(bot.mesh.position.x - cs.player.pos.x, bot.mesh.position.z - cs.player.pos.z);
       if (Math.abs(planar - 12) > 1) return { fail: `setup drifted out of band: ${planar.toFixed(1)} m` };
 
       const t0 = performance.now();
       let sawRoute = false;
-      while (performance.now() - t0 < 75000) { // give-up bound, not the claim
+      while (performance.now() - t0 < 30000) { // give-up bound, not the claim
         await wait(150);
         if (!bot.alive) return { fail: 'bot died before regaining sight', sawRoute };
         if (bot.mode === 'route') sawRoute = true;

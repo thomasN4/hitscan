@@ -330,7 +330,8 @@ export class DefaultBrain implements BotBrain {
    * the juke is suppressed so the strafe COMMITS one way instead of pacing
    * across the face of whatever is occluding — the trap where a bot holds
    * band range forever, re-probing every retryCooldown and never rounding
-   * the corner between it and its target. Cleared by any successful probe.
+   * the corner between it and its target. Cleared by any successful probe,
+   * or when the target leaves the trigger's range/alive gate.
    */
   private sightBlocked = false;
 
@@ -526,11 +527,15 @@ export class DefaultBrain implements BotBrain {
     // on the short retryCooldown instead of firing through cover — and each
     // blocked retry records sightBlocked for the movement policy above, so
     // the strafe commits while the probe cadence (0.3 s) keeps the reading
-    // fresh. One-frame lag is deliberate: the probe lands after this frame's
-    // step, like moveBlocked.
+    // fresh. A target outside the range/alive gate is not being probed, so it
+    // cannot keep an old blocked result latched. One-frame lag is deliberate:
+    // the observation lands after this frame's step, like moveBlocked.
     let wantShoot = false;
     this.cooldown -= dt;
-    if (this.cooldown <= 0 && view.dist3 < this.params.engageRange && view.targetAlive) {
+    const targetEligible = view.dist3 < this.params.engageRange && view.targetAlive;
+    if (!targetEligible) {
+      this.sightBlocked = false;
+    } else if (this.cooldown <= 0) {
       if (view.seeTarget()) {
         this.sightBlocked = false;
         this.cooldown = this.params.cooldownMin + this.rng() * this.params.cooldownSpan;

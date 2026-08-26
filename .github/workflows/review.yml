@@ -122,8 +122,18 @@ jobs:
       - name: Install Codex
         if: steps.dedupe.outputs.reviewed != 'true' && steps.route.outputs.reviewer == 'codex'
         run: |
+          # Codex's Linux sandbox prefers the distribution bwrap binary. The
+          # runner host carries its Ubuntu AppArmor profile; the job container
+          # still needs the binary whose path activates that profile.
+          apt-get update
+          apt-get install --no-install-recommends --yes bubblewrap
           npm i -g @openai/codex@0.149.1
           codex login status
+
+          # Fail before invoking the model if the nested job container cannot
+          # create Codex's read-only sandbox. Without this probe, every shell
+          # read fails but Codex can still return prose and waste review tokens.
+          codex sandbox -- true
 
       - name: Review with Claude
         if: steps.dedupe.outputs.reviewed != 'true' && steps.route.outputs.reviewer == 'claude'

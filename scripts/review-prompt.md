@@ -1,14 +1,22 @@
 <!--
 scripts/review-prompt.md — the standing instructions for the CI reviewer.
 
-Passed to `claude -p` via `--append-system-prompt` from
-.github/workflows/review.yml. It lives in a file rather than inline in the YAML
-so it can be diffed like code and iterated locally without pushing a branch:
+Passed to the selected headless reviewer from `.github/workflows/review.yml`.
+It lives in a file rather than inline in the YAML so it can be diffed like code
+and iterated locally without pushing a branch:
 
   claude -p "Review the pull request titled \"<PR title>\", whose base commit is $(git merge-base main HEAD) and head commit is HEAD." \
     --model claude-opus-5 \
     --append-system-prompt "$(cat scripts/review-prompt.md)" \
     --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+
+  codex exec --model gpt-5.6-sol \
+    --config 'model_reasoning_effort="high"' \
+    --sandbox read-only --ephemeral --ignore-user-config --ignore-rules \
+    --output-last-message review.md \
+    "Review the pull request titled \"<PR title>\", whose base commit is $(git merge-base main HEAD) and head commit is HEAD.
+
+    $(cat scripts/review-prompt.md)"
 
 This comment is HTML so the file reads cleanly if it is ever posted verbatim.
 -->

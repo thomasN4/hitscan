@@ -45,14 +45,15 @@ Report three kinds of thing:
   specific inputs or state, leading to a specific wrong output, crash, or
   violated invariant. If you cannot construct that scenario, you do not have a
   bug; drop it.
-- **Stale claims** — a comment or repo document asserting something the code no
-  longer does. This codebase leans on its comments: they carry the review-lesson
-  citations, the pinned commit SHAs and the "why this order is load-bearing"
-  rationale AGENTS.md tells the next agent to trust, so one that lies misleads
-  the next reader as reliably as a broken test would. The evidence is a pair —
-  quote the claim, then name the code that contradicts it. A stale claim has no
-  failure scenario at runtime and that is fine; the contradiction is what makes
-  it falsifiable, and without one you have a wording opinion, excluded below.
+- **Stale claims** — a comment or repo document asserting something contradicted
+  by the code or repository artifact it describes. This codebase leans on its
+  comments: they carry the review-lesson citations, the pinned commit SHAs and
+  the "why this order is load-bearing" rationale AGENTS.md tells the next agent
+  to trust, so one that lies misleads the next reader as reliably as a broken
+  test would. The evidence is a pair — quote the claim, then name the code or
+  repository artifact that contradicts it. A stale claim has no failure scenario
+  at runtime and that is fine; the contradiction is what makes it falsifiable,
+  and without one you have a wording opinion, excluded below.
 - **Cleanups** — reuse, simplification, efficiency. Prefer ones that point at an
   existing helper the change should have used: `src/world.ts` owns level
   geometry registration, `src/sim/` owns gameplay math, `src/core/state.ts` owns
@@ -88,8 +89,9 @@ so keep the strongest.
 Each finding is one bullet:
 
 - **`path/to/file.ts:42`** — one sentence stating the defect. Then its evidence:
-  the failure scenario for a bug, the quoted claim and the code contradicting it
-  for a stale claim, what to use instead for a cleanup.
+  the failure scenario for a bug, the quoted claim and the code or repository
+  artifact contradicting it for a stale claim, what to use instead for a
+  cleanup.
 
 Be willing to find nothing. If the change is sound, output exactly:
 

@@ -841,6 +841,87 @@ async function runAllyCheck() {
   await page.close();
 }
 
+// Flat routing (issue #44): band steering has no representation of obstacles,
+// so a same-level target behind the arena's mid wall used to be unreachable —
+// the bot paced at the wall face (no `blk`: sliding keeps ~0.7 of its step)
+// and never arrived. The stagnation latch must hand the problem to the graph.
+//
+// Geometry: the player spawns at (0, 48); T-1 is teleported to ≈(−6, −10).
+// Their straight line crosses z = 0 inside the west mid wall's span
+// (x ∈ [−52.5, 2.5]), so steering alone cannot arrive; the wall's east gap
+// (x ≈ [2.5, 15]) is only metres away. The claim is POLLED (lesson 26): feet
+// crossing to the CT side of the wall, with route mode observed en route so
+// strafe-luck cannot satisfy it. The wall clock appears only in the give-up
+// bound. Non-vacuity: against pre-fix main this phase times out with the bot
+// still south of z = 0.
+async function runFlatRouteCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      cs.game.started = true;
+      cs.game.locked = true;
+      cs.player.hp = 100000;
+
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+
+      // Collider-free placement, [allies]' margin: an embedded bot is stuck
+      // for life and would poison everything measured after the teleport.
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      const spot = [-6, -10];
+      if (blocked(...spot)) return { fail: 'teleport spot is inside geometry' };
+      bot.mesh.position.set(spot[0], 0, spot[1]);
+      bot.vy = 0;      // clear vertical state carried from wherever it spawned,
+      bot.onGround = true; // like Bot.spawnAtRandom does
+      // path/leg are TS-private ("written here only" in bots.ts); the harness
+      // reaches past that on purpose — a teleport is not a flow the executor
+      // otherwise sees, and without this the stale route survives until the
+      // ROUTE_ABANDON drift check drops it a frame later.
+      bot.path = [];
+      bot.leg = 0;
+
+      const t0 = performance.now();
+      let sawRoute = false;
+      while (performance.now() - t0 < 45000) { // give-up bound, not the claim
+        await wait(150);
+        if (!bot.alive) return { fail: 'bot died before crossing', sawRoute };
+        if (bot.mode === 'route') sawRoute = true;
+        if (bot.mesh.position.z >= 2) {
+          return {
+            crossedZ: +bot.mesh.position.z.toFixed(2),
+            crossedX: +bot.mesh.position.x.toFixed(1),
+            sawRoute,
+            elapsedS: +((performance.now() - t0) / 1000).toFixed(1),
+          };
+        }
+      }
+      return {
+        fail: 'bot never crossed the mid wall',
+        finalX: +bot.mesh.position.x.toFixed(1),
+        finalZ: +bot.mesh.position.z.toFixed(1),
+        sawRoute,
+      };
+    });
+    if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
+    if (!result.sawRoute) throw new Error(`crossed without ever entering route mode — strafe luck, not routing: ${JSON.stringify(result)}`);
+    console.log('[flatRoute] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[flatRoute] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[flatRoute] ${e}`));
+  await page.close();
+}
+
 // Bots and stairs — the question the elevation map exists to answer.
 //
 // A T bot is placed at the foot of the two-story building's INTERNAL flight
@@ -1130,25 +1211,48 @@ async function runDebugViewCheck() {
         const el = document.getElementById('botDebug');
         return el && { shown: getComputedStyle(el).display !== 'none', text: el.textContent };
       };
+      // The shot-gate readout (issue #46): while the view is up, bots pay one
+      // LOS raycast per frame and report it; while it is down, live bots must
+      // hold NO fresh probe — the raycast is DEV-only and lazy everywhere else.
+      // Dead bots are excluded: their update() early-returns, so a corpse that
+      // died mid-overlay legitimately keeps the last value it took.
+      const gateCensus = () => {
+        let probed = 0, alive = 0;
+        for (const b of cs.bots) {
+          if (!b.alive) continue;
+          alive++;
+          if (b.targetLOS !== null) probed++;
+        }
+        return { probed, alive };
+      };
       const before = wireframeCount();
       const roBefore = readoutState();
+      const gatesBefore = gateCensus();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(30);
       const on = wireframeCount();
       const roOn = readoutState();
+      const gatesOn = gateCensus();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(10);
       const off = wireframeCount();
       const roOff = readoutState();
+      const gatesOff = gateCensus();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(10);
       const roBackOn = readoutState();
-      return { before, on, off, bots: cs.bots.length, roBefore, roOn, roOff, roBackOn };
+      const gatesBackOn = gateCensus();
+      return { before, on, off, bots: cs.bots.length, roBefore, roOn, roOff, roBackOn,
+               gatesBefore, gatesOn, gatesOff, gatesBackOn };
     });
     if (result.before === -1) throw new Error('no bot mesh to reach the scene through');
     if (result.before !== 0) throw new Error(`level geometry was already wireframed before the toggle: ${JSON.stringify(result)}`);
     if (result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
     if (result.off !== 0) throw new Error(`toggling the debug view off left ${result.off} materials wireframed: ${JSON.stringify(result)}`);
+    if (result.gatesBefore.probed !== 0) throw new Error(`bots took LOS probes before any V press — the raycast must be gated on session.debugView: ${JSON.stringify(result)}`);
+    if (result.gatesOn.alive > 0 && result.gatesOn.probed === 0) throw new Error(`no live bot reported a sight probe while the debug view was up: ${JSON.stringify(result)}`);
+    if (result.gatesOff.probed !== 0) throw new Error(`live bots kept fresh LOS probes after the debug view went down: ${JSON.stringify(result)}`);
+    if (result.gatesBackOn.alive > 0 && result.gatesBackOn.probed === 0) throw new Error(`no live bot resumed sight probes on re-toggle: ${JSON.stringify(result)}`);
     if (!result.roBefore || result.roBefore.shown) throw new Error(`bot readout was visible before any V press: ${JSON.stringify(result)}`);
     if (!result.roOn || !result.roOn.shown || result.roOn.text === '') throw new Error(`bot readout did not show with text while the debug view was up: ${JSON.stringify(result)}`);
     if (!result.roOff || result.roOff.shown) throw new Error(`bot readout stayed visible after the debug view went down: ${JSON.stringify(result)}`);
@@ -1492,6 +1596,7 @@ try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
+  await runFlatRouteCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();

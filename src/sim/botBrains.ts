@@ -67,6 +67,27 @@ export interface BrainParams {
   /** Seconds a jammed bot commits to sliding one way along whatever blocks it. */
   commitTime: number;
   /**
+   * Seconds a bot may fail to CLOSE on its target beyond farBand before it
+   * stops trusting band steering and routes on the flat — the flat analogue
+   * of climbThreshold's job: evidence gathered, not anticipation.
+   */
+  noProgressTime: number;
+  /**
+   * Closure (m), measured against where distance stood when the stall timer
+   * last reset, that counts as progress. Deliberately several frames' worth:
+   * real approach shrinks dist by selfSpeed·dt each frame (~0.06 m), and a
+   * per-frame test would demand an epsilon below that and jitter would arm
+   * the timer mid-approach.
+   */
+  noProgressEpsilon: number;
+  /**
+   * Growth (m) beyond that same baseline read as the GOAL FLEEING rather
+   * than as stagnation: re-baseline and give steering a fresh chance.
+   * Without it, chasing anything faster latches routing permanently even
+   * though nothing is blocked.
+   */
+  fleeReset: number;
+  /**
    * How much a metre of height counts against a metre of ground when
    * ranking targets. Above 1 because height is not distance: reaching it
    * costs a detour to whatever flight serves that level.
@@ -100,6 +121,9 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   climbExit: 0.45,     // just over one riser — keep routing to the last step
   stuckTime: 0.25,
   commitTime: 0.5,
+  noProgressTime: 1.5,   // ~2 juke swings would be 4 s; 1.5 s is already patient
+  noProgressEpsilon: 0.25, // ≈ 4 frames of full-speed closure
+  fleeReset: 2,          // a target 2 m farther than the best seen is running, not stalling
   verticalWeight: 2,   // a deck 3.6 m up ranks like 7.2 m of extra ground
   hitChanceNear: 0.65,
   hitChanceDivisor: 80,
@@ -178,8 +202,8 @@ export interface BrainView {
    * Planar distance to the target (=== toTarget.length()). Ground distance,
    * NOT the steering basis (that is the vector above) and no longer what the
    * bands read — they moved to dist3. Kept because ground distance is the
-   * right measure of whether a bot is making headway toward its target, which
-   * is what stuck detection needs.
+   * right measure of whether a bot is making headway toward its target —
+   * what stuck detection and the flat-routing stall tracker both read.
    */
   dist: number;
   /** True eye-to-eye 3D distance — the same range the hit die rolls on. */
@@ -257,6 +281,13 @@ export interface BotBrain {
   rollHit(dist: number): boolean;
   /** Draw one landed-shot damage from this brain's ballistic params. */
   rollDamage(): number;
+  /**
+   * Whether a target at eye-to-eye 3D `dist` passes this brain's engage
+   * gate — the same exclusive comparison decide()'s trigger applies before
+   * it ever probes sight. Exposed so a display-only consumer can report
+   * "would fire" without reading params, like hitChance above.
+   */
+  inRange(dist: number): boolean;
 }
 
 /** The shipped bot policy, parameterized for future variants. */
@@ -271,6 +302,21 @@ export class DefaultBrain implements BotBrain {
   private commitLeft = 0;
   /** Which way the last slide went; the next one takes the other. */
   private slideDir: 1 | -1 = 1;
+  /**
+   * Planar distance to the target when the stall tracker last reset — the
+   * baseline closure is measured against. Infinity until a real reading
+   * adopts it, so the first frame of any life counts as progress.
+   */
+  private stallBase = Infinity;
+  /** Seconds spent beyond farBand without closing on that baseline. */
+  private stalledFor = 0;
+  /**
+   * The flat-routing latch, raised when stalledFor reaches noProgressTime
+   * and held until dist3 comes back inside farBand — the same
+   * evidence-then-hand-over shape as the climb gate's hysteresis, with the
+   * band boundary doing what climbExit does there.
+   */
+  private flatRouted = false;
 
   constructor(
     private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
@@ -300,6 +346,9 @@ export class DefaultBrain implements BotBrain {
     this.routing = false;
     this.blockedFor = 0;
     this.commitLeft = 0;
+    this.flatRouted = false;
+    this.stalledFor = 0;
+    this.stallBase = Infinity;
   }
 
   hitChance(dist: number): number {
@@ -312,6 +361,10 @@ export class DefaultBrain implements BotBrain {
 
   rollDamage(): number {
     return botDamageRoll(this.rng, this.params);
+  }
+
+  inRange(dist: number): boolean {
+    return dist < this.params.engageRange;
   }
 
   /**
@@ -365,9 +418,46 @@ export class DefaultBrain implements BotBrain {
     // waits for climbExit, because a bot partway up a flight still reads a
     // rise of a metre or so and dropping it back to band steering there is
     // exactly the stall this replaces — orbiting one step short of the deck.
-    const wantRoute = this.routing
+    const climbWants = this.routing
       ? view.rise > this.params.climbExit
       : view.rise > this.params.climbThreshold;
+
+    // The flat analogue (issue #44): band steering has no representation of
+    // obstacles, so when it demonstrably cannot close — pacing beyond
+    // farBand with planar distance pinned against a baseline — hand the
+    // problem to the graph. Tracking is gated on being OUTSIDE farBand:
+    // in-band pacing at constant radius is engagement, not failure (#45's
+    // pure-strafe hold), and arming here would route-mode every firefight.
+    // Closure is measured over several frames' worth of movement
+    // (noProgressEpsilon) rather than per frame, so ordinary approach never
+    // reads as stalled; growth past fleeReset re-baselines instead of
+    // arming, because a fleeing goal is not stagnation.
+    if (this.flatRouted) {
+      if (!climbWants && view.dist3 <= this.params.farBand) {
+        // Back inside the band: steering owns the problem again. Re-baseline
+        // so a fresh wedge has to earn a fresh latch.
+        this.flatRouted = false;
+        this.stalledFor = 0;
+        this.stallBase = view.dist;
+      }
+    } else if (!climbWants) {
+      if (view.dist3 <= this.params.farBand || view.dist <= this.stallBase - this.params.noProgressEpsilon) {
+        this.stallBase = view.dist;
+        this.stalledFor = 0;
+      } else if (view.dist >= this.stallBase + this.params.fleeReset) {
+        this.stallBase = view.dist;
+        this.stalledFor = 0;
+      } else {
+        this.stalledFor += dt;
+        if (this.stalledFor >= this.params.noProgressTime) {
+          this.flatRouted = true;
+          this.stalledFor = 0;
+          this.stallBase = view.dist;
+        }
+      }
+    }
+
+    const wantRoute = climbWants || this.flatRouted;
     const waypoint = wantRoute ? view.nextWaypoint() : null;
     this.routing = waypoint !== null;
 

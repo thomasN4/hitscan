@@ -1,0 +1,135 @@
+name: Claude review
+
+# An advisory PR reviewer: runs `claude -p` headlessly against the diff and posts
+# the result as a Gitea comment-review. Deliberately a SEPARATE workflow from
+# ci.yml — a flaky reviewer must never read as a failed build, and it is not on
+# the critical path of a merge. ci.yml stays the gate.
+#
+# Gitea has no commit-comment API, so `/pulls/{index}/reviews` is the only place
+# prose can sit next to a diff; that is why this hangs off pull_request rather
+# than push. Posting lives in scripts/gitea-review.mjs, the reviewer's standing
+# instructions in scripts/review-prompt.md — both runnable by hand, see their
+# headers.
+#
+# Two secrets, both set in the repo's Settings -> Actions -> Secrets:
+#   CLAUDE_CODE_OAUTH_TOKEN  from `claude setup-token` (subscription auth; the
+#                            portable form of what `/login` writes to ~/.claude,
+#                            which a fresh job container does not have)
+#   CLAUDE_BOT_TOKEN         a PAT for a dedicated `claude-bot` Gitea account,
+#                            added as a collaborator. Not the auto-injected
+#                            GITEA_TOKEN: that acts as the triggering user, and
+#                            Gitea restricts reviewing a PR you authored — which
+#                            here is every PR.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude PR review
+    # `tea pr create --draft` prepends `WIP: ` and stripping it is what marks a
+    # PR ready (AGENTS.md step 4), so this gate is what keeps the reviewer from
+    # firing on every push of work still in progress. `edited` is in the trigger
+    # list precisely so that stripping the prefix is itself an event.
+    #
+    # The head-repo check keeps the two secrets away from a fork's PR.
+    if: >-
+      !startsWith(github.event.pull_request.title, 'WIP:')
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # GITEA_TOKEN is deliberately NOT here. It carries repo write, and job-level
+    # env would hand it to the Review step, where a model is reading text this
+    # repo does not control (diff contents, PR title). Only the two poster steps
+    # get it.
+    env:
+      GITEA_API: ${{ github.server_url }}
+      GITEA_REPO: ${{ github.repository }}
+      PR_INDEX: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The reviewer diffs head against the base commit, which a shallow
+          # clone of the PR branch does not contain.
+          fetch-depth: 0
+
+      # No `cache: npm` here, for the same reason as ci.yml: the Actions cache
+      # server resolves to act_runner's own docker-bridge address, which the job
+      # container cannot route to, so both restore and save sit in a connect
+      # timeout.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Deliberately no `npm ci`. This job reads code, it does not run the suite
+      # (ci.yml owns that on the same commit), and gitea-review.mjs is written
+      # against Node built-ins and global fetch so it needs no install.
+
+      # `edited` also fires when the PR *description* changes, so without this
+      # a typo fix in the body would post a second review of identical code.
+      - name: Check whether this commit was already reviewed
+        id: dedupe
+        # Assign first, echo second. `echo "reviewed=$(...)"` would take its exit
+        # status from echo, so an API failure would read as "not yet reviewed"
+        # and post a duplicate; an assignment inherits the substitution's status,
+        # which `bash -e` then turns into a red step.
+        env:
+          GITEA_TOKEN: ${{ secrets.CLAUDE_BOT_TOKEN }}
+        run: |
+          reviewed="$(node scripts/gitea-review.mjs already-reviewed)"
+          echo "reviewed=$reviewed" >> "$GITHUB_OUTPUT"
+
+      # Below the dedupe check, and gated on it: the skip path (an `edited` event
+      # on an already-reviewed commit) then costs one GET rather than a global
+      # npm install. The dedupe step itself needs only the Node from setup-node.
+      #
+      # Pinned, like actions/checkout@v7 and node-version above. Unpinned, a CLI
+      # release that renames a flag or changes what `-p` writes to stdout would
+      # change this reviewer's behavior with no diff in this repo to explain it.
+      - name: Install Claude Code
+        if: steps.dedupe.outputs.reviewed != 'true'
+        run: npm i -g @anthropic-ai/claude-code@2.1.246
+
+      - name: Review
+        if: steps.dedupe.outputs.reviewed != 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        # Write and Edit are absent from the allowlist, which is what makes the
+        # reviewer read-only by construction rather than by asking politely: in
+        # `-p` mode a tool outside the list is denied without a prompt.
+        # `--output-format` stays at its "text" default so the model's markdown
+        # lands in the file directly and the container needs no jq.
+        #
+        # Swap in claude-sonnet-5 if subscription quota gets tight; the model
+        # flag is the only thing that changes.
+        run: |
+          # base.sha is the tip of `main` at event time, not the branch point.
+          # With parallel worktrees (AGENTS.md step 2) another PR routinely lands
+          # on main first, and diffing against the tip would show that PR's work
+          # inverted and blame it on this one. Resolve the merge base instead.
+          BASE_SHA="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          claude -p "Review the pull request titled \"$PR_TITLE\", whose base commit is $BASE_SHA and head commit is $HEAD_SHA." \
+            --model claude-opus-5 \
+            --append-system-prompt "$(cat scripts/review-prompt.md)" \
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)" \
+            > review.md
+
+      # Not `continue-on-error`: a reviewer that quietly stops posting is worse
+      # than a red job, and this workflow gates nothing, so red is cheap here.
+      - name: Post the review
+        if: steps.dedupe.outputs.reviewed != 'true'
+        env:
+          GITEA_TOKEN: ${{ secrets.CLAUDE_BOT_TOKEN }}
+        run: node scripts/gitea-review.mjs post review.md

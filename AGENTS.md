@@ -6,6 +6,11 @@ Guidance for AI agents (and humans) working in this repository.
 
 Browser FPS demo: Three.js + Vite, TypeScript throughout `src/`, no framework. All game code lives in `src/`; markup/CSS in `index.html`. Intra-`src/` imports are extensionless (`from './core/state'`) — that is what let files rename to `.ts` one at a time without touching importers (Vite only maps a `'./x.js'` specifier onto `x.ts` when the *importer* is TS).
 
+The canonical remote is a self-hosted Gitea instance on the LAN:
+`http://192.168.2.161:3000/thomasN4/another-cs-clone` (`origin`). GitHub is no
+longer the source of truth — `gh` is the wrong tool here; use `tea` (configured
+login: `gitea-lan`).
+
 ## Workflow
 
 Default loop for every non-trivial change: **plan → worktree → implement → open draft PR**.
@@ -14,7 +19,7 @@ Default loop for every non-trivial change: **plan → worktree → implement →
 2. **Worktree** — every branch is developed in its own git worktree, never directly in the shared primary checkout (which stays on `main`). One session per worktree; never run two sessions against one working copy:
 
    ```sh
-   git worktree add ../cs-demo-<slug> -b feat/<short-slug>
+   git worktree add ../acsc-<slug> -b feat/<short-slug>
    ```
 
 3. **Implement** — on a feature branch cut from `main` (inside its worktree):
@@ -29,9 +34,17 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    Fix missing player import breaking reload; add smoke test and debug hook
    ```
 4. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
-   - `gh pr create --draft --title "<imperative summary>" --body "..."`
+   - `tea pr create --draft --title "<imperative summary>" --description "..."`
+   - Gitea has no draft flag on the pull request itself. `--draft` prepends
+     `WIP: ` to the title and Gitea refuses to merge while that prefix is
+     present — removing the prefix is what marks a PR ready for review.
    - PR body: what changed, why, and verification results.
-5. **Review** — the user merges personally in the GitHub UI. Do NOT run `gh pr merge` or `gh pr ready` unless explicitly instructed for that specific PR.
+5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR.
+   - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
+     (`.github/workflows/review.yml`): a headless `claude -p` reads the diff and
+     posts a comment-review as `claude-bot`, once per head commit. It is
+     advisory and gates nothing — `npm run lint`/`typecheck`/`test`/`build` in
+     `ci.yml` remain the only checks that can fail a PR.
 
 Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 
@@ -55,6 +68,14 @@ Four static/sim layers, deliberately split:
 
 - **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit. When a browser-side module holds pure logic the suite cannot reach, split out a seam rather than mocking — `sim/recoil.ts:convertOnSwap()` is the worked example, and lesson 19 is what it cost to learn twice. The suite also carries one repo-hygiene check that is not simulation logic: `scripts/lessonNumbering.test.mjs`, which reads `docs/*-plan.md` off disk and fails if a review-lesson number moves out from under the comments citing it (see Roadmap).
 - **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, every map. This is the layer that catches wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`. Note Vitest resolves through its own bundled Vite (8.x), not the workspace Vite 5 — a resolution edge must work under both.
+
+A fifth layer reads rather than runs: the CI reviewer in
+`.github/workflows/review.yml`. Its standing instructions are
+`scripts/review-prompt.md` — edit that file, not the workflow, to change what
+the reviewer looks for. That file's header carries the by-hand invocation for
+iterating on it locally without pushing; it lives there and not here because the
+snippet has to track the workflow's actual `claude -p` call, and two copies
+drifted apart within one PR the first time there were two.
 
 ## Architecture rules
 

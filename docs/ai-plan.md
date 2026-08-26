@@ -221,7 +221,8 @@ Routing is gated on height alone — `rise > climbThreshold` to enter, held down
 to a much lower `climbExit` (0.45) because a bot partway up a flight still
 reads a rise of a metre and dropping it back to band steering there IS the
 stall this replaces. Same-level routing waits on evidence that same-level bots
-actually fail to arrive.
+actually fail to arrive. *(That evidence arrived: issue #44, and the flat
+latch below is its answer.)*
 
 **Result: going-nowhere windows 7/40 → 3/40**, and the remaining ones changed
 character — they are mostly bots at `feetY 3.6, rise 0.0`, on the deck orbiting
@@ -306,6 +307,96 @@ Two things it taught immediately, both about presentation rather than routing:
 a DEV readout renders it, written here only" contract `mode` and `moveBlocked`
 already carry.
 
+### Shot-gate grading on the overlay (issue #46)
+
+The playtest report behind this issue — *"the bots are almost always engaging,
+probably because they can see their enemies through walls"* — was the overlay
+lying by omission. One bit, brain mode, carried everything it drew, and
+`engage` means *not routing*, not *can shoot*: a bot 80 m away behind three
+walls drew the same solid intent line as one mid-gunfight. The gates were
+already honest (`dist3 < engageRange`, then `seeTarget()`); nothing could SEE
+that.
+
+Now the tint carries what the hue cannot. The intent line and marker grade by
+the actual shot gates — full = inside engage range with sight proven this
+frame, half = in range but sight unproven or blocked, quarter = tracking a
+target beyond engage range — while the hue stays the mode's.
+
+- `BotBrain.inRange(dist)` exposes the trigger's exclusive comparison so the
+  executor never reads params, same rationale as `hitChance`.
+- The two halves cost differently and are treated differently:
+  `Bot.targetInRange` is a comparison, fresh every frame; `Bot.targetLOS`
+  costs a real raycast, so it is taken only while `session.debugView` is up.
+  Policy's own probe stays lazy — at most once per cooldown window — exactly
+  as the issue required: a deliberate choice to pay while inspecting, never a
+  side effect. Both reset alongside `targetEye` on no-target and respawn.
+- Smoke `[debugView]` pins the gating end-to-end: zero probes before any V
+  press, at least one live bot probing while up (the pin asserts ≥1, not
+  every — a bot whose target died mid-phase legitimately holds `null`),
+  none after down, resumed on re-toggle. Dead bots are excluded from the
+  census — their `update()` early-returns, so a corpse killed mid-overlay
+  legitimately keeps the last value it took.
+- Two carriers for one state (PR 1.5), because neither survives contact with
+  eyes alone: brightness tiers are hard to tell apart at a glance and not
+  colorblind-trivial, so `hud.ts:updateBotDebug` now renders the same gates
+  as an `r`/`s` text column beside the mode — `rs` can fire, `r-` in range
+  but sight unproven or blocked, `--` tracking beyond engage range.
+- Cost accounting for that DEV probe, stated plainly: it is paid per bot per
+  frame while the view is up EVEN WHEN THE TARGET IS OUT OF RANGE, where the
+  result cannot change the tier. Kept eager deliberately — the smoke census
+  keys on any live bot with any target probing, which a range-gated probe
+  would break, and the cost cannot ship outside DEV. Revisit only if
+  profiling ever shows it.
+
+### Flat routing (issue #44)
+
+The nav graph has covered the whole map since tranche 5, but the brain only
+asked it for routes UP: `wantRoute` keyed on `rise` alone, so every wall,
+crate and building on the flat was left to band steering — which knows the
+direction to its target and whether last frame's step was refused, and nothing
+else. Issue #44's playtest was that design failing exactly as documented:
+bots pacing ±3 m at a wall face with no `blk`, because sliding keeps ~0.7 of
+the intended step and step-rejection cannot see a stall it never causes. The
+measured case was stark enough to gate the fix on: against pre-fix main, a T
+teleported south of arena's mid wall with the player on the CT half ground to
+a halt at (−9.6, −1.5) — pressed into the wall's face, never in route mode,
+still there 45 s later.
+
+The latch, in `DefaultBrain`: while NOT routed by the climb gate and beyond
+`farBand`, planar distance is tracked against a baseline. Closing by more than
+`noProgressEpsilon` (0.25 m — several frames' worth; per-frame closure is only
+~0.07 m, so a per-frame test arms the timer mid-approach) or retreating by
+more than `fleeReset` (2 m — a fleeing goal is not stagnation; without this,
+chasing anything faster latches permanently) re-baselines and resets.
+Otherwise the accrual grows; at `noProgressTime` (1.5 s) routing engages
+regardless of rise, and stays engaged until `dist3` comes back inside farBand
+— the same evidence-then-hand-over shape as climbThreshold/climbExit, with
+the band boundary playing climbExit's role. Release keys on band entry ALONE:
+closure made en route does not release early, so a long open-ground chase
+stays graph-followed until the target is back inside farBand — deliberate,
+because flip-flopping between steering and graph mid-chase would thrash both.
+
+What it buys:
+
+- The graph now covers the flat, and `travel()`'s jam recovery — built and
+  validated in tranche 5 but unreachable from engage mode, because engage
+  zeroed `blockedFor`/`commitLeft` every frame — finally fires in the
+  situations playtesters were reporting.
+- Smoke `[flatRoute]` pins it end-to-end on arena: same teleport, poll for
+  feet crossing z ≥ 2 AND route mode observed en route (strafe-luck cannot
+  satisfy it). Fix: crossed at x = 3.5 — through the wall's east gap, the
+  only path — in 8 s, `sawRoute: true`. Pre-fix main fails the phase with the
+  bot still south of the wall.
+- Nine unit tests pin the latch's edges: adoption frame arithmetic (the first
+  stalled frame establishes the baseline and accrues nothing), approach and
+  flight re-baselining, in-band pacing staying engagement (#45's hold must
+  not read as failure), release-and-fresh-evidence, respawn clearing, and
+  jam-recovery reachability from an engage-origin route.
+
+Deliberately deferred to the band-steering fixes (#45/#43): routing when SIGHT
+has been blocked long enough. This latch keys on distance progress, not sight;
+the two compose but are separate evidence streams.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
@@ -385,3 +476,14 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
    flake, and the first explanation reached for was GC pressure from a new
    allocation. That was a cause of slow frames, not the bug — the bug is that a
    slow frame mattered at all. Lesson 24's shape again.
+27. **A constant headed for Float32 storage should be chosen to survive it.**
+    The overlay's brightness tiers were first drafted as 1 / 0.55 / 0.25, and
+    the pin asserting the mid tier failed — not because the maths was wrong
+    but because the color buffer is a `Float32Array`, and 0.55 has no exact
+    float32 representation: it round-trips as 0.550000011920929, while 1,
+    0.5 and 0.25 are exact. The fix was to pick the value the storage can hold
+    (0.5 reads identically) rather than loosen the assertion with a tolerance;
+    an exact pin that survives is worth more than a fuzzy one that passes.
+    Same family as the LIFT comment in debugView.test.ts about 1.9 rounding —
+    but that one tolerated at read time, where this could be fixed at write
+    time, which is always the better end of the pipe.

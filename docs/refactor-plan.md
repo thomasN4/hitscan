@@ -468,7 +468,8 @@ CT-bots work in a `docs/<tranche>-plan.md` of its own.
 ## Working agreement
 
 Per `AGENTS.md`: plan → worktree → implement → **draft** PR. The user merges in
-the GitHub UI; do not run `gh pr merge` or `gh pr ready` unprompted.
+the Gitea UI; do not run `tea pr merge`, and do not strip a PR's `WIP: ` prefix,
+unprompted.
 
 **Archival policy for this file and every other `docs/*-plan.md`: append and
 annotate, never renumber.** A closed tranche's record is not rewritten to match

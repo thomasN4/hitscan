@@ -23,7 +23,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, gameTime, session, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -206,6 +206,19 @@ export class Bot implements BotShape {
    * it costs no allocation of its own.
    */
   targetEye: THREE.Vector3 | null = null;
+  /**
+   * Shot-gate readout for debugView.ts's intent line (issue #46): whether
+   * this bot could actually FIRE at its current target, split into the two
+   * gates the trigger applies — range, and sight.
+   *
+   * Public for the same reason `targetEye` is: part of the structural Bot
+   * shape, rendered by a DEV view, written here only. The range half is a
+   * comparison and is kept fresh every frame; the sight half costs a real
+   * raycast, so it is only paid while session.debugView is up (which cannot
+   * happen outside DEV builds) and holds null otherwise.
+   */
+  targetInRange = false;
+  targetLOS: boolean | null = null;
   /** Seconds until this bot may spend the frame's route budget again. */
   private routeCooldown = 0;
 
@@ -320,6 +333,8 @@ export class Bot implements BotShape {
     if (!target) {
       this.moveBlocked = false;
       this.targetEye = null;
+      this.targetInRange = false;
+      this.targetLOS = null;
       return;
     }
 
@@ -346,6 +361,15 @@ export class Bot implements BotShape {
     const losTo = target.kind === 'player'
       ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
       : () => hasLineOfSight(this.eyePos(), target.bot.eyePos(), solids);
+
+    // DEV overlay readout of the shot gates (issue #46): the trigger is
+    // range-gated AND LOS-gated, and the overlay exists to say which of the
+    // three states a bot is in — can shoot, in range but unproven/blocked
+    // sight, or merely tracking. The probe here is deliberately NOT lazy:
+    // seeTarget stays at-most-once-per-cooldown for the policy itself, while
+    // the overlay pays one raycast per bot per frame for as long as it is up.
+    this.targetInRange = this.brain.inRange(dist3);
+    this.targetLOS = session.debugView && target.alive ? losTo() : null;
 
     // Clamped, not free-running: a bot that spends minutes not routing would
     // otherwise drift the timer arbitrarily negative for no benefit, and the
@@ -541,6 +565,8 @@ export class Bot implements BotShape {
       this.leg = 0;
       this.mode = 'engage';
       this.targetEye = null;
+      this.targetInRange = false;
+      this.targetLOS = null;
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }

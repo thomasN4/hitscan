@@ -52,7 +52,7 @@ jobs:
     if: >-
       !startsWith(github.event.pull_request.title, 'WIP:')
       && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ai-review
     timeout-minutes: 25
     # GITEA_TOKEN is deliberately NOT here. It carries repo write, and job-level
     # env would hand it to the Review step, where a model is reading text this

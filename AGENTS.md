@@ -76,6 +76,7 @@ the reviewer looks for, and iterate on it locally without pushing:
 
 ```sh
 claude -p "Review the pull request whose base commit is $(git merge-base main HEAD) and head commit is HEAD" \
+  --model claude-opus-5 \
   --append-system-prompt "$(cat scripts/review-prompt.md)" \
   --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
 ```

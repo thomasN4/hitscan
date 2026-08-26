@@ -48,15 +48,29 @@ function authHeaders() {
   return { Authorization: `token ${requireEnv('GITEA_TOKEN')}` };
 }
 
-/** True when a review carrying this commit's marker is already on the PR. */
+// Gitea clamps a page to MAX_RESPONSE_ITEMS, 50 by default, so asking for more
+// in one request does not work — the scan has to walk pages instead.
+const PAGE_LIMIT = 50;
+
+/**
+ * True when a review carrying this commit's marker is already on the PR.
+ *
+ * Paginated rather than single-shot: a marker sitting past the first page would
+ * read as "not yet reviewed" and post a duplicate, which is the one failure this
+ * check exists to prevent. Walks until a short page comes back.
+ */
 async function alreadyReviewed() {
   const sha = requireEnv('HEAD_SHA');
-  const res = await fetch(`${reviewsUrl()}?limit=50`, { headers: authHeaders() });
-  if (!res.ok) {
-    throw new Error(`Listing reviews failed: ${res.status} ${res.statusText}\n${await res.text()}`);
+  const url = reviewsUrl();
+  for (let page = 1; ; page++) {
+    const res = await fetch(`${url}?limit=${PAGE_LIMIT}&page=${page}`, { headers: authHeaders() });
+    if (!res.ok) {
+      throw new Error(`Listing reviews failed: ${res.status} ${res.statusText}\n${await res.text()}`);
+    }
+    const reviews = await res.json();
+    if (reviews.some((review) => typeof review.body === 'string' && review.body.includes(marker(sha)))) return true;
+    if (reviews.length < PAGE_LIMIT) return false;
   }
-  const reviews = await res.json();
-  return reviews.some((review) => typeof review.body === 'string' && review.body.includes(marker(sha)));
 }
 
 /**

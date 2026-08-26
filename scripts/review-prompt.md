@@ -6,6 +6,7 @@ Passed to `claude -p` via `--append-system-prompt` from
 so it can be diffed like code and iterated locally without pushing a branch:
 
   claude -p "Review the pull request whose base commit is $(git merge-base main HEAD) and head commit is HEAD" \
+  --model claude-opus-5 \
     --append-system-prompt "$(cat scripts/review-prompt.md)" \
     --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
 

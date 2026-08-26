@@ -202,8 +202,8 @@ export interface BrainView {
    * Planar distance to the target (=== toTarget.length()). Ground distance,
    * NOT the steering basis (that is the vector above) and no longer what the
    * bands read — they moved to dist3. Kept because ground distance is the
-   * right measure of whether a bot is making headway toward its target, which
-   * is what stuck detection needs.
+   * right measure of whether a bot is making headway toward its target —
+   * what stuck detection and the flat-routing stall tracker both read.
    */
   dist: number;
   /** True eye-to-eye 3D distance — the same range the hit die rolls on. */

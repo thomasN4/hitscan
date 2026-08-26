@@ -816,7 +816,11 @@ async function runFlatRouteCheck() {
       bot.mesh.position.set(spot[0], 0, spot[1]);
       bot.vy = 0;      // clear vertical state carried from wherever it spawned,
       bot.onGround = true; // like Bot.spawnAtRandom does
-      bot.path = [];   // and drop any stale route from the pre-teleport life
+      // path/leg are TS-private ("written here only" in bots.ts); the harness
+      // reaches past that on purpose — a teleport is not a flow the executor
+      // otherwise sees, and without this the stale route survives until the
+      // ROUTE_ABANDON drift check drops it a frame later.
+      bot.path = [];
       bot.leg = 0;
 
       const t0 = performance.now();

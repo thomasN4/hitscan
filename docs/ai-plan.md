@@ -371,7 +371,10 @@ chasing anything faster latches permanently) re-baselines and resets.
 Otherwise the accrual grows; at `noProgressTime` (1.5 s) routing engages
 regardless of rise, and stays engaged until `dist3` comes back inside farBand
 — the same evidence-then-hand-over shape as climbThreshold/climbExit, with
-the band boundary playing climbExit's role.
+the band boundary playing climbExit's role. Release keys on band entry ALONE:
+closure made en route does not release early, so a long open-ground chase
+stays graph-followed until the target is back inside farBand — deliberate,
+because flip-flopping between steering and graph mid-chase would thrash both.
 
 What it buys:
 

@@ -118,6 +118,14 @@ export interface WeaponDef {
    * Required whenever `melee` is present.
    */
   arcRad?: number;
+  /**
+   * Backstab damage multiplier: a strike delivered from within 60° of
+   * directly behind the victim (sim/melee.ts:isBackstab) multiplies the
+   * ordinary zone damage by this. Required whenever `melee` is present and
+   * meaningless otherwise — validateWeapons owns both directions of the
+   * pairing, exactly like range/arcRad. Absent means 1 (no backstab bonus).
+   */
+  backstabMult?: number;
 }
 
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
@@ -463,7 +471,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                                // the contract rather than broken tuning
     fireRate: 0.45,  // swing cadence (~2.2 swings/sec click ceiling)
     reloadTime: 0,   // never reloads; tryReload() no-ops on a melee def
-    damage: 55,      // two swings to kill ANYWHERE on the body; legs x0.75
+    damage: 55,      // two FRONT swings to kill anywhere on the body; legs x0.75.
+                     // A backstab (x3 below) kills a full-health bot in one
     headshotMult: 1, // NO head premium. The arc strikes the NEAREST part, and
                      // point-blank that is usually the head — with x4 every
                      // close swing one-tapped (the smoke phase measured -120
@@ -490,6 +499,9 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     melee: true,
     range: 2.0,        // metres from the eye a strike reaches
     arcRad: 0.6,       // rad (~34°) total apex angle — forgiving CS-style arc
+    backstabMult: 3,   // strike from within 60° of directly behind and the
+                       // zone damage triples: 55 x 3 = 165 — the CS-style
+                       // one-hit backstab on a full-health bot (issue #37)
   },
 };
 

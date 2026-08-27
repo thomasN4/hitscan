@@ -352,12 +352,16 @@ jobs:
           git show "$BASE_SHA:scripts/select-runner-node.sh" > /tmp/select-runner-node.sh
           bash /tmp/select-runner-node.sh
 
-      - name: Install and preflight OpenCode
+      - name: Install ripgrep and preflight OpenCode
         env:
           # Makes the built-in OpenRouter provider resolvable during the local
           # config preflight without exposing the real key before model launch.
           OPENROUTER_API_KEY: preflight-only-not-a-real-key
         run: |
+          apt-get update
+          apt-get install --no-install-recommends --yes ripgrep
+          command -v rg
+
           mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
           (cd /tmp && npm i -g opencode-ai@1.18.23)
           test "$(opencode --version)" = '1.18.23'

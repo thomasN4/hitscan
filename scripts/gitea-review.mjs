@@ -1,9 +1,9 @@
 // scripts/gitea-review.mjs — the Gitea half of the automated PR review.
 //
-// `.github/workflows/review.yml` runs `claude -p` to produce a markdown review,
-// then hands it here to be posted. Split out of the workflow YAML because a
-// shell one-liner buried in a `run:` block is neither readable nor runnable
-// locally, and this file needs both:
+// `.github/workflows/review.yml` runs the selected model to produce a markdown
+// review, then hands it here to be posted. Split out of the workflow YAML
+// because a shell one-liner buried in a `run:` block is neither readable nor
+// runnable locally, and this file needs both:
 //
 //   GITEA_API=http://192.168.2.161:3000 GITEA_TOKEN="$(cat ../.gitea-access-token)" \
 //   GITEA_REPO=thomasN4/another-cs-clone PR_INDEX=52 HEAD_SHA="$(git rev-parse HEAD)" \
@@ -19,6 +19,7 @@
 // requests rather than pushes: `/pulls/{index}/reviews` is the only endpoint
 // that puts prose next to a diff.
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 // Marker appended to every posted body. It is what makes the job idempotent:
 // the workflow's `edited` trigger fires on description edits too, so without
@@ -26,7 +27,17 @@ import { readFileSync } from 'node:fs';
 // of the same code. A marker in the body rather than the review's own
 // `commit_id` field because this half controls the marker outright — nothing
 // on the server decides what it means.
-const marker = (sha) => `<!-- claude-review:${sha} -->`;
+export const marker = (sha) => `<!-- ai-review:${sha} -->`;
+const legacyMarker = (sha) => `<!-- claude-review:${sha} -->`;
+const reviewerNames = new Map([
+  ['claude', 'Claude'],
+  ['codex', 'GPT-5.6 Sol'],
+]);
+
+/** Supports reviews posted before the reviewer became provider-neutral. */
+export function hasReviewMarker(body, sha) {
+  return typeof body === 'string' && (body.includes(marker(sha)) || body.includes(legacyMarker(sha)));
+}
 
 /** Reads an env var, or fails with a named error rather than a silent `undefined` in a URL. */
 function requireEnv(name) {
@@ -68,7 +79,7 @@ async function alreadyReviewed() {
       throw new Error(`Listing reviews failed: ${res.status} ${res.statusText}\n${await res.text()}`);
     }
     const reviews = await res.json();
-    if (reviews.some((review) => typeof review.body === 'string' && review.body.includes(marker(sha)))) return true;
+    if (reviews.some((review) => hasReviewMarker(review.body, sha))) return true;
     // Stops on an EMPTY page, not a short one: PAGE_LIMIT only matches Gitea's
     // default, and on an instance configured below it every page comes back
     // short — which would end the walk at page 1 and silently restore the
@@ -100,35 +111,40 @@ async function post(body) {
  * finds nothing is indistinguishable from a bot that crashed, and the whole
  * point of the marker above is that this costs exactly one comment per commit.
  */
-function composeBody(review, sha) {
+export function composeBody(review, sha, reviewer) {
   const findings = review.trim();
-  // Refuse to stamp the marker onto nothing. `claude -p` can exit 0 having
+  // Refuse to stamp the marker onto nothing. A model can exit 0 having
   // written an empty final message, and because alreadyReviewed() keys off the
   // marker, posting that would pin a content-free review to this commit
   // permanently — no later event could replace it. Fail the step instead.
   if (!findings) throw new Error('Review file is empty — refusing to post a marker with no content');
+  const name = reviewerNames.get(reviewer);
+  if (!name) throw new Error(`Unknown reviewer ${reviewer ?? 'nothing'}`);
   const header = findings === 'NO FINDINGS'
-    ? '🤖 **Claude review** — no findings.'
-    : `🤖 **Claude review** — advisory; \`ci.yml\` remains the gate.\n\n${findings}`;
+    ? `🤖 **${name} review** — no findings.`
+    : `🤖 **${name} review** — advisory; \`ci.yml\` remains the gate.\n\n${findings}`;
   return `${header}\n\n${marker(sha)}\n`;
 }
 
-const [command, file] = process.argv.slice(2);
+async function main() {
+  const [command, file, reviewer] = process.argv.slice(2);
+  switch (command) {
+    case 'already-reviewed':
+      // stdout is consumed by the workflow's `$GITHUB_OUTPUT` step, so it is the
+      // return channel; exit code stays 0 for both answers, leaving non-zero to
+      // mean the API call itself failed.
+      process.stdout.write(String(await alreadyReviewed()));
+      break;
 
-switch (command) {
-  case 'already-reviewed':
-    // stdout is consumed by the workflow's `$GITHUB_OUTPUT` step, so it is the
-    // return channel; exit code stays 0 for both answers, leaving non-zero to
-    // mean the API call itself failed.
-    process.stdout.write(String(await alreadyReviewed()));
-    break;
+    case 'post': {
+      if (!file || !reviewer) throw new Error('Usage: gitea-review.mjs post <review-file> <claude|codex>');
+      await post(composeBody(readFileSync(file, 'utf8'), requireEnv('HEAD_SHA'), reviewer));
+      break;
+    }
 
-  case 'post': {
-    if (!file) throw new Error('Usage: gitea-review.mjs post <review-file>');
-    await post(composeBody(readFileSync(file, 'utf8'), requireEnv('HEAD_SHA')));
-    break;
+    default:
+      throw new Error(`Usage: gitea-review.mjs <already-reviewed|post <file> <claude|codex>>, got ${command ?? 'nothing'}`);
   }
-
-  default:
-    throw new Error(`Usage: gitea-review.mjs <already-reviewed|post <file>>, got ${command ?? 'nothing'}`);
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

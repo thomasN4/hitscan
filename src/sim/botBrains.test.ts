@@ -280,7 +280,7 @@ describe('DefaultBrain blocked-sight strafe', () => {
     const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
       0.9, 0,          // dir+, stagger 1.0 s
       /* F1 */ 0.9,    // probe fails → sightBlocked; would-be flips stay dead
-      /* respawn */ 0.9, // fresh stagger ≈ 2.08 s: no early probe to re-block
+      /* respawn */ 0.9, // fresh stagger ≈ 2.8 s: no early probe to re-block
       /* F2 */ 0.4,    // juke resumes (flag cleared) — steers from F3
       /* F3 */ 0.9,
     ]));

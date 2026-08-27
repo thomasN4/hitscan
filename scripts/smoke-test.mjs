@@ -912,7 +912,7 @@ async function runCornerTrapCheck() {
       // Player state writes are what respawn() itself does; vel zeroed so
       // nothing integrates the old value onward.
       cs.player.pos.set(-40, cs.player.pos.y, 2);
-      if (cs.player.vel) cs.player.vel.set(0, 0, 0);
+      cs.player.vel.set(0, 0, 0);
       bot.mesh.position.set(-40, 0, -10);
       bot.vy = 0;
       bot.onGround = true;

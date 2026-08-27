@@ -387,6 +387,12 @@ What it buys:
   satisfy it). Fix: crossed at x = 3.5 — through the wall's east gap, the
   only path — in 8 s, `sawRoute: true`. Pre-fix main fails the phase with the
   bot still south of the wall.
+  *(Annotation, band-steering PR: the route-mode half of that assertion did
+  not survive contact with its own successors. A later main run crossed via
+  juke-luck alone in 4.5 s without ever routing, and #45's committed strafe
+  is a second legitimate wall-rounding solver — so demanding route mode would
+  flake against healthy outcomes. The claim is now ARRIVAL within budget,
+  mechanism-free; `sawRoute` is recorded for information. Lesson 28.)*
 - Nine unit tests pin the latch's edges: adoption frame arithmetic (the first
   stalled frame establishes the baseline and accrues nothing), approach and
   flight re-baselining, in-band pacing staying engagement (#45's hold must
@@ -396,6 +402,48 @@ What it buys:
 Deliberately deferred to the band-steering fixes (#45/#43): routing when SIGHT
 has been blocked long enough. This latch keys on distance progress, not sight;
 the two compose but are separate evidence streams.
+
+### Band steering commits (#43/#45)
+
+Two playtest complaints with one root shape: the engage blend's lateral
+component never COMMITTED to anything.
+
+**#43 — the collision flip is edge-triggered.** `decide` reversed
+`strafeDir` on every frame `moveBlocked` was set, so a bot resting against a
+wall face reversed ~60×/s; the perpendicular component cancelled itself out
+while the radial term kept pushing in — the wall-grind playtesters watched.
+Now a run of blocked frames is ONE contact event and flips once
+(`wasBlocked`), giving a committed direction to clear the obstacle in — the
+same principle `travel()`'s slide commits use for routing bots.
+
+**#45 — blocked sight stands down the juke.** The corner trap composed two
+facts: inside the band the radial term is exactly zero (pure strafe at full
+speed), and nothing in the policy responded to blocked sight — failed probes
+only shortened a cooldown. But those probes already fire every
+`retryCooldown` while in range, so the information was arriving and being
+discarded. Now each failed probe records `sightBlocked`, and while it holds
+the juke is suppressed: the band hold COMMITS one way and walks around
+whatever occludes instead of pacing across its face. Any successful probe
+clears it; leaving the trigger's range/alive gate clears it; respawn clears
+it; the draw is still consumed so scripted rng sequences are unchanged. One
+frame of lag is deliberate — the observation lands after this frame's step,
+like `moveBlocked`.
+
+Measured with `[cornerTrap]`, a new smoke phase built for the trap: player
+and T-1 placed 12 m apart — dead centre of the band hold — either side of
+arena's west mid wall, with PR #50's `targetLOS` readout as the acceptance
+sensor (the debug view's eager probes make "regained a firing solution"
+directly observable). Main paced at the wall for the full 75 s budget twice,
+drifting to (−26.7, −2.1) and (−28.7, −6.2), sight never clearing. The fix
+regained LOS in **7.1 s**: committed WEST along the face, rounded the wall's
+west tip, sight cleared — `sawRoute: false`, i.e. band steering alone solved
+it without ever invoking the nav graph. The west tip is only 12.5 m from the
+setup, so those randomized runs are observations, not the regression pin: the
+smoke phase now forces every juke draw below threshold. Without suppression
+the bot re-flips continuously and times out; with it the draws are consumed
+but ignored and the bot commits. That was the point of bundling: neither half
+gets credit alone, since #43's per-frame flips would have cancelled any
+commitment #45 tried to make.
 
 ## Deferred
 
@@ -487,3 +535,15 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
     Same family as the LIFT comment in debugView.test.ts about 1.9 rounding —
     but that one tolerated at read time, where this could be fixed at write
     time, which is always the better end of the pipe.
+28. **Pin the invariant, not the mechanism that currently produces it.**
+    `[flatRoute]` asserted not just arrival but ARRIVAL-BY-ROUTING, on the
+    theory that strafe-luck could not satisfy it. Two PRs later the world
+    contained a second legitimate solver — #45's committed strafe walks
+    around a wall end without ever opening a route — and one main run even
+    crossed on raw juke-luck, so the pin would have flaked against bots
+    behaving CORRECTLY. The fix demoted the mechanism to recorded
+    information and kept the invariant (arrival within budget) as the only
+    assertion. When more than one policy is sanctioned to produce an
+    outcome, asserting which one ran is testing yesterday's implementation;
+    the units own mechanism isolation, where the rng is scripted and no
+    second solver can sneak in.

@@ -74,6 +74,18 @@ exit "\${PLAN_RELAY_TEST_EXIT:-0}"
 `);
   chmodSync(fake, 0o755);
 
+  // The runner deliberately preflights ripgrep so the real OpenCode executor
+  // can rely on `rg` being available. Keep this fixture hermetic instead of
+  // inheriting that system dependency from the developer or CI image. GNU
+  // grep accepts the exact long options the runner uses for plan validation.
+  const fakeBin = join(root, 'bin');
+  mkdirSync(fakeBin);
+  const fakeRg = join(fakeBin, 'rg');
+  writeFileSync(fakeRg, `#!/usr/bin/env bash
+exec grep "$@"
+`);
+  chmodSync(fakeRg, 0o755);
+
   const capture = {
     args: join(root, 'args.txt'),
     config: join(root, 'config.json'),
@@ -86,6 +98,7 @@ exit "\${PLAN_RELAY_TEST_EXIT:-0}"
     PLAN_RELAY_TEST_ARGS: capture.args,
     PLAN_RELAY_TEST_CONFIG: capture.config,
     PLAN_RELAY_TEST_XDG: capture.xdg,
+    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
   };
   return { primary, linked, plan, baseline, capture, env };
 }

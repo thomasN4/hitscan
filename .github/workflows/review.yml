@@ -264,7 +264,12 @@ jobs:
           bash /tmp/select-runner-node.sh
 
       - name: Install Claude Code
-        run: (cd /tmp && npm i -g --ignore-scripts @anthropic-ai/claude-code@2.1.246)
+        # Claude Code's npm wrapper installs its platform-native binary in its
+        # postinstall, so `--ignore-scripts` leaves behind a broken `claude`
+        # shim. This ordinary runner has no Codex credential mount, and the
+        # Claude token is scoped only to the later model step; keep /tmp as the
+        # cwd so a PR-owned .npmrc still cannot influence this install.
+        run: (cd /tmp && npm i -g @anthropic-ai/claude-code@2.1.246)
 
       - name: Review with Claude
         env:

@@ -23,7 +23,7 @@ import { roundInterval, roundTransfer, planReload } from './sim/ammo';
 import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
-import { meleeSwing, type MeleeCandidate } from './sim/melee';
+import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -442,7 +442,16 @@ function swingMelee(def: WeaponDef): void {
   if (hit) {
     sfxKnifeHit();
     showHitmarker(hit.part === 'head');
-    damageBot(hit.payload, damageForPart(weapon, hit.part), hit.part);
+    // Backstab classification runs ONLY after the range/arc winner is chosen:
+    // it scales that hit's ordinary zone damage, it never steers target
+    // selection. The bot group's local +Z is its world facing (Bot.update
+    // maintains the invariant), and the bearing reads horizontal X/Z only.
+    const victimForward = hit.payload.mesh.getWorldDirection(new THREE.Vector3());
+    let dmg = damageForPart(weapon, hit.part);
+    if (isBackstab(origin, hit.payload.mesh.position, victimForward)) {
+      dmg *= def.backstabMult ?? 1; // documented default: absent means no bonus
+    }
+    damageBot(hit.payload, dmg, hit.part);
   }
 
   wpn.recoil = Math.min(wpn.recoil + def.recoilKick, RECOIL_CAP);

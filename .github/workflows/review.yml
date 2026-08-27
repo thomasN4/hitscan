@@ -174,13 +174,21 @@ jobs:
 
       - name: Install Codex
         run: |
-          # Codex's Linux sandbox prefers the distribution bwrap binary. The
-          # runner host carries its Ubuntu AppArmor profile; the job container
-          # still needs the binary whose path activates that profile.
-          apt-get update
-          apt-get install --no-install-recommends --yes bubblewrap
           # Do not let a PR-owned .npmrc select what runs beside the credential.
           (cd /tmp && npm i -g --ignore-scripts @openai/codex@0.149.1)
+
+          # Codex ships a static bwrap in its pinned Linux npm artifact. Put
+          # that binary at the distribution path so the runner host's Ubuntu
+          # AppArmor profile recognizes the sandbox executable without APT.
+          codex_package_root="$(npm root -g)/@openai/codex"
+          bundled_bwrap="$(find "$codex_package_root" -type f -path '*/codex-resources/bwrap' -print -quit)"
+          if ! test -x "$bundled_bwrap"; then
+            echo "::error::Pinned Codex package did not contain its bundled bwrap"
+            exit 1
+          fi
+          install -m 0755 "$bundled_bwrap" /usr/bin/bwrap
+          command -v bwrap
+
           codex login status
           if ! test -r "$CODEX_HOME/auth.json"; then
             echo "::error::Expected file-backed Codex credentials at $CODEX_HOME/auth.json"
@@ -352,18 +360,22 @@ jobs:
           git show "$BASE_SHA:scripts/select-runner-node.sh" > /tmp/select-runner-node.sh
           bash /tmp/select-runner-node.sh
 
-      - name: Install ripgrep and preflight OpenCode
+      - name: Install npm tools and preflight OpenCode
         env:
           # Makes the built-in OpenRouter provider resolvable during the local
           # config preflight without exposing the real key before model launch.
           OPENROUTER_API_KEY: preflight-only-not-a-real-key
         run: |
-          apt-get update
-          apt-get install --no-install-recommends --yes ripgrep
-          command -v rg
-
           mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
-          (cd /tmp && npm i -g opencode-ai@1.18.23)
+          # @vscode/ripgrep ships its checksum-verified platform binary inside
+          # npm; installing it beside OpenCode avoids a second package source.
+          (cd /tmp && npm i -g @vscode/ripgrep@1.18.0 opencode-ai@1.18.23)
+          ripgrep_package="$(npm root -g)/@vscode/ripgrep"
+          rg_path="$(RIPGREP_PACKAGE="$ripgrep_package" node -e \
+            'process.stdout.write(require(process.env.RIPGREP_PACKAGE).rgPath)')"
+          install -m 0755 "$rg_path" /usr/local/bin/rg
+          command -v rg
+          rg --version
           test "$(opencode --version)" = '1.18.23'
 
           git show "$BASE_SHA:scripts/opencode-review-config.json" > /tmp/opencode-review-config.json

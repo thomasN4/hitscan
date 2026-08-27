@@ -49,6 +49,58 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      `npm run typecheck`, `npm test`, and `npm run build` in `ci.yml` remain the
      only checks that can fail a PR.
 
+### Plan Relay (Codex planner → OpenCode executor)
+
+**Plan Relay** is the optional split-agent implementation path for a task whose
+plan should be agreed in Codex and executed by the repository's pinned OpenCode
+agent. The ordinary single-agent loop above remains valid. When Plan Relay is
+chosen, its ownership boundary is strict:
+
+1. **Codex plans** — inspect the worktree read-only, settle every product and
+   implementation decision with the user, and write an approved Markdown plan.
+2. **The user approves** — an unresolved choice is a planning blocker, not a
+   decision for the executor to improvise.
+3. **OpenCode implements** — from the clean linked worktree, run:
+
+   ```sh
+   scripts/plan-relay.sh <plan.md>
+   ```
+
+   The runner pins the repository's `executor` agent, model, permissions and
+   runtime isolation. It never commits, pushes or opens a PR.
+4. **Codex verifies** — read the retained transcript and working-tree diff,
+   rerun the plan's checks independently, and report deviations before the
+   normal commit / draft-PR stages continue. Git publication remains the
+   user's decision.
+
+The handoff plan is a public interface between the two agents. It must be a
+non-empty Markdown file with exactly one version and baseline in YAML
+frontmatter, plus all five required sections:
+
+```md
+---
+plan_relay_version: 1
+baseline_commit: <40-character Git commit>
+---
+
+# Task title
+
+## Summary
+## Interfaces
+## Implementation
+## Test Plan
+## Assumptions
+```
+
+`baseline_commit` is the clean worktree commit the plan was written against.
+The runner refuses a primary worktree, `main`, dirty state, malformed plan, or
+baseline mismatch. It copies the approved input and OpenCode JSONL events to an
+ignored `.plan-relay/<baseline>.<random>/` directory, whose path it prints.
+Those records are local evidence, not project documentation. OpenCode must
+treat both this file and the copied plan as binding; if repository truth
+contradicts the plan, it stops and reports the conflict instead of redesigning
+the task.
+
 Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 
 ## Commands

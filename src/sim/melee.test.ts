@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { meleeSwing, type MeleeCandidate } from './melee';
+import { BACKSTAB_MIN_ALIGNMENT, isBackstab, meleeSwing, type MeleeCandidate } from './melee';
 
 /** Eye at the origin looking down -z (the arena's default facing). */
 const EYE = new THREE.Vector3(0, 1.7, 0);
@@ -86,5 +86,68 @@ describe('meleeSwing', () => {
       { payload: bot, zone: 'torso', at: new THREE.Vector3(0, 1.4, -1) },
     ]);
     expect(hit?.payload).toBe(bot);
+  });
+});
+
+describe('isBackstab', () => {
+  // Victim at the origin facing +Z. An attacker whose attacker-to-victim
+  // direction makes angle `bearing` with the victim's forward stands at
+  // victim − dist · dir(bearing): bearing 0 = directly BEHIND, π = directly
+  // in front, π/2 = side-on.
+  const VICTIM = new THREE.Vector3(0, 0, 0);
+  const FORWARD = new THREE.Vector3(0, 0, 1);
+  function attackerAtBearing(bearing: number, dist = 2): THREE.Vector3 {
+    return new THREE.Vector3(-Math.sin(bearing) * dist, 0, -Math.cos(bearing) * dist);
+  }
+
+  test('directly behind is a backstab', () => {
+    expect(isBackstab(attackerAtBearing(0), VICTIM, FORWARD)).toBe(true);
+  });
+
+  test('directly in front is not', () => {
+    expect(isBackstab(attackerAtBearing(Math.PI), VICTIM, FORWARD)).toBe(false);
+  });
+
+  test('side-on (90°) is not', () => {
+    expect(isBackstab(attackerAtBearing(Math.PI / 2), VICTIM, FORWARD)).toBe(false);
+  });
+
+  test('exactly 60 degrees is a backstab — the boundary is inclusive', () => {
+    expect(BACKSTAB_MIN_ALIGNMENT).toBe(0.5); // cos(60°)
+    expect(isBackstab(attackerAtBearing(Math.PI / 3), VICTIM, FORWARD)).toBe(true);
+  });
+
+  test('just outside 60 degrees is not', () => {
+    expect(isBackstab(attackerAtBearing(Math.PI / 3 + 1e-6), VICTIM, FORWARD)).toBe(false);
+  });
+
+  test('height is ignored — a strike from above reads the same bearing', () => {
+    const above = attackerAtBearing(0); // directly behind, then elevated
+    above.y = 5;
+    expect(isBackstab(above, VICTIM, FORWARD)).toBe(true);
+    // A victim forward tilted up (aiming at a raised target) flattens the
+    // same way.
+    expect(isBackstab(attackerAtBearing(0), VICTIM, new THREE.Vector3(0, 1, 1))).toBe(true);
+  });
+
+  test('an attacker directly above the victim has no horizontal bearing', () => {
+    expect(isBackstab(new THREE.Vector3(0, 3, 0), VICTIM, FORWARD)).toBe(false);
+  });
+
+  test('a victim facing straight up has no horizontal bearing', () => {
+    expect(isBackstab(attackerAtBearing(0), VICTIM, new THREE.Vector3(0, 1, 0))).toBe(false);
+  });
+
+  test('caller-owned vectors are never mutated', () => {
+    // Non-unit inputs on purpose: normalization WOULD change them if it hit
+    // the caller's objects instead of fresh local copies.
+    const attacker = new THREE.Vector3(0, 0, -10);
+    const victim = new THREE.Vector3(0, 7, 0);
+    const forward = new THREE.Vector3(0, 3, 9);
+    const snapshot = [attacker.clone(), victim.clone(), forward.clone()];
+    expect(isBackstab(attacker, victim, forward)).toBe(true);
+    expect(attacker).toEqual(snapshot[0]);
+    expect(victim).toEqual(snapshot[1]);
+    expect(forward).toEqual(snapshot[2]);
   });
 });

@@ -1392,8 +1392,10 @@ async function runShotgunCheck() {
 // Knife: the always-carried fallback (key 3). Pins the position-3 swap
 // through the real keybind, the hidden ammo readout while knifing, the
 // inert R/RMB paths (a blade holds no rounds and raises no sights), the
-// ABSENCE of a knife card in the picker, and an actual kill: two swings at
-// a teleported bot must drop it through the melee arc without touching ammo.
+// ABSENCE of a knife card in the picker, and the damage model E2E: a FRONT
+// strike at a teleported bot deals ordinary 55 (alive at 45), then a
+// BACKSTAB — the bot rotated directly away — one-shots it from restored
+// full HP through the x3 multiplier. Neither swing may touch ammo.
 // Swapping back to a firearm must re-reveal the readout with FRESH numbers.
 async function runKnifeCheck() {
   const page = await browser.newPage();
@@ -1445,32 +1447,40 @@ async function runKnifeCheck() {
       const rmbInert = { aimingInput: cs.game.aiming, adsLerp: +cs.game.adsLerp.toFixed(3) };
       window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
 
-      // The kill: TWO clean swings — which also pins the dropped headshot
-      // multiplier E2E (the old x4 knife killed in one, because the arc's
-      // nearest part point-blank IS the head). Headless frames advance game
-      // time slower than wall time (the sim's dt clamp), so fixed sleeps
-      // under-run the 0.45 s cadence gate: instead, pin the target, hold the
-      // gate open, and swing until the drop — bounded by a deadline.
+      // The damage model: a FRONT strike, then a BACKSTAB — which also pins
+      // the x3 backstab multiplier E2E (issue #37). The bot is placed 1.4 m
+      // ahead (inside the arc, out of the old head-premium range). Headless
+      // frames advance game time slower than wall time (the sim's dt clamp),
+      // so fixed sleeps under-run the 0.45 s cadence gate: the gate is
+      // forced open before every trigger instead of waiting it out.
       cs.player.hp = 100000; // the bot shoots back; the swings are what matter
       const bot = cs.bots.find(b => b.team === 'T' && b.alive);
       if (!bot) return { fail: 'no live T bot' };
       cs.game.yaw = 0; // forward is -z, straight at the bot
       cs.game.pitch = 0; // torso sits inside the arc from here
       const pin = () => bot.mesh.position.set(cs.player.pos.x, 0, cs.player.pos.z - 1.4);
-      pin();
-      let swings = 0;
-      let hpAfterSwing1 = null;
-      const t0 = performance.now();
-      while (bot.alive && performance.now() - t0 < 6000) {
+      const swingOnce = async () => {
         pin();
         cs.weapon.lastShot = -9; // the cadence gate must not eat a fresh swing
         window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
         await new Promise(r => setTimeout(r, 120));
         window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
-        swings++;
-        if (swings === 1) hpAfterSwing1 = bot.hp;
         await new Promise(r => setTimeout(r, 180));
-      }
+      };
+      // Strike 1 — FRONT: the player stands on the bot's +Z side (the bot
+      // is at player z − 1.4), so yaw 0 points the bot's local +Z at the
+      // player. Ordinary zone damage only: 100 − 55 = 45, alive.
+      bot.mesh.rotation.y = 0;
+      await swingOnce();
+      const frontSwingHp = bot.hp;
+      // Strike 2 — BACKSTAB: restore HP, keep the same strike point, and
+      // rotate local +Z directly away from the player IMMEDIATELY before
+      // the trigger — updateWeapon runs before updateBots (which would
+      // otherwise re-face the bot every frame), so the swing observes that
+      // yaw. 55 x 3 = 165: a full-health bot dies in one swing.
+      bot.hp = 100;
+      bot.mesh.rotation.y = Math.PI;
+      await swingOnce();
       // Ammo untouched by the swings — must be sampled BEFORE the swap-back
       // below, which arms the SMG and would mask the knife's zeros.
       const magStillZero = cs.weapon.mag === 0 && cs.weapon.reserve === 0;
@@ -1491,10 +1501,9 @@ async function runKnifeCheck() {
       return {
         swapped, reloadInert, rmbInert,
         swapBack,
-        killed: !bot.alive,
-        swings,
-        hpAfterSwing1,
-        // Head/torso depends on which part took the final swing, and the
+        frontSwingHp,
+        backstabKilled: !bot.alive,
+        // Head/torso depends on which part took the killing swing, and the
         // respawn banner may prepend above either (one bot = an instant
         // wave reset) — so match anywhere in the feed.
         feedHasKill: /You (killed|☠ headshot) T-\d+/.test(document.getElementById('killfeed')?.textContent ?? ''),
@@ -1507,10 +1516,11 @@ async function runKnifeCheck() {
     if (!result.swapped.ammoHidden) throw new Error('ammo readout still visible while knifing');
     if (result.reloadInert.reloading) throw new Error('R started a reload while knifing');
     if (result.rmbInert.adsLerp > 0.01) throw new Error(`RMB blended into ADS while knifing: ${JSON.stringify(result.rmbInert)}`);
-    if (!result.killed) throw new Error(`swings never dropped the bot (swing 1 hp: ${result.hpAfterSwing1})`);
-    // Exactly two: 55 x 2 = 110 with NO head premium. One swing means a
-    // headshot multiplier crept back in; three means damage regressed.
-    if (result.swings !== 2) throw new Error(`expected exactly 2 swings to kill, got ${result.swings} (swing 1 hp: ${result.hpAfterSwing1})`);
+    // Front strike: ordinary 55 damage, NO backstab premium — alive at
+    // exactly 45. Lower means the multiplier leaked into front hits; higher
+    // means damage regressed.
+    if (result.frontSwingHp !== 45) throw new Error(`front swing must leave the bot alive at 45 hp, got ${result.frontSwingHp}`);
+    if (!result.backstabKilled) throw new Error(`the backstab did not kill from restored full hp (front swing left ${result.frontSwingHp})`);
     if (result.swapBack.slot !== 0 || result.swapBack.name !== 'SMG') throw new Error(`Digit1 swap-back failed: ${JSON.stringify(result.swapBack)}`);
     if (!result.swapBack.visible) throw new Error('ammo readout did not reappear after swapping off the knife');
     if (result.swapBack.domMag !== String(result.swapBack.mag) || result.swapBack.domReserve !== String(result.swapBack.reserve)) {

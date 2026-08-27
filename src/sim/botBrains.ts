@@ -317,6 +317,23 @@ export class DefaultBrain implements BotBrain {
    * band boundary doing what climbExit does there.
    */
   private flatRouted = false;
+  /**
+   * Whether LAST frame's step was rejected by geometry. The drift reversal
+   * is EDGE-triggered on this (#43): a level-triggered flip re-reverses
+   * every frame a bot rests against a wall, and ~60 reversals a second
+   * cancel the perpendicular component to zero while the radial term keeps
+   * pushing in — the wall-grind playtesters watched.
+   */
+  private wasBlocked = false;
+  /**
+   * Sight state from the trigger's most recent probe (#45). While blocked,
+   * the juke is suppressed so the strafe COMMITS one way instead of pacing
+   * across the face of whatever is occluding — the trap where a bot holds
+   * band range forever, re-probing every retryCooldown and never rounding
+   * the corner between it and its target. Cleared by any successful probe,
+   * or when the target leaves the trigger's range/alive gate.
+   */
+  private sightBlocked = false;
 
   constructor(
     private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
@@ -349,6 +366,8 @@ export class DefaultBrain implements BotBrain {
     this.flatRouted = false;
     this.stalledFor = 0;
     this.stallBase = Infinity;
+    this.wasBlocked = false;
+    this.sightBlocked = false;
   }
 
   hitChance(dist: number): number {
@@ -410,8 +429,14 @@ export class DefaultBrain implements BotBrain {
 
     // Collision feedback from LAST frame's application: bumped geometry
     // reverses the drift, starting with this frame's step (the original
-    // flipped between frames, not within one).
-    if (view.moveBlocked) this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+    // flipped between frames, not within one). EDGE-triggered (#43): a run
+    // of blocked frames is ONE contact event and flips once — flipping per
+    // frame re-reverses ~60×/s against a wall face and the perpendicular
+    // component cancels itself out while the radial term keeps pushing in.
+    // One flip gives a committed direction to clear the obstacle in, the
+    // same principle travel()'s slide commits use for routing bots.
+    if (view.moveBlocked && !this.wasBlocked) this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+    this.wasBlocked = view.moveBlocked;
 
     // Route when the target is a level up and the executor has a way there.
     // Hysteresis is wide on purpose: entry needs climbThreshold, but exit
@@ -487,20 +512,36 @@ export class DefaultBrain implements BotBrain {
 
     // Random juke (~jukeRate flips/sec); drawn after the step like the
     // original statement order, so it steers from the NEXT frame on.
-    if (this.rng() < dt * this.params.jukeRate) this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+    // SUPPRESSED while sight is blocked (#45): a coin-flip drift across the
+    // face of the cover that occludes paces forever — the corner trap —
+    // while a committed one walks around it. The draw is still consumed so
+    // the rng stream the tests script against is unchanged either way.
+    if (this.rng() < dt * this.params.jukeRate && !this.sightBlocked) {
+      this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+    }
 
     // Trigger: cooldown-gated, range-gated, target-gated, LOS-gated. The
     // range gate reads dist3 so it agrees with the die rollHit rolls on;
     // gating on planar distance let a bot on a tower open up on something
     // its own accuracy curve had already written off. Blocked sight retries
-    // on the short retryCooldown instead of firing through cover.
+    // on the short retryCooldown instead of firing through cover — and each
+    // blocked retry records sightBlocked for the movement policy above, so
+    // the strafe commits while the probe cadence (0.3 s) keeps the reading
+    // fresh. A target outside the range/alive gate is not being probed, so it
+    // cannot keep an old blocked result latched. One-frame lag is deliberate:
+    // the observation lands after this frame's step, like moveBlocked.
     let wantShoot = false;
     this.cooldown -= dt;
-    if (this.cooldown <= 0 && view.dist3 < this.params.engageRange && view.targetAlive) {
+    const targetEligible = view.dist3 < this.params.engageRange && view.targetAlive;
+    if (!targetEligible) {
+      this.sightBlocked = false;
+    } else if (this.cooldown <= 0) {
       if (view.seeTarget()) {
+        this.sightBlocked = false;
         this.cooldown = this.params.cooldownMin + this.rng() * this.params.cooldownSpan;
         wantShoot = true;
       } else {
+        this.sightBlocked = true;
         this.cooldown = this.params.retryCooldown;
       }
     }

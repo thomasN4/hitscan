@@ -864,10 +864,10 @@ export interface SessionState {
   /** First Play click happened; distinguishes pause from pre-game. */
   started: boolean;
   /**
-   * DEV only: the bot-observation wireframe overlay (V, debugView.ts) is up.
-   * hud.ts's bot readout rides the same flag so the text block shows and hides
-   * with the routes. Always false in production — the key handler never calls
-   * the toggle there — so this costs one boolean check per frame at most.
+   * Developer-facing bot-observation flag. The wireframe overlay, V binding,
+   * and HUD readout are DEV-only, but the unconditional window.__cs facade may
+   * set this in a production preview so smoke tests can activate diagnostic
+   * LOS reads. Do not infer its value from the build mode alone.
    */
   debugView: boolean;
   /** The match has ended (clock expiry or elimination); written once by combat.ts:endMatch. */

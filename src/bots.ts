@@ -214,8 +214,9 @@ export class Bot implements BotShape {
    * Public for the same reason `targetEye` is: part of the structural Bot
    * shape, rendered by a DEV view, written here only. The range half is a
    * comparison and is kept fresh every frame; the sight half costs a real
-   * raycast, so it is only paid while session.debugView is up (which cannot
-   * happen outside DEV builds) and holds null otherwise.
+   * raycast, so it is only paid while session.debugView is up and holds null
+   * otherwise. The key binding is DEV-only, but the debug facade may enable
+   * the flag explicitly in a production preview for smoke-test diagnostics.
    */
   targetInRange = false;
   targetLOS: boolean | null = null;
@@ -402,8 +403,9 @@ export class Bot implements BotShape {
     const preX = this.mesh.position.x, preZ = this.mesh.position.z;
     const intended = intent.step.length();
     slideMoveXZ(this.mesh.position, intent.step.x, intent.step.z, BOT_RADIUS, prevFeet, colliders);
-    // Pinned against geometry: report rejection so NEXT frame's brain
-    // reverses its drift (DefaultBrain.decide consumes this).
+    // Report rejection for NEXT frame's brain. DefaultBrain consumes the
+    // contact's leading edge to reverse once; sustained rejection preserves
+    // that committed drift until the bot clears the geometry.
     this.moveBlocked =
       Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ) < intended * 0.25;
 

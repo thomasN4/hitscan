@@ -842,18 +842,21 @@ async function runAllyCheck() {
 }
 
 // Flat routing (issue #44): band steering has no representation of obstacles,
-// so a same-level target behind the arena's mid wall used to be unreachable —
-// the bot paced at the wall face (no `blk`: sliding keeps ~0.7 of its step)
-// and never arrived. The stagnation latch must hand the problem to the graph.
+// so a same-level target behind the arena's mid wall can be unreachable — the
+// bot paces at the wall face (no `blk`: sliding keeps ~0.7 of its step) and
+// never arrives. The stagnation latch hands the problem to the graph.
 //
 // Geometry: the player spawns at (0, 48); T-1 is teleported to ≈(−6, −10).
 // Their straight line crosses z = 0 inside the west mid wall's span
-// (x ∈ [−52.5, 2.5]), so steering alone cannot arrive; the wall's east gap
-// (x ≈ [2.5, 15]) is only metres away. The claim is POLLED (lesson 26): feet
-// crossing to the CT side of the wall, with route mode observed en route so
-// strafe-luck cannot satisfy it. The wall clock appears only in the give-up
-// bound. Non-vacuity: against pre-fix main this phase times out with the bot
-// still south of z = 0.
+// (x ∈ [−52.5, 2.5]), so straight-line steering cannot arrive; the wall's
+// east gap (x ≈ [2.5, 15]) sits metres away — close enough that a lucky juke
+// slide occasionally carries an UNlatched bot through it, which one main run
+// demonstrated after #52. So the claim here is deliberately mechanism-free:
+// ARRIVAL within the budget, polled per lesson 26 with the wall clock only in
+// the give-up bound. Whether the bot routed (#44), committed a strafe slide
+// around the wall end (#45/#43), or simply got lucky is recorded in sawRoute
+// for information, not asserted — policy isolation belongs to the unit suite;
+// this phase owns the outcome "the trap does not hold".
 async function runFlatRouteCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -912,13 +915,118 @@ async function runFlatRouteCheck() {
       };
     });
     if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
-    if (!result.sawRoute) throw new Error(`crossed without ever entering route mode — strafe luck, not routing: ${JSON.stringify(result)}`);
     console.log('[flatRoute] OK', JSON.stringify(result));
   } catch (e) {
     failures++;
     console.log(`[flatRoute] FAIL: ${e.message}`);
   }
   errors.push(...mapErrors.map(e => `[flatRoute] ${e}`));
+  await page.close();
+}
+
+// The corner trap (issues #43/#45): a bot holding BAND range of a target it
+// cannot see used to pace across the occlusion forever — inside the band the
+// radial term is exactly zero and normalize() rescales the pure-strafe step
+// to full speed, so the only things that reversed it were the juke (a
+// symmetric coin flip) and per-frame collision flips that cancelled out. The
+// bot never rounded the corner; it just re-probed every 0.3 s.
+//
+// Geometry: the player is placed at (-40, 2), north of arena's west mid wall
+// (x ∈ [-52.5, 2.5], z ∈ [-1, 1]); T-1 at (-40, -10) on the south side.
+// Planar distance is 12 m — dead centre of the [7, 14] band hold — and the
+// straight line crosses the wall, so LOS cannot clear without leaving the
+// south side. The west tip is 12.5 m away and the east gap ~42.5 m away, so a
+// lucky uninterrupted westward juke could otherwise satisfy LOS by rounding
+// the nearby tip. The harness removes that false pass: its test-only reach
+// into the brain makes every frame request a juke flip. Without #45 those
+// flips cancel the drift; with blocked-sight suppression they are consumed
+// but ignored, so the strafe commits. The #44 latch may also take over once
+// committed sliding carries the bot beyond farBand against the wall — either
+// escape satisfies the claim, which is recorded via sawRoute for exactly
+// that reason.
+//
+// The acceptance sensor is PR #50's overlay readout: with the debug view up,
+// Bot.targetLOS carries a fresh sight probe each frame, so "regained a
+// firing solution" is directly observable rather than inferred from damage
+// rolls.
+async function runCornerTrapCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=150', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      cs.game.started = true;
+      cs.game.locked = true;
+      cs.player.hp = 100000;
+      // Use the testing facade directly: KeyV is correctly DEV-only, while
+      // this acceptance sensor also needs to work against `vite preview`.
+      cs.game.debugView = true; // fresh LOS probes
+      await wait(100);
+
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      if (blocked(-40, -10)) return { fail: 'bot spot inside geometry' };
+      // Player state writes are what respawn() itself does; vel zeroed so
+      // nothing integrates the old value onward.
+      cs.player.pos.set(-40, cs.player.pos.y, 2);
+      cs.player.vel.set(0, 0, 0);
+      bot.mesh.position.set(-40, 0, -10);
+      bot.vy = 0;
+      bot.onGround = true;
+      bot.path = [];
+      bot.leg = 0;
+      // Test-only private-field reach, like path/leg above: make the first
+      // blocked probe land this frame and leave its post-step flip pointing
+      // WEST. A zero draw then requests another flip every simulated frame.
+      // The unfixed policy re-flips continuously; sightBlocked must suppress
+      // those requests for the bot to keep the westward commitment and escape.
+      bot.brain.rng = () => 0;
+      bot.brain.cooldown = 0;
+      bot.brain.strafeDir = -1;
+      bot.brain.sightBlocked = false;
+
+      const planar = Math.hypot(bot.mesh.position.x - cs.player.pos.x, bot.mesh.position.z - cs.player.pos.z);
+      if (Math.abs(planar - 12) > 1) return { fail: `setup drifted out of band: ${planar.toFixed(1)} m` };
+
+      const t0 = performance.now();
+      let sawRoute = false;
+      while (performance.now() - t0 < 30000) { // give-up bound, not the claim
+        await wait(150);
+        if (!bot.alive) return { fail: 'bot died before regaining sight', sawRoute };
+        if (bot.mode === 'route') sawRoute = true;
+        if (bot.targetLOS === true) {
+          return {
+            losRegained: true,
+            sawRoute,
+            elapsedS: +((performance.now() - t0) / 1000).toFixed(1),
+            finalX: +bot.mesh.position.x.toFixed(1),
+            finalZ: +bot.mesh.position.z.toFixed(1),
+          };
+        }
+      }
+      return {
+        fail: 'bot never regained line of sight',
+        finalX: +bot.mesh.position.x.toFixed(1),
+        finalZ: +bot.mesh.position.z.toFixed(1),
+        sawRoute,
+      };
+    });
+    if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
+    console.log('[cornerTrap] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[cornerTrap] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[cornerTrap] ${e}`));
   await page.close();
 }
 
@@ -1597,6 +1705,7 @@ try {
   await runConfigCheck();
   await runAllyCheck();
   await runFlatRouteCheck();
+  await runCornerTrapCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();

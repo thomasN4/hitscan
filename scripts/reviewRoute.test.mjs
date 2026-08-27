@@ -21,10 +21,18 @@ describe('selectReviewer', () => {
   });
 
   test.each([
+    'opencode',
+    ' OpenCode ',
+    'OPENCODE',
+  ])('selects OpenCode for %j', (value) => {
+    expect(selectReviewer(value).reviewer).toBe('opencode');
+  });
+
+  test.each([
     'gpt',
     'auto',
     'claude,codex',
   ])('rejects unsupported value %j', (value) => {
-    expect(() => selectReviewer(value)).toThrow(/expected "codex" or "claude"/);
+    expect(() => selectReviewer(value)).toThrow(/expected "codex", "claude", or "opencode"/);
   });
 });

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "snapshot": false,
+  "autoupdate": false,
+  "enabled_providers": ["openrouter"],
+  "provider": {
+    "openrouter": {
+      "models": {
+        "z-ai/glm-5.3-flash": {
+          "name": "GLM-5.3-Flash",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 1310720,
+            "output": 131072
+          },
+          "variants": {
+            "high": {
+              "reasoning": {
+                "effort": "high"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "permission": {
+    "*": "deny",
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "external_directory": "deny"
+  },
+  "agent": {
+    "review": {
+      "description": "Review a pull request from immutable base and head snapshots without changing or executing repository content.",
+      "mode": "primary",
+      "permission": {
+        "*": "deny",
+        "read": {
+          "*": "allow",
+          "*.env": "deny",
+          "*.env.*": "deny",
+          "*.env.example": "allow"
+        },
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "external_directory": "deny"
+      }
+    }
+  }
+}

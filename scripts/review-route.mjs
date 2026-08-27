@@ -1,8 +1,8 @@
-// scripts/review-route.mjs — chooses the subscription-backed PR reviewer.
+// scripts/review-route.mjs — chooses the configured PR reviewer.
 //
-// Codex is the stable default. Claude remains available as an explicit repo
-// variable override until its headless token can read subscription usage; issue
-// #59 tracks restoring automatic quota-aware routing.
+// Codex is the stable default. Claude and OpenCode remain explicit repo variable
+// overrides; issue #59 tracks restoring automatic quota-aware routing where the
+// selected provider exposes enough supported headless usage data.
 
 import { pathToFileURL } from 'node:url';
 
@@ -18,7 +18,10 @@ export function selectReviewer(value) {
   if (reviewer === 'claude') {
     return { reviewer, reason: 'AI_REVIEWER selects Claude' };
   }
-  throw new Error(`Invalid AI_REVIEWER value ${JSON.stringify(value)}; expected "codex" or "claude"`);
+  if (reviewer === 'opencode') {
+    return { reviewer, reason: 'AI_REVIEWER selects OpenCode' };
+  }
+  throw new Error(`Invalid AI_REVIEWER value ${JSON.stringify(value)}; expected "codex", "claude", or "opencode"`);
 }
 
 function main() {

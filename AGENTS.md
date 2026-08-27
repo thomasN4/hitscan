@@ -43,8 +43,9 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
      diff and posts a comment-review as `review-bot`, once per head commit.
-     Codex is the default; the repo Actions variable `AI_REVIEWER=claude`
-     selects Claude manually. It is advisory and gates nothing — `npm run lint`,
+     Codex is the default; the repo Actions variable `AI_REVIEWER=claude` or
+     `AI_REVIEWER=opencode` selects Claude or OpenCode manually. It is advisory
+     and gates nothing — `npm run lint`,
      `npm run typecheck`, `npm test`, and `npm run build` in `ci.yml` remain the
      only checks that can fail a PR.
 
@@ -76,8 +77,8 @@ A fifth layer reads rather than runs: the CI reviewer in
 `scripts/review-prompt.md` — edit that file, not the workflow, to change what
 the reviewer looks for. That file's header carries the by-hand invocation for
 iterating on it locally without pushing; it lives there and not here because the
-snippets have to track the workflow's actual Claude and Codex calls, and two
-copies drifted apart within one PR the first time there were two.
+snippets have to track the workflow's actual Claude, Codex and OpenCode calls,
+and two copies drifted apart within one PR the first time there were two.
 
 ## Architecture rules
 

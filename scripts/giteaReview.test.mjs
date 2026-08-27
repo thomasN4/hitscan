@@ -7,6 +7,7 @@ describe('Gitea review identity', () => {
   test.each([
     ['claude', 'Claude'],
     ['codex', 'GPT-5.6 Sol'],
+    ['opencode', 'OpenCode / GLM-5.3-Flash'],
   ])('labels %s output as %s', (reviewer, name) => {
     const body = composeBody('## Bugs\n\n- finding', SHA, reviewer);
     expect(body).toContain(`**${name} review**`);
@@ -15,6 +16,7 @@ describe('Gitea review identity', () => {
 
   test('uses the selected provider for a clean review', () => {
     expect(composeBody('NO FINDINGS', SHA, 'codex')).toContain('**GPT-5.6 Sol review** — no findings.');
+    expect(composeBody('NO FINDINGS', SHA, 'opencode')).toContain('**OpenCode / GLM-5.3-Flash review** — no findings.');
   });
 
   test('rejects empty output and unknown providers', () => {

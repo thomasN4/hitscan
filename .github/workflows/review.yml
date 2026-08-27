@@ -26,7 +26,10 @@ name: AI review
 # Codex uses personal ChatGPT subscription auth from a private, persistent
 # runner bind mount at /codex-home. Set CODEX_HOME to that mount, run
 # `CODEX_HOME=/codex-home codex login` once in the runner environment, and keep
-# it owner-restricted: Codex refreshes its OAuth state there between jobs.
+# it owner-restricted: Codex refreshes its OAuth state there between jobs. The
+# Claude route unmounts it before invoking that model; the Codex route denies it
+# to model-generated commands with CODEX_REVIEW_PROFILE while leaving it
+# readable to the parent CLI for authentication.
 
 on:
   pull_request:
@@ -65,6 +68,10 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       CODEX_HOME: /codex-home
+      # Permission profiles, unlike the older `--sandbox` modes, can carve a
+      # secret path out of a broader read-only policy. Keep this one inline so
+      # the preflight and real review cannot silently select different policies.
+      CODEX_REVIEW_PROFILE: 'permissions.review={extends=":read-only", filesystem={"/codex-home"="deny"}}'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -112,6 +119,19 @@ jobs:
           reviewer="$(node scripts/review-route.mjs)"
           echo "reviewer=$reviewer" >> "$GITHUB_OUTPUT"
 
+      # The runner mounts /codex-home into every job container. The Claude
+      # process needs none of it, so remove the bind from this mount namespace
+      # before installing or invoking Claude rather than relying on its Read
+      # tool allowlist to protect credentials.
+      - name: Hide Codex credentials from Claude
+        if: steps.dedupe.outputs.reviewed != 'true' && steps.route.outputs.reviewer == 'claude'
+        run: |
+          umount "$CODEX_HOME"
+          if test -e "$CODEX_HOME/auth.json"; then
+            echo "::error::Codex credentials remain visible after unmount"
+            exit 1
+          fi
+
       # Below the dedupe and route checks, so an already-reviewed commit installs
       # nothing and a new review installs only the CLI it will actually use.
       # Both versions are pinned: CLI behavior must not change without a repo diff.
@@ -129,11 +149,23 @@ jobs:
           apt-get install --no-install-recommends --yes bubblewrap
           npm i -g @openai/codex@0.149.1
           codex login status
+          if ! test -r "$CODEX_HOME/auth.json"; then
+            echo "::error::Expected file-backed Codex credentials at $CODEX_HOME/auth.json"
+            exit 1
+          fi
 
           # Fail before invoking the model if the nested job container cannot
-          # create Codex's read-only sandbox. Without this probe, every shell
-          # read fails but Codex can still return prose and waste review tokens.
-          codex sandbox -- true
+          # create the exact permission profile used by the review. An empty
+          # temporary CODEX_HOME gives the probe the same absence of user config
+          # as `codex exec --ignore-user-config`; its parent needs no auth.
+          probe_codex_home="$(mktemp -d)"
+          CODEX_HOME="$probe_codex_home" codex \
+            --config 'default_permissions="review"' \
+            --config "$CODEX_REVIEW_PROFILE" \
+            sandbox \
+            --permission-profile review \
+            -- \
+            sh -c 'test -r package.json && test ! -w package.json && test ! -r /codex-home/auth.json'
 
       - name: Review with Claude
         if: steps.dedupe.outputs.reviewed != 'true' && steps.route.outputs.reviewer == 'claude'
@@ -167,10 +199,11 @@ jobs:
         if: steps.dedupe.outputs.reviewed != 'true' && steps.route.outputs.reviewer == 'codex'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        # Codex's read-only sandbox is the mutation boundary. `--ignore-user-config`
-        # keeps runner-local preferences and integrations out of this reproducible
-        # job while auth still comes from CODEX_HOME; `--ephemeral` leaves no run
-        # history behind. The standing prompt remains repo-owned and reviewable.
+        # Codex's custom permission profile is the mutation and credential-read
+        # boundary. `--ignore-user-config` keeps runner-local preferences and
+        # integrations out of this reproducible job while the parent CLI still
+        # reads auth from CODEX_HOME; `--ephemeral` leaves no run history behind.
+        # The standing prompt remains repo-owned and reviewable.
         run: |
           BASE_SHA="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
           REVIEW_PROMPT="Review the pull request titled \"$PR_TITLE\", whose base commit is $BASE_SHA and head commit is $HEAD_SHA.
@@ -182,7 +215,9 @@ jobs:
             codex exec \
               --model gpt-5.6-sol \
               --config 'model_reasoning_effort="high"' \
-              --sandbox read-only \
+              --config 'default_permissions="review"' \
+              --config "$CODEX_REVIEW_PROFILE" \
+              --strict-config \
               --ephemeral \
               --ignore-user-config \
               --ignore-rules \

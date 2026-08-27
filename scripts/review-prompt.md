@@ -12,7 +12,9 @@ and iterated locally without pushing a branch:
 
   codex exec --model gpt-5.6-sol \
     --config 'model_reasoning_effort="high"' \
-    --sandbox read-only --ephemeral --ignore-user-config --ignore-rules \
+    --config 'default_permissions="review"' \
+    --config "permissions.review={extends=\":read-only\", filesystem={\"${CODEX_HOME:-$HOME/.codex}\"=\"deny\"}}" \
+    --strict-config --ephemeral --ignore-user-config --ignore-rules \
     --output-last-message review.md \
     "Review the pull request titled \"<PR title>\", whose base commit is $(git merge-base main HEAD) and head commit is HEAD.
 

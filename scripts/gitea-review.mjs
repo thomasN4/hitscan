@@ -32,6 +32,7 @@ const legacyMarker = (sha) => `<!-- claude-review:${sha} -->`;
 const reviewerNames = new Map([
   ['claude', 'Claude'],
   ['codex', 'GPT-5.6 Sol'],
+  ['opencode', 'OpenCode / GLM-5.3-Flash'],
 ]);
 
 /** Supports reviews posted before the reviewer became provider-neutral. */
@@ -137,13 +138,13 @@ async function main() {
       break;
 
     case 'post': {
-      if (!file || !reviewer) throw new Error('Usage: gitea-review.mjs post <review-file> <claude|codex>');
+      if (!file || !reviewer) throw new Error('Usage: gitea-review.mjs post <review-file> <claude|codex|opencode>');
       await post(composeBody(readFileSync(file, 'utf8'), requireEnv('HEAD_SHA'), reviewer));
       break;
     }
 
     default:
-      throw new Error(`Usage: gitea-review.mjs <already-reviewed|post <file> <claude|codex>>, got ${command ?? 'nothing'}`);
+      throw new Error(`Usage: gitea-review.mjs <already-reviewed|post <file> <claude|codex|opencode>>, got ${command ?? 'nothing'}`);
   }
 }
 

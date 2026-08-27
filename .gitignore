@@ -11,3 +11,7 @@ dist
 # command locally — so without this, a `git add -A` commits a review into the
 # repo.
 review.md
+
+# Plan Relay keeps approved plan copies and OpenCode JSONL transcripts here.
+# They are local execution records, not source artifacts.
+.plan-relay

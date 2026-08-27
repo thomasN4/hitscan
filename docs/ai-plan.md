@@ -15,7 +15,8 @@ renumber — see AGENTS.md's Roadmap section and the gate
 
 The shipped bot AI was a single hardcoded policy fused into one class: no
 variance, one enemy team, and no seam a second behavior could plug into.
-The arc, agreed up front as three tranches:
+The initial arc, agreed up front as three tranches (later playtests added the
+height, navigation and senses work recorded below):
 
 1. **Observability** — make the respawn wiring testable end-to-end (issue
    #17's real ask), because "the one I killed" must be identifiable before
@@ -76,14 +77,13 @@ resume → assert-revived phase proving the clock freeze end-to-end
 
 `sim/botBrains.ts`: engine-free `BotBrain` interface, `BrainView`/`BrainIntent`,
 `BrainParams`, `DefaultBrain` (a parameterized port of the original inline
-policy) and pure ballistic helpers. `bots.ts` became a stateless executor.
-16 pinning tests with hand-derived expectations and replayed-frame cadence;
-they caught the first draft flipping strafe direction a frame late relative
-to the original (see lessons below).
+policy) and pure ballistic helpers. `bots.ts` became a policy-free executor;
+later navigation work added executor-owned route state without moving decisions
+back out of the brain. 16 pinning tests with hand-derived expectations and
+replayed-frame cadence caught the first draft flipping strafe direction a
+frame late relative to the original (see lessons below).
 
-## In flight
-
-### Tranche 3 — CT bots
+### Tranche 3 — CT bots (PR #29)
 
 - `Team = 'T' | 'CT'` on `BotShape`; blue-gray palette alongside tan;
   spawn bands mirrored (`z ∈ [−55,−20]` vs `[20,55]`, rejection-sampled);
@@ -102,7 +102,7 @@ to the original (see lessons below).
   `[allies]` phase teleports a T beside a CT at collider-free spots and
   asserts cross-team engagement evidence within a generous window.
 
-### Tranche 4 — a brain with height (in flight)
+### Tranche 4 — a brain with height (PRs #33–34)
 
 The seam's default policy was planar in every dimension that mattered: it
 steered planar (correct — a step only moves in x/z), but it also RANGED
@@ -179,7 +179,7 @@ where the stall happens, not that it happens — stair navigation is what closes
 it, because a bot must head for the TOP OF THE FLIGHT and keep heading there
 until the level changes, which no band around the target can express.
 
-### Tranche 5 — navigation (in flight)
+### Tranche 5 — navigation (PRs #38 and #42)
 
 Reactive steering has a ceiling, and measurement found it. With the player
 held on the second-floor deck, the worst 5-second windows show bots walking
@@ -307,7 +307,7 @@ Two things it taught immediately, both about presentation rather than routing:
 a DEV readout renders it, written here only" contract `mode` and `moveBlocked`
 already carry.
 
-### Shot-gate grading on the overlay (issue #46)
+### Shot-gate grading on the overlay (issue #46; PRs #50–51)
 
 The playtest report behind this issue — *"the bots are almost always engaging,
 probably because they can see their enemies through walls"* — was the overlay
@@ -341,14 +341,16 @@ target beyond engage range — while the hue stays the mode's.
   colorblind-trivial, so `hud.ts:updateBotDebug` now renders the same gates
   as an `r`/`s` text column beside the mode — `rs` can fire, `r-` in range
   but sight unproven or blocked, `--` tracking beyond engage range.
-- Cost accounting for that DEV probe, stated plainly: it is paid per bot per
-  frame while the view is up EVEN WHEN THE TARGET IS OUT OF RANGE, where the
-  result cannot change the tier. Kept eager deliberately — the smoke census
-  keys on any live bot with any target probing, which a range-gated probe
-  would break, and the cost cannot ship outside DEV. Revisit only if
-  profiling ever shows it.
+- Cost accounting for that diagnostic probe, stated plainly: it is paid per
+  bot per frame while the view is up EVEN WHEN THE TARGET IS OUT OF RANGE,
+  where the result cannot change the tier. Kept eager deliberately — the smoke
+  census keys on any live bot with any target probing, which a range-gated
+  probe would break. The V binding and overlay are DEV-only, but the
+  unconditional `window.__cs.game.debugView` facade can enable the probes in a
+  production preview for smoke diagnostics; the cost is paid only while that
+  flag is up. Revisit only if profiling ever shows it.
 
-### Flat routing (issue #44)
+### Flat routing (issue #44; PR #52)
 
 The nav graph has covered the whole map since tranche 5, but the brain only
 asked it for routes UP: `wantRoute` keyed on `rise` alone, so every wall,
@@ -399,11 +401,13 @@ What it buys:
   not read as failure), release-and-fresh-evidence, respawn clearing, and
   jam-recovery reachability from an engage-origin route.
 
-Deliberately deferred to the band-steering fixes (#45/#43): routing when SIGHT
-has been blocked long enough. This latch keys on distance progress, not sight;
-the two compose but are separate evidence streams.
+The separate blocked-sight evidence stream was resolved by the band-steering
+fixes (#45/#43) below. Blocked sight does not itself force a route: it suppresses
+the juke so a committed strafe can clear the occluder. Distance stagnation
+remains the evidence that hands flat movement to the nav graph; the two compose
+without conflating their triggers.
 
-### Band steering commits (#43/#45)
+### Band steering commits (#43/#45; PR #56)
 
 Two playtest complaints with one root shape: the engage blend's lateral
 component never COMMITTED to anything.
@@ -445,6 +449,224 @@ but ignored and the bot commits. That was the point of bundling: neither half
 gets credit alone, since #43's per-frame flips would have cancelled any
 commitment #45 tried to make.
 
+## Planned
+
+### Tranche 6 — senses
+
+The current executor chooses the best live opponent from exact world positions
+every frame. LOS gates the SHOT, but not the KNOWLEDGE: a bot tracks somebody
+through a building, faces them continuously and feeds their live position to
+the route graph before it has ever seen or heard them. Tranche 6 replaces that
+omniscience with observations, memory and bounded investigation without moving
+raycasts, collision or effects into the brain.
+
+Land this in two implementation PRs. **6a establishes sight, memory and search
+first; 6b feeds sound into that settled stimulus seam.** Combining them would
+make a failed pursuit ambiguous between vision, memory, hearing and routing at
+the exact point the tranche is trying to make those causes observable.
+
+#### 6a — vision, awareness and search
+
+**Division of ownership.** Perception mechanics stay with the executor;
+perception POLICY belongs to the brain.
+
+- `bots.ts` owns the entity registry, range/FOV prechecks, LOS raycasts, stable
+  entity lookup, route realization, collision, facing/aim application and the
+  realization of any shot the brain orders.
+- `DefaultBrain` owns which detected opponent is being followed, its frozen
+  last-known position, stimulus priority, search/scan state, expiry and the
+  transition between `hold`, `search`, `route` and `engage`.
+- Unseen candidates' positions may be used by the executor only to decide
+  whether a perception ray is worth attempting. They are not included in
+  `BrainView`, used as a movement goal or rendered as an intent until an LOS
+  probe succeeds. That is the boundary that removes omniscience.
+- Give the player and every bot a stable perception identity (`player` versus
+  bot id). The brain stores identities and copied positions, never entity or
+  mesh references. A remembered position must not move when its source moves.
+
+**Sight budget and acquisition.** Initial tuning is a **120° horizontal FOV**
+and **60 m visual range**. Vertical elevation does not narrow the cone; the
+planar yaw test decides whether to look, while the 3D range and world LOS decide
+whether the look succeeds.
+
+- Each living bot may spend at most **one perception LOS raycast per frame**.
+  If it has an identified opponent, try that opponent first; otherwise rotate
+  fairly through opposing candidates by stable id. Range, liveness and the FOV
+  dot-product are cheap rejections and do not spend the raycast. After a cheap
+  rejection, continue the rotation until one eligible candidate spends the
+  raycast or every opponent has been examined; an out-of-cone remembered target
+  must not starve acquisition of somebody standing in view.
+- Do not reuse #46's diagnostic result as gameplay perception. The overlay can
+  be off, and when it is on its eager probe has a deliberately different cost
+  contract. The perception result may feed the display, never the reverse.
+- A successful probe produces one visual observation: identity, copied feet
+  and eye positions, planar/3D distance and rise. Failure produces no fresh
+  target position. The currently identified target remains remembered at its
+  last successful observation.
+- Ts initially face the CT half and CTs the T half, on construction AND
+  respawn. With a real FOV, leaving both teams at the mesh's default yaw would
+  make first contact asymmetric by spawn side rather than by policy.
+
+**Brain interface.** Replace the single omniscient target view with a passive
+observation view: own feet/facing and movement feedback, zero or one visual
+observation, heard stimuli added by 6b, and lazy `nextWaypoint(goal)` routing.
+The brain exposes its current focus id so the executor can prioritize the next
+probe. `BrainIntent` gains a planar facing direction and focus identity beside
+its movement step, shot request and mode.
+
+The executor may realize `wantShoot` only when all three agree in THIS frame:
+the intent's focus id, the successful visual observation's id, and the normal
+range gate. A last-known position, sound origin or incoming-fire bearing can
+drive movement and facing but can never authorize a shot. This is the pin that
+prevents awareness work from becoming fire-through-cover by another name.
+
+**Modes and transitions.** Widen `BrainMode` from `engage | route` to
+`hold | search | route | engage`; update every exhaustive
+`Record<BrainMode, ...>`, debug label and reset site in the same commit.
+
+- `engage`: an identified opponent is visible and band steering owns the move.
+- `route`: the brain asked the executor's graph to reach a visible opponent or
+  a remembered position and received a waypoint.
+- `search`: the bot is scanning at the last-known position, at an incoming-fire
+  bearing, or in place because no route to its remembered point exists.
+- `hold`: no visible opponent and no live memory. The bot stands down facing
+  its last heading. Patrol points and a patrol-goal policy are OUT of tranche 6.
+
+Sight refreshes both identity and last-known position every successful probe.
+When sight breaks, freeze that position and route to it; never substitute the
+source entity's current position. Arrival is within **1 m planar distance** of
+the remembered point. If the graph returns no route while the point remains
+farther away, enter search in place rather than retaining an immortal route
+request.
+
+On arrival, scan deterministically rather than picking random wander goals
+that may land inside geometry: face the arrival bearing, then alternate
+**+120° / −120° every 0.75 s**. Those three headings let a 120° FOV cover the
+full circle and give unit tests exact phase boundaries. Start the **8 s
+`forgetTime` only on arrival** (or on the no-route fallback), so a long valid
+route is always investigated rather than expiring halfway across the map.
+Reacquisition immediately refreshes memory and returns to engage/route;
+expiry clears focus and position and enters hold. Respawn clears every focus,
+route, scan and memory field.
+
+**Incoming damage.** The original shorthand, "getting shot reveals the
+shooter," is deliberately narrower here: damage reveals the DIRECTION OF THE
+SHOT, not the shooter's identity, distance or exact position.
+
+- `damageBot` remains the one HP path. Before applying a live hit, it resolves
+  the attacker position already available from the player or named bot and
+  hands the victim a normalized planar bearing through an executor-to-brain
+  damage-stimulus method.
+- A damage bearing overrides visible combat, ordinary sound and stale memory.
+  It clears any remembered point, turns the victim toward the bearing and
+  starts an in-place search immediately.
+- The bot does not manufacture a destination down that ray and does not return
+  fire until an ordinary FOV + range + LOS observation identifies an opponent.
+  A later visual or audible position may replace the bearing normally.
+
+The complete priority is:
+
+```
+incoming-fire bearing
+  > currently visible opponent
+  > newly heard hostile gunshot
+  > newly heard hostile footstep
+  > remembered position
+  > hold
+```
+
+Ordinary sound never pulls a bot off an opponent it currently sees. The damage
+bearing is the one interrupt because the victim has direct evidence of a
+threat from another direction.
+
+**Observability and acceptance.** Give `hold` and `search` distinct overlay
+colours and HUD labels. The intent line/marker points at the visible target,
+remembered position or scan bearing as appropriate. #46's range/sight grading
+remains meaningful only for a CURRENT visual combat target; memory, sound and
+bearing goals render non-shootable rather than inheriting stale `r`/`s` bits.
+
+Pure tests pin the FOV/range boundaries, tracked-first/fair candidate schedule,
+one-ray maximum, copied last-known position, sight loss and reacquisition,
+route-to-search arrival, no-route fallback, the three-heading scan cadence,
+post-arrival expiry, hold, damage priority, no memory-shot and respawn reset.
+The smoke test supplies the wiring pins: an opponent hidden behind a wall is
+not tracked or shot; crossing into FOV + LOS acquires; breaking LOS routes to
+the frozen point; arrival scans then holds; and damaging a bot turns it toward
+the incoming bearing without granting immediate retaliation.
+
+#### 6b — hearing and sound events
+
+Add an engine-free `sim/soundEvents.ts` with a fixed-capacity **256-entry ring
+buffer**. The module defines the data structure but holds no shared module
+global: the live `soundEvents` instance belongs in `core/state.ts`, preserving
+the repository's one home for shared mutable game state.
+
+Each immutable event carries a monotonic sequence, game-time timestamp, kind
+(`gunshot | footstep`), source identity/team, copied world position and radius.
+The buffer exposes its latest sequence and non-destructive reads after a
+caller's cursor, optionally capped at a captured high-water sequence. If a
+cursor predates retained data after wraparound, reading resumes at the oldest
+retained event; events are never removed by one listener because every bot must
+be able to hear the same occurrence.
+
+**Emitters and tuning.** Emission is gameplay data beside the existing audible
+WebAudio effect, not a replacement for `audio.ts`.
+
+- `weapons.ts`: every accepted PLAYER firearm trigger pull emits one **80 m**
+  gunshot from the shot origin. A shotgun's pellets are one event; dry fire and
+  melee emit none.
+- `bots.ts:shoot`: every bot trigger emits one **80 m** gunshot before the hit
+  die, so misses remain audible.
+- `player.ts`: at the existing grounded footstep cadence, emit **24 m** while
+  running and **12 m** while walking or aim-walking. Gate the AI event on
+  post-collision XZ displacement, not merely held movement keys, so pressing
+  into a wall does not reveal the player. Crouched and airborne movement is
+  silent.
+
+Hearing is radius-only. Walls neither silence nor attenuate an event; adding
+sound occlusion would spend another geometry-probe budget and is not part of
+this tranche. Bots ignore their own and allied events. A heard enemy event
+provides an investigation POSITION, not entity identity and never permission
+to shoot.
+
+Each executor owns a sound cursor. `updateBots` captures the buffer's high-water
+sequence before iterating bots, and every bot reads only through that snapshot;
+therefore a shot emitted by an early bot is heard by ALL bots on the next frame
+instead of only by later entries in registry order. The executor filters new
+events by team and radius and passes the bounded heard set to the brain. Policy
+chooses gunshots before footsteps and the newest event within one kind. A dead
+bot's cursor resets to the latest sequence on respawn so it cannot replay six
+seconds of combat that occurred while it was absent.
+
+Heard positions enter the same route → arrival scan → forget → hold pipeline
+6a established. Visible combat ignores ordinary sound; direct damage remains a
+separate bearing stimulus and overrides it all. The ring does not carry a
+special "shot-at" event — an actual damage call is the authoritative evidence.
+
+Unit tests cover empty/full/wrapped rings, independent readers, stale-cursor
+recovery, high-water snapshots, copied positions, radius edges, team filtering,
+gunshot/footstep priority, stance radii and respawn cursor reset. Smoke pins
+hostile gunshot investigation through a wall, run-full/walk-half boundaries,
+crouch silence, allied-sound rejection and damage-bearing precedence over an
+already heard event.
+
+#### Why the preceding work is prerequisite
+
+- **#46 (shot-gate grading)** made range and LOS separately visible. Tranche 6
+  adds a third distinction — perceived versus merely remembered — and would be
+  impossible to playtest honestly if every intent line still looked shootable.
+- **#44 (flat routing)** lets a bot reach an arbitrary remembered or heard
+  position behind same-level walls. Without its stagnation latch, "search"
+  would reintroduce the wall pacing that navigation already measured and fixed.
+- **#43 + #45 (committed band steering)** stop per-frame contact flips and
+  stand down random jukes while sight is blocked. LOS-gated awareness creates
+  more occluder approaches by design; without those fixes, searchers would
+  oscillate at the cover they are meant to clear.
+
+6a therefore lands before 6b, and each receives its own feature PR, unit pins,
+smoke phase and playtest record. The document PR that records this plan changes
+no gameplay behavior.
+
 ## Deferred
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
@@ -453,8 +675,6 @@ commitment #45 tried to make.
   counts all T-side kills, not just player deaths — review finding, fixed
   in-tranche); renaming the field pair to team-named counters is HUD/state
   churn beyond this tranche.
-- **#28 reconciliation**: audit of `docs/refactor-plan.md` staleness and the
-  archival policy between it and this file.
 
 ## Review lessons (AI tranche)
 

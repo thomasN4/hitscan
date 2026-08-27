@@ -22,9 +22,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # Absolute Gitea URLs avoid the default GitHub action source, whose
-      # implementation fetches have intermittently timed out on this runner.
-      - uses: https://gitea.com/actions/checkout@v7
+      # Reusable actions are deliberately absent. act_runner clones them with
+      # its own Go client before any step can recover, and that client's TLS
+      # handshakes have timed out against both GitHub and gitea.com. The source
+      # repo is public and on the LAN, so plain Git is the smaller dependency.
+      - name: Check out the tested revision from LAN Gitea
+        env:
+          CHECKOUT_SHA: ${{ github.sha }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          git init --quiet .
+          git remote add origin "$REPOSITORY_URL"
+          git fetch --quiet --no-tags --depth=1 origin "$CHECKOUT_SHA"
+          git checkout --quiet --detach FETCH_HEAD
 
       # No `cache: npm` here. On the self-hosted Gitea runner the Actions cache
       # server is reachable only at act_runner's own docker-bridge address, which
@@ -32,9 +42,8 @@ jobs:
       # in a connect timeout. That cost ~9 minutes of a 12.5-minute run, against
       # an `npm ci` that finishes in about 12 seconds. Re-add it only alongside a
       # runner whose cache host the job container can actually reach.
-      - uses: https://gitea.com/actions/setup-node@v7
-        with:
-          node-version: 22
+      - name: Select runner-provided Node 22
+        run: bash scripts/select-runner-node.sh
 
       - run: npm ci
 

@@ -74,21 +74,25 @@ jobs:
       PR_INDEX: ${{ github.event.pull_request.number }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      # Gitea otherwise resolves relative action names through GitHub. Use the
-      # official Gitea mirrors after repeated GitHub TLS fetch timeouts.
-      - uses: https://gitea.com/actions/checkout@v7
-        with:
-          # Control-plane scripts must come from the trusted target revision,
-          # never from the PR head that they inspect.
-          ref: ${{ github.event.pull_request.base.sha }}
+      # Control-plane scripts must come from the trusted target revision, never
+      # from the PR head that they inspect. Plain LAN Git also avoids remote
+      # reusable-action clones, whose TLS failures happen before a step can run.
+      - name: Check out the trusted base from LAN Gitea
+        env:
+          CHECKOUT_SHA: ${{ github.event.pull_request.base.sha }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          git init --quiet .
+          git remote add origin "$REPOSITORY_URL"
+          git fetch --quiet --no-tags --depth=1 origin "$CHECKOUT_SHA"
+          git checkout --quiet --detach FETCH_HEAD
 
       # No `cache: npm` here, for the same reason as ci.yml: the Actions cache
       # server resolves to act_runner's own docker-bridge address, which the job
       # container cannot route to, so both restore and save sit in a connect
       # timeout.
-      - uses: https://gitea.com/actions/setup-node@v7
-        with:
-          node-version: 22
+      - name: Select runner-provided Node 22
+        run: bash scripts/select-runner-node.sh
 
       # Deliberately no `npm ci`. This job reads code, it does not run the suite
       # (ci.yml owns that on the same commit), and gitea-review.mjs is written
@@ -141,19 +145,24 @@ jobs:
       # the preflight and real review cannot silently select different policies.
       CODEX_REVIEW_PROFILE: 'permissions.review={extends=":read-only", filesystem={"/codex-home"="deny"}}'
     steps:
-      - uses: https://gitea.com/actions/checkout@v7
-        with:
-          # pull_request_target checks out the base by default; the model needs
-          # the untrusted head tree as data, while the workflow and standing
-          # prompt remain pinned to the trusted base revision.
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          # Do not leave the job token in .git/config for the model to read.
-          persist-credentials: false
+      # The model needs the untrusted head tree as data plus the trusted base
+      # history for merge-base and prompt lookup. This public-LAN fetch leaves
+      # no job token in .git/config for the model to read.
+      - name: Check out the review revisions from LAN Gitea
+        env:
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          git init --quiet .
+          git remote add origin "$REPOSITORY_URL"
+          git fetch --quiet --no-tags origin "$HEAD_SHA" "$BASE_SHA"
+          git checkout --quiet --detach "$HEAD_SHA"
 
-      - uses: https://gitea.com/actions/setup-node@v7
-        with:
-          node-version: 22
+      - name: Select runner-provided Node 22
+        # This job can read persistent Codex auth. Execute the target branch's
+        # audited helper, never the PR head's replacement.
+        run: |
+          git show "$BASE_SHA:scripts/select-runner-node.sh" > /tmp/select-runner-node.sh
+          bash /tmp/select-runner-node.sh
 
       - name: Install Codex
         run: |
@@ -238,15 +247,21 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
-      - uses: https://gitea.com/actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          persist-credentials: false
+      - name: Check out the review revisions from LAN Gitea
+        env:
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          git init --quiet .
+          git remote add origin "$REPOSITORY_URL"
+          git fetch --quiet --no-tags origin "$HEAD_SHA" "$BASE_SHA"
+          git checkout --quiet --detach "$HEAD_SHA"
 
-      - uses: https://gitea.com/actions/setup-node@v7
-        with:
-          node-version: 22
+      - name: Select runner-provided Node 22
+        # Keep setup base-pinned too, even though the Claude token is scoped to
+        # the later model step.
+        run: |
+          git show "$BASE_SHA:scripts/select-runner-node.sh" > /tmp/select-runner-node.sh
+          bash /tmp/select-runner-node.sh
 
       - name: Install Claude Code
         run: (cd /tmp && npm i -g --ignore-scripts @anthropic-ai/claude-code@2.1.246)
@@ -302,15 +317,20 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       REVIEWER: ${{ needs.prepare.outputs.reviewer }}
     steps:
-      - uses: https://gitea.com/actions/checkout@v7
-        with:
-          # The poster runs with a PAT, so execute the base branch's audited
-          # implementation rather than a PR-controlled replacement.
-          ref: ${{ github.event.pull_request.base.sha }}
+      # The poster runs with a PAT, so execute the base branch's audited
+      # implementation rather than a PR-controlled replacement.
+      - name: Check out the trusted base from LAN Gitea
+        env:
+          CHECKOUT_SHA: ${{ github.event.pull_request.base.sha }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          git init --quiet .
+          git remote add origin "$REPOSITORY_URL"
+          git fetch --quiet --no-tags --depth=1 origin "$CHECKOUT_SHA"
+          git checkout --quiet --detach FETCH_HEAD
 
-      - uses: https://gitea.com/actions/setup-node@v7
-        with:
-          node-version: 22
+      - name: Select runner-provided Node 22
+        run: bash scripts/select-runner-node.sh
 
       - name: Decode Codex review
         if: needs.prepare.outputs.reviewer == 'codex'

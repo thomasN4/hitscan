@@ -74,7 +74,9 @@ jobs:
       PR_INDEX: ${{ github.event.pull_request.number }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v7
+      # Gitea otherwise resolves relative action names through GitHub. Use the
+      # official Gitea mirrors after repeated GitHub TLS fetch timeouts.
+      - uses: https://gitea.com/actions/checkout@v7
         with:
           # Control-plane scripts must come from the trusted target revision,
           # never from the PR head that they inspect.
@@ -84,7 +86,7 @@ jobs:
       # server resolves to act_runner's own docker-bridge address, which the job
       # container cannot route to, so both restore and save sit in a connect
       # timeout.
-      - uses: actions/setup-node@v7
+      - uses: https://gitea.com/actions/setup-node@v7
         with:
           node-version: 22
 
@@ -139,7 +141,7 @@ jobs:
       # the preflight and real review cannot silently select different policies.
       CODEX_REVIEW_PROFILE: 'permissions.review={extends=":read-only", filesystem={"/codex-home"="deny"}}'
     steps:
-      - uses: actions/checkout@v7
+      - uses: https://gitea.com/actions/checkout@v7
         with:
           # pull_request_target checks out the base by default; the model needs
           # the untrusted head tree as data, while the workflow and standing
@@ -149,7 +151,7 @@ jobs:
           # Do not leave the job token in .git/config for the model to read.
           persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: https://gitea.com/actions/setup-node@v7
         with:
           node-version: 22
 
@@ -236,13 +238,13 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: https://gitea.com/actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: https://gitea.com/actions/setup-node@v7
         with:
           node-version: 22
 
@@ -300,13 +302,13 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       REVIEWER: ${{ needs.prepare.outputs.reviewer }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: https://gitea.com/actions/checkout@v7
         with:
           # The poster runs with a PAT, so execute the base branch's audited
           # implementation rather than a PR-controlled replacement.
           ref: ${{ github.event.pull_request.base.sha }}
 
-      - uses: actions/setup-node@v7
+      - uses: https://gitea.com/actions/setup-node@v7
         with:
           node-version: 22
 

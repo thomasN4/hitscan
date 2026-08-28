@@ -225,7 +225,10 @@ describe('Plan Relay runner', () => {
     ]);
     expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'max']);
     expect(args).not.toContain('--auto');
-    expect(argsText).toContain('allowed commands are rg, ls, read-only git inspection');
+    expect(argsText).toContain('rg and ls with optional arguments');
+    expect(argsText).toContain('npm run build with optional arguments');
+    expect(argsText).toContain('optionally prefixed by CS_SMOKE_BASE=http://localhost:<port>');
+    expect(argsText).toContain('All unlisted shell commands are denied');
     expect(argsText).toContain('Use the read tool for file contents.');
     expect(argsText).not.toContain('cat (never .env files)');
 

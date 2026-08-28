@@ -822,6 +822,30 @@ describe('DefaultBrain memory pursuit', () => {
     brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
     expect(goals[0]!.x).toBeCloseTo(20, 12); // NEW feet, not the stale (10,0,0)
   });
+
+  it('memory pursuit arms the climb hysteresis for the next visible frame', () => {
+    const brain = calmBrain();
+    // Seen level (rise under climbThreshold): nothing wants a route yet.
+    brain.decide(view({ visual: visualAt(10, 0) }), DT);
+
+    // Sight lost, the graph hands over a real waypoint: memory pursuit is
+    // routing, and that state must LATCH, not just move this frame.
+    const pursued = brain.decide(view({
+      visual: null,
+      nextWaypoint: () => new THREE.Vector3(0.5, 0, 0),
+    }), DT);
+    expect(pursued.mode).toBe('route');
+
+    // Reacquired at a rise strictly between climbExit (0.45) and
+    // climbThreshold (1.5) — one that only CONTINUES a route. The latch the
+    // memory pursuit raised must keep this frame routing; a fresh entry at
+    // climbThreshold would read this as engage.
+    const reacquired = brain.decide(view({
+      visual: visualAt(10, 1),
+      nextWaypoint: () => new THREE.Vector3(0.5, 0, 0),
+    }), DT);
+    expect(reacquired.mode).toBe('route');
+  });
 });
 
 describe('DefaultBrain scan search', () => {

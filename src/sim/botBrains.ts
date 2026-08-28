@@ -770,7 +770,12 @@ export class DefaultBrain implements BotBrain {
       }
       return this.searchFrameIntent(view, toward);
     }
-    // A real waypoint: the executor's existing travel() recovery applies.
+    // A real waypoint: raise the routing latch BEFORE travel() so the climb
+    // hysteresis (climbExit, not climbThreshold) survives into the next
+    // visible frame — without it, a mid-flight reacquisition re-enters at
+    // climbThreshold and stalls one step short, the stall routing exists to
+    // prevent.
+    this.routing = true;
     const step = new THREE.Vector3();
     this.travel(step, waypoint, view, dt);
     return {

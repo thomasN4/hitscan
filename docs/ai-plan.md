@@ -449,6 +449,17 @@ but ignored and the bot commits. That was the point of bundling: neither half
 gets credit alone, since #43's per-frame flips would have cancelled any
 commitment #45 tried to make.
 
+*(In-flight 6a annotation: tranche 6a retires the `[cornerTrap]` smoke
+fixture. Its setup deliberately hands a bot an occluded opponent it has
+never seen and forces the pre-6a `sightBlocked`/juke machinery against it —
+under 6a's non-omniscient policy that target is intentionally unknowable
+and the only correct result is `hold`, which the `[vision]` phase now
+covers end to end, including the damage-priority frame. The hidden-behavior
+claim it carried is replaced by `[vision]`, and cross-wall navigation
+survives in `[flatRoute]` through observed, frozen memory. The #43/#45
+steering policy itself remains pinned at the pure/unit layer for the case
+where a current visual exists. No merge or PR number is claimed here.)*
+
 ## Planned
 
 ### Tranche 6 — senses
@@ -637,7 +648,21 @@ What the in-flight implementation built against the spec above:
   player), non-shootable throughout; arrival → a standing `search` with a
   scan endpoint that expires to `hold` clearing both; and a real SMG hit
   through the firing path → a same-frame bearing `search` with no
-  retaliation.
+  retaliation. The damage frame's 5 m setup hands the bot an eligible
+  simultaneous ordinary visual, and the assertion is `targetLOS === false`
+  EXACTLY — proof the frame spent its perception probe and the
+  higher-priority incoming-fire bearing discarded the look's focus
+  agreement, rather than the cheaper reading that no probe was attempted.
+  The cross-wall routing outcome in `[flatRoute]` is reseeded to match 6a:
+  the bot first acquires the player through a real visual north of the mid
+  wall, then runs the original cross-wall claim on that copied observation
+  alone, with the intent endpoint held separated from the live hidden
+  player and grading non-shootable. The pre-6a `[cornerTrap]` fixture is
+  retired (its premise contradicts non-omniscience; see the annotation
+  beside it above), and `[debugView]`'s toggling is re-verified as a
+  non-influencing consumer: the gameplay-perception census (mode, target,
+  grading, endpoint) must be unchanged across the V toggles, replacing the
+  pre-6a probe-count assertions.
 
 #### 6b — hearing and sound events
 

@@ -63,12 +63,6 @@ export function evaluateEvents(jsonl) {
   const events = parseEvents(jsonl);
 
   const lastStepFinish = events.findLast((e) => e?.type === 'step_finish');
-  if (lastStepFinish?.part?.reason === 'length') {
-    failures.push(
-      'final step ended truncated (finish reason "length"): the session produced no usable response',
-    );
-  }
-
   // A recovery continuation appends to the retained stream. Reconnaissance
   // text from the truncated turn is not evidence that the continuation did
   // anything, so judge liveness only after the most recent truncation.
@@ -78,6 +72,14 @@ export function evaluateEvents(jsonl) {
   const liveEvents = lastLength >= 0 ? events.slice(lastLength + 1) : events;
   const edited = hasCompletedEdit(liveEvents);
   const responded = liveEvents.some((e) => e?.type === 'text');
+  // OpenCode may observe session idle before the final step-finish event. If a
+  // continuation emitted usable work after the old length marker, that work
+  // supersedes the marker even when a final `stop` never reached stdout.
+  if (lastStepFinish?.part?.reason === 'length' && !edited && !responded) {
+    failures.push(
+      'final step ended truncated (finish reason "length"): the session produced no usable response',
+    );
+  }
   if (!edited && !responded) {
     failures.push('session produced neither file edits nor an assistant response');
   }

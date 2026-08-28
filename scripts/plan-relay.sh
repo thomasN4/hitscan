@@ -34,10 +34,11 @@ if test -z "${OPENROUTER_API_KEY:-}"; then
   exit 2
 fi
 
-# Watchdog ceiling for the executor session, in seconds. GLM-5.3-flash via
-# openrouter has been observed to hang for 15+ minutes before dying with a
-# 502, and a healthy deep-reasoning session can legitimately take ~20 minutes;
-# the default gives that more than 2x headroom.
+# Watchdog ceiling for the whole executor session, in seconds, shared by the
+# initial turn and its one possible recovery. GLM-5.3-flash via openrouter has
+# been observed to hang for 15+ minutes before dying with a 502, and a healthy
+# deep-reasoning session can legitimately take ~20 minutes; the default gives
+# that more than 2x headroom.
 timeout_secs="${OPENCODE_TIMEOUT:-2700}"
 if ! [[ "$timeout_secs" =~ ^[0-9]+$ ]] || test "$timeout_secs" -eq 0; then
   echo "Plan Relay: OPENCODE_TIMEOUT must be a positive integer number of seconds" >&2
@@ -129,6 +130,7 @@ AGENTS.md and the plan are binding. Make only the planned repository changes, ru
 
 The bash tool is restricted. Allowed commands are: $allowed_commands. All unlisted shell commands are denied and return no output, so do not retry them. Use the read tool with offsets and limits for file contents. The generic grep tool is denied because a file path may broaden to its parent directory; use rg with an explicit, narrow file or directory path. Keep reconnaissance targeted to the plan's named interfaces, and begin with the smallest planned edit once those interfaces are confirmed."
 
+relay_started_at=$SECONDS
 set +e
 OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
 XDG_CONFIG_HOME="$runtime/config" \
@@ -159,26 +161,31 @@ if test "$status" -eq 0; then
   recovery_session="$(node "$script_dir/planRelayGate.mjs" --recovery-session "$events")"
 fi
 if test -n "$recovery_session"; then
-  echo "Plan Relay: continuing no-edit length-truncated session once: $recovery_session" >&2
-  recovery_prompt="Your previous turn ended before implementation. Repository inspection is complete. Do not reread files already inspected. Begin with the smallest edit required by the attached approved plan now, then continue its implementation and validation. The same plan remains binding. If blocked, report the blocker."
-  OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
-  XDG_CONFIG_HOME="$runtime/config" \
-  XDG_DATA_HOME="$runtime/data" \
-  XDG_CACHE_HOME="$runtime/cache" \
-  XDG_STATE_HOME="$runtime/state" \
-  OPENCODE_CONFIG_DIR="$runtime/config" \
-  OPENCODE_DISABLE_AUTOUPDATE=true \
-  NO_COLOR=1 \
-  CI=true \
-  timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
-    --dir "$repo_root" \
-    --agent executor \
-    --model openrouter/z-ai/glm-5.3-flash \
-    --variant high \
-    --session "$recovery_session" \
-    --format json \
-    "$recovery_prompt" | tee -a "$events"
-  status="${PIPESTATUS[0]}"
+  recovery_timeout=$((timeout_secs - (SECONDS - relay_started_at)))
+  if test "$recovery_timeout" -gt 0; then
+    echo "Plan Relay: continuing no-edit length-truncated session once with ${recovery_timeout}s remaining: $recovery_session" >&2
+    recovery_prompt="Your previous turn ended before implementation. Repository inspection is complete. Do not reread files already inspected. Begin with the smallest edit required by the attached approved plan now, then continue its implementation and validation. The same plan remains binding. If blocked, report the blocker."
+    OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
+    XDG_CONFIG_HOME="$runtime/config" \
+    XDG_DATA_HOME="$runtime/data" \
+    XDG_CACHE_HOME="$runtime/cache" \
+    XDG_STATE_HOME="$runtime/state" \
+    OPENCODE_CONFIG_DIR="$runtime/config" \
+    OPENCODE_DISABLE_AUTOUPDATE=true \
+    NO_COLOR=1 \
+    CI=true \
+    timeout --kill-after=30s "$recovery_timeout" "$opencode_bin" --pure run \
+      --dir "$repo_root" \
+      --agent executor \
+      --model openrouter/z-ai/glm-5.3-flash \
+      --variant high \
+      --session "$recovery_session" \
+      --format json \
+      "$recovery_prompt" | tee -a "$events"
+    status="${PIPESTATUS[0]}"
+  else
+    echo "Plan Relay: no watchdog budget remains for recovery" >&2
+  fi
 fi
 set -e
 

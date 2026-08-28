@@ -87,6 +87,12 @@ healthy_stream() {
       '{"type":"text","part":{"text":"Implementation complete."}}' \\
       '{"type":"step_finish","part":{"reason":"stop"}}'
 }
+activity_without_finish_stream() {
+    printf '%s\\n' \\
+      '{"type":"step_start","part":{}}' \\
+      '{"type":"tool_use","part":{"tool":"edit","state":{"status":"completed","input":{"filePath":"src/x.ts"}}}}' \\
+      '{"type":"text","part":{"text":"Implementation complete."}}'
+}
 length_stream() {
     printf '%s\\n' \\
       '{"type":"step_start","sessionID":"ses_fixture","part":{}}' \\
@@ -101,6 +107,21 @@ case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
     ;;
   length_then_healthy)
     if test "$call_index" -eq 1; then
+      length_stream
+    else
+      healthy_stream
+    fi
+    ;;
+  length_then_activity_without_finish)
+    if test "$call_index" -eq 1; then
+      length_stream
+    else
+      activity_without_finish_stream
+    fi
+    ;;
+  length_slow_then_healthy)
+    if test "$call_index" -eq 1; then
+      sleep 1
       length_stream
     else
       healthy_stream
@@ -129,11 +150,23 @@ exec grep "$@"
 `);
   chmodSync(fakeRg, 0o755);
 
+  // Record the watchdog supplied to each executor turn, then delegate to the
+  // real GNU timeout required by the runner. This makes the shared-budget
+  // contract observable without weakening the hung-executor integration test.
+  const realTimeout = execFileSync('sh', ['-c', 'command -v timeout'], { encoding: 'utf8' }).trim();
+  const fakeTimeout = join(fakeBin, 'timeout');
+  writeFileSync(fakeTimeout, `#!/usr/bin/env bash
+printf '%s\\n' "$2" >> "$PLAN_RELAY_TEST_TIMEOUTS"
+exec ${JSON.stringify(realTimeout)} "$@"
+`);
+  chmodSync(fakeTimeout, 0o755);
+
   const capture = {
     args: join(root, 'args.txt'),
     count: join(root, 'count.txt'),
     config: join(root, 'config.json'),
     xdg: join(root, 'xdg.txt'),
+    timeouts: join(root, 'timeouts.txt'),
   };
   const env = {
     ...process.env,
@@ -143,6 +176,7 @@ exec grep "$@"
     PLAN_RELAY_TEST_COUNT: capture.count,
     PLAN_RELAY_TEST_CONFIG: capture.config,
     PLAN_RELAY_TEST_XDG: capture.xdg,
+    PLAN_RELAY_TEST_TIMEOUTS: capture.timeouts,
     PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
   };
   return { primary, linked, plan, baseline, capture, env };
@@ -233,6 +267,18 @@ describe('Plan Relay liveness gate', () => {
     );
     expect(ok).toBe(false);
     expect(failures.join('\n')).toContain('neither file edits nor an assistant response');
+  });
+
+  test('accepts recovery activity when OpenCode omits the final step finish', () => {
+    expect(
+      evaluateEvents(
+        stream(
+          { type: 'step_finish', part: { reason: 'length' } },
+          EDIT_CALL,
+          { type: 'text', part: { text: 'Implementation complete.' } },
+        ),
+      ),
+    ).toEqual({ ok: true, failures: [] });
   });
 
   test('rejects a session with only failed edits and no response', () => {
@@ -387,7 +433,9 @@ describe('Plan Relay runner', () => {
     const fixture = createFixture();
     const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_STREAM: 'length_then_healthy' });
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stderr).toContain('continuing no-edit length-truncated session once: ses_fixture');
+    expect(result.stderr).toMatch(
+      /continuing no-edit length-truncated session once with [1-9][0-9]*s remaining: ses_fixture/,
+    );
     expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
 
     const firstArgs = readFileSync(`${fixture.capture.args}.1`, 'utf8').trim().split('\n');
@@ -409,6 +457,39 @@ describe('Plan Relay runner', () => {
     const events = readFileSync(join(fixture.linked, '.plan-relay', runDir, 'events.jsonl'), 'utf8');
     expect(events).toContain('"reason":"length"');
     expect(events).toContain('Implementation complete.');
+  });
+
+  test('accepts a successful recovery whose final step-finish event is absent', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, {
+      PLAN_RELAY_TEST_STREAM: 'length_then_activity_without_finish',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const events = readFileSync(join(fixture.linked, '.plan-relay', runDir, 'events.jsonl'), 'utf8');
+    expect(events).toContain('"reason":"length"');
+    expect(events).toContain('Implementation complete.');
+    expect(events).not.toContain('"reason":"stop"');
+  });
+
+  test('gives recovery only the remaining watchdog budget', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, {
+      OPENCODE_TIMEOUT: '5',
+      PLAN_RELAY_TEST_STREAM: 'length_slow_then_healthy',
+    });
+    expect(result.status, result.stderr).toBe(0);
+
+    const timeouts = readFileSync(fixture.capture.timeouts, 'utf8')
+      .trim()
+      .split('\n')
+      .map(Number);
+    expect(timeouts).toHaveLength(2);
+    expect(timeouts[0]).toBe(5);
+    expect(timeouts[1]).toBeGreaterThan(0);
+    expect(timeouts[1]).toBeLessThan(timeouts[0]);
   });
 
   test('fails the run on a truncated or dead zero-exit session', () => {

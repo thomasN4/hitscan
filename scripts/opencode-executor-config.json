@@ -68,7 +68,9 @@
           "npm run build *": "allow",
           "npm run dev -- --port * --strictPort": "allow",
           "node scripts/smoke-test.mjs": "allow",
-          "CS_SMOKE_BASE=http://localhost:* node scripts/smoke-test.mjs": "allow"
+          "CS_SMOKE_BASE=http://localhost:* node scripts/smoke-test.mjs": "allow",
+          "ls": "allow",
+          "ls *": "allow"
         }
       }
     }

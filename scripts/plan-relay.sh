@@ -126,7 +126,7 @@ executor_prompt="Implement the attached approved Plan Relay document against bas
 
 AGENTS.md and the plan are binding. Make only the planned repository changes, run every permitted validation command named by the plan, and do not commit, push, publish, or edit the plan. If repository truth conflicts with the plan or a required action is not permitted, stop and report the blocker instead of redesigning the task. In the final response, list changed files, validation results, and any deviation from the plan.
 
-The bash tool is restricted: allowed commands are rg, ls, cat (never .env files), read-only git inspection (status, diff, log, show, rev-parse), npm test, npm run lint, npm run typecheck, npm run build, npm run dev -- --port <n> --strictPort, and node scripts/smoke-test.mjs. Any other shell command is denied and returns no output, so do not retry it — use the read tool for file contents."
+The bash tool is restricted: allowed commands are rg, ls, read-only git inspection (status, diff, log, show, rev-parse), npm test, npm run lint, npm run typecheck, npm run build, npm run dev -- --port <n> --strictPort, and node scripts/smoke-test.mjs. Any other shell command is denied and returns no output, so do not retry it. Use the read tool for file contents."
 
 set +e
 OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \

@@ -203,44 +203,9 @@ describe('Plan Relay executor policy', () => {
     expect(policy.bash['npm test']).toBe('allow');
     expect(policy.bash.ls).toBe('allow');
     expect(policy.bash['ls *']).toBe('allow');
-    expect(policy.bash['cat *']).toBe('allow');
+    expect(Object.keys(policy.bash).some((command) => command === 'cat' || command.startsWith('cat '))).toBe(false);
     expect(policy.bash).not.toHaveProperty('git commit *');
     expect(policy.bash).not.toHaveProperty('git push *');
-  });
-
-  // opencode 1.18.23 resolves permission rules with findLast over the
-  // config's own key order (Permission.evaluate + Permission.fromConfig at
-  // that tag), so the cat denies below are effective only because they sit
-  // AFTER "cat *" in the file. This replica pins the security-relevant
-  // resolutions; reordering or shortening the rules fails here.
-  test('resolves cat through last-match-wins file order', () => {
-    const bash = config.agent.executor.permission.bash;
-    const resolveAction = (input) => {
-      const matching = Object.entries(bash)
-        .map(([pattern, action]) => {
-          let source = pattern
-            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-            .replace(/\*/g, '.*')
-            .replace(/\?/g, '.');
-          if (source.endsWith(' .*')) source = source.slice(0, -3) + '( .*)?';
-          return { regex: new RegExp(`^${source}$`), action };
-        })
-        .filter((rule) => rule.regex.test(input));
-      return matching[matching.length - 1]?.action;
-    };
-
-    expect(resolveAction('cat package.json')).toBe('allow');
-    expect(resolveAction('cat src/mathutil.js')).toBe('allow');
-    expect(resolveAction('cat')).toBe('allow');
-    expect(resolveAction('ls src/maps')).toBe('allow');
-    expect(resolveAction('ls')).toBe('allow');
-    expect(resolveAction('cat .env')).toBe('deny');
-    expect(resolveAction('cat .env.local')).toBe('deny');
-    expect(resolveAction('cat src/.env')).toBe('deny');
-    expect(resolveAction('cat .env other.txt')).toBe('deny');
-    expect(resolveAction('cat -n src/.env.production x')).toBe('deny');
-    expect(resolveAction('cat .env.example')).toBe('allow');
-    expect(resolveAction('git push origin main')).toBe('deny');
   });
 });
 
@@ -250,7 +215,8 @@ describe('Plan Relay runner', () => {
     const result = run(fixture);
     expect(result.status, result.stderr).toBe(0);
 
-    const args = readFileSync(fixture.capture.args, 'utf8').trim().split('\n');
+    const argsText = readFileSync(fixture.capture.args, 'utf8');
+    const args = argsText.trim().split('\n');
     expect(args).toContain('--pure');
     expect(args.slice(args.indexOf('--agent'), args.indexOf('--agent') + 2)).toEqual(['--agent', 'executor']);
     expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual([
@@ -259,6 +225,9 @@ describe('Plan Relay runner', () => {
     ]);
     expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'max']);
     expect(args).not.toContain('--auto');
+    expect(argsText).toContain('allowed commands are rg, ls, read-only git inspection');
+    expect(argsText).toContain('Use the read tool for file contents.');
+    expect(argsText).not.toContain('cat (never .env files)');
 
     const runs = readdirSync(join(fixture.linked, '.plan-relay'));
     expect(runs).toHaveLength(1);

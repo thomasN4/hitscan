@@ -40,19 +40,13 @@ export interface BrainParams {
   jukeRate: number;
   /** Never shoot beyond this 3D range. */
   engageRange: number;
-  /**
-   * Cooldown while sight is blocked — INERT in this stage: acquisition owns
-   * the looking, and a bot that sees nothing holds rather than re-probes.
-   * Stage 2's search consumes it again.
-   */
-  retryCooldown: number;
   /** Post-shot cooldown lower bound. */
   cooldownMin: number;
   /** Post-shot cooldown random span added to cooldownMin. */
   cooldownSpan: number;
   /** Spawn stagger lower bound (first-shot delay). */
   firstDelayMin: number;
-  /** Spawn stagger random span added to firstDelaySpan. */
+  /** Spawn stagger random span added to firstDelayMin. */
   firstDelaySpan: number;
   /**
    * Rise (m) above which a target counts as on ANOTHER LEVEL rather than
@@ -97,12 +91,6 @@ export interface BrainParams {
    * though nothing is blocked.
    */
   fleeReset: number;
-  /**
-   * How much a metre of height counts against a metre of ground when
-   * ranking targets. Above 1 because height is not distance: reaching it
-   * costs a detour to whatever flight serves that level.
-   */
-  verticalWeight: number;
   /** Hit chance at point-blank. */
   hitChanceNear: number;
   /** Hit-chance falloff divisor: chance = near − dist / this. */
@@ -122,7 +110,6 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   strafeFactor: 0.7,
   jukeRate: 0.5,
   engageRange: 45,
-  retryCooldown: 0.3,
   cooldownMin: 0.7,
   cooldownSpan: 1.2,
   firstDelayMin: 1,
@@ -134,7 +121,6 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   noProgressTime: 1.5,   // ~2 juke swings would be 4 s; 1.5 s is already patient
   noProgressEpsilon: 0.25, // ≈ 4 frames of full-speed closure
   fleeReset: 2,          // a target 2 m farther than the best seen is running, not stalling
-  verticalWeight: 2,   // a deck 3.6 m up ranks like 7.2 m of extra ground
   hitChanceNear: 0.65,
   hitChanceDivisor: 80,
   hitChanceMin: 0.12,

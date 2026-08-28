@@ -92,6 +92,18 @@ describe('acquireVisual cheap gates', () => {
     expect(acquireVisual(self, [outside], null, 0, los).observation).toBeNull();
   });
 
+  it('FOV boundary is inclusive at a geometrically exact 60-degree offset', () => {
+    // Facing 30° off +x, target exactly on +x: the planar angle between them
+    // is exactly 60°. The normalized dot product lands one ulp below
+    // cos(π/3), so the inclusive comparison must absorb floating-point-scale
+    // error at the boundary — without accepting a meaningfully outside one.
+    const facing = new THREE.Vector3(Math.sin(Math.PI / 6), 0, Math.cos(Math.PI / 6)).normalize();
+    const self = { eye: new THREE.Vector3(0, 1.9, 0), feet: new THREE.Vector3(0, 0, 0), facing };
+    const { los } = countingLos();
+    const exact = cand(1, 10, 0);
+    expect(acquireVisual(self, [exact], null, 0, los).observation).not.toBeNull();
+  });
+
   it('vertical angle never narrows the cone: a deck overhead in the planar cone is seen', () => {
     const self = selfAt();
     const { los } = countingLos();
@@ -247,13 +259,13 @@ describe('acquireVisual observations', () => {
 
   it('derives planar distance, eye-to-eye 3D distance and rise', () => {
     const self = selfAt();
-    // Feet 8 m up, 3 m planar away: planar dist 5, rise 8, eye-to-eye
-    // hypot(3, 8) — both eyes 1.9 m up so the eye offset is planar + rise.
+    // Feet 8 m up at planar offset (3, 4): planar dist 5, rise 8, eye-to-eye
+    // hypot(5, 8) — both eyes 1.9 m up so the eye offset is planar + rise.
     const c = cand(1, 3, 4, { feetY: 8, eyeY: 8 + 1.9 });
     const obs = acquireVisual(self, [c], null, 0, () => true).observation!;
     expect(obs.dist).toBeCloseTo(5, 12);
     expect(obs.rise).toBeCloseTo(8, 12);
-    expect(obs.dist3).toBeCloseTo(Math.hypot(3, 8), 12);
+    expect(obs.dist3).toBeCloseTo(Math.hypot(5, 8), 12);
   });
 
   it('keeps the observed identity alongside the geometry', () => {

@@ -205,9 +205,12 @@ export function updateHUD(): void {
 // brightness tiers are hard to tell apart at a glance and not
 // colorblind-trivial: `rs` = the bot currently SEES its focus (the frame's
 // visual observation) AND it is inside engage range (can and will fire),
-// `r-` = in range but no current observation, `--` = no shootable
-// observation at all (a holding bot sits here). Same gates that grade the
-// intent line's tint.
+// `--` = no shootable observation at all (a holding bot sits here). Same
+// gates that grade the intent line's tint. The range gate is written only
+// from a CURRENT observation (bots.ts), so an `r-` state — in range without
+// a current observation — is not reachable: the readout shows shootable
+// `rs` or non-shootable `--` (`-s` when a seen target sits beyond
+// engageRange).
 //
 // lastBotDebug doubles as shown-state: it is non-empty exactly when the text
 // was last written AND revealed, so the inactive path can hide with one check.

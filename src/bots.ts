@@ -404,11 +404,14 @@ export class Bot implements BotShape {
     this.targetEye = intent.lookAt;
 
     // DEV overlay readout of the shot gates (issue #46): the trigger is
-    // range-gated AND sight-gated, and the overlay exists to say which of
-    // the three states a bot is in — can shoot, in range but unproven/blocked
-    // sight, or merely tracking. Sight here is the frame's own observation
-    // (acquisition already spent the frame's ray), so the readout costs no
-    // extra probe and is fresh every frame.
+    // range-gated AND sight-gated, and the overlay exists to say which
+    // state a bot is in — shootable (`rs`, a current observation inside
+    // engage range) or not (`--`; `-s` when the seen target sits beyond
+    // engageRange). The range gate is written only from a CURRENT
+    // observation, so an in-range-without-observation state never appears.
+    // Sight here is the frame's own observation (acquisition already spent
+    // the frame's ray), so the readout costs no extra probe and is fresh
+    // every frame.
     const obs = acquisition.observation;
     this.targetInRange = obs !== null && this.brain.inRange(obs.dist3);
     this.targetLOS = obs !== null ? true : acquisition.attempted !== null ? false : null;

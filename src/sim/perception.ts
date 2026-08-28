@@ -118,7 +118,10 @@ function cheaplyVisible(self: PerceptionSelf, c: VisualCandidate): boolean {
   if (planar === 0) return false;
   const dot = (dx / planar) * self.facing.x + (dz / planar) * self.facing.z;
   // Inclusive cosine boundary: dot === cos(halfFov) is still inside the cone.
-  return dot >= COS_HALF_FOV;
+  // A floating-point-scale tolerance absorbs the one-ulp gap between a
+  // mathematically exact half-angle direction's normalized dot and
+  // Math.cos(halfFov); a meaningfully outside direction stays rejected.
+  return dot >= COS_HALF_FOV - 1e-12;
 }
 
 /** Build the observation for a candidate that just passed LOS. Vectors are copied. */

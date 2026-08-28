@@ -12,12 +12,16 @@
 // the policies unit-testable in plain Node (botBrains.test.ts), the same
 // seam pattern as recoil.ts:convertOnSwap.
 //
-// The default policy, stage 1 of visual awareness: with a current visual
-// observation, engage — approach beyond farBand, back off inside nearBand,
-// drift perpendicular with random jukes, route when the observation sits a
-// level up or band steering demonstrably cannot close, fire on cooldown.
-// WITHOUT an observation it holds: stands still, keeps its facing, never
-// fires. Memory, scanning and expiry (the `search` mode) are stage 2.
+// The default policy: with a current visual observation, engage — approach
+// beyond farBand, back off inside nearBand, drift perpendicular with random
+// jukes, route when the observation sits a level up or band steering
+// demonstrably cannot close, fire on cooldown. On sight loss the LAST KNOWN
+// position is pursued: the brain routes to the frozen remembered feet, and on
+// arrival (or a confirmed dead end) switches to a three-heading scan
+// (`search`) that forgets after `forgetTime`. A direction-only incoming-fire
+// bearing (onIncomingFire) outranks everything for one frame and starts a
+// search where the shot came from. Only a CURRENT visible observation can
+// order a shot — memory, search and damage reactions never fire.
 //
 // STEERING IS PLANAR, RANGING IS NOT. The steering basis derived from the
 // observation's feet is y-stripped because a step only ever moves in x/z —
@@ -27,6 +31,9 @@
 // "in my face at dist ~ 0" and pushed bots away from the stairs that reach it.
 import * as THREE from 'three';
 import type { PerceptionId, VisualObservation } from './perception';
+
+/** Shared +Y axis for the scan rotation (Three.js positive-Y convention). */
+const UP_Y = new THREE.Vector3(0, 1, 0);
 
 /** Tunables of a reactive policy. Lengths in metres, times in seconds. */
 export interface BrainParams {
@@ -101,6 +108,15 @@ export interface BrainParams {
   damageMin: number;
   /** …plus rng()·span. */
   damageSpan: number;
+  /**
+   * Planar distance (m) at which a memory pursuit counts as ARRIVED: the
+   * search begins here without asking the graph again. Inclusive boundary.
+   */
+  memoryArrivalRadius: number;
+  /** Seconds per heading of the three-phase search scan. */
+  scanPhase: number;
+  /** Seconds a search runs from ENTRY before the memory is dropped (hold). */
+  forgetTime: number;
 }
 
 /** The shipped bot behavior. */
@@ -126,6 +142,9 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   hitChanceMin: 0.12,
   damageMin: 8,
   damageSpan: 14,
+  memoryArrivalRadius: 1, // planar; reached the remembered spot → scan here
+  scanPhase: 0.75,        // per heading; the full sweep repeats every 2.25 s
+  forgetTime: 8,          // drop the memory 8 s after the search began
 };
 
 /**
@@ -173,24 +192,31 @@ export interface BrainView {
   moveBlocked: boolean;
   /**
    * Planar vector to the next waypoint on the executor's route toward
-   * `goal`, or null when it has none. A THUNK for the same reason the old
-   * seeTarget was: pathfinding is the expensive thing here, so it is only
-   * asked for when the policy has already decided it wants to travel.
+   * `goal`, with a THREE-way outcome so a policy can tell waiting from a
+   * dead end without any extra pathfinding:
+   *
+   * - a `Vector3`: the next relative waypoint — walk it;
+   * - `undefined`: the shared one-A-star-per-frame budget DEFERRED the
+   *   request — nothing is known about the route, wait and ask again next
+   *   frame;
+   * - `null`: the graph was asked and confirmed there is NO route.
    *
    * Relative to the bot's own feet — a brain never learns where it is, only
    * which way to go.
    */
-  nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | null;
+  nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | undefined | null;
 }
 
 /**
  * What a brain is doing this frame, in one word.
  *
- * `engage` and `route` are the two active modes; `hold` stands still on
- * sight loss; `search` is stage 2's memory-driven scan and is never
- * produced yet. Reported for OBSERVABILITY, not consumed by the executor:
- * hud.ts renders it in the DEV bot readout, because "why is that bot doing
- * that" is otherwise only answerable by pausing in devtools.
+ * `engage` and `route` are the two active modes; `search` scans in place
+ * from a remembered position's arrival, a routing dead end, or a
+ * direction-only incoming-fire bearing; `hold` stands still on forget (or,
+ * pre-memory, on plain sight loss). Reported for OBSERVABILITY, not
+ * consumed by the executor: hud.ts renders it in the DEV bot readout,
+ * because "why is that bot doing that" is otherwise only answerable by
+ * pausing in devtools.
  */
 export type BrainMode = 'hold' | 'search' | 'route' | 'engage';
 
@@ -225,6 +251,15 @@ export interface BrainIntent {
 /** The decision half of a bot. Instances own per-bot state; executors are stateless shells. */
 export interface BotBrain {
   decide(view: BrainView, dt: number): BrainIntent;
+  /**
+   * Direction-only "the shot came from this way" stimulus: `bearing` is a
+   * planar victim-to-attacker direction, copied and normalized on receipt.
+   * It becomes the NEXT decision's highest-priority stimulus — outranking a
+   * same-frame visual — and starts a search at that bearing. No identity,
+   * distance or destination travels with it; a zero planar vector is
+   * ignored defensively.
+   */
+  onIncomingFire(bearing: THREE.Vector3): void;
   /**
    * Clear per-life policy state.
    *
@@ -302,6 +337,24 @@ export class DefaultBrain implements BotBrain {
    * does not inherit the corpse's attention.
    */
   private focus: PerceptionId | null = null;
+  /**
+   * Frozen last-known position: cloned feet and eye from the most recent
+   * visual observation. COPIES, never a live reference — the observation is
+   * the executor's and the target moves. Pursued on sight loss; dropped by
+   * the search expiry and onRespawn.
+   */
+  private memory: { feet: THREE.Vector3; eye: THREE.Vector3 } | null = null;
+  /** True while an active search owns the bot (the forget timer runs). */
+  private searching = false;
+  /** Normalized planar base bearing of the active search; null when none. */
+  private scanBase: THREE.Vector3 | null = null;
+  /** Seconds since the active search began. */
+  private scanElapsed = 0;
+  /**
+   * Copied normalized planar victim-to-attacker bearing awaiting the next
+   * decision, or null. Set by onIncomingFire, consumed by the next decide().
+   */
+  private pendingBearing: THREE.Vector3 | null = null;
 
   constructor(
     private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
@@ -332,6 +385,65 @@ export class DefaultBrain implements BotBrain {
     this.stallBase = Infinity;
     this.wasBlocked = false;
     this.focus = null;
+    this.memory = null;
+    this.searching = false;
+    this.scanBase = null;
+    this.scanElapsed = 0;
+    this.pendingBearing = null;
+  }
+
+  /** See BotBrain.onIncomingFire. The bearing is copied and planar-normalized. */
+  onIncomingFire(bearing: THREE.Vector3): void {
+    const planar = new THREE.Vector3(bearing.x, 0, bearing.z);
+    // Zero planar vector (or an all-vertical one): no direction to remember.
+    if (planar.lengthSq() === 0) return;
+    this.pendingBearing = planar.normalize();
+  }
+
+  /** Drop the routing/jam/stall machinery shared by the pursue and search handovers. */
+  private clearPursuitState(): void {
+    this.routing = false;
+    this.blockedFor = 0;
+    this.commitLeft = 0;
+    this.flatRouted = false;
+    this.stalledFor = 0;
+    this.stallBase = Infinity;
+    this.wasBlocked = false;
+  }
+
+  /** Begin a scan at `base`: elapsed zero, every pursuit state dropped. */
+  private enterSearch(base: THREE.Vector3): void {
+    this.searching = true;
+    this.scanBase = base.clone();
+    this.scanElapsed = 0;
+    this.clearPursuitState();
+  }
+
+  /** Heading for the current scan phase: base, base+120°, base−120°, repeating. */
+  private scanHeading(): THREE.Vector3 {
+    const phase = Math.floor(this.scanElapsed / this.params.scanPhase) % 3;
+    if (phase === 0) return this.scanBase!.clone();
+    const offset = phase === 1 ? (2 * Math.PI) / 3 : -(2 * Math.PI) / 3;
+    return this.scanBase!.clone().applyAxisAngle(UP_Y, offset);
+  }
+
+  /**
+   * Intent for a search frame: stand still, face `heading`, look along it.
+   * The lookAt point rides the FROZEN eye height while memory exists; a
+   * direction-only damage search (memory already cleared) uses the bot eye
+   * convention off the bot's own feet.
+   */
+  private searchFrameIntent(view: BrainView, heading: THREE.Vector3): BrainIntent {
+    const eyeY = this.memory !== null ? this.memory.eye.y : view.selfFeet.y + 1.9;
+    const lookAt = new THREE.Vector3(view.selfFeet.x + heading.x, eyeY, view.selfFeet.z + heading.z);
+    return {
+      step: new THREE.Vector3(),
+      wantShoot: false,
+      mode: 'search',
+      focusId: this.focus,
+      lookAt,
+      facing: heading.clone(),
+    };
   }
 
   hitChance(dist: number): number {
@@ -390,31 +502,98 @@ export class DefaultBrain implements BotBrain {
 
   decide(view: BrainView, dt: number): BrainIntent {
     // One juke draw per frame and one reroll on fire, whatever the mode —
-    // the draw contract the tests script against. (Drawn up front so the
-    // hold path below consumes it too.)
+    // the draw contract the tests script against. (Drawn up front so every
+    // path below consumes it.)
     const jukeDraw = this.rng();
     this.cooldown -= dt;
 
-    const vis = view.visual;
-    if (!vis) {
-      // Stage 1 (WIP): nothing seen this frame -> hold. Stand still, keep
-      // the facing the body already has, expose no lookAt, never fire. The
-      // identity stays tracked so acquisition probes it first once a look
-      // could plausibly succeed again; memory, scanning and expiry (the
-      // `search` mode) are stage 2.
+    // Priority 1: a pending incoming-fire bearing — even over a same-frame
+    // visual. The shot's direction is ALL that is known: no identity, no
+    // distance, no destination. Drop the focus and any remembered position,
+    // and search where it came from; a later ordinary visual observation
+    // replaces this normally.
+    if (this.pendingBearing !== null) {
+      const bearing = this.pendingBearing;
+      this.pendingBearing = null;
+      this.focus = null;
+      this.memory = null;
+      this.enterSearch(bearing);
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;
       }
-      return {
-        step: new THREE.Vector3(),
-        wantShoot: false,
-        mode: 'hold',
-        focusId: this.focus,
-        lookAt: null,
-        facing: view.facing.clone(),
-      };
+      return this.searchFrameIntent(view, bearing);
     }
+
+    const vis = view.visual;
+    if (vis) {
+      return this.visualIntent(view, vis, dt, jukeDraw);
+    }
+
+    // Priority 3a: an active scan continues — stand still, never shoot,
+    // age the forget timer (which started only at search ENTRY, so route
+    // walks and deferred frames never aged the memory).
+    if (this.searching) {
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      this.scanElapsed += dt;
+      if (this.scanElapsed >= this.params.forgetTime) {
+        // Forget: drop memory and every pursuit/scan state, hold facing.
+        this.focus = null;
+        this.memory = null;
+        this.searching = false;
+        this.scanBase = null;
+        this.scanElapsed = 0;
+        this.clearPursuitState();
+        return {
+          step: new THREE.Vector3(),
+          wantShoot: false,
+          mode: 'hold',
+          focusId: null,
+          lookAt: null,
+          facing: view.facing.clone(),
+        };
+      }
+      return this.searchFrameIntent(view, this.scanHeading());
+    }
+
+    // Priority 3b: sight lost with a remembered position — pursue it.
+    if (this.memory !== null) {
+      return this.memoryIntent(view, dt, jukeDraw);
+    }
+
+    // Nothing seen, nothing remembered: hold. Stand still, keep the facing
+    // the body already has, expose no lookAt, never fire. The identity stays
+    // tracked so acquisition probes it first once a look could plausibly
+    // succeed again.
+    if (jukeDraw < dt * this.params.jukeRate) {
+      this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+    }
+    return {
+      step: new THREE.Vector3(),
+      wantShoot: false,
+      mode: 'hold',
+      focusId: this.focus,
+      lookAt: null,
+      facing: view.facing.clone(),
+    };
+  }
+
+  /**
+   * Priority 2: a current visual observation. Refreshes the focus and the
+   * cloned feet/eye memory, exits any active search, then runs the existing
+   * visible engage/route policy — collision recovery, stagnation, juke,
+   * fire cadence — unchanged.
+   */
+  private visualIntent(view: BrainView, vis: VisualObservation, dt: number, jukeDraw: number): BrainIntent {
     this.focus = vis.id;
+    // Freeze the last-known position: COPIES of the observation's geometry —
+    // the observation belongs to the executor and the target moves.
+    this.memory = { feet: vis.feet.clone(), eye: vis.eye.clone() };
+    // A look exits any active scan.
+    this.searching = false;
+    this.scanBase = null;
+    this.scanElapsed = 0;
 
     // Planar steering basis, derived from the observation — the only target
     // geometry the brain has. STEERING is planar (a step only ever moves in
@@ -481,7 +660,11 @@ export class DefaultBrain implements BotBrain {
     }
 
     const wantRoute = climbWants || this.flatRouted;
-    const waypoint = wantRoute ? view.nextWaypoint(vis.feet) : null;
+    const requested = wantRoute ? view.nextWaypoint(vis.feet) : null;
+    // undefined (budget deferred) falls back to band steering at the VISIBLE
+    // target — the observation is fresh, so steering at it is never worse
+    // than standing still. null keeps the existing no-route fallback.
+    const waypoint = requested === undefined ? null : requested;
     this.routing = waypoint !== null;
 
     const step = new THREE.Vector3();
@@ -539,6 +722,64 @@ export class DefaultBrain implements BotBrain {
       focusId: this.focus,
       lookAt: vis.eye.clone(),
       facing,
+    };
+  }
+
+  /**
+   * Priority 3: pursue the frozen last-known position. Route to the
+   * remembered FEET — never a candidate's live position — face the frozen
+   * point, and NEVER shoot: the memory is not sight, and no ray was spent
+   * to confirm anything is still there. A deferred route waits in `route`
+   * with zero step (and does not age the forget timer, which starts only at
+   * search entry); a confirmed dead end and the inclusive arrival radius
+   * hand over to a search, with the arrival direction as its base bearing.
+   */
+  private memoryIntent(view: BrainView, dt: number, jukeDraw: number): BrainIntent {
+    const mem = this.memory!;
+    const toMem = new THREE.Vector3(mem.feet.x - view.selfFeet.x, 0, mem.feet.z - view.selfFeet.z);
+    const dist = toMem.length();
+    const toward = dist > 1e-9 ? toMem.clone().multiplyScalar(1 / dist) : view.facing.clone();
+
+    // Arrived (inclusive boundary): scan here without asking the graph again.
+    if (dist <= this.params.memoryArrivalRadius) {
+      this.enterSearch(toward);
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      return this.searchFrameIntent(view, toward);
+    }
+
+    const waypoint = view.nextWaypoint(mem.feet);
+    if (waypoint === undefined) {
+      // Budget deferred: wait in place. Zero step, forget timer untouched —
+      // only a search ages the memory.
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'route',
+        focusId: this.focus,
+        lookAt: mem.eye.clone(),
+        facing: toward.clone(),
+      };
+    }
+    if (waypoint === null) {
+      // The graph confirmed there is no way there: search where we stand.
+      this.enterSearch(toward);
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      return this.searchFrameIntent(view, toward);
+    }
+    // A real waypoint: the executor's existing travel() recovery applies.
+    const step = new THREE.Vector3();
+    this.travel(step, waypoint, view, dt);
+    return {
+      step,
+      wantShoot: false,
+      mode: 'route',
+      focusId: this.focus,
+      lookAt: mem.eye.clone(),
+      facing: toward.clone(),
     };
   }
 }

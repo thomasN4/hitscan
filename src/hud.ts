@@ -194,23 +194,26 @@ export function updateHUD(): void {
 // flag) because both answer the same question, "what is this bot thinking",
 // and the overlay is the explicit opt-in; on any map, since nothing here is
 // elevation-specific.
-// Modes are hold/search/route/engage (botBrains.ts:BrainMode — `search` is
-// stage 2 and not produced yet). `route` with `blk` flickering is a bot
-// squeezing past something; `route` that never becomes `engage` means it is
-// not arriving. Rendered as one cached string because updateHUD runs every
-// frame; a bot standing still must not touch the DOM. Mesh y IS the bot's
-// feet height (bots.ts positions by feet). padEnd(6) fits the widest mode.
+// Modes are hold/search/route/engage (botBrains.ts:BrainMode). `search` is
+// a memory scan — arrival at a remembered position, a routing dead end, or
+// a direction-only incoming-fire reaction. `route` with `blk` flickering is
+// a bot squeezing past something; `route` that never becomes `engage` means
+// it is not arriving. Rendered as one cached string because updateHUD runs
+// every frame; a bot standing still must not touch the DOM. Mesh y IS the
+// bot's feet height (bots.ts positions by feet). padEnd(6) fits the widest
+// mode.
 //
 // The r/s pair restates the shot gates as text, because the overlay's
 // brightness tiers are hard to tell apart at a glance and not
 // colorblind-trivial: `rs` = the bot currently SEES its focus (the frame's
-// visual observation) AND it is inside engage range (can and will fire),
-// `--` = no shootable observation at all (a holding bot sits here). Same
-// gates that grade the intent line's tint. The range gate is written only
-// from a CURRENT observation (bots.ts), so an `r-` state — in range without
-// a current observation — is not reachable: the readout shows shootable
-// `rs` or non-shootable `--` (`-s` when a seen target sits beyond
-// engageRange).
+// visual observation agreeing with the intent's focus) AND it is inside
+// engage range (can and will fire), `--` = no shootable observation at all
+// (a holding, memory-pursuing or searching bot sits here). Same gates that
+// grade the intent line's tint. The gates are written only from a CURRENT
+// observation that agrees with the intent's focus (bots.ts), so an `r-`
+// state — in range without a current agreeing observation — is not
+// reachable: the readout shows shootable `rs` or non-shootable `--` (`-s`
+// when a seen target sits beyond engageRange).
 //
 // lastBotDebug doubles as shown-state: it is non-empty exactly when the text
 // was last written AND revealed, so the inactive path can hide with one check.

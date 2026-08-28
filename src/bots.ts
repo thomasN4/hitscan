@@ -17,7 +17,9 @@
 // Shot gating contract (realized by the default brain): fire only when a
 // cooldown expires AND the bot currently SEES its focus — the observation is
 // the LOS proof, so a bot that sees nothing holds instead of shooting
-// through walls.
+// through walls. On sight loss it pursues the FROZEN last-known position
+// (brain-owned memory) and scans on arrival; the executor keeps its route
+// cache only while it still belongs to the same active goal.
 //
 // Hit zones: each body part is its own mesh with `userData.bot` pointing at
 // this instance — weapons.ts raycasts against head/torso/legs directly and
@@ -225,6 +227,13 @@ export class Bot implements BotShape {
   targetLOS: boolean | null = null;
   /** Seconds until this bot may spend the frame's route budget again. */
   private routeCooldown = 0;
+  /**
+   * Which pursuit the cached route belongs to — 'v' (current-visual) or 'm'
+   * (memory) pursuit, plus the focus id. A remembered goal must not inherit
+   * a path computed for a different pursuit or a different target: the key
+   * is checked on every route request and the cache dropped on any change.
+   */
+  private routeKey: string | null = null;
 
   constructor(team: Team = 'T') {
     // Plain assignments, not a parameter property: the `name` derivation must
@@ -297,6 +306,43 @@ export class Bot implements BotShape {
   }
 
   /**
+   * Direction-only "shot came from this way" stimulus, forwarded to the
+   * brain. The bearing is a normalized planar victim-to-attacker direction;
+   * no attacker identity, distance or destination passes through here.
+   */
+  onIncomingFire(bearing: THREE.Vector3): void {
+    this.brain.onIncomingFire(bearing);
+  }
+
+  /**
+   * Full-life reset: revive, replace, and drop every per-life state — body
+   * (hp/visibility/vertical state), placement, brain policy state (stagger,
+   * focus, memory, scan, damage reaction), perception cursor, cached route
+   * and its cooldown, mode/intent target/DEV gates, movement-blocked state
+   * and aim pitch. BOTH scheduled revival paths (die()'s six-second
+   * self-revival and combat.ts's 2.5-second wave reset) route through here,
+   * so neither can revive a bot halfway.
+   */
+  respawn(): void {
+    this.hp = 100;
+    this.alive = true;
+    this.mesh.visible = true;
+    this.spawnAtRandom();
+    // The brain outlived the body: re-arm its spawn stagger and drop the
+    // corpse's attention, memory and reactions — a new life inherits nothing.
+    this.brain.onRespawn();
+    this.perceptionCursor = 0;
+    this.clearRouteCache();
+    this.routeCooldown = 0;
+    this.mode = 'hold';
+    this.targetEye = null;
+    this.targetInRange = false;
+    this.targetLOS = null;
+    this.moveBlocked = false;
+    this.aim.rotation.x = 0;
+  }
+
+  /**
    * Per-frame executor pass: run one visual acquisition, build the view,
    * take the brain's intent, realize it. No policy decisions live here.
    * @param dt delta time (s)
@@ -361,11 +407,19 @@ export class Bot implements BotShape {
         moveBlocked: this.moveBlocked,
         // Lazy on purpose: pathfinding is the expensive thing here, so it is
         // only paid when the policy has already decided it wants to travel
-        // rather than fight where it stands.
-        nextWaypoint: (goal) => this.waypointToward(goal),
+        // rather than fight where it stands. The pursuit flag keys the route
+        // cache: a frame WITH an observation routes at what it sees; a frame
+        // WITHOUT one (memory pursuit) routes at the frozen remembered feet.
+        nextWaypoint: (goal) => this.waypointToward(goal, acquisition.observation !== null),
       },
       dt,
     );
+
+    // Route-cache ownership: whenever the intent leaves route/engage — a
+    // search or hold of any kind (arrival, dead end, damage reaction,
+    // forget) — drop the cached path so a later, unrelated goal cannot
+    // inherit it.
+    if (intent.mode === 'search' || intent.mode === 'hold') this.clearRouteCache();
 
     // Horizontal gate: the SAME axis-separated slide the player uses, with
     // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
@@ -407,14 +461,16 @@ export class Bot implements BotShape {
     // range-gated AND sight-gated, and the overlay exists to say which
     // state a bot is in — shootable (`rs`, a current observation inside
     // engage range) or not (`--`; `-s` when the seen target sits beyond
-    // engageRange). The range gate is written only from a CURRENT
-    // observation, so an in-range-without-observation state never appears.
-    // Sight here is the frame's own observation (acquisition already spent
-    // the frame's ray), so the readout costs no extra probe and is fresh
-    // every frame.
+    // engageRange). The gates are written only when the SAME frame's
+    // observation agrees with the intent's focus, so a memory or damage
+    // search stays dim even if acquisition happened to see something on a
+    // damage-priority frame — the brain discarded that look. Sight here is
+    // the frame's own observation (acquisition already spent the frame's
+    // ray), so the readout costs no extra probe and is fresh every frame.
     const obs = acquisition.observation;
-    this.targetInRange = obs !== null && this.brain.inRange(obs.dist3);
-    this.targetLOS = obs !== null ? true : acquisition.attempted !== null ? false : null;
+    const focusSeen = obs !== null && obs.id === intent.focusId;
+    this.targetInRange = focusSeen && this.brain.inRange(obs!.dist3); // bound-guarded: focusSeen ⇒ obs non-null
+    this.targetLOS = focusSeen ? true : acquisition.attempted !== null ? false : null;
 
     if (intent.wantShoot && obs && obs.id === intent.focusId
         && this.brain.inRange(obs.dist3)) {
@@ -428,35 +484,60 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Planar vector to the next waypoint on a route to `goal`, or null when the
-   * graph has none.
+   * Planar vector to the next waypoint on a route to `goal`, with a
+   * three-way outcome: a waypoint when a (cached or fresh) path exists,
+   * `undefined` when the shared one-A-star-per-frame budget deferred the
+   * request, `null` when the graph confirmed there is no route.
    *
    * Mechanism, not policy: this keeps and refreshes the path and decides which
    * waypoint is "next", while the brain decides whether to walk it at all —
-   * and only ever names the goal, which is whatever it currently SEES. Same
-   * split as the old seeTarget: the executor owns the raycast and the graph,
-   * the brain owns the trigger and the route decision.
+   * and only ever names the goal, which is whatever it currently SEES or last
+   * remembered. Same split as the old seeTarget: the executor owns the
+   * raycast and the graph, the brain owns the trigger and the route decision.
    */
-  private waypointToward(goal: THREE.Vector3): THREE.Vector3 | null {
+  private waypointToward(goal: THREE.Vector3, visualPursuit: boolean): THREE.Vector3 | undefined | null {
     const here = this.mesh.position;
+    // A remembered goal must not inherit a path computed for a different
+    // pursuit ('v' vs 'm') or a different target (focus id): key the cache
+    // and drop it on any mismatch.
+    const key = `${visualPursuit ? 'v' : 'm'}:${this.brain.focusId ?? '*'}`;
+    if (this.routeKey !== key) {
+      this.routeKey = key;
+      this.path = [];
+      this.leg = 0;
+    }
     // Drop a path the bot is no longer on: it fell off an edge, got shoved,
     // or respawned across the map still holding last life's route.
     if (this.path.length > 0) {
       const leg = this.path[Math.min(this.leg, this.path.length - 1)]!;
-      if (Math.hypot(leg.x - here.x, leg.z - here.z) > ROUTE_ABANDON) this.path = [];
+      if (Math.hypot(leg.x - here.x, leg.z - here.z) > ROUTE_ABANDON) {
+        this.path = [];
+        this.leg = 0;
+      }
     }
-    if ((this.path.length === 0 || this.routeCooldown <= 0) && routeBudget > 0) {
+    const wantsRecompute = this.path.length === 0 || this.routeCooldown <= 0;
+    let recomputed = false;
+    if (wantsRecompute && routeBudget > 0) {
       // One A* per frame across all bots; whoever misses out keeps walking
       // whatever it already has.
       routeBudget--;
+      recomputed = true;
       this.routeCooldown = ROUTE_INTERVAL;
       const found = route(here, goal);
       if (found) {
         this.path = found;
         this.leg = 0;
+      } else {
+        // A failed recompute must not keep walking a stale path.
+        this.path = [];
+        this.leg = 0;
       }
     }
-    if (this.path.length === 0) return null;
+    if (this.path.length === 0) {
+      // Deferred (budget spent elsewhere) vs confirmed dead end — the brain
+      // waits on the first and starts searching on the second.
+      return recomputed ? null : undefined;
+    }
 
     // Consume waypoints already stood on, planar — the step is planar too.
     while (this.leg < this.path.length - 1) {
@@ -467,6 +548,13 @@ export class Bot implements BotShape {
     const w = this.path[this.leg]!;
     const to = new THREE.Vector3(w.x - here.x, 0, w.z - here.z);
     return to.lengthSq() < 1e-8 ? null : to;
+  }
+
+  /** Drop the cached route: path, leg and goal key. */
+  private clearRouteCache(): void {
+    this.path = [];
+    this.leg = 0;
+    this.routeKey = null;
   }
 
   /**
@@ -545,22 +633,11 @@ export class Bot implements BotShape {
     debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();
     gameTime.schedule(6, () => {
-      this.hp = 100;
-      this.alive = true;
-      this.mesh.visible = true;
-      this.spawnAtRandom();
-      // The brain outlived the body: re-arm its spawn stagger so a revived
-      // bot does not open fire on whatever cooldown its corpse was carrying,
-      // and drop its focus — a new life does not inherit the corpse's
-      // attention.
-      this.brain.onRespawn();
-      this.perceptionCursor = 0;
-      this.path = [];
-      this.leg = 0;
-      this.mode = 'hold';
-      this.targetEye = null;
-      this.targetInRange = false;
-      this.targetLOS = null;
+      // The wave reset (combat.ts, 2.5 s) may already have revived this bot
+      // via respawn(); guard so a later callback does not teleport an
+      // already-revived bot a second time.
+      if (this.alive) return;
+      this.respawn();
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }

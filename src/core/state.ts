@@ -162,22 +162,44 @@ export interface Bot {
   readonly navPath: readonly THREE.Vector3[];
   /** How far along `navPath` the bot has got — waypoints before this are consumed. Display only. */
   readonly navLeg: number;
-  /** World-space point the brain's intent looks at (the observed eye), or null when holding. Display only. */
+  /**
+   * World-space point the brain's intent looks at — the observed eye while
+   * engaging, a copied remembered-eye or scan-bearing point while pursuing
+   * memory or searching — or null when holding. Display only.
+   */
   readonly targetEye: THREE.Vector3 | null;
   /** Whether that focus sits inside the brain's engage range. Display only. */
   readonly targetInRange: boolean;
   /**
-   * Sight gate for the current focus: true while the frame's own visual
-   * observation is held (acquisition spent the frame's ray — no extra probe
-   * is paid), false when a look was attempted and blocked, null when no ray
-   * was spent at all. Display only; see bots.ts.
+   * Sight gate for the current focus: true only while the frame's own
+   * visual observation agrees with the intent's focus (acquisition spent
+   * the frame's ray — no extra probe is paid), false when a look was
+   * attempted and blocked, null when no ray was spent at all. Memory and
+   * damage-search frames stay dim even if acquisition saw something the
+   * brain discarded. Display only; see bots.ts.
    */
   readonly targetLOS: boolean | null;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
   /** @param killerName display name of a bot killer; omitted for player kills */
   die(part: HitZone, killerName?: string): void;
+  /** Place on a fresh spawn point; placement only — see respawn() for the full-life reset. */
   spawnAtRandom(): void;
+  /**
+   * Full-life reset: revive (hp/alive/visibility), replace, and drop every
+   * per-life state — brain policy state, perception cursor, cached route,
+   * DEV gates, movement feedback and aim pose. Both scheduled revival paths
+   * (bots.ts:die's six-second callback, combat.ts's 2.5-second wave reset)
+   * route through this.
+   */
+  respawn(): void;
+  /**
+   * Direction-only "shot came from this way" stimulus: a copied, normalized
+   * PLANAR victim-to-attacker bearing. No attacker identity, distance or
+   * destination travels with it — the brain may search toward the bearing
+   * but can never know (or shoot at) what sent it.
+   */
+  onIncomingFire(bearing: THREE.Vector3): void;
 }
 
 /** One transient impact puff tracked by effects.ts. */

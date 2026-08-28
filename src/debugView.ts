@@ -53,9 +53,10 @@ const ROUTE_COLOR: Record<Team, readonly [number, number, number]> = {
  * Intent-line colours, by brain mode — all four, exhaustively, since a
  * Record<BrainMode, …> fails to compile when a mode is added without a
  * colour. `engage` and `route` are the two active modes the hysteresis in
- * botBrains.ts:DefaultBrain.decide flips between; `hold` (sight lost, stage
- * 1) and `search` (stage 2's memory scan, not produced yet) get distinct
- * warm hues so a standing bot is never misread as routing.
+ * botBrains.ts:DefaultBrain.decide flips between; `search` (memory scan:
+ * remembered-position arrival, routing dead end, or damage reaction) and
+ * `hold` (memory forgotten, or plain sight loss before any memory) get
+ * distinct warm hues so a standing bot is never misread as routing.
  */
 const MODE_COLOR: Record<BrainMode, readonly [number, number, number]> = {
   hold: [1.0, 0.5, 0.0],    // orange
@@ -67,13 +68,15 @@ const MODE_COLOR: Record<BrainMode, readonly [number, number, number]> = {
 /**
  * Brightness tiers over the mode tint, by whether THIS bot could actually
  * fire at its focus (issue #46): full = inside engage range with the frame's
- * own visual observation held (sight is proven by acquisition — no extra
- * probe is paid); mid = inside range but sight unproven or blocked; dim = no
- * shootable observation at all. Hue stays the mode's — the gates ride
- * brightness alone, so one legend covers both. Without the grading, every
- * bot with a live target drew an identical line however far away it was and
- * however many walls stood between, which read as "everyone is engaging me
- * through walls".
+ * own visual observation AGREEING with the intent's focus (sight is proven
+ * by acquisition — no extra probe is paid); mid = inside range but sight
+ * unproven or blocked; dim = no shootable observation at all — memory
+ * pursuit and search never grade a line shootable, even when the bot
+ * exposes a scan lookAt. Hue stays the mode's — the gates ride brightness
+ * alone, so one legend covers both. Without the grading, every bot with a
+ * live target drew an identical line however far away it was and however
+ * many walls stood between, which read as "everyone is engaging me through
+ * walls".
  */
 const GATE_BRIGHTNESS = { shoot: 1, range: 0.5, track: 0.25 } as const;
 

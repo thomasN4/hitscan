@@ -16,9 +16,9 @@
             "output": 131072
           },
           "variants": {
-            "max": {
+            "high": {
               "reasoning": {
-                "effort": "max"
+                "effort": "high"
               }
             }
           }
@@ -39,7 +39,7 @@
           "*.env.example": "allow"
         },
         "glob": "allow",
-        "grep": "allow",
+        "grep": "deny",
         "list": "allow",
         "edit": "allow",
         "lsp": "allow",

@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
-import { evaluateEvents } from './planRelayGate.mjs';
+import { evaluateEvents, recoverySession } from './planRelayGate.mjs';
 import { formatAllowedCommands } from './planRelayPrompt.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -69,10 +69,16 @@ if test "\${1:-}" = "--version"; then
   exit 0
 fi
 printf '%s\\n' "$@" > "$PLAN_RELAY_TEST_ARGS"
+call_index=1
+if test -f "$PLAN_RELAY_TEST_COUNT"; then
+  IFS= read -r previous_calls < "$PLAN_RELAY_TEST_COUNT"
+  call_index=$((previous_calls + 1))
+fi
+printf '%s\\n' "$call_index" > "$PLAN_RELAY_TEST_COUNT"
+printf '%s\\n' "$@" > "$PLAN_RELAY_TEST_ARGS.$call_index"
 printf '%s' "$OPENCODE_CONFIG_CONTENT" > "$PLAN_RELAY_TEST_CONFIG"
 printf '%s\\n' "$XDG_CONFIG_HOME" > "$PLAN_RELAY_TEST_XDG"
-case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
-  healthy)
+healthy_stream() {
     printf '%s\\n' \\
       '{"type":"step_start","part":{}}' \\
       '{"type":"tool_use","part":{"tool":"edit","state":{"status":"completed","input":{"filePath":"src/x.ts"}}}}' \\
@@ -80,9 +86,46 @@ case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
       '{"type":"step_start","part":{}}' \\
       '{"type":"text","part":{"text":"Implementation complete."}}' \\
       '{"type":"step_finish","part":{"reason":"stop"}}'
+}
+activity_without_finish_stream() {
+    printf '%s\\n' \\
+      '{"type":"step_start","part":{}}' \\
+      '{"type":"tool_use","part":{"tool":"edit","state":{"status":"completed","input":{"filePath":"src/x.ts"}}}}' \\
+      '{"type":"text","part":{"text":"Implementation complete."}}'
+}
+length_stream() {
+    printf '%s\\n' \\
+      '{"type":"step_start","sessionID":"ses_fixture","part":{}}' \\
+      '{"type":"step_finish","sessionID":"ses_fixture","part":{"reason":"length"}}'
+}
+case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
+  healthy)
+    healthy_stream
     ;;
   length)
-    printf '%s\\n' '{"type":"step_start","part":{}}' '{"type":"step_finish","part":{"reason":"length"}}'
+    length_stream
+    ;;
+  length_then_healthy)
+    if test "$call_index" -eq 1; then
+      length_stream
+    else
+      healthy_stream
+    fi
+    ;;
+  length_then_activity_without_finish)
+    if test "$call_index" -eq 1; then
+      length_stream
+    else
+      activity_without_finish_stream
+    fi
+    ;;
+  length_slow_then_healthy)
+    if test "$call_index" -eq 1; then
+      sleep 1
+      length_stream
+    else
+      healthy_stream
+    fi
     ;;
   dead)
     printf '%s\\n' '{"type":"tool_use","part":{"tool":"read","state":{"status":"completed","input":{"filePath":"x"}}}}'
@@ -107,18 +150,33 @@ exec grep "$@"
 `);
   chmodSync(fakeRg, 0o755);
 
+  // Record the watchdog supplied to each executor turn, then delegate to the
+  // real GNU timeout required by the runner. This makes the shared-budget
+  // contract observable without weakening the hung-executor integration test.
+  const realTimeout = execFileSync('sh', ['-c', 'command -v timeout'], { encoding: 'utf8' }).trim();
+  const fakeTimeout = join(fakeBin, 'timeout');
+  writeFileSync(fakeTimeout, `#!/usr/bin/env bash
+printf '%s\\n' "$2" >> "$PLAN_RELAY_TEST_TIMEOUTS"
+exec ${JSON.stringify(realTimeout)} "$@"
+`);
+  chmodSync(fakeTimeout, 0o755);
+
   const capture = {
     args: join(root, 'args.txt'),
+    count: join(root, 'count.txt'),
     config: join(root, 'config.json'),
     xdg: join(root, 'xdg.txt'),
+    timeouts: join(root, 'timeouts.txt'),
   };
   const env = {
     ...process.env,
     OPENROUTER_API_KEY: 'test-only',
     OPENCODE_BIN: fake,
     PLAN_RELAY_TEST_ARGS: capture.args,
+    PLAN_RELAY_TEST_COUNT: capture.count,
     PLAN_RELAY_TEST_CONFIG: capture.config,
     PLAN_RELAY_TEST_XDG: capture.xdg,
+    PLAN_RELAY_TEST_TIMEOUTS: capture.timeouts,
     PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
   };
   return { primary, linked, plan, baseline, capture, env };
@@ -166,6 +224,27 @@ describe('Plan Relay liveness gate', () => {
     expect(failures.join('\n')).toContain('length');
   });
 
+  test('selects only a no-edit length-truncated session for recovery', () => {
+    const start = { type: 'step_start', sessionID: 'ses_recover', part: {} };
+    const finish = {
+      type: 'step_finish',
+      sessionID: 'ses_recover',
+      part: { reason: 'length' },
+    };
+    const truncated = stream(start, finish);
+    expect(recoverySession(truncated)).toBe('ses_recover');
+    expect(recoverySession(stream(EDIT_CALL, start, finish))).toBeUndefined();
+    expect(
+      recoverySession(
+        stream(
+          { type: 'step_start', sessionID: 'ses_done', part: {} },
+          { type: 'step_finish', sessionID: 'ses_done', part: { reason: 'stop' } },
+        ),
+      ),
+    ).toBeUndefined();
+    expect(recoverySession(stream({ type: 'step_finish', part: { reason: 'length' } }))).toBeUndefined();
+  });
+
   test('rejects a session with neither edits nor a response', () => {
     const { ok, failures } = evaluateEvents(
       stream(
@@ -175,6 +254,31 @@ describe('Plan Relay liveness gate', () => {
     );
     expect(ok).toBe(false);
     expect(failures.join('\n')).toContain('neither file edits nor an assistant response');
+  });
+
+  test('does not count activity from before a recovery continuation', () => {
+    const { ok, failures } = evaluateEvents(
+      stream(
+        { type: 'text', part: { text: 'Baseline verified.' } },
+        { type: 'step_finish', part: { reason: 'length' } },
+        { type: 'step_start', part: {} },
+        { type: 'step_finish', part: { reason: 'stop' } },
+      ),
+    );
+    expect(ok).toBe(false);
+    expect(failures.join('\n')).toContain('neither file edits nor an assistant response');
+  });
+
+  test('accepts recovery activity when OpenCode omits the final step finish', () => {
+    expect(
+      evaluateEvents(
+        stream(
+          { type: 'step_finish', part: { reason: 'length' } },
+          EDIT_CALL,
+          { type: 'text', part: { text: 'Implementation complete.' } },
+        ),
+      ),
+    ).toEqual({ ok: true, failures: [] });
   });
 
   test('rejects a session with only failed edits and no response', () => {
@@ -234,10 +338,10 @@ describe('Plan Relay executor policy', () => {
     ).toThrow('executor config contains no allowed bash commands');
   });
 
-  test('pins GLM-5.3-Flash max with persistence and publication disabled', () => {
+  test('pins GLM-5.3-Flash high with persistence and publication disabled', () => {
     const model = config.provider.openrouter.models['z-ai/glm-5.3-flash'];
     expect(config.enabled_providers).toEqual(['openrouter']);
-    expect(model.variants.max.reasoning.effort).toBe('max');
+    expect(model.variants.high.reasoning.effort).toBe('high');
     expect(config.share).toBe('disabled');
     expect(config.snapshot).toBe(false);
     expect(config.autoupdate).toBe(false);
@@ -248,6 +352,7 @@ describe('Plan Relay executor policy', () => {
     expect(policy['*']).toBe('deny');
     expect(policy.external_directory).toBe('deny');
     expect(policy.edit).toBe('allow');
+    expect(policy.grep).toBe('deny');
     expect(policy.bash['*']).toBe('deny');
     expect(policy.bash.rg).toBe('allow');
     expect(policy.bash['rg *']).toBe('allow');
@@ -274,11 +379,13 @@ describe('Plan Relay runner', () => {
       '--model',
       'openrouter/z-ai/glm-5.3-flash',
     ]);
-    expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'max']);
+    expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'high']);
     expect(args).not.toContain('--auto');
     expect(argsText).toContain(`Allowed commands are: ${formatAllowedCommands(config)}.`);
     expect(argsText).toContain('All unlisted shell commands are denied');
-    expect(argsText).toContain('Use the read tool for file contents.');
+    expect(argsText).toContain('Use the read tool with offsets and limits for file contents.');
+    expect(argsText).toContain('generic grep tool is denied');
+    expect(argsText).toContain('explicit, narrow file or directory path');
     expect(argsText).not.toContain('cat (never .env files)');
 
     const runs = readdirSync(join(fixture.linked, '.plan-relay'));
@@ -319,6 +426,70 @@ describe('Plan Relay runner', () => {
     const fixture = createFixture();
     const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_EXIT: '17' });
     expect(result.status).toBe(17);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
+  });
+
+  test('continues a no-edit length-truncated session once and gates the combined stream', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_STREAM: 'length_then_healthy' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toMatch(
+      /continuing no-edit length-truncated session once with [1-9][0-9]*s remaining: ses_fixture/,
+    );
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+
+    const firstArgs = readFileSync(`${fixture.capture.args}.1`, 'utf8').trim().split('\n');
+    expect(firstArgs).toContain('--file');
+    expect(firstArgs).not.toContain('--session');
+
+    const secondArgs = readFileSync(`${fixture.capture.args}.2`, 'utf8').trim().split('\n');
+    expect(secondArgs.slice(secondArgs.indexOf('--session'), secondArgs.indexOf('--session') + 2)).toEqual([
+      '--session',
+      'ses_fixture',
+    ]);
+    expect(secondArgs.slice(secondArgs.indexOf('--variant'), secondArgs.indexOf('--variant') + 2)).toEqual([
+      '--variant',
+      'high',
+    ]);
+    expect(secondArgs).not.toContain('--file');
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const events = readFileSync(join(fixture.linked, '.plan-relay', runDir, 'events.jsonl'), 'utf8');
+    expect(events).toContain('"reason":"length"');
+    expect(events).toContain('Implementation complete.');
+  });
+
+  test('accepts a successful recovery whose final step-finish event is absent', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, {
+      PLAN_RELAY_TEST_STREAM: 'length_then_activity_without_finish',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const events = readFileSync(join(fixture.linked, '.plan-relay', runDir, 'events.jsonl'), 'utf8');
+    expect(events).toContain('"reason":"length"');
+    expect(events).toContain('Implementation complete.');
+    expect(events).not.toContain('"reason":"stop"');
+  });
+
+  test('gives recovery only the remaining watchdog budget', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, {
+      OPENCODE_TIMEOUT: '5',
+      PLAN_RELAY_TEST_STREAM: 'length_slow_then_healthy',
+    });
+    expect(result.status, result.stderr).toBe(0);
+
+    const timeouts = readFileSync(fixture.capture.timeouts, 'utf8')
+      .trim()
+      .split('\n')
+      .map(Number);
+    expect(timeouts).toHaveLength(2);
+    expect(timeouts[0]).toBe(5);
+    expect(timeouts[1]).toBeGreaterThan(0);
+    expect(timeouts[1]).toBeLessThan(timeouts[0]);
   });
 
   test('fails the run on a truncated or dead zero-exit session', () => {
@@ -327,11 +498,13 @@ describe('Plan Relay runner', () => {
     expect(truncatedResult.status).toBe(1);
     expect(truncatedResult.stderr).toContain('liveness gate');
     expect(truncatedResult.stderr).toContain('length');
+    expect(readFileSync(truncated.capture.count, 'utf8').trim()).toBe('2');
 
     const dead = createFixture();
     const deadResult = run(dead, dead.linked, { PLAN_RELAY_TEST_STREAM: 'dead' });
     expect(deadResult.status).toBe(1);
     expect(deadResult.stderr).toContain('neither file edits nor an assistant response');
+    expect(readFileSync(dead.capture.count, 'utf8').trim()).toBe('1');
   });
 
   test('kills a hung executor with the watchdog and propagates the timeout status', () => {

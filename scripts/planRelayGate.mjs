@@ -35,7 +35,12 @@ export function evaluateEvents(jsonl) {
     );
   }
 
-  const edited = events.some((e) => e?.type === 'tool_use' && EDIT_TOOLS.has(e.part?.tool));
+  const edited = events.some(
+    (e) =>
+      e?.type === 'tool_use' &&
+      EDIT_TOOLS.has(e.part?.tool) &&
+      e.part?.state?.status === 'completed',
+  );
   const responded = events.some((e) => e?.type === 'text');
   if (!edited && !responded) {
     failures.push('session produced neither file edits nor an assistant response');

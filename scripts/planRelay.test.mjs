@@ -176,6 +176,23 @@ describe('Plan Relay liveness gate', () => {
     expect(failures.join('\n')).toContain('neither file edits nor an assistant response');
   });
 
+  test('rejects a session with only failed edits and no response', () => {
+    const { ok, failures } = evaluateEvents(
+      stream(
+        {
+          type: 'tool_use',
+          part: {
+            tool: 'edit',
+            state: { status: 'error', input: { filePath: 'src/x.ts' }, error: 'oldString not found' },
+          },
+        },
+        { type: 'step_finish', part: { reason: 'tool-calls' } },
+      ),
+    );
+    expect(ok).toBe(false);
+    expect(failures.join('\n')).toContain('neither file edits nor an assistant response');
+  });
+
   test('rejects empty and unparsable streams', () => {
     expect(evaluateEvents('').ok).toBe(false);
     expect(evaluateEvents('not json\n{"broken').ok).toBe(false);

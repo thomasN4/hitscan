@@ -465,6 +465,9 @@ first; 6b feeds sound into that settled stimulus seam.** Combining them would
 make a failed pursuit ambiguous between vision, memory, hearing and routing at
 the exact point the tranche is trying to make those causes observable.
 
+**Status: 6a is implementation-in-flight in this PR (not merged); 6b remains
+planned and unstarted.**
+
 #### 6a — vision, awareness and search
 
 **Division of ownership.** Perception mechanics stay with the executor;
@@ -593,6 +596,48 @@ The smoke test supplies the wiring pins: an opponent hidden behind a wall is
 not tracked or shot; crossing into FOV + LOS acquires; breaking LOS routes to
 the frozen point; arrival scans then holds; and damaging a bot turns it toward
 the incoming bearing without granting immediate retaliation.
+
+#### 6a implementation record (in flight — not merged, no PR number)
+
+What the in-flight implementation built against the spec above:
+
+- **Engine-free perception seam** — `sim/perception.ts`: stable perception
+  identities (`'player'` / bot id), 120° horizontal FOV and 60 m range as
+  cheap rejections that never spend the ray, a tracked-first then
+  fair-rotation candidate schedule, and at most one LOS raycast per living
+  bot per frame through an injected callback — the same pure-seam pattern as
+  the rest of `sim/`.
+- **Copied brain memory/search/damage state** — `DefaultBrain` clones the
+  observed feet/eye into its memory on every successful look, pursues the
+  copy on sight loss (`route` until the 1 m arrival or a confirmed dead end),
+  then scans three headings (0.75 s each) and forgets 8 s after search entry
+  into `hold`. A direction-only incoming-fire bearing outranks a same-frame
+  visual for one decision, starts an in-place search, and can never
+  authorize a shot.
+- **Executor-only candidate/LOS/routing/shot agreement** — `bots.ts` owns the
+  candidate list, the raycast, route realization and the trigger: the brain
+  receives zero or one observation and never a position it did not see, and a
+  shot is realized only when the intent's focus id, the same frame's
+  observation id and the range gate all agree. Memory, search and bearing
+  intents are structurally unable to fire.
+- **Centralized respawn/debug observability** — every per-life field (body,
+  placement, brain policy state, perception cursor, cached route and
+  cooldown, mode and the `targetEye`/`targetInRange`/`targetLOS` readouts)
+  resets in `Bot.respawn()`, and those same public fields are what the DEV
+  overlay and HUD readout render.
+- **Pure tests** — the Node suite stands at 490 tests in 24 files, including
+  the FOV/range boundaries, one-ray budget, copied-memory, route-to-search
+  arrival, no-route fallback, scan cadence, forget expiry, damage priority,
+  no-memory-shot and respawn-reset pins.
+- **Browser acceptance** — the new `[vision]` smoke phase drives the wiring
+  end to end on the arena: hidden across the west mid wall → `hold` with no
+  intent endpoint, no shootable grading and no damage past the spawn
+  stagger; stepping into FOV+LOS → `engage` with the observed eye recorded;
+  breaking LOS → `route` pinned to the copied pre-break eye (never the live
+  player), non-shootable throughout; arrival → a standing `search` with a
+  scan endpoint that expires to `hold` clearing both; and a real SMG hit
+  through the firing path → a same-frame bearing `search` with no
+  retaliation.
 
 #### 6b — hearing and sound events
 

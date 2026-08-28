@@ -964,6 +964,261 @@ async function runCornerTrapCheck() {
   await page.close();
 }
 
+// Vision awareness (tranche 6a), end to end in the browser.
+//
+// The pure suite pins the perception/brain seams; this phase owns the WIRING:
+// that the executor's acquisition, the brain's memory/search/damage policy and
+// the shot gate agree through the real frame loop. One T bot, one wall — the
+// arena's west mid wall (x ∈ [-52.5, 2.5], z ∈ [-1, 1]) — and five staged
+// claims, each polled on wall-clock give-up bounds (lesson 26) rather than
+// slept:
+//
+//   1. hidden: the bot faces the player across the wall but holds — no intent
+//      endpoint, no shootable grading, no damage — past the spawn shot
+//      stagger, measured on the game clock the stagger runs on.
+//   2. acquisition: the player steps into FOV + LOS on the bot's side; the
+//      bot engages and its intent endpoint is the observed eye.
+//   3. frozen memory: sight breaks; the bot routes to the COPIED last-known
+//      eye — the endpoint must not follow the live player — and grades
+//      non-shootable throughout.
+//   4. investigation: arrival stands a still scan (endpoint up, non-shootable)
+//      until the 8 s forget timer expires into hold, which clears both.
+//   5. damage priority through the real firing path: one SMG round lands, and
+//      the SAME frame's decision is a bearing search — body and endpoint face
+//      the planar victim-to-player bearing, grading stays non-shootable, and
+//      the bot does not retaliate. Damage must outrank the simultaneous
+//      ordinary visual the 5 m setup supplies, for that one decision.
+//
+// Assertions stay on public behavior (mode, targetEye, the r/s grading bits,
+// hp, the public respawn()); no private brain state, and no claim about WHICH
+// routing mechanism produced an allowed outcome.
+async function runVisionAwarenessCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      const BOT_SPOT = [-40, -10]; // south side of the west mid wall
+      const NORTH = [-40, 2];      // north side, hidden from the bot
+      const SOUTH = [-27.3, -2];   // south side: 15.0 m from the bot, dot 0.53 into its 120° FOV
+      for (const [label, [x, z]] of [['bot', BOT_SPOT], ['north player', NORTH], ['south player', SOUTH]]) {
+        if (blocked(x, z)) return { fail: `${label} spot (${x}, ${z}) is inside geometry` };
+      }
+      cs.player.hp = 100000;
+      cs.player.pos.set(NORTH[0], 1.7, NORTH[1]);
+      cs.player.vel.set(0, 0, 0);
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot || cs.bots.length !== 1) return { fail: `expected exactly one live T bot, got ${cs.bots.length}` };
+      bot.mesh.position.set(BOT_SPOT[0], 0, BOT_SPOT[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      // T spawn convention faces +z — toward the hidden player. The plan's
+      // "faces toward the player" gate, asserted before any frame runs.
+      const toHidden = { x: NORTH[0] - BOT_SPOT[0], z: NORTH[1] - BOT_SPOT[1] };
+      const fx = Math.sin(bot.mesh.rotation.y), fz = Math.cos(bot.mesh.rotation.y);
+      if ((fx * toHidden.x + fz * toHidden.z) / Math.hypot(toHidden.x, toHidden.z) < 0.5) {
+        return { fail: 'bot does not face the hidden player at setup' };
+      }
+      cs.game.started = true;
+      cs.game.locked = true;
+      const simT0 = cs.gameTime.now();
+
+      // 1) Hidden: observe past the spawn stagger (<= 3 s game time).
+      let held = true, observed = 0;
+      const t1 = performance.now();
+      while (performance.now() - t1 < 20000 && cs.gameTime.now() - simT0 < 4) {
+        await frame();
+        observed++;
+        if (bot.mode !== 'hold') held = false;
+        if (cs.game.matchOver) return { fail: 'match ended while hidden' };
+      }
+      const hidden = {
+        observed, held, mode: bot.mode,
+        endpoint: bot.targetEye !== null,
+        inRange: bot.targetInRange,
+        los: bot.targetLOS,
+        playerHpLost: 100000 - cs.player.hp,
+        simS: +(cs.gameTime.now() - simT0).toFixed(2),
+      };
+      if (hidden.simS < 4) return { fail: 'simulation too slow to cover the spawn stagger', hidden };
+      if (!hidden.held || hidden.mode !== 'hold') return { fail: 'bot left hold while hidden', hidden };
+      if (hidden.endpoint) return { fail: 'hidden bot exposed an intent endpoint', hidden };
+      if (hidden.inRange || hidden.los === true) return { fail: 'hidden bot graded a current visual', hidden };
+      if (hidden.playerHpLost !== 0) return { fail: 'hidden bot damaged the player', hidden };
+
+      // 2) Acquisition: into the FOV on the bot's side of the wall, ~15 m out.
+      cs.player.pos.set(SOUTH[0], 1.7, SOUTH[1]);
+      cs.player.vel.set(0, 0, 0);
+      let acquired = false;
+      const t2 = performance.now();
+      while (performance.now() - t2 < 8000) {
+        await frame();
+        if (bot.targetLOS === true) { acquired = true; break; }
+        if (cs.game.matchOver) return { fail: 'match ended during acquisition' };
+      }
+      const seen = {
+        acquired,
+        mode: bot.mode,
+        endpoint: bot.targetEye ? { x: +bot.targetEye.x.toFixed(2), y: +bot.targetEye.y.toFixed(2), z: +bot.targetEye.z.toFixed(2) } : null,
+      };
+      if (!acquired) return { fail: 'bot never acquired a player in FOV+LOS', seen };
+      if (seen.mode !== 'engage') return { fail: `acquisition did not engage (mode ${seen.mode})`, seen };
+      if (!seen.endpoint) return { fail: 'engaged bot exposed no intent endpoint', seen };
+
+      // 3) Frozen memory: break sight north; the pursuit endpoint must stay
+      //    pinned to the COPIED pre-break eye and grade non-shootable.
+      const preBreak = bot.targetEye.clone();
+      cs.player.pos.set(NORTH[0], 1.7, NORTH[1]);
+      cs.player.vel.set(0, 0, 0);
+      let routed = false;
+      const t3 = performance.now();
+      while (performance.now() - t3 < 10000) {
+        await frame();
+        if (bot.mode === 'route') { routed = true; break; }
+        if (bot.mode === 'search' || bot.mode === 'hold') break;
+        if (cs.game.matchOver) return { fail: 'match ended while breaking sight' };
+      }
+      let maxDev = 0, minLive = Infinity, gradeOk = true;
+      const t3b = performance.now();
+      while (performance.now() - t3b < 20000) {
+        await frame();
+        if (bot.mode !== 'route') break; // arrival hands over to the scan
+        if (bot.targetEye) {
+          maxDev = Math.max(maxDev, bot.targetEye.distanceTo(preBreak));
+          minLive = Math.min(minLive, bot.targetEye.distanceTo(cs.player.pos));
+        }
+        if (bot.targetInRange || bot.targetLOS === true) gradeOk = false;
+        if (cs.game.matchOver) return { fail: 'match ended during memory pursuit' };
+      }
+      const mem = {
+        routed, mode: bot.mode,
+        maxEndpointDrift: +maxDev.toFixed(2),
+        minLiveEyeDist: minLive === Infinity ? null : +minLive.toFixed(2),
+        gradeOk,
+      };
+      if (!routed) return { fail: `sight loss never produced a route (mode ${mem.mode})`, mem };
+      if (mem.maxEndpointDrift > 1) return { fail: 'pursuit endpoint left the frozen last-known eye', mem };
+      if (mem.minLiveEyeDist === null || mem.minLiveEyeDist < 8) return { fail: 'pursuit endpoint followed the live player', mem };
+      if (!gradeOk) return { fail: 'memory pursuit graded shootable', mem };
+
+      // 4) Investigation: arrival -> standing scan -> forget (8 s) -> hold.
+      let searched = bot.mode === 'search';
+      const t4 = performance.now();
+      while (!searched && performance.now() - t4 < 15000) {
+        await frame();
+        if (bot.mode === 'search') searched = true;
+        else if (bot.mode === 'hold') break;
+        if (cs.game.matchOver) return { fail: 'match ended before the scan' };
+      }
+      if (!searched) return { fail: `arrival never entered search (mode ${bot.mode})` };
+      const scanPos = bot.mesh.position.clone();
+      const scanT = cs.gameTime.now();
+      let drift = 0, endpointUp = true, gradeOk2 = true;
+      const t4b = performance.now();
+      while (performance.now() - t4b < 30000) {
+        await frame();
+        drift = Math.max(drift, bot.mesh.position.distanceTo(scanPos));
+        if (bot.mode === 'hold') break;
+        if (bot.mode !== 'search') { endpointUp = false; break; }
+        if (bot.targetEye === null) endpointUp = false;
+        if (bot.targetInRange) gradeOk2 = false;
+        if (cs.game.matchOver) return { fail: 'match ended during the scan' };
+      }
+      const scan = {
+        mode: bot.mode,
+        drift: +drift.toFixed(2),
+        endpointUp, gradeOk: gradeOk2,
+        scanGameS: +(cs.gameTime.now() - scanT).toFixed(2),
+      };
+      if (scan.mode !== 'hold') return { fail: 'search never expired to hold', scan };
+      if (scan.drift > 0.4) return { fail: 'search did not stand still', scan };
+      if (!scan.endpointUp) return { fail: 'search lost its scan endpoint', scan };
+      if (!scan.gradeOk) return { fail: 'search graded shootable', scan };
+      if (bot.targetEye !== null) return { fail: 'hold kept an intent endpoint', scan };
+      if (bot.targetInRange || bot.targetLOS === true) return { fail: 'hold kept shootable grading', scan };
+
+      // 5) Damage priority through the real firing path: reset the SAME bot
+      //    via its public respawn(), stand 5 m apart in open arena, land one
+      //    zero-spread SMG round (rest cone ~1.4 cm at this range — a torso
+      //    hit is deterministic). The 5 m setup also supplies an ordinary
+      //    visual, which the bearing must outrank for that one decision.
+      bot.respawn();
+      bot.hp = 100000; // the hit must be nonlethal
+      const BOT5 = [10, 10], PLAYER5 = [10, 5];
+      if (blocked(...BOT5) || blocked(...PLAYER5)) return { fail: 'damage-priority spots inside geometry' };
+      bot.mesh.position.set(BOT5[0], 0, BOT5[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      cs.player.pos.set(PLAYER5[0], 1.7, PLAYER5[1]);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = Math.PI; // forward (+z at yaw pi) at the bot
+      cs.game.pitch = 0;
+      cs.game.spray = 1;
+      cs.weapon.mag = 30;
+      cs.weapon.lastShot = -9;
+      const playerHpBefore = cs.player.hp;
+      const botHpBefore = bot.hp;
+      cs.game.shooting = true;
+      let fired = false;
+      const t5 = performance.now();
+      while (performance.now() - t5 < 3000) {
+        await frame();
+        if (bot.hp < botHpBefore) { fired = true; break; }
+      }
+      // Freeze on the firing frame's edge: the reaction under test happened in
+      // the SAME frame (updateWeapon damages before updateBots decides).
+      cs.game.shooting = false;
+      cs.game.locked = false;
+      const bx = Math.sin(bot.mesh.rotation.y), bz = Math.cos(bot.mesh.rotation.y);
+      const bear = { x: PLAYER5[0] - bot.mesh.position.x, z: PLAYER5[1] - bot.mesh.position.z };
+      const bl = Math.hypot(bear.x, bear.z);
+      bear.x /= bl; bear.z /= bl;
+      const bodyDot = bx * bear.x + bz * bear.z;
+      let endDot = null, endLen = null;
+      if (bot.targetEye) {
+        const ex = bot.targetEye.x - bot.mesh.position.x, ez = bot.targetEye.z - bot.mesh.position.z;
+        endLen = Math.hypot(ex, ez);
+        endDot = endLen > 1e-6 ? (ex * bear.x + ez * bear.z) / endLen : null;
+      }
+      const dmg = {
+        fired,
+        botHp: +bot.hp.toFixed(1),
+        mode: bot.mode,
+        bodyDot: +bodyDot.toFixed(3),
+        endDot: endDot === null ? null : +endDot.toFixed(3),
+        endLen: endLen === null ? null : +endLen.toFixed(2),
+        inRange: bot.targetInRange,
+        los: bot.targetLOS,
+        playerHpLost: playerHpBefore - cs.player.hp,
+      };
+      if (!fired) return { fail: 'the SMG round never landed', dmg };
+      if (dmg.mode !== 'search') return { fail: `damage did not start a bearing search (mode ${dmg.mode})`, dmg };
+      if (dmg.bodyDot < 0.99) return { fail: 'body did not face the incoming bearing', dmg };
+      if (dmg.endDot === null || dmg.endDot < 0.98 || Math.abs(dmg.endLen - 1) > 0.2) {
+        return { fail: 'intent endpoint did not face the incoming bearing', dmg };
+      }
+      if (dmg.inRange || dmg.los === true) return { fail: 'damage reaction graded a current visual', dmg };
+      if (dmg.playerHpLost !== 0) return { fail: 'the bot retaliated on the damage-priority frame', dmg };
+      return { hiddenSimS: hidden.simS, endpoint: seen.endpoint, mem, scan, dmg };
+    });
+    if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
+    console.log('[vision] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[vision] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[vision] ${e}`));
+  await page.close();
+}
+
 // Bots and stairs — the question the elevation map exists to answer.
 //
 // A T bot is placed at the foot of the two-story building's INTERNAL flight
@@ -1650,6 +1905,7 @@ try {
   await runAllyCheck();
   await runFlatRouteCheck();
   await runCornerTrapCheck();
+  await runVisionAwarenessCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();

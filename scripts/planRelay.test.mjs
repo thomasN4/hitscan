@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
+import { evaluateEvents } from './planRelayGate.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const runner = join(scriptsDir, 'plan-relay.sh');
@@ -69,7 +70,26 @@ fi
 printf '%s\\n' "$@" > "$PLAN_RELAY_TEST_ARGS"
 printf '%s' "$OPENCODE_CONFIG_CONTENT" > "$PLAN_RELAY_TEST_CONFIG"
 printf '%s\\n' "$XDG_CONFIG_HOME" > "$PLAN_RELAY_TEST_XDG"
-printf '{"type":"turn.completed"}\\n'
+case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
+  healthy)
+    printf '%s\\n' \\
+      '{"type":"step_start","part":{}}' \\
+      '{"type":"tool_use","part":{"tool":"edit","state":{"status":"completed","input":{"filePath":"src/x.ts"}}}}' \\
+      '{"type":"step_finish","part":{"reason":"tool-calls"}}' \\
+      '{"type":"step_start","part":{}}' \\
+      '{"type":"text","part":{"text":"Implementation complete."}}' \\
+      '{"type":"step_finish","part":{"reason":"stop"}}'
+    ;;
+  length)
+    printf '%s\\n' '{"type":"step_start","part":{}}' '{"type":"step_finish","part":{"reason":"length"}}'
+    ;;
+  dead)
+    printf '%s\\n' '{"type":"tool_use","part":{"tool":"read","state":{"status":"completed","input":{"filePath":"x"}}}}'
+    ;;
+  sleep)
+    exec sleep 10
+    ;;
+esac
 exit "\${PLAN_RELAY_TEST_EXIT:-0}"
 `);
   chmodSync(fake, 0o755);
@@ -111,6 +131,57 @@ function run(fixture, cwd = fixture.linked, extraEnv = {}) {
   });
 }
 
+function stream(...events) {
+  return events.map((event) => JSON.stringify(event)).join('\n');
+}
+
+const EDIT_CALL = { type: 'tool_use', part: { tool: 'edit', state: { status: 'completed', input: { filePath: 'src/x.ts' } } } };
+
+describe('Plan Relay liveness gate', () => {
+  test('accepts a healthy session and a zero-edit blocker report', () => {
+    const healthy = stream(
+      { type: 'step_start', part: {} },
+      EDIT_CALL,
+      { type: 'step_finish', part: { reason: 'tool-calls' } },
+      { type: 'step_start', part: {} },
+      { type: 'text', part: { text: 'Implementation complete.' } },
+      { type: 'step_finish', part: { reason: 'stop' } },
+    );
+    expect(evaluateEvents(healthy)).toEqual({ ok: true, failures: [] });
+
+    const blocker = stream(
+      { type: 'step_start', part: {} },
+      { type: 'text', part: { text: 'Blocker: repository truth conflicts with the plan.' } },
+      { type: 'step_finish', part: { reason: 'stop' } },
+    );
+    expect(evaluateEvents(blocker)).toEqual({ ok: true, failures: [] });
+  });
+
+  test('rejects a length-truncated final step even after edits', () => {
+    const { ok, failures } = evaluateEvents(
+      stream(EDIT_CALL, { type: 'text', part: { text: 'Working on it' } }, { type: 'step_finish', part: { reason: 'length' } }),
+    );
+    expect(ok).toBe(false);
+    expect(failures.join('\n')).toContain('length');
+  });
+
+  test('rejects a session with neither edits nor a response', () => {
+    const { ok, failures } = evaluateEvents(
+      stream(
+        { type: 'tool_use', part: { tool: 'read', state: { status: 'completed', input: { filePath: 'x' } } } },
+        { type: 'step_finish', part: { reason: 'tool-calls' } },
+      ),
+    );
+    expect(ok).toBe(false);
+    expect(failures.join('\n')).toContain('neither file edits nor an assistant response');
+  });
+
+  test('rejects empty and unparsable streams', () => {
+    expect(evaluateEvents('').ok).toBe(false);
+    expect(evaluateEvents('not json\n{"broken').ok).toBe(false);
+  });
+});
+
 describe('Plan Relay executor policy', () => {
   test('pins GLM-5.3-Flash max with persistence and publication disabled', () => {
     const model = config.provider.openrouter.models['z-ai/glm-5.3-flash'];
@@ -130,8 +201,46 @@ describe('Plan Relay executor policy', () => {
     expect(policy.bash.rg).toBe('allow');
     expect(policy.bash['rg *']).toBe('allow');
     expect(policy.bash['npm test']).toBe('allow');
+    expect(policy.bash.ls).toBe('allow');
+    expect(policy.bash['ls *']).toBe('allow');
+    expect(policy.bash['cat *']).toBe('allow');
     expect(policy.bash).not.toHaveProperty('git commit *');
     expect(policy.bash).not.toHaveProperty('git push *');
+  });
+
+  // opencode 1.18.23 resolves permission rules with findLast over the
+  // config's own key order (Permission.evaluate + Permission.fromConfig at
+  // that tag), so the cat denies below are effective only because they sit
+  // AFTER "cat *" in the file. This replica pins the security-relevant
+  // resolutions; reordering or shortening the rules fails here.
+  test('resolves cat through last-match-wins file order', () => {
+    const bash = config.agent.executor.permission.bash;
+    const resolveAction = (input) => {
+      const matching = Object.entries(bash)
+        .map(([pattern, action]) => {
+          let source = pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*/g, '.*')
+            .replace(/\?/g, '.');
+          if (source.endsWith(' .*')) source = source.slice(0, -3) + '( .*)?';
+          return { regex: new RegExp(`^${source}$`), action };
+        })
+        .filter((rule) => rule.regex.test(input));
+      return matching[matching.length - 1]?.action;
+    };
+
+    expect(resolveAction('cat package.json')).toBe('allow');
+    expect(resolveAction('cat src/mathutil.js')).toBe('allow');
+    expect(resolveAction('cat')).toBe('allow');
+    expect(resolveAction('ls src/maps')).toBe('allow');
+    expect(resolveAction('ls')).toBe('allow');
+    expect(resolveAction('cat .env')).toBe('deny');
+    expect(resolveAction('cat .env.local')).toBe('deny');
+    expect(resolveAction('cat src/.env')).toBe('deny');
+    expect(resolveAction('cat .env other.txt')).toBe('deny');
+    expect(resolveAction('cat -n src/.env.production x')).toBe('deny');
+    expect(resolveAction('cat .env.example')).toBe('allow');
+    expect(resolveAction('git push origin main')).toBe('deny');
   });
 });
 
@@ -155,7 +264,7 @@ describe('Plan Relay runner', () => {
     expect(runs).toHaveLength(1);
     const runDir = join(fixture.linked, '.plan-relay', runs[0]);
     expect(readFileSync(join(runDir, 'plan.md'), 'utf8')).toBe(readFileSync(fixture.plan, 'utf8'));
-    expect(readFileSync(join(runDir, 'events.jsonl'), 'utf8')).toContain('turn.completed');
+    expect(readFileSync(join(runDir, 'events.jsonl'), 'utf8')).toContain('Implementation complete');
     expect(readFileSync(fixture.capture.config, 'utf8')).toBe(
       readFileSync(join(scriptsDir, 'opencode-executor-config.json'), 'utf8').trim(),
     );
@@ -189,5 +298,32 @@ describe('Plan Relay runner', () => {
     const fixture = createFixture();
     const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_EXIT: '17' });
     expect(result.status).toBe(17);
+  });
+
+  test('fails the run on a truncated or dead zero-exit session', () => {
+    const truncated = createFixture();
+    const truncatedResult = run(truncated, truncated.linked, { PLAN_RELAY_TEST_STREAM: 'length' });
+    expect(truncatedResult.status).toBe(1);
+    expect(truncatedResult.stderr).toContain('liveness gate');
+    expect(truncatedResult.stderr).toContain('length');
+
+    const dead = createFixture();
+    const deadResult = run(dead, dead.linked, { PLAN_RELAY_TEST_STREAM: 'dead' });
+    expect(deadResult.status).toBe(1);
+    expect(deadResult.stderr).toContain('neither file edits nor an assistant response');
+  });
+
+  test('kills a hung executor with the watchdog and propagates the timeout status', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_STREAM: 'sleep', OPENCODE_TIMEOUT: '1' });
+    expect(result.status).toBe(124);
+    expect(result.stderr).not.toContain('liveness gate');
+  });
+
+  test('rejects a non-numeric OPENCODE_TIMEOUT', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { OPENCODE_TIMEOUT: 'soon' });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('OPENCODE_TIMEOUT');
   });
 });

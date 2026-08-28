@@ -67,7 +67,13 @@ chosen, its ownership boundary is strict:
    ```
 
    The runner pins the repository's `executor` agent, model, permissions and
-   runtime isolation. It never commits, pushes or opens a PR.
+   runtime isolation. The executor runs under a watchdog (`OPENCODE_TIMEOUT`,
+   default 2700 s) whose nonzero status — including the watchdog's own 124 —
+   propagates; an exit-0 session must additionally pass a liveness gate over
+   the retained event stream
+   (`scripts/planRelayGate.mjs`), because a `length`-truncated final step
+   otherwise exits 0 over a session that did nothing. It never commits,
+   pushes or opens a PR.
 4. **Codex verifies** — read the retained transcript and working-tree diff,
    rerun the plan's checks independently, and report deviations before the
    normal commit / draft-PR stages continue. Git publication remains the

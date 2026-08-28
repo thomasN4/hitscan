@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { evaluateEvents } from './planRelayGate.mjs';
+import { formatAllowedCommands } from './planRelayPrompt.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const runner = join(scriptsDir, 'plan-relay.sh');
@@ -200,6 +201,39 @@ describe('Plan Relay liveness gate', () => {
 });
 
 describe('Plan Relay executor policy', () => {
+  test('formats allowed bash policy entries without including deny rules', () => {
+    const formatted = formatAllowedCommands({
+      agent: {
+        executor: {
+          permission: {
+            bash: {
+              '*': 'deny',
+              rg: 'allow',
+              'rg *': 'allow',
+              'git show *': 'allow',
+              'CS_SMOKE_BASE=http://localhost:* node scripts/smoke-test.mjs': 'allow',
+              cat: 'deny',
+            },
+          },
+        },
+      },
+    });
+
+    expect(formatted).toBe(
+      'rg with optional arguments; git show with arguments; CS_SMOKE_BASE=http://localhost:* node scripts/smoke-test.mjs',
+    );
+    expect(formatted).not.toContain('cat');
+  });
+
+  test('rejects configs without an allowed bash command', () => {
+    expect(() => formatAllowedCommands({})).toThrow(
+      'executor config is missing agent.executor.permission.bash',
+    );
+    expect(() =>
+      formatAllowedCommands({ agent: { executor: { permission: { bash: { '*': 'deny' } } } } }),
+    ).toThrow('executor config contains no allowed bash commands');
+  });
+
   test('pins GLM-5.3-Flash max with persistence and publication disabled', () => {
     const model = config.provider.openrouter.models['z-ai/glm-5.3-flash'];
     expect(config.enabled_providers).toEqual(['openrouter']);
@@ -242,9 +276,7 @@ describe('Plan Relay runner', () => {
     ]);
     expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'max']);
     expect(args).not.toContain('--auto');
-    expect(argsText).toContain('rg and ls with optional arguments');
-    expect(argsText).toContain('npm run build with optional arguments');
-    expect(argsText).toContain('optionally prefixed by CS_SMOKE_BASE=http://localhost:<port>');
+    expect(argsText).toContain(`Allowed commands are: ${formatAllowedCommands(config)}.`);
     expect(argsText).toContain('All unlisted shell commands are denied');
     expect(argsText).toContain('Use the read tool for file contents.');
     expect(argsText).not.toContain('cat (never .env files)');

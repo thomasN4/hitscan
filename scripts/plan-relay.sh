@@ -122,11 +122,12 @@ mkdir -p "$runtime/config" "$runtime/data" "$runtime/cache" "$runtime/state"
 cp -- "$plan_source" "$plan_copy"
 
 echo "Plan Relay run: ${run_dir#"$repo_root"/}" >&2
+allowed_commands="$(node "$script_dir/planRelayPrompt.mjs" "$executor_config")"
 executor_prompt="Implement the attached approved Plan Relay document against baseline $baseline.
 
 AGENTS.md and the plan are binding. Make only the planned repository changes, run every permitted validation command named by the plan, and do not commit, push, publish, or edit the plan. If repository truth conflicts with the plan or a required action is not permitted, stop and report the blocker instead of redesigning the task. In the final response, list changed files, validation results, and any deviation from the plan.
 
-The bash tool is restricted. Allowed commands are: rg and ls with optional arguments; git status, git diff, and git log with optional arguments; git show and git rev-parse with arguments; npm test, npm run lint, npm run typecheck, and npm run build with optional arguments; npm run dev -- --port <port> --strictPort; and node scripts/smoke-test.mjs, optionally prefixed by CS_SMOKE_BASE=http://localhost:<port>. All unlisted shell commands are denied and return no output, so do not retry them. Use the read tool for file contents."
+The bash tool is restricted. Allowed commands are: $allowed_commands. All unlisted shell commands are denied and return no output, so do not retry them. Use the read tool for file contents."
 
 set +e
 OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \

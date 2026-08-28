@@ -1,26 +1,32 @@
 // botBrains.ts — bot decision policies as an engine-free seam.
 //
 // Division of labor with the concrete Bot (bots.ts): a BotBrain DECIDES,
-// the Bot EXECUTES. Each frame the executor builds a passive BrainView
-// (positions, distances, a lazy line-of-sight thunk, collision feedback),
-// hands it to decide(), then realizes the returned BrainIntent: applies
-// the movement step under world collision and fires if told to. Nothing in
-// here may import the engine, world, audio or DOM — that is what keeps the
-// policies unit-testable in plain Node (botBrains.test.ts), the same seam
-// pattern as recoil.ts:convertOnSwap.
+// the Bot EXECUTES. Each frame the executor runs ONE visual acquisition
+// (sim/perception.ts) over the opposing candidates and hands the brain a
+// passive BrainView — own feet and facing, the frame's zero-or-one visual
+// observation, movement feedback — then realizes the returned BrainIntent:
+// applies the movement step under world collision, turns the body to the
+// intent facing, aims the barrel at the intent lookAt, and realizes a shot
+// only when the frame's observation agrees with the intent's focus. Nothing
+// in here may import the engine, world, audio or DOM — that is what keeps
+// the policies unit-testable in plain Node (botBrains.test.ts), the same
+// seam pattern as recoil.ts:convertOnSwap.
 //
-// The default policy: approach beyond farBand, back off inside nearBand,
-// always drift perpendicular at strafeFactor weight with random jukes; fire
-// only when a cooldown expires AND seeTarget() passes, retrying soon when
-// sight is blocked so bullets respect cover like the player's do.
+// The default policy, stage 1 of visual awareness: with a current visual
+// observation, engage — approach beyond farBand, back off inside nearBand,
+// drift perpendicular with random jukes, route when the observation sits a
+// level up or band steering demonstrably cannot close, fire on cooldown.
+// WITHOUT an observation it holds: stands still, keeps its facing, never
+// fires. Memory, scanning and expiry (the `search` mode) are stage 2.
 //
-// STEERING IS PLANAR, RANGING IS NOT. `toTarget`/`dist` are y-stripped
-// because a step only ever moves in x/z — the executor's shared vertical
-// resolver owns height. But every RANGE decision (the bands, engageRange,
-// which candidate to chase) reads the true 3D numbers, `dist3` and `rise`.
-// Mixing those up is what made a target on a deck overhead read as "in my
-// face at dist ~ 0" and pushed bots away from the stairs that reach it.
+// STEERING IS PLANAR, RANGING IS NOT. The steering basis derived from the
+// observation's feet is y-stripped because a step only ever moves in x/z —
+// the executor's shared vertical resolver owns height. But every RANGE
+// decision (the bands, engageRange) reads the true 3D numbers, `dist3` and
+// `rise`. Mixing those up is what made a target on a deck overhead read as
+// "in my face at dist ~ 0" and pushed bots away from the stairs that reach it.
 import * as THREE from 'three';
+import type { PerceptionId, VisualObservation } from './perception';
 
 /** Tunables of a reactive policy. Lengths in metres, times in seconds. */
 export interface BrainParams {
@@ -34,7 +40,11 @@ export interface BrainParams {
   jukeRate: number;
   /** Never shoot beyond this 3D range. */
   engageRange: number;
-  /** Cooldown while sight is blocked — a soon re-check, not a shot. */
+  /**
+   * Cooldown while sight is blocked — INERT in this stage: acquisition owns
+   * the looking, and a bot that sees nothing holds rather than re-probes.
+   * Stage 2's search consumes it again.
+   */
   retryCooldown: number;
   /** Post-shot cooldown lower bound. */
   cooldownMin: number;
@@ -42,7 +52,7 @@ export interface BrainParams {
   cooldownSpan: number;
   /** Spawn stagger lower bound (first-shot delay). */
   firstDelayMin: number;
-  /** Spawn stagger random span added to firstDelayMin. */
+  /** Spawn stagger random span added to firstDelaySpan. */
   firstDelaySpan: number;
   /**
    * Rise (m) above which a target counts as on ANOTHER LEVEL rather than
@@ -145,108 +155,58 @@ export function botDamageRoll(rng: () => number, params: BrainParams): number {
   return params.damageMin + rng() * params.damageSpan;
 }
 
-/** A targetable entity as the executor presents it: position + liveness. */
-export interface OpposingCandidate {
-  /**
-   * World-space FEET position to chase and range against. Feet, not eyes:
-   * `pos.y` is compared against the bot's own feet to derive rise, so an
-   * executor handing over an eye position injects phantom height.
-   */
-  pos: THREE.Vector3;
-  alive: boolean;
-}
-
-/** How a brain ranks candidate targets; lower wins. Squared units. */
-export type TargetScorer = (dx: number, dy: number, dz: number) => number;
-
-/** Ground-only ranking: the pre-3D behavior, and the default here. */
-const planarScore: TargetScorer = (dx, _dy, dz) => dx * dx + dz * dz;
-
-/**
- * Best ALIVE candidate from `origin` under `score`, or undefined when
- * nothing is alive. Corpses never draw fire.
- *
- * The scorer is a parameter because "which enemy is worth chasing" is
- * policy, and policy lives in brains — see BotBrain.targetScore. It
- * defaults to flat ground distance so callers with no opinion (and the
- * pre-3D tests) get the original behavior.
- */
-export function nearestOpposing<T extends OpposingCandidate>(
-  origin: THREE.Vector3,
-  candidates: readonly T[],
-  score: TargetScorer = planarScore,
-): T | undefined {
-  let best: T | undefined;
-  let bestScore = Infinity;
-  for (const c of candidates) {
-    if (!c.alive) continue;
-    const s = score(c.pos.x - origin.x, c.pos.y - origin.y, c.pos.z - origin.z);
-    if (s < bestScore) {
-      bestScore = s;
-      best = c;
-    }
-  }
-  return best;
-}
-
 /** What a brain may know about the world this frame — all executor-supplied. */
 export interface BrainView {
   /**
-   * Planar vector from the bot to its target (y stripped). The STEERING
-   * basis: a step only moves in x/z, and both the approach direction and the
-   * perpendicular drift are derived from this vector. Ranging uses
-   * dist3/rise instead.
+   * This bot's own world-space FEET position. Read-only basis: the planar
+   * steering vector and closure measure are derived from it and the
+   * observation; the brain must not mutate it.
    */
-  toTarget: THREE.Vector3;
+  selfFeet: THREE.Vector3;
   /**
-   * Planar distance to the target (=== toTarget.length()). Ground distance,
-   * NOT the steering basis (that is the vector above) and no longer what the
-   * bands read — they moved to dist3. Kept because ground distance is the
-   * right measure of whether a bot is making headway toward its target —
-   * what stuck detection and the flat-routing stall tracker both read.
+   * This bot's own normalized planar facing (its mesh yaw basis). The
+   * degenerate-vector fallback for an intent facing, and the facing a
+   * holding bot preserves.
    */
-  dist: number;
-  /** True eye-to-eye 3D distance — the same range the hit die rolls on. */
-  dist3: number;
-  /** Target feet minus this bot's feet (m). Positive: the target is above. */
-  rise: number;
+  facing: THREE.Vector3;
+  /**
+   * The frame's visual observation, or null when nothing was seen this
+   * frame. This is the ONLY target knowledge a brain gets — no positions,
+   * distances or liveness for anything the bot did not just look at.
+   */
+  visual: VisualObservation | null;
   /**
    * Resting on support this frame; false while airborne. Read by the jam
    * recovery below, which must not fire mid-fall: a falling bot's steps are
    * refused for reasons no amount of sliding sideways will fix.
    */
   onGround: boolean;
-  targetAlive: boolean;
-  /**
-   * Line-of-sight probe to the target. A THUNK on purpose: the raycast
-   * against world solids is only worth paying when the trigger is otherwise
-   * ready, so the default policy calls it at most once per cooldown window.
-   */
-  seeTarget(): boolean;
   /** Movement speed (m/s) the executor can realize this frame. */
   selfSpeed: number;
   /** Whether LAST frame's step was rejected by world collision. */
   moveBlocked: boolean;
   /**
-   * Planar vector to the next waypoint on the executor's route, or null when
-   * it has none. A THUNK for the same reason seeTarget is: pathfinding is the
-   * expensive thing here, so it is only asked for when the policy has already
-   * decided it wants to travel.
+   * Planar vector to the next waypoint on the executor's route toward
+   * `goal`, or null when it has none. A THUNK for the same reason the old
+   * seeTarget was: pathfinding is the expensive thing here, so it is only
+   * asked for when the policy has already decided it wants to travel.
    *
-   * Relative, like toTarget — a brain never learns where it is, only which
-   * way to go.
+   * Relative to the bot's own feet — a brain never learns where it is, only
+   * which way to go.
    */
-  nextWaypoint(): THREE.Vector3 | null;
+  nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | null;
 }
 
 /**
  * What a brain is doing this frame, in one word.
  *
- * Reported for OBSERVABILITY, not consumed by the executor: hud.ts renders it
- * in the DEV bot readout, because "why is that bot doing that" is otherwise
- * only answerable by pausing in devtools.
+ * `engage` and `route` are the two active modes; `hold` stands still on
+ * sight loss; `search` is stage 2's memory-driven scan and is never
+ * produced yet. Reported for OBSERVABILITY, not consumed by the executor:
+ * hud.ts renders it in the DEV bot readout, because "why is that bot doing
+ * that" is otherwise only answerable by pausing in devtools.
  */
-export type BrainMode = 'engage' | 'route';
+export type BrainMode = 'hold' | 'search' | 'route' | 'engage';
 
 /** What a brain wants done this frame. */
 export interface BrainIntent {
@@ -256,6 +216,24 @@ export interface BrainIntent {
   wantShoot: boolean;
   /** What the brain thinks it is doing; display only. */
   mode: BrainMode;
+  /**
+   * The identity the brain's attention is on — the observed one when a
+   * visual exists, else the retained focus across temporary sight loss.
+   * The executor only realizes a shot when the SAME frame's observation
+   * carries this id.
+   */
+  focusId: PerceptionId | null;
+  /**
+   * World-space point to look at (a copy), or null when the brain has
+   * nothing to look at — a holding bot exposes none and the executor keeps
+   * the last barrel pose.
+   */
+  lookAt: THREE.Vector3 | null;
+  /**
+   * Normalized planar direction the body should face this frame: toward the
+   * visible point when one exists, else the bot's own facing preserved.
+   */
+  facing: THREE.Vector3;
 }
 
 /** The decision half of a bot. Instances own per-bot state; executors are stateless shells. */
@@ -271,8 +249,13 @@ export interface BotBrain {
    * once per match, at construction, and never again.
    */
   onRespawn(): void;
-  /** Rank a candidate target by its offset from this bot; lower wins. */
-  targetScore: TargetScorer;
+  /**
+   * The brain's current focus identity, read-only: which perceivable entity
+   * its attention is on (null before the first observation of a life). The
+   * executor feeds it back as acquisition's focus so a tracked identity is
+   * probed first.
+   */
+  readonly focusId: PerceptionId | null;
   /** Hit probability for a shot at eye-to-eye 3D `dist` under this brain's accuracy. */
   hitChance(dist: number): number;
   /** Draw one hit/miss outcome for a shot at eye-to-eye 3D `dist` from this
@@ -284,8 +267,9 @@ export interface BotBrain {
   /**
    * Whether a target at eye-to-eye 3D `dist` passes this brain's engage
    * gate — the same exclusive comparison decide()'s trigger applies before
-   * it ever probes sight. Exposed so a display-only consumer can report
-   * "would fire" without reading params, like hitChance above.
+   * it orders a shot. Exposed so the executor can require intent/observation
+   * agreement before realizing one, and so a display-only consumer can
+   * report "would fire" without reading params.
    */
   inRange(dist: number): boolean;
 }
@@ -326,14 +310,12 @@ export class DefaultBrain implements BotBrain {
    */
   private wasBlocked = false;
   /**
-   * Sight state from the trigger's most recent probe (#45). While blocked,
-   * the juke is suppressed so the strafe COMMITS one way instead of pacing
-   * across the face of whatever is occluding — the trap where a bot holds
-   * band range forever, re-probing every retryCooldown and never rounding
-   * the corner between it and its target. Cleared by any successful probe,
-   * or when the target leaves the trigger's range/alive gate.
+   * The identity this brain's attention is on: the last observed id, held
+   * across temporary sight loss so acquisition probes it first when the
+   * look could plausibly succeed again. Cleared by onRespawn — a new life
+   * does not inherit the corpse's attention.
    */
-  private sightBlocked = false;
+  private focus: PerceptionId | null = null;
 
   constructor(
     private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
@@ -344,20 +326,16 @@ export class DefaultBrain implements BotBrain {
     this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
   }
 
-  /**
-   * Bound so the executor can hand it straight to nearestOpposing without
-   * losing `this` (and without allocating a closure every frame).
-   */
-  targetScore: TargetScorer = (dx, dy, dz) => {
-    const weighted = this.params.verticalWeight * dy;
-    return dx * dx + dz * dz + weighted * weighted;
-  };
+  /** Read-only focus exposure for the executor's acquisition call. */
+  get focusId(): PerceptionId | null {
+    return this.focus;
+  }
 
   /**
-    * Re-arm the spawn stagger from this brain's own rng, like the constructor
-    * does. One draw, taken outside decide() so the per-frame draw sequence
-    * the tests script against is untouched.
-    */
+   * Re-arm the spawn stagger from this brain's own rng, like the constructor
+   * does. One draw, taken outside decide() so the per-frame draw sequence
+   * the tests script against is untouched.
+   */
   onRespawn(): void {
     this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
     this.routing = false;
@@ -367,7 +345,7 @@ export class DefaultBrain implements BotBrain {
     this.stalledFor = 0;
     this.stallBase = Infinity;
     this.wasBlocked = false;
-    this.sightBlocked = false;
+    this.focus = null;
   }
 
   hitChance(dist: number): number {
@@ -425,7 +403,41 @@ export class DefaultBrain implements BotBrain {
   }
 
   decide(view: BrainView, dt: number): BrainIntent {
-    const dir = view.toTarget.clone().normalize();
+    // One juke draw per frame and one reroll on fire, whatever the mode —
+    // the draw contract the tests script against. (Drawn up front so the
+    // hold path below consumes it too.)
+    const jukeDraw = this.rng();
+    this.cooldown -= dt;
+
+    const vis = view.visual;
+    if (!vis) {
+      // Stage 1 (WIP): nothing seen this frame -> hold. Stand still, keep
+      // the facing the body already has, expose no lookAt, never fire. The
+      // identity stays tracked so acquisition probes it first once a look
+      // could plausibly succeed again; memory, scanning and expiry (the
+      // `search` mode) are stage 2.
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'hold',
+        focusId: this.focus,
+        lookAt: null,
+        facing: view.facing.clone(),
+      };
+    }
+    this.focus = vis.id;
+
+    // Planar steering basis, derived from the observation — the only target
+    // geometry the brain has. STEERING is planar (a step only ever moves in
+    // x/z); ranging reads the observation's true 3D numbers instead.
+    const toTarget = new THREE.Vector3(vis.feet.x - view.selfFeet.x, 0, vis.feet.z - view.selfFeet.z);
+    const dist = toTarget.length();
+    const dir = dist > 1e-9 ? toTarget.clone().multiplyScalar(1 / dist) : new THREE.Vector3();
+    const dist3 = vis.dist3;
+    const rise = vis.rise;
 
     // Collision feedback from LAST frame's application: bumped geometry
     // reverses the drift, starting with this frame's step (the original
@@ -444,8 +456,8 @@ export class DefaultBrain implements BotBrain {
     // rise of a metre or so and dropping it back to band steering there is
     // exactly the stall this replaces — orbiting one step short of the deck.
     const climbWants = this.routing
-      ? view.rise > this.params.climbExit
-      : view.rise > this.params.climbThreshold;
+      ? rise > this.params.climbExit
+      : rise > this.params.climbThreshold;
 
     // The flat analogue (issue #44): band steering has no representation of
     // obstacles, so when it demonstrably cannot close — pacing beyond
@@ -458,32 +470,32 @@ export class DefaultBrain implements BotBrain {
     // reads as stalled; growth past fleeReset re-baselines instead of
     // arming, because a fleeing goal is not stagnation.
     if (this.flatRouted) {
-      if (!climbWants && view.dist3 <= this.params.farBand) {
+      if (!climbWants && dist3 <= this.params.farBand) {
         // Back inside the band: steering owns the problem again. Re-baseline
         // so a fresh wedge has to earn a fresh latch.
         this.flatRouted = false;
         this.stalledFor = 0;
-        this.stallBase = view.dist;
+        this.stallBase = dist;
       }
     } else if (!climbWants) {
-      if (view.dist3 <= this.params.farBand || view.dist <= this.stallBase - this.params.noProgressEpsilon) {
-        this.stallBase = view.dist;
+      if (dist3 <= this.params.farBand || dist <= this.stallBase - this.params.noProgressEpsilon) {
+        this.stallBase = dist;
         this.stalledFor = 0;
-      } else if (view.dist >= this.stallBase + this.params.fleeReset) {
-        this.stallBase = view.dist;
+      } else if (dist >= this.stallBase + this.params.fleeReset) {
+        this.stallBase = dist;
         this.stalledFor = 0;
       } else {
         this.stalledFor += dt;
         if (this.stalledFor >= this.params.noProgressTime) {
           this.flatRouted = true;
           this.stalledFor = 0;
-          this.stallBase = view.dist;
+          this.stallBase = dist;
         }
       }
     }
 
     const wantRoute = climbWants || this.flatRouted;
-    const waypoint = wantRoute ? view.nextWaypoint() : null;
+    const waypoint = wantRoute ? view.nextWaypoint(vis.feet) : null;
     this.routing = waypoint !== null;
 
     const step = new THREE.Vector3();
@@ -501,51 +513,46 @@ export class DefaultBrain implements BotBrain {
       // Back-off is suppressed outright while the target is a level above —
       // you cannot reverse away from something overhead, and trying only
       // widens the gap to whatever flight reaches it.
-      const overhead = view.rise > this.params.climbThreshold;
-      if (view.dist3 > this.params.farBand || overhead) step.add(dir);
-      else if (view.dist3 < this.params.nearBand) step.sub(dir);
-      const strafe = new THREE.Vector3(-view.toTarget.z, 0, view.toTarget.x)
+      const overhead = rise > this.params.climbThreshold;
+      if (dist3 > this.params.farBand || overhead) step.add(dir);
+      else if (dist3 < this.params.nearBand) step.sub(dir);
+      const strafe = new THREE.Vector3(-toTarget.z, 0, toTarget.x)
         .normalize()
         .multiplyScalar(this.strafeDir * this.params.strafeFactor);
       step.add(strafe).normalize().multiplyScalar(view.selfSpeed * dt);
     }
 
-    // Random juke (~jukeRate flips/sec); drawn after the step like the
-    // original statement order, so it steers from the NEXT frame on.
-    // SUPPRESSED while sight is blocked (#45): a coin-flip drift across the
-    // face of the cover that occludes paces forever — the corner trap —
-    // while a committed one walks around it. The draw is still consumed so
-    // the rng stream the tests script against is unchanged either way.
-    if (this.rng() < dt * this.params.jukeRate && !this.sightBlocked) {
+    // Random juke (~jukeRate flips/sec). The draw was hoisted to the top of
+    // decide() (one draw per frame in every mode); the FLIP lands after this
+    // frame's step, the original statement order, so it steers from the NEXT
+    // frame on.
+    if (jukeDraw < dt * this.params.jukeRate) {
       this.strafeDir = this.strafeDir === 1 ? -1 : 1;
     }
 
-    // Trigger: cooldown-gated, range-gated, target-gated, LOS-gated. The
-    // range gate reads dist3 so it agrees with the die rollHit rolls on;
-    // gating on planar distance let a bot on a tower open up on something
-    // its own accuracy curve had already written off. Blocked sight retries
-    // on the short retryCooldown instead of firing through cover — and each
-    // blocked retry records sightBlocked for the movement policy above, so
-    // the strafe commits while the probe cadence (0.3 s) keeps the reading
-    // fresh. A target outside the range/alive gate is not being probed, so it
-    // cannot keep an old blocked result latched. One-frame lag is deliberate:
-    // the observation lands after this frame's step, like moveBlocked.
+    // Trigger: cooldown-gated, range-gated. There is NO LOS probe here — the
+    // observation IS this frame's successful look (acquisition spent the
+    // frame's one ray), so a visible target inside engage range fires when
+    // the cooldown expires, and the old blocked-sight retry path is gone: a
+    // target that stops being seen stops being engaged (hold), not re-probed.
     let wantShoot = false;
-    this.cooldown -= dt;
-    const targetEligible = view.dist3 < this.params.engageRange && view.targetAlive;
-    if (!targetEligible) {
-      this.sightBlocked = false;
-    } else if (this.cooldown <= 0) {
-      if (view.seeTarget()) {
-        this.sightBlocked = false;
-        this.cooldown = this.params.cooldownMin + this.rng() * this.params.cooldownSpan;
-        wantShoot = true;
-      } else {
-        this.sightBlocked = true;
-        this.cooldown = this.params.retryCooldown;
-      }
+    if (dist3 < this.params.engageRange && this.cooldown <= 0) {
+      this.cooldown = this.params.cooldownMin + this.rng() * this.params.cooldownSpan;
+      wantShoot = true;
     }
 
-    return { step, wantShoot, mode: this.routing ? 'route' : 'engage' };
+    // Face what the bot sees. The normalized planar direction to the visible
+    // point, falling back to the body's own facing when the point is
+    // degenerate (zero planar offset).
+    const facing = dist > 1e-9 ? dir.clone() : view.facing.clone();
+
+    return {
+      step,
+      wantShoot,
+      mode: this.routing ? 'route' : 'engage',
+      focusId: this.focus,
+      lookAt: vis.eye.clone(),
+      facing,
+    };
   }
 }

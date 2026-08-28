@@ -50,20 +50,26 @@ const ROUTE_COLOR: Record<Team, readonly [number, number, number]> = {
 };
 
 /**
- * Intent-line colours, by brain mode — the visible form of the
- * climbThreshold/climbExit hysteresis in botBrains.ts:DefaultBrain.decide.
- * A bot that flips to `route` flips this line cyan in the same frame.
+ * Intent-line colours, by brain mode — all four, exhaustively, since a
+ * Record<BrainMode, …> fails to compile when a mode is added without a
+ * colour. `engage` and `route` are the two active modes the hysteresis in
+ * botBrains.ts:DefaultBrain.decide flips between; `hold` (sight lost, stage
+ * 1) and `search` (stage 2's memory scan, not produced yet) get distinct
+ * warm hues so a standing bot is never misread as routing.
  */
 const MODE_COLOR: Record<BrainMode, readonly [number, number, number]> = {
+  hold: [1.0, 0.5, 0.0],    // orange
+  search: [1.0, 1.0, 0.0],  // yellow
   route: [0.1, 1.0, 0.35],  // green
   engage: [1.0, 0.0, 0.0],  // red
 };
 
 /**
  * Brightness tiers over the mode tint, by whether THIS bot could actually
- * fire at its target (issue #46): full = inside engage range with sight
- * proven this frame; mid = inside range but sight unproven or blocked; dim
- * = has a target beyond engage range. Hue stays the mode's — the gates ride
+ * fire at its focus (issue #46): full = inside engage range with the frame's
+ * own visual observation held (sight is proven by acquisition — no extra
+ * probe is paid); mid = inside range but sight unproven or blocked; dim = no
+ * shootable observation at all. Hue stays the mode's — the gates ride
  * brightness alone, so one legend covers both. Without the grading, every
  * bot with a live target drew an identical line however far away it was and
  * however many walls stood between, which read as "everyone is engaging me
@@ -123,10 +129,11 @@ export interface DebugBotView {
   mesh: { position: THREE.Vector3 };
   navPath: readonly THREE.Vector3[];
   navLeg: number;
+  /** World-space point the brain's intent looks at, or null when holding. */
   targetEye: THREE.Vector3 | null;
-  /** Whether that target is inside the brain's engage range (issue #46). */
+  /** Whether that focus sits inside the brain's engage range (issue #46). */
   targetInRange: boolean;
-  /** Fresh LOS probe result for this frame, or null when none was taken. */
+  /** Sight gate: true only while the frame's visual observation is held. */
   targetLOS: boolean | null;
   eyePos(): THREE.Vector3;
 }

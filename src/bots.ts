@@ -3,27 +3,28 @@
 // instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
-// Each frame update() picks the best opposing entity (player or bot) under
-// the brain's own ranking, builds a passive BrainView around it (planar
-// steering vector, 3D range and rise, a lazy LOS thunk, last frame's
-// collision outcome), hands it to decide(), then
-// realizes the BrainIntent: attempt the returned step against world
-// geometry through the SAME feet-aware gates the player uses (slideMoveXZ +
-// resolveVertical, so bots climb stairs and land off edges), reporting
-// rejection back as moveBlocked, and looses a shot if asked. All tuning of
-// behavior lives in BrainParams / brain classes; this file holds no policy
-// numbers.
+// Each frame update() runs ONE visual acquisition (sim/perception.ts) over
+// the opposing candidates, hands the brain a passive BrainView around its
+// zero-or-one observation (own feet and facing, movement feedback, a lazy
+// route thunk), then realizes the BrainIntent: attempt the returned step
+// against world geometry through the SAME feet-aware gates the player uses
+// (slideMoveXZ + resolveVertical, so bots climb stairs and land off edges),
+// report rejection back as moveBlocked, face the intent's facing, aim the
+// barrel at its lookAt, and loose a shot only when the frame's observation
+// agrees with the intent's focus. All tuning of behavior lives in
+// BrainParams / brain classes; this file holds no policy numbers.
 //
 // Shot gating contract (realized by the default brain): fire only when a
-// cooldown expires AND line of sight passes; without sight it retries on a
-// short 0.3s cooldown so bots keep hunting instead of shooting through walls.
+// cooldown expires AND the bot currently SEES its focus — the observation is
+// the LOS proof, so a bot that sees nothing holds instead of shooting
+// through walls.
 //
 // Hit zones: each body part is its own mesh with `userData.bot` pointing at
 // this instance — weapons.ts raycasts against head/torso/legs directly and
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -31,7 +32,8 @@ import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
-import { DefaultBrain, nearestOpposing, type BrainMode } from './sim/botBrains';
+import { DefaultBrain, type BrainMode } from './sim/botBrains';
+import { acquireVisual, type PerceptionId, type VisualCandidate } from './sim/perception';
 import { NAV_RADIUS, route } from './nav';
 
 /**
@@ -132,16 +134,17 @@ export function botFor(obj: THREE.Object3D): BotShape | undefined {
 }
 
 /**
- * One entity this bot may fight. The player and bot targets differ in how
- * their LOS endpoint is derived and where shot damage is routed.
+ * One entity this bot may fight, carrying its stable perception identity.
+ * The player and bot targets differ in where shot damage is routed.
  *
- * `pos` is the target's FEET on both arms — see OpposingCandidate. The
+ * `feet` is the target's FEET on both arms (see VisualCandidate) — the
  * player's own `pos` is its EYE (core/state.ts), so the player arm has to
- * drop eyeHeight rather than pass the state vector straight through.
+ * drop eyeHeight rather than pass the state vector straight through. `eye`
+ * is the LOS endpoint: the camera for the player, the bot's eyePos().
  */
 type Target =
-  | { kind: 'player'; pos: THREE.Vector3; alive: boolean }
-  | { kind: 'bot'; pos: THREE.Vector3; alive: boolean; bot: BotShape };
+  | { kind: 'player'; id: PerceptionId; feet: THREE.Vector3; eye: THREE.Vector3; alive: boolean }
+  | { kind: 'bot'; id: PerceptionId; feet: THREE.Vector3; eye: THREE.Vector3; alive: boolean; bot: BotShape };
 
 /** Concrete Bot: implements the structural `Bot` shape core/state.ts declares for the registry. */
 export class Bot implements BotShape {
@@ -167,11 +170,12 @@ export class Bot implements BotShape {
   /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
   private readonly brain = new DefaultBrain();
   /**
-   * The brain's target ranking, bound once. Which enemy is worth chasing is
-   * policy, so it comes from the brain; hoisting it to a field keeps
-   * nearestOpposing from allocating a fresh closure per bot per frame.
+   * Fair-rotation cursor for the per-frame visual acquisition: the index the
+   * next scan starts from when the brain's tracked identity is not cheaply
+   * eligible. Advanced by acquisition only (see sim/perception.ts); reset
+   * with the rest of the per-life state on respawn.
    */
-  private readonly targetScore = this.brain.targetScore;
+  private perceptionCursor = 0;
   /**
    * Whether last frame's intended step was rejected by world collision.
    *
@@ -191,31 +195,31 @@ export class Bot implements BotShape {
    * Public for the same reason moveBlocked is: it is part of the structural
    * Bot shape and the readout renders it. Written here only.
    */
-  mode: BrainMode = 'engage';
+  mode: BrainMode = 'hold';
   /** Waypoints the bot is currently walking, nav-graph order; empty when none. */
   private path: THREE.Vector3[] = [];
   /** How far along `path` the bot has got. */
   private leg = 0;
   /**
-   * Eye position of this frame's target, for debugView.ts's intent line.
+   * World-space point the brain's intent looks at (a copy of the observed
+   * eye), for debugView.ts's intent line; null when the brain has nothing
+   * to look at (hold).
    *
    * Public for the same reason `mode` is: part of the structural Bot shape,
-   * rendered by a DEV view, written here only. It holds the REFERENCE the LOS
-   * ray already uses (`camera.position`, or the target's `eyePos()` result), so
-   * it costs no allocation of its own.
+   * rendered by a DEV view, written here only.
    */
   targetEye: THREE.Vector3 | null = null;
   /**
    * Shot-gate readout for debugView.ts's intent line (issue #46): whether
-   * this bot could actually FIRE at its current target, split into the two
+   * this bot could actually FIRE at its current focus, split into the two
    * gates the trigger applies — range, and sight.
    *
    * Public for the same reason `targetEye` is: part of the structural Bot
-   * shape, rendered by a DEV view, written here only. The range half is a
-   * comparison and is kept fresh every frame; the sight half costs a real
-   * raycast, so it is only paid while session.debugView is up and holds null
-   * otherwise. The key binding is DEV-only, but the debug facade may enable
-   * the flag explicitly in a production preview for smoke-test diagnostics.
+   * shape, rendered by a DEV view, written here only. Sight here is the
+   * frame's own observation (acquisition spent the frame's ray), so no
+   * extra probe is paid for the readout; it is fresh every frame. The key
+   * binding is DEV-only, but the debug facade may enable the flag explicitly
+   * in a production preview for smoke-test diagnostics.
    */
   targetInRange = false;
   targetLOS: boolean | null = null;
@@ -282,6 +286,10 @@ export class Bot implements BotShape {
     );
     this.respawnPoint.copy(p);
     this.mesh.position.copy(p);
+    // Spawn facing is a team convention, not a gameplay input: Ts look down
+    // the arena toward +z (the player's half), CTs back the other way. The
+    // first perception frame reads its facing basis off this yaw.
+    this.mesh.rotation.y = this.team === 'T' ? 0 : Math.PI;
     // Spawns are on open ground: clear vertical state carried from the life
     // that just ended rather than relying on resolveVertical to self-heal it.
     this.vy = 0;
@@ -289,98 +297,72 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Per-frame executor pass: pick a target, build the view, take the
-   * brain's intent, realize it. No policy decisions live here.
+   * Per-frame executor pass: run one visual acquisition, build the view,
+   * take the brain's intent, realize it. No policy decisions live here.
    * @param dt delta time (s)
    * @param player the player entity
    */
   update(dt: number, player: PlayerState): void {
     if (!this.alive) return;
 
-    // Opposing entities: Ts fight the player and every CT; CTs fight every
-    // T. The player is listed even while dead — with ctbots=0 that keeps an
-    // enemy chasing the corpse position exactly as pre-team behavior did,
-    // while shooting stays gated off by targetAlive.
+    // Opposing entities as STABLE CANDIDATES — no positional selection here.
+    // Perception owns acquisition; the brain only ever learns about the one
+    // candidate the frame's single ray successfully looked at. Ts fight the
+    // player and every CT; CTs fight every T. The player is listed even
+    // while dead — a dead candidate is a cheap rejection, so the bot holds
+    // rather than chasing the corpse position.
     const enemies: Target[] = [];
     if (this.team === 'T') {
       enemies.push({
         kind: 'player',
-        // Feet, not the eye that `player.pos` holds: `rise` and the brain's
-        // target ranking both compare this against bot feet, and passing
-        // the eye through would hand every bot 1.7 m of phantom height.
-        pos: new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z),
+        id: 'player',
+        // Feet, not the eye that `player.pos` holds: rise and the planar
+        // closure measure compare these against bot feet, and passing the
+        // eye through would hand every bot 1.7 m of phantom height.
+        feet: new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z),
+        eye: camera.position,
         alive: player.alive,
       });
     }
     for (const b of bots) {
       if (b === this || b.team === this.team) continue;
-      enemies.push({ kind: 'bot', pos: b.mesh.position, alive: b.alive, bot: b });
+      enemies.push({ kind: 'bot', id: b.id, feet: b.mesh.position, eye: b.eyePos(), alive: b.alive, bot: b });
     }
-    const target = nearestOpposing(this.mesh.position, enemies, this.targetScore)
-      ?? enemies[0]; // no live opponent: Ts fall back to the inert player entry, CTs stand down
+    const candidates: VisualCandidate[] = enemies.map(e => ({ id: e.id, feet: e.feet, eye: e.eye, alive: e.alive }));
 
-    if (!target) {
-      this.moveBlocked = false;
-      this.targetEye = null;
-      this.targetInRange = false;
-      this.targetLOS = null;
-      return;
-    }
-
-    const toTarget = new THREE.Vector3().subVectors(target.pos, this.mesh.position);
-    const rise = toTarget.y; // target feet minus own feet, before y is stripped
-    toTarget.y = 0; // STEERING is planar — a step only ever moves in x/z
-    const dist = toTarget.length();
-
-    // RANGING is not. The eye-to-eye distance the hit die already rolled on
-    // is what the brain's bands and engage gate read too, so a target on a
-    // deck overhead stops reading as point-blank.
+    // ONE acquisition per living update: the brain's tracked identity is
+    // probed first, else the cursor rotates fairly. Only its observation —
+    // never the candidate list — reaches the brain.
     const selfEye = this.eyePos();
-    const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
-    const dist3 = selfEye.distanceTo(targetEye);
-    this.targetEye = targetEye;
-
-    // Face the target, and tip the aim barrel at it so a bot firing up at a
-    // deck visibly aims up. The mesh yaw puts local +z on the target, and a
-    // positive x-rotation tips that forward axis DOWN — hence the negation.
-    this.mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
-    const pitch = Math.atan2(targetEye.y - selfEye.y, Math.max(dist, 1e-6));
-    this.aim.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_AIM_PITCH, MAX_AIM_PITCH);
-
-    const losTo = target.kind === 'player'
-      ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
-      : () => hasLineOfSight(this.eyePos(), target.bot.eyePos(), solids);
-
-    // DEV overlay readout of the shot gates (issue #46): the trigger is
-    // range-gated AND LOS-gated, and the overlay exists to say which of the
-    // three states a bot is in — can shoot, in range but unproven/blocked
-    // sight, or merely tracking. The probe here is deliberately NOT lazy:
-    // seeTarget stays at-most-once-per-cooldown for the policy itself, while
-    // the overlay pays one raycast per bot per frame for as long as it is up.
-    this.targetInRange = this.brain.inRange(dist3);
-    this.targetLOS = session.debugView && target.alive ? losTo() : null;
+    const selfFacing = new THREE.Vector3(
+      Math.sin(this.mesh.rotation.y), 0, Math.cos(this.mesh.rotation.y),
+    );
+    const acquisition = acquireVisual(
+      { eye: selfEye, feet: this.mesh.position, facing: selfFacing },
+      candidates,
+      this.brain.focusId,
+      this.perceptionCursor,
+      (from, to) => hasLineOfSight(from, to, solids),
+    );
+    this.perceptionCursor = acquisition.cursor;
 
     // Clamped, not free-running: a bot that spends minutes not routing would
     // otherwise drift the timer arbitrarily negative for no benefit, and the
     // first request after a lull should fire immediately either way.
     this.routeCooldown = Math.max(0, this.routeCooldown - dt);
+
     const intent = this.brain.decide(
       {
-        toTarget,
-        dist,
-        dist3,
-        rise,
+        selfFeet: this.mesh.position,
+        facing: selfFacing,
+        visual: acquisition.observation,
         onGround: this.onGround,
-        targetAlive: target.alive,
-        // Lazy on purpose, like seeTarget: pathfinding is the expensive
-        // thing here, so it is only paid when the policy has already decided
-        // it wants to travel rather than fight where it stands.
-        nextWaypoint: () => this.waypointToward(target.pos),
-        // Lazy on purpose: the raycast is only paid when the trigger is
-        // otherwise ready — see BrainView.seeTarget.
-        seeTarget: losTo,
         selfSpeed: this.speed,
         moveBlocked: this.moveBlocked,
+        // Lazy on purpose: pathfinding is the expensive thing here, so it is
+        // only paid when the policy has already decided it wants to travel
+        // rather than fight where it stands.
+        nextWaypoint: (goal) => this.waypointToward(goal),
       },
       dt,
     );
@@ -408,11 +390,37 @@ export class Bot implements BotShape {
 
     this.mode = intent.mode;
 
-    if (intent.wantShoot) {
-      // Re-measured AFTER the move, unlike the view's dist3: the bot has
-      // stepped since, and the die should roll from where it is actually
-      // shooting (see botBrains.ts:botHitChance).
-      this.shoot(this.eyePos().distanceTo(targetEye), target);
+    // Face where the brain looked, and tip the aim barrel at it so a bot
+    // firing up at a deck visibly aims up. The mesh yaw puts local +z on the
+    // intent facing, and a positive x-rotation tips that forward axis DOWN —
+    // hence the negation. A holding bot exposes no lookAt, so the last
+    // barrel pose is kept.
+    this.mesh.rotation.y = Math.atan2(intent.facing.x, intent.facing.z);
+    if (intent.lookAt) {
+      const planar = Math.hypot(intent.lookAt.x - selfEye.x, intent.lookAt.z - selfEye.z);
+      const pitch = Math.atan2(intent.lookAt.y - selfEye.y, Math.max(planar, 1e-6));
+      this.aim.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_AIM_PITCH, MAX_AIM_PITCH);
+    }
+    this.targetEye = intent.lookAt;
+
+    // DEV overlay readout of the shot gates (issue #46): the trigger is
+    // range-gated AND sight-gated, and the overlay exists to say which of
+    // the three states a bot is in — can shoot, in range but unproven/blocked
+    // sight, or merely tracking. Sight here is the frame's own observation
+    // (acquisition already spent the frame's ray), so the readout costs no
+    // extra probe and is fresh every frame.
+    const obs = acquisition.observation;
+    this.targetInRange = obs !== null && this.brain.inRange(obs.dist3);
+    this.targetLOS = obs !== null ? true : acquisition.attempted !== null ? false : null;
+
+    if (intent.wantShoot && obs && obs.id === intent.focusId
+        && this.brain.inRange(obs.dist3)) {
+      // Identity agreement first: the intent's focus must be the SAME frame's
+      // observation. Only then does the id resolve back to the stable
+      // candidate, and the die rolls from the ACTUAL post-move distance (see
+      // botBrains.ts:botHitChance).
+      const target = enemies.find(e => e.id === obs.id);
+      if (target) this.shoot(this.eyePos().distanceTo(obs.eye), target);
     }
   }
 
@@ -421,9 +429,10 @@ export class Bot implements BotShape {
    * graph has none.
    *
    * Mechanism, not policy: this keeps and refreshes the path and decides which
-   * waypoint is "next", while the brain decides whether to walk it at all.
-   * Same split as seeTarget — the executor owns the raycast, the brain owns
-   * the trigger.
+   * waypoint is "next", while the brain decides whether to walk it at all —
+   * and only ever names the goal, which is whatever it currently SEES. Same
+   * split as the old seeTarget: the executor owns the raycast and the graph,
+   * the brain owns the trigger and the route decision.
    */
   private waypointToward(goal: THREE.Vector3): THREE.Vector3 | null {
     const here = this.mesh.position;
@@ -538,11 +547,14 @@ export class Bot implements BotShape {
       this.mesh.visible = true;
       this.spawnAtRandom();
       // The brain outlived the body: re-arm its spawn stagger so a revived
-      // bot does not open fire on whatever cooldown its corpse was carrying.
+      // bot does not open fire on whatever cooldown its corpse was carrying,
+      // and drop its focus — a new life does not inherit the corpse's
+      // attention.
       this.brain.onRespawn();
+      this.perceptionCursor = 0;
       this.path = [];
       this.leg = 0;
-      this.mode = 'engage';
+      this.mode = 'hold';
       this.targetEye = null;
       this.targetInRange = false;
       this.targetLOS = null;

@@ -12,9 +12,9 @@
 // Engine-free and DOM-free like everything in sim/, and it does not import
 // collision.ts either — nothing in sim/ does, and this is not the module to
 // start. The two questions it needs about the world ("can a body stand here",
-// "what holds it up") arrive as an injected NavProbe, the same way
-// nearestOpposing takes a scorer. That is also what makes it testable against
-// synthetic worlds with no colliders at all.
+// "what holds it up") arrive as an injected NavProbe, the same seam pattern
+// as perception.ts's injected LOS callback. That is also what makes it
+// testable against synthetic worlds with no colliders at all.
 //
 // The graph is MULTI-LEVEL: a column of space holds one node per standable
 // height, which is what lets a two-storey building have a floor and a deck

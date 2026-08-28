@@ -162,14 +162,15 @@ export interface Bot {
   readonly navPath: readonly THREE.Vector3[];
   /** How far along `navPath` the bot has got — waypoints before this are consumed. Display only. */
   readonly navLeg: number;
-  /** Eye position of whatever the bot is currently targeting, or null when it has none. Display only. */
+  /** World-space point the brain's intent looks at (the observed eye), or null when holding. Display only. */
   readonly targetEye: THREE.Vector3 | null;
-  /** Whether that target sits inside the brain's engage range. Display only. */
+  /** Whether that focus sits inside the brain's engage range. Display only. */
   readonly targetInRange: boolean;
   /**
-   * Result of a line-of-sight probe against the current target this frame,
-   * or null when none was taken (overlay off, or no live target). Display
-   * only — the probe itself is DEV-gated; see bots.ts.
+   * Sight gate for the current focus: true while the frame's own visual
+   * observation is held (acquisition spent the frame's ray — no extra probe
+   * is paid), false when a look was attempted and blocked, null when no ray
+   * was spent at all. Display only; see bots.ts.
    */
   readonly targetLOS: boolean | null;
   update(dt: number, player: PlayerState): void;

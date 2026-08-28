@@ -13,7 +13,7 @@ if test "$#" -ne 1; then
   usage
 fi
 
-for command in git rg; do
+for command in git rg node timeout; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Plan Relay: required command not found: $command" >&2
     exit 2
@@ -31,6 +31,16 @@ if test "$($opencode_bin --version)" != "1.18.23"; then
 fi
 if test -z "${OPENROUTER_API_KEY:-}"; then
   echo "Plan Relay: OPENROUTER_API_KEY is not set" >&2
+  exit 2
+fi
+
+# Watchdog ceiling for the executor session, in seconds. GLM-5.3-flash via
+# openrouter has been observed to hang for 15+ minutes before dying with a
+# 502, and a healthy deep-reasoning session can legitimately take ~20 minutes;
+# the default gives that more than 2x headroom.
+timeout_secs="${OPENCODE_TIMEOUT:-2700}"
+if ! [[ "$timeout_secs" =~ ^[0-9]+$ ]] || test "$timeout_secs" -eq 0; then
+  echo "Plan Relay: OPENCODE_TIMEOUT must be a positive integer number of seconds" >&2
   exit 2
 fi
 
@@ -112,9 +122,12 @@ mkdir -p "$runtime/config" "$runtime/data" "$runtime/cache" "$runtime/state"
 cp -- "$plan_source" "$plan_copy"
 
 echo "Plan Relay run: ${run_dir#"$repo_root"/}" >&2
+allowed_commands="$(node "$script_dir/planRelayPrompt.mjs" "$executor_config")"
 executor_prompt="Implement the attached approved Plan Relay document against baseline $baseline.
 
-AGENTS.md and the plan are binding. Make only the planned repository changes, run every permitted validation command named by the plan, and do not commit, push, publish, or edit the plan. If repository truth conflicts with the plan or a required action is not permitted, stop and report the blocker instead of redesigning the task. In the final response, list changed files, validation results, and any deviation from the plan."
+AGENTS.md and the plan are binding. Make only the planned repository changes, run every permitted validation command named by the plan, and do not commit, push, publish, or edit the plan. If repository truth conflicts with the plan or a required action is not permitted, stop and report the blocker instead of redesigning the task. In the final response, list changed files, validation results, and any deviation from the plan.
+
+The bash tool is restricted. Allowed commands are: $allowed_commands. All unlisted shell commands are denied and return no output, so do not retry them. Use the read tool for file contents."
 
 set +e
 OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
@@ -126,7 +139,7 @@ OPENCODE_CONFIG_DIR="$runtime/config" \
 OPENCODE_DISABLE_AUTOUPDATE=true \
 NO_COLOR=1 \
 CI=true \
-"$opencode_bin" --pure run \
+timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
   --dir "$repo_root" \
   --agent executor \
   --model openrouter/z-ai/glm-5.3-flash \
@@ -139,4 +152,12 @@ status="${PIPESTATUS[0]}"
 set -e
 
 echo "Plan Relay events: ${events#"$repo_root"/}" >&2
+# A nonzero status (executor failure or watchdog kill, exit 124) propagates
+# as-is. A zero exit still has to prove the session did something: opencode
+# exits 0 after a length-truncated final turn, which has produced a run with
+# zero edits over 33 minutes. The gate judges the retained stream instead.
+if test "$status" -eq 0 && ! node "$script_dir/planRelayGate.mjs" "$events"; then
+  echo "Plan Relay: executor session failed the liveness gate" >&2
+  status=1
+fi
 exit "$status"

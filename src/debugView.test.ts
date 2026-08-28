@@ -155,6 +155,29 @@ describe('buildDebugSegments', () => {
       expect(col[1]).toBeCloseTo(0.125, 12);     // 0.25 × hold green
       expect(col[2]).toBeCloseTo(0, 12);
     });
+
+    it('keeps a search intent line dim even though its endpoint is non-null', () => {
+      // A memory or damage search exposes a scan lookAt (a frozen remembered
+      // eye, or a direction-only heading), but the endpoint is NOT a seen
+      // target: the line is drawn, yet stays at the dim, non-shootable tier
+      // in the search hue.
+      const { pos, col } = buffers();
+      const verts = buildDebugSegments(
+        [bot({
+          mode: 'search',
+          targetEye: new THREE.Vector3(3, 1.9, 0),
+          targetInRange: false,
+          targetLOS: null,
+        })],
+        pos, col, VIEW,
+      );
+      expect(verts).toBe(2 + MARKER_VERTS); // the intent line is still emitted
+      expectVertex(pos, 0, 0, 1.9, 0);
+      expectVertex(pos, 1, 3, 1.9, 0);
+      expect(col[0]).toBeCloseTo(0.25, 12); // 0.25 × search yellow
+      expect(col[1]).toBeCloseTo(0.25, 12);
+      expect(col[2]).toBeCloseTo(0, 12);
+    });
   });
 
   it('colours routes by team', () => {

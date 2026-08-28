@@ -67,6 +67,7 @@ export function damagePlayer(dmg: number, attackerName: string): void {
 function incomingFireBearing(bot: BotShape, attackerName?: string): THREE.Vector3 | null {
   let from: THREE.Vector3 | null;
   if (attackerName === undefined) {
+    if (!player.alive) return null;
     // player.pos is an EYE (core/state.ts) — drop eyeHeight for feet.
     from = new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z);
   } else {

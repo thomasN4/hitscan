@@ -469,7 +469,7 @@ export class Bot implements BotShape {
     // ray), so the readout costs no extra probe and is fresh every frame.
     const obs = acquisition.observation;
     const focusSeen = obs !== null && obs.id === intent.focusId;
-    this.targetInRange = focusSeen && this.brain.inRange(obs!.dist3); // bound-guarded: focusSeen ⇒ obs non-null
+    this.targetInRange = focusSeen && this.brain.inRange(obs.dist3);
     this.targetLOS = focusSeen ? true : acquisition.attempted !== null ? false : null;
 
     if (intent.wantShoot && obs && obs.id === intent.focusId

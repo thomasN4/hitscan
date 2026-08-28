@@ -127,7 +127,7 @@ executor_prompt="Implement the attached approved Plan Relay document against bas
 
 AGENTS.md and the plan are binding. Make only the planned repository changes, run every permitted validation command named by the plan, and do not commit, push, publish, or edit the plan. If repository truth conflicts with the plan or a required action is not permitted, stop and report the blocker instead of redesigning the task. In the final response, list changed files, validation results, and any deviation from the plan.
 
-The bash tool is restricted. Allowed commands are: $allowed_commands. All unlisted shell commands are denied and return no output, so do not retry them. Use the read tool for file contents."
+The bash tool is restricted. Allowed commands are: $allowed_commands. All unlisted shell commands are denied and return no output, so do not retry them. Use the read tool with offsets and limits for file contents. The generic grep tool is denied because a file path may broaden to its parent directory; use rg with an explicit, narrow file or directory path. Keep reconnaissance targeted to the plan's named interfaces, and begin with the smallest planned edit once those interfaces are confirmed."
 
 set +e
 OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
@@ -143,19 +143,50 @@ timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
   --dir "$repo_root" \
   --agent executor \
   --model openrouter/z-ai/glm-5.3-flash \
-  --variant max \
+  --variant high \
   --file "$plan_copy" \
   --format json \
   --title "Plan Relay: ${branch#*/}" \
   "$executor_prompt" | tee "$events"
 status="${PIPESTATUS[0]}"
+
+# A length-truncated turn with no completed edit is the one observed failure
+# that a procedural nudge can safely recover. Continue the same isolated
+# session once — the approved plan and its inspection history are already in
+# context — and force the transition from reconnaissance to implementation.
+recovery_session=""
+if test "$status" -eq 0; then
+  recovery_session="$(node "$script_dir/planRelayGate.mjs" --recovery-session "$events")"
+fi
+if test -n "$recovery_session"; then
+  echo "Plan Relay: continuing no-edit length-truncated session once: $recovery_session" >&2
+  recovery_prompt="Your previous turn ended before implementation. Repository inspection is complete. Do not reread files already inspected. Begin with the smallest edit required by the attached approved plan now, then continue its implementation and validation. The same plan remains binding. If blocked, report the blocker."
+  OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
+  XDG_CONFIG_HOME="$runtime/config" \
+  XDG_DATA_HOME="$runtime/data" \
+  XDG_CACHE_HOME="$runtime/cache" \
+  XDG_STATE_HOME="$runtime/state" \
+  OPENCODE_CONFIG_DIR="$runtime/config" \
+  OPENCODE_DISABLE_AUTOUPDATE=true \
+  NO_COLOR=1 \
+  CI=true \
+  timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
+    --dir "$repo_root" \
+    --agent executor \
+    --model openrouter/z-ai/glm-5.3-flash \
+    --variant high \
+    --session "$recovery_session" \
+    --format json \
+    "$recovery_prompt" | tee -a "$events"
+  status="${PIPESTATUS[0]}"
+fi
 set -e
 
 echo "Plan Relay events: ${events#"$repo_root"/}" >&2
 # A nonzero status (executor failure or watchdog kill, exit 124) propagates
-# as-is. A zero exit still has to prove the session did something: opencode
-# exits 0 after a length-truncated final turn, which has produced a run with
-# zero edits over 33 minutes. The gate judges the retained stream instead.
+# as-is. A zero exit still has to prove the combined session did something:
+# opencode exits 0 after a length-truncated final turn, so the gate judges the
+# retained stream instead.
 if test "$status" -eq 0 && ! node "$script_dir/planRelayGate.mjs" "$events"; then
   echo "Plan Relay: executor session failed the liveness gate" >&2
   status=1

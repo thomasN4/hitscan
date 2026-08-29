@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import {
   solids, colliders, navLinks, liftPads, resetWorld, stairLink, openTreadBase,
-  createSolidBox, registerSolid, registerSolidBox, registerGroupParts,
+  createSolidBox, registerSolid, registerSolidBox, registerGroupParts, coplanarTopOverlaps,
 } from './world';
 import { collidesAt, HEAD_HEIGHT, STEP_HEIGHT } from './collision';
 
@@ -259,6 +259,73 @@ describe('openTreadBase', () => {
 
     // The claim the design rests on: most of the run is open underneath.
     expect(COUNT - firstOpen).toBeGreaterThan(COUNT / 2);
+  });
+});
+
+// coplanarTopOverlaps — the z-fighting the eye sees but the source hides.
+//
+// The case that motivated it: maps/warehouse2.ts built its catwalk decking out
+// to the shell wall's CENTRE-line, so a 0.5 m strip of deck sat in the same
+// plane as the wall top it buried. Both faces point up, both write the same
+// depth, and three.js re-sorts opaque draws by distance every frame — so the
+// winning material flipped as the player walked, and the catwalk port sills
+// flickered between deck grey and wall grey.
+describe('coplanarTopOverlaps', () => {
+  /** A box spanning x/z, `top` metres tall — the shape this predicate reads. */
+  const at = (minX: number, maxX: number, minZ: number, maxZ: number, top: number): THREE.Box3 =>
+    new THREE.Box3(new THREE.Vector3(minX, 0, minZ), new THREE.Vector3(maxX, top, maxZ));
+
+  test('finds two up-facing surfaces sharing a plane and a footprint', () => {
+    // The warehouse2 sill, to scale: wall top and deck top both at 5.1,
+    // overlapping over the wall's inner half-thickness.
+    const found = coplanarTopOverlaps([at(29.5, 30.5, -6, 20, 5.1), at(22, 30, -12, 12, 5.1)]);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.y).toBeCloseTo(5.1, 6);
+    expect(found[0]!.area).toBeCloseTo(0.5 * 18, 6);
+    expect(found[0]!.minX).toBeCloseTo(29.5, 6);
+    expect(found[0]!.maxX).toBeCloseTo(30, 6);
+  });
+
+  test('ignores tops at different heights', () => {
+    expect(coplanarTopOverlaps([at(0, 10, 0, 10, 3), at(0, 10, 0, 10, 3.4)])).toHaveLength(0);
+  });
+
+  test('ignores boxes that share a plane but not a footprint', () => {
+    expect(coplanarTopOverlaps([at(0, 10, 0, 10, 3), at(20, 30, 0, 10, 3)])).toHaveLength(0);
+  });
+
+  test('a butt join is not an overlap — this is the shape of the FIX', () => {
+    // Decking stopping at the wall's inner face. The faces touch along a line
+    // and share no area, which is exactly what the repair produces; a
+    // predicate that flagged this would have no clean state to report.
+    expect(coplanarTopOverlaps([at(29.5, 30.5, 0, 10, 5.1), at(22, 29.5, 0, 10, 5.1)])).toHaveLength(0);
+  });
+
+  test('tolerates float32 noise at map scale', () => {
+    // Colliders are measured from float32 vertex data, where one ulp near 30 m
+    // is ~2e-6. A join built to the same number twice must not read as a fight.
+    const noise = 2e-6;
+    expect(coplanarTopOverlaps([
+      at(29.5, 30.5, 0, 10, 5.1),
+      at(22, 29.5 + noise, 0, 10, 5.1 + noise),
+    ])).toHaveLength(0);
+  });
+
+  test('a slab RESTING on a wall is fine — only tops are compared', () => {
+    // The rail sits on the deck: its base is coplanar with the deck's top, but
+    // the two faces point opposite ways and backface culling draws one of them.
+    const deck = at(0, 10, 0, 10, 5.1);
+    const rail = new THREE.Box3(new THREE.Vector3(0, 5.1, 0), new THREE.Vector3(10, 6.2, 10));
+    expect(coplanarTopOverlaps([deck, rail])).toHaveLength(0);
+  });
+
+  test('reports every pair, not just the first', () => {
+    const found = coplanarTopOverlaps([at(0, 10, 0, 10, 3), at(5, 15, 0, 10, 3), at(8, 20, 0, 10, 3)]);
+    expect(found).toHaveLength(3);
+  });
+
+  test('an empty world has nothing to report', () => {
+    expect(coplanarTopOverlaps([])).toHaveLength(0);
   });
 });
 

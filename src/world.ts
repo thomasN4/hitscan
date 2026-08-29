@@ -417,6 +417,54 @@ export function stairLink(
   };
 }
 
+/** Two solids whose TOP faces share a plane, and the footprint they share. */
+export interface CoplanarTop {
+  /** The plane both tops lie in. */
+  y: number;
+  /** The shared footprint, in world x/z. */
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  /** Area of that footprint, m^2 — how much surface is fighting. */
+  area: number;
+}
+
+/**
+ * Every pair of boxes whose top faces are coplanar AND overlap in x/z.
+ *
+ * That combination is a rendering bug with no visual tell in the source: two
+ * up-facing surfaces at the same height write the same depth, so which one
+ * wins is decided by the opaque draw order, three.js re-sorts that by distance
+ * every frame, and the winner flips as the camera moves. It reads as a patch
+ * of surface flickering between two materials. Coincident faces pointing in
+ * OPPOSITE directions (a slab resting on a wall) are fine — backface culling
+ * means only one of them is ever drawn — which is why this looks only at tops.
+ *
+ * Pure, and O(n^2) over the collider list, so it is for a DEV-only check at
+ * build time rather than anything per-frame.
+ *
+ * @param tol how far apart two tops may sit and still count as one plane, and
+ *   how much footprint overlap to dismiss as float noise (m). The colliders
+ *   are measured from float32 vertex data, where one ulp at this map's scale
+ *   is ~2e-6 m; the default sits 50x above that and 600x below the smallest
+ *   overlap a builder could write by hand.
+ */
+export function coplanarTopOverlaps(boxes: readonly THREE.Box3[], tol = 1e-4): CoplanarTop[] {
+  const found: CoplanarTop[] = [];
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!, b = boxes[j]!;
+      if (Math.abs(a.max.y - b.max.y) > tol) continue;
+      const minX = Math.max(a.min.x, b.min.x), maxX = Math.min(a.max.x, b.max.x);
+      const minZ = Math.max(a.min.z, b.min.z), maxZ = Math.min(a.max.z, b.max.z);
+      if (maxX - minX <= tol || maxZ - minZ <= tol) continue;
+      found.push({ y: a.max.y, minX, maxX, minZ, maxZ, area: (maxX - minX) * (maxZ - minZ) });
+    }
+  }
+  return found;
+}
+
 /** Empty both registries. Used by tests to isolate cases; not used at runtime. */
 export function resetWorld(): void {
   solids.length = 0;

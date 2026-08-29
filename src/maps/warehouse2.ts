@@ -44,7 +44,10 @@
 // that is how you get walk-through / shoot-through bugs.
 import * as THREE from 'three';
 import { scene } from '../core/engine';
-import { addSolidBox, addStairs, addOpenStairs, addLiftPad, registerSolid, registerGroupParts } from '../world';
+import {
+  addSolidBox, addStairs, addOpenStairs, addLiftPad, registerSolid, registerGroupParts,
+  colliders, coplanarTopOverlaps,
+} from '../world';
 import { STEP_HEIGHT, HEAD_HEIGHT } from '../collision';
 import { GRAVITY } from '../sim/movement';
 import { launchApex } from '../sim/lift';
@@ -100,7 +103,24 @@ const TREAD_T = 0.16;
 
 /** Shell half-extents (to the wall centre-line), wall thickness, wall height. */
 const SHELL_X = 30, SHELL_Z = 20, WALL_T = 1, WALL_H = 10;
-/** Depth of the catwalk ring, measured in from the shell wall. */
+/**
+ * The wall's two FACES, which is what abutting geometry has to be built to.
+ *
+ * SHELL_X/SHELL_Z are centre-lines, and a centre-line is not a surface: a slab
+ * built out to one overlaps the inner half of the wall it meets. Where both
+ * tops then land on the same plane — decking and the lower wall register both
+ * top out at DECK_Y — the two up-facing surfaces fight for the depth buffer
+ * and flicker as the camera moves. Every join in this file is therefore built
+ * face-to-face: the decking stops at INNER, the yard landing starts at OUTER,
+ * and each corner belongs to exactly one of the two runs that meet there.
+ */
+const INNER_X = SHELL_X - WALL_T / 2, INNER_Z = SHELL_Z - WALL_T / 2;
+const OUTER_X = SHELL_X + WALL_T / 2, OUTER_Z = SHELL_Z + WALL_T / 2;
+/**
+ * Depth of the catwalk ring, measured in from the wall's CENTRE-LINE — so it
+ * sets where the void lip falls, not how much decking there is. The decking
+ * itself is BAND, half a wall thinner, and stops at the wall's inner face.
+ */
 const RING = 8;
 /** The void: the ring's inner edge, and so the hole's half-extents. */
 const VOID_X = SHELL_X - RING, VOID_Z = SHELL_Z - RING;
@@ -208,15 +228,20 @@ const PORT_S: [number, number][] = [[-18, -14], [2, 6], [22, 26]];
 const PORT_W: [number, number][] = [[-16, -12], [-2, 2]];
 const PORT_E: [number, number][] = [[-3, 3], [12, 16]];
 
+// The N/S runs own all four corners — they run the full OUTER width, and the
+// E/W runs stop at the inner face of the wall they meet. Built symmetrically
+// (both runs to their centre-lines) each corner would be covered twice, with
+// the two tops coplanar, AND still leave the outermost square of the corner
+// covered by neither.
 function buildShell(): void {
-  wallRun('x', -SHELL_Z, -SHELL_X, SHELL_X, 0, DECK_Y, DOOR_N);
-  wallRun('x', -SHELL_Z, -SHELL_X, SHELL_X, DECK_Y, WALL_H, PORT_N);
-  wallRun('x',  SHELL_Z, -SHELL_X, SHELL_X, 0, DECK_Y, DOOR_S);
-  wallRun('x',  SHELL_Z, -SHELL_X, SHELL_X, DECK_Y, WALL_H, PORT_S);
-  wallRun('z', -SHELL_X, -SHELL_Z, SHELL_Z, 0, DECK_Y, DOOR_W);
-  wallRun('z', -SHELL_X, -SHELL_Z, SHELL_Z, DECK_Y, WALL_H, PORT_W);
-  wallRun('z',  SHELL_X, -SHELL_Z, SHELL_Z, 0, DECK_Y, DOOR_E);
-  wallRun('z',  SHELL_X, -SHELL_Z, SHELL_Z, DECK_Y, WALL_H, PORT_E);
+  wallRun('x', -SHELL_Z, -OUTER_X, OUTER_X, 0, DECK_Y, DOOR_N);
+  wallRun('x', -SHELL_Z, -OUTER_X, OUTER_X, DECK_Y, WALL_H, PORT_N);
+  wallRun('x',  SHELL_Z, -OUTER_X, OUTER_X, 0, DECK_Y, DOOR_S);
+  wallRun('x',  SHELL_Z, -OUTER_X, OUTER_X, DECK_Y, WALL_H, PORT_S);
+  wallRun('z', -SHELL_X, -INNER_Z, INNER_Z, 0, DECK_Y, DOOR_W);
+  wallRun('z', -SHELL_X, -INNER_Z, INNER_Z, DECK_Y, WALL_H, PORT_W);
+  wallRun('z',  SHELL_X, -INNER_Z, INNER_Z, 0, DECK_Y, DOOR_E);
+  wallRun('z',  SHELL_X, -INNER_Z, INNER_Z, DECK_Y, WALL_H, PORT_E);
 }
 
 /**
@@ -253,13 +278,26 @@ function wallRun(
 // them, which is what makes the join a single continuous loop rather than four
 // platforms.
 
+/**
+ * Decking depth: the wall's inner FACE to the void lip, not RING.
+ *
+ * RING is measured in from the wall's centre-line, so a band RING deep buries
+ * its outer half-thickness of wall — and the lower wall register tops out at
+ * DECK_Y too, so the buried strip is two coplanar up-facing surfaces running
+ * the whole perimeter. Under a solid wall you never see it; under a catwalk
+ * PORT it is the sill you stand on, which is where the flicker showed. The
+ * 0.5 m the decking gives up is still walking surface at exactly DECK_Y —
+ * the wall's own collider holds it up — so nothing moves but the rendering.
+ */
+const BAND = RING - WALL_T / 2;
+
 function buildRing(): void {
-  const bandZ = SHELL_Z - RING / 2; // 16
-  const bandX = SHELL_X - RING / 2; // 26
-  addSolidBox(0, DECK_Y - SLAB_T, -bandZ, SHELL_X * 2, SLAB_T, RING, matSlab);
-  addSolidBox(0, DECK_Y - SLAB_T,  bandZ, SHELL_X * 2, SLAB_T, RING, matSlab);
-  addSolidBox(-bandX, DECK_Y - SLAB_T, 0, RING, SLAB_T, VOID_Z * 2, matSlab);
-  addSolidBox( bandX, DECK_Y - SLAB_T, 0, RING, SLAB_T, VOID_Z * 2, matSlab);
+  const bandZ = INNER_Z - BAND / 2; // 15.75
+  const bandX = INNER_X - BAND / 2; // 25.75
+  addSolidBox(0, DECK_Y - SLAB_T, -bandZ, INNER_X * 2, SLAB_T, BAND, matSlab);
+  addSolidBox(0, DECK_Y - SLAB_T,  bandZ, INNER_X * 2, SLAB_T, BAND, matSlab);
+  addSolidBox(-bandX, DECK_Y - SLAB_T, 0, BAND, SLAB_T, VOID_Z * 2, matSlab);
+  addSolidBox( bandX, DECK_Y - SLAB_T, 0, BAND, SLAB_T, VOID_Z * 2, matSlab);
 
   // Rail along all four void edges, gapped where something arrives.
   //
@@ -267,12 +305,17 @@ function buildRing(): void {
   // gaps are placed deliberately. Each flight lands through one, and each lift
   // arc comes down through one — a body thrown onto the deck edge and stopped
   // by a 1.1 m rail falls straight back into the void.
+  //
+  // The four corners go to the x-runs, for the shell wall's reason: two runs
+  // each built to the lip would double-cover a RAIL_T square at every corner,
+  // coplanar at the rail top, in the brightest material on the map.
   const half = FLIGHT_W / 2;
   const liftGap = PAD_W / 2 + LIFT_GAP_MARGIN;
-  railRun('x', -VOID_Z, -VOID_X, VOID_X, [[PAD_A_X - liftGap, PAD_A_X + liftGap]]);
-  railRun('x',  VOID_Z, -VOID_X, VOID_X, [[PAD_B_X - liftGap, PAD_B_X + liftGap]]);
-  railRun('z', -VOID_X, -VOID_Z, VOID_Z, [[-FLIGHT_Z - half, -FLIGHT_Z + half]]);
-  railRun('z',  VOID_X, -VOID_Z, VOID_Z, [[ FLIGHT_Z - half,  FLIGHT_Z + half]]);
+  const railEnd = VOID_X + RAIL_T / 2, railStop = VOID_Z - RAIL_T / 2;
+  railRun('x', -VOID_Z, -railEnd, railEnd, [[PAD_A_X - liftGap, PAD_A_X + liftGap]]);
+  railRun('x',  VOID_Z, -railEnd, railEnd, [[PAD_B_X - liftGap, PAD_B_X + liftGap]]);
+  railRun('z', -VOID_X, -railStop, railStop, [[-FLIGHT_Z - half, -FLIGHT_Z + half]]);
+  railRun('z',  VOID_X, -railStop, railStop, [[ FLIGHT_Z - half,  FLIGHT_Z + half]]);
 }
 
 /** One void edge's rail, as segments between `gaps`. Same shape as wallRun. */
@@ -322,11 +365,15 @@ function buildFlights(): void {
 
   // Yard flight: mouth at z = 15.75, topping out at z = 3 on its landing.
   addStairs(YARD_FLIGHT_X, 0, 3 + RISERS * STEP_D, FLIGHT_W, STEP_H, STEP_D, RISERS, matStair, 'z-');
-  // Landing, flush with the last tread at z = 3 and with the ring's outer edge
-  // at x = SHELL_X, so the port at z [-3, 3] is a step-free walk onto the deck.
-  addSolidBox(YARD_FLIGHT_X, DECK_Y - SLAB_T, 0, 5, SLAB_T, 6, matSlab);
+  // Landing, flush with the last tread at z = 3 and stopping at the wall's
+  // OUTER face, so the port at z [-3, 3] is a step-free walk onto the deck:
+  // landing, then a metre of wall top at the same height, then decking. Run
+  // to the centre-line instead and it overlaps the wall exactly as the ring
+  // bands did, in the one port a player walks through rather than shoots from.
+  const landOut = YARD_FLIGHT_X + 2.5;
+  addSolidBox((OUTER_X + landOut) / 2, DECK_Y - SLAB_T, 0, landOut - OUTER_X, SLAB_T, 6, matSlab);
   // Outer rail only; the inner side is the doorway.
-  addSolidBox(YARD_FLIGHT_X + 2.5 - RAIL_T / 2, DECK_Y, 0, RAIL_T, RAIL_H, 6, matRail);
+  addSolidBox(landOut - RAIL_T / 2, DECK_Y, 0, RAIL_T, RAIL_H, 6, matRail);
 }
 
 // ---------- E. Cargo lifts ----------
@@ -393,8 +440,8 @@ function buildCover(): void {
 
 /** Container dimensions: length, height, width. Stacked pairs double the height. */
 const CONT_L = 12, CONT_H = 2.6, CONT_W = 2.9;
-/** Fence height and post spacing. */
-const FENCE_H = 4, POST_SPACING = 8;
+/** Fence height, panel thickness, and post spacing. */
+const FENCE_H = 4, FENCE_T = 0.12, POST_SPACING = 8;
 
 function buildYard(): void {
   // [x, z, alongX, stacked]
@@ -411,18 +458,30 @@ function buildYard(): void {
     if (stacked) addSolidBox(x, CONT_H, z, w, CONT_H, d, matCrate);
   }
 
+  // Corners belong to the x-runs, panels and posts alike — the same rule as
+  // the shell wall and the void rail. The z-runs stop half a panel short and
+  // skip their end posts; built to the corner they would lay a second panel
+  // over the first and stand a post inside a post, exactly coincident.
   const group = new THREE.Group();
   const posts: THREE.Mesh[] = [];
   const panels: THREE.Mesh[] = [];
-  fenceSide('x', -YARD_Z, -YARD_X, YARD_X, group, posts, panels);
-  fenceSide('x',  YARD_Z, -YARD_X, YARD_X, group, posts, panels);
-  fenceSide('z', -YARD_X, -YARD_Z, YARD_Z, group, posts, panels);
-  fenceSide('z',  YARD_X, -YARD_Z, YARD_Z, group, posts, panels);
+  fenceSide('x', -YARD_Z, -YARD_X, YARD_X, group, posts, panels, true);
+  fenceSide('x',  YARD_Z, -YARD_X, YARD_X, group, posts, panels, true);
+  fenceSide('z', -YARD_X, -YARD_Z, YARD_Z, group, posts, panels, false);
+  fenceSide('z',  YARD_X, -YARD_Z, YARD_Z, group, posts, panels, false);
   scene.add(group);
   registerGroupParts(group, { shootable: posts, blocking: [...panels, ...posts] });
 }
 
-/** One run of fence: a thin mesh panel plus steel posts every POST_SPACING. */
+/**
+ * One run of fence: a thin mesh panel plus steel posts every POST_SPACING.
+ *
+ * `from`/`to` are the CORNERS the run spans, both runs meeting at each one.
+ * `ownsCorners` decides which of the two takes them: the owner's panel grows
+ * half a thickness past each corner and it stands the corner posts, the other
+ * stops half a thickness short and skips them. Both runs claiming a corner
+ * puts two identical posts in the same place and crosses the panels.
+ */
 function fenceSide(
   axis: 'x' | 'z',
   fixed: number,
@@ -431,18 +490,22 @@ function fenceSide(
   group: THREE.Group,
   posts: THREE.Mesh[],
   panels: THREE.Mesh[],
+  ownsCorners: boolean,
 ): void {
-  const mid = (from + to) / 2, len = to - from;
+  const reach = ownsCorners ? FENCE_T / 2 : -FENCE_T / 2;
+  const a = from - reach, b = to + reach;
+  const mid = (a + b) / 2, len = b - a;
   const panel = new THREE.Mesh(
     axis === 'x'
-      ? new THREE.BoxGeometry(len, FENCE_H, 0.12)
-      : new THREE.BoxGeometry(0.12, FENCE_H, len),
+      ? new THREE.BoxGeometry(len, FENCE_H, FENCE_T)
+      : new THREE.BoxGeometry(FENCE_T, FENCE_H, len),
     matFence);
   panel.position.set(axis === 'x' ? mid : fixed, FENCE_H / 2, axis === 'x' ? fixed : mid);
   group.add(panel);
   panels.push(panel);
 
   for (let p = from; p <= to + 1e-6; p += POST_SPACING) {
+    if (!ownsCorners && (p <= from + 1e-6 || p >= to - 1e-6)) continue;
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.35, FENCE_H + 0.3, 0.35), matFence);
     post.position.set(axis === 'x' ? p : fixed, (FENCE_H + 0.3) / 2, axis === 'x' ? fixed : p);
     post.castShadow = true;
@@ -481,9 +544,9 @@ const SKY_HALF = 1.5, SKY_Z = 6;
 const BEAM_Z = [-16, -8, 0, 8, 16];
 
 function buildRoof(): void {
-  const w = SHELL_X * 2 + WALL_T;
+  const w = OUTER_X * 2;
   /** Outer edge of the roof, and the inner edge of each outboard band. */
-  const edge = SHELL_Z + WALL_T / 2, strip = SKY_Z + SKY_HALF;
+  const edge = OUTER_Z, strip = SKY_Z + SKY_HALF;
   // Three opaque bands: outboard of each strip, and the one between them.
   addSolidBox(0, ROOF_Y, -(edge + strip) / 2, w, ROOF_T, edge - strip, matRoof);
   addSolidBox(0, ROOF_Y,  (edge + strip) / 2, w, ROOF_T, edge - strip, matRoof);
@@ -505,9 +568,11 @@ function buildRoof(): void {
 
   // Purlins, hung under the deck. Their tops are below the roof, so no body
   // could ever rest on one — canStand rejects a foothold whose head is inside
-  // the slab above it — and they cost nothing but silhouette.
+  // the slab above it — and they cost nothing but silhouette. They span wall
+  // FACE to wall face: run to the centre-lines and each end buries itself in
+  // the upper wall register, whose top is at ROOF_Y too.
   for (const z of BEAM_Z) {
-    addSolidBox(0, ROOF_Y - 0.55, z, SHELL_X * 2, 0.55, 0.7, matBeam);
+    addSolidBox(0, ROOF_Y - 0.55, z, INNER_X * 2, 0.55, 0.7, matBeam);
   }
 }
 
@@ -515,11 +580,15 @@ function buildRoof(): void {
 // Loud, not fatal, and DEV-only — the same shape as warehouse1's checkAisles,
 // and statically dead in production builds.
 //
-// Two failure modes, both quiet. A route narrowed under AISLE_MIN still looks
+// Three failure modes, all quiet. A route narrowed under AISLE_MIN still looks
 // walkable and still lets the PLAYER through, but stops holding sampled nav
-// cells, so bots simply never use it. And a lift whose arc no longer clears
-// the deck it serves still launches you — it just drops you back where you
-// started, which reads as a broken pad rather than a changed constant.
+// cells, so bots simply never use it. A lift whose arc no longer clears the
+// deck it serves still launches you — it just drops you back where you
+// started, which reads as a broken pad rather than a changed constant. And a
+// solid built to a centre-line rather than a face lands its top face in the
+// same plane as its neighbour's, which renders as a flickering patch and is
+// invisible in the source: see INNER_X/OUTER_X, and world.ts's
+// coplanarTopOverlaps, which is what actually measures it.
 //
 // Everything below is derived from the constants the geometry is built from,
 // and compared against the ENGINE constants themselves rather than copies, so
@@ -534,15 +603,12 @@ function checkClearances(): void {
     if (got > max) problems.push(`${name} is ${got.toFixed(2)} ${unit}, over ${max}`);
   };
 
-  /** Inner face of the shell wall on either axis. */
-  const innerX = SHELL_X - WALL_T / 2, innerZ = SHELL_Z - WALL_T / 2;
-
   // Routes. The ring's two band widths are what a bot walks along up top; the
   // under-ring corridor and the central lane are the ground equivalents.
-  atLeast('catwalk band (N/S)', innerZ - VOID_Z, AISLE_MIN);
-  atLeast('catwalk band (E/W)', innerX - VOID_X, AISLE_MIN);
+  atLeast('catwalk band (N/S)', INNER_Z - VOID_Z, AISLE_MIN);
+  atLeast('catwalk band (E/W)', INNER_X - VOID_X, AISLE_MIN);
   atLeast('central floor lane', RACK_Z * 2 - RACK_D, AISLE_MIN);
-  atLeast('rack end to shell wall', innerX - RACK_W / 2, AISLE_MIN);
+  atLeast('rack end to shell wall', INNER_X - RACK_W / 2, AISLE_MIN);
   atLeast('corner stack to void lip', CORNER_X - CORNER_SIZE / 2 - VOID_X, AISLE_MIN);
   atLeast('headroom over a corner stack', DECK_Y - SLAB_T - CORNER_H, HEAD_HEIGHT);
   for (const [name, gaps] of [
@@ -573,6 +639,16 @@ function checkClearances(): void {
   }
   if (Math.abs(RISERS * STEP_H - DECK_Y) > 1e-6) {
     problems.push(`flights climb ${(RISERS * STEP_H).toFixed(2)} m against a ${DECK_Y} m deck`);
+  }
+
+  // Coincident geometry. This one reads the world that was actually built
+  // rather than the constants above, because it is a property of the boxes and
+  // not of any one number — the flicker it catches has come from a slab, a
+  // rail, a purlin and a fence post so far, each a different arithmetic slip.
+  for (const o of coplanarTopOverlaps(colliders)) {
+    problems.push(
+      `coplanar top faces at y=${o.y.toFixed(2)} over ${o.area.toFixed(2)} m2 ` +
+      `(x ${o.minX.toFixed(2)}..${o.maxX.toFixed(2)}, z ${o.minZ.toFixed(2)}..${o.maxZ.toFixed(2)})`);
   }
 
   for (const p of problems) console.error(`[warehouse2] ${p}`);

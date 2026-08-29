@@ -27,6 +27,10 @@ name: AI review
 # dedicated, spending-limited OpenRouter key. Leave AI_REVIEWER unset (or set
 # it to `codex`) for the default Codex route.
 #
+# AI review is enabled by default. Set the repo Actions variable
+# ENABLE_AI_REVIEW to `false` to skip this workflow's jobs temporarily; leave it
+# unset (or set it to `true`) to run reviews normally.
+#
 # Codex uses personal ChatGPT subscription auth from a private, persistent
 # runner bind mount at /codex-home. Set CODEX_HOME to that mount, run
 # `CODEX_HOME=/codex-home codex login` once in the runner environment, and keep
@@ -58,6 +62,9 @@ concurrency:
 jobs:
   prepare:
     name: Select AI reviewer
+    # ENABLE_AI_REVIEW is an optional repo Actions variable. Only the explicit
+    # lower-case value `false` disables reviews, so an unset variable preserves
+    # the default-on behavior.
     # `tea pr create --draft` prepends `WIP: ` and stripping it is what marks a
     # PR ready (AGENTS.md step 4), so this gate is what keeps the reviewer from
     # firing on every push of work still in progress. `edited` is in the trigger
@@ -65,7 +72,8 @@ jobs:
     #
     # The head-repo check keeps every review credential away from a fork's PR.
     if: >-
-      !startsWith(github.event.pull_request.title, 'WIP:')
+      vars.ENABLE_AI_REVIEW != 'false'
+      && !startsWith(github.event.pull_request.title, 'WIP:')
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5

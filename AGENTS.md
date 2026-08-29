@@ -44,10 +44,12 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
      diff and posts a comment-review as `review-bot`, once per head commit.
      Codex is the default; the repo Actions variable `AI_REVIEWER=claude` or
-     `AI_REVIEWER=opencode` selects Claude or OpenCode manually. It is advisory
-     and gates nothing — `npm run lint`,
-     `npm run typecheck`, `npm test`, and `npm run build` in `ci.yml` remain the
-     only checks that can fail a PR.
+     `AI_REVIEWER=opencode` selects Claude or OpenCode manually. AI review is
+     enabled by default; setting the repo Actions variable
+     `ENABLE_AI_REVIEW=false` temporarily skips it, while unsetting the variable
+     or setting it to `true` enables it. It is advisory and gates nothing —
+     `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` in
+     `ci.yml` remain the only checks that can fail a PR.
 
 ### Plan Relay (Codex planner → OpenCode executor)
 

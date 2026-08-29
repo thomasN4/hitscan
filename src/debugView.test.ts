@@ -92,11 +92,11 @@ describe('buildDebugSegments', () => {
     expectVertex(pos, 1, 10, 5.3, 0);
   });
 
-  it('colours the intent line by brain mode, all four distinct', () => {
+  it('colours the intent line by brain mode, all five distinct', () => {
     const { pos, col } = buffers();
     const target = new THREE.Vector3(1, 1, 1);
     const seen: number[][] = [];
-    for (const mode of ['hold', 'search', 'route', 'engage'] as const) {
+    for (const mode of ['hold', 'search', 'route', 'engage', 'patrol'] as const) {
       buildDebugSegments([bot({ mode, targetEye: target })], pos, col, VIEW);
       seen.push([col[0]!, col[1]!, col[2]!]);
     }
@@ -107,6 +107,10 @@ describe('buildDebugSegments', () => {
         expect(seen[i]).not.toEqual(seen[j]);
       }
     }
+    // Patrol is pinned to cyan explicitly: it is the one cool hue, and the
+    // goalless route walk must never read as any combat mode. The bot fixture
+    // exposes no shootable observation, so the tint is the dim tier.
+    expect(seen[4]).toEqual([0.0, 0.25, 0.25]);
   });
 
   // Issue #46: the old single-brightness line read as "everyone is engaging

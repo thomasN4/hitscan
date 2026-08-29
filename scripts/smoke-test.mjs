@@ -935,11 +935,12 @@ async function runFlatRouteCheck() {
 // claims, each polled on wall-clock give-up bounds (lesson 26) rather than
 // slept:
 //
-//   1. hidden: the bot faces the player across the wall but holds — no intent
-//      endpoint, no shootable grading, no damage — past the spawn shot
-//      stagger, measured on the game clock the stagger runs on.
-//   2. acquisition: the player steps into FOV + LOS on the bot's side; the
-//      bot engages and its intent endpoint is the observed eye.
+//   1. hidden: the player is a non-candidate, so the bot faces the wall,
+//      holds through the one-second patrol stand-down, then patrols —
+//      materially, with no shootable grading and no damage.
+//   2. acquisition: respawn clears the patrol state; the player steps into
+//      FOV + LOS on the bot's side; the bot engages and its intent endpoint
+//      is the observed eye.
 //   3. frozen memory: sight breaks; the bot routes to the COPIED last-known
 //      eye — the endpoint must not follow the live player — and grades
 //      non-shootable throughout.
@@ -977,6 +978,10 @@ async function runVisionAwarenessCheck() {
       cs.player.hp = 100000;
       cs.player.pos.set(NORTH[0], 1.7, NORTH[1]);
       cs.player.vel.set(0, 0, 0);
+      // The hidden phase wants the bot UNAWARE: with the player a
+      // non-candidate there is nothing to acquire, so patrol begins after
+      // the stand-down. Restored before the acquisition staging below.
+      cs.player.alive = false;
       const bot = cs.bots.find(b => b.team === 'T' && b.alive);
       if (!bot || cs.bots.length !== 1) return { fail: `expected exactly one live T bot, got ${cs.bots.length}` };
       bot.mesh.position.set(BOT_SPOT[0], 0, BOT_SPOT[1]);
@@ -993,30 +998,54 @@ async function runVisionAwarenessCheck() {
       cs.game.locked = true;
       const simT0 = cs.gameTime.now();
 
-      // 1) Hidden: observe past the spawn stagger (<= 3 s game time).
-      let held = true, observed = 0;
+      // 1) Hidden: observe past the spawn stagger (<= 3 s game time). The 6a
+      //    follow-up lets an unaware bot patrol after a one-second
+      //    stand-down, so the claim is: it holds through the pause, then
+      //    patrols — and never grades a shootable target, exposes a current
+      //    visual, or damages the player.
+      let firstMode = null, sawPatrol = false, leftModes = false;
+      let graded = false, patrolDrift = 0, patrolAt = null, patrolAnchor = null;
+      let observed = 0;
       const t1 = performance.now();
       while (performance.now() - t1 < 20000 && cs.gameTime.now() - simT0 < 4) {
         await frame();
         observed++;
-        if (bot.mode !== 'hold') held = false;
+        if (firstMode === null) firstMode = bot.mode;
+        if (bot.mode === 'patrol') {
+          if (!sawPatrol) { sawPatrol = true; patrolAt = cs.gameTime.now() - simT0; patrolAnchor = bot.mesh.position.clone(); }
+          patrolDrift = Math.max(patrolDrift, bot.mesh.position.distanceTo(patrolAnchor));
+        } else if (bot.mode !== 'hold') leftModes = true;
+        if (bot.targetInRange || bot.targetLOS === true) graded = true;
         if (cs.game.matchOver) return { fail: 'match ended while hidden' };
       }
       const hidden = {
-        observed, held, mode: bot.mode,
-        endpoint: bot.targetEye !== null,
+        observed, firstMode, sawPatrol, leftModes, graded,
+        patrolAfterS: patrolAt === null ? null : +patrolAt.toFixed(2),
+        patrolDrift: +patrolDrift.toFixed(2),
         inRange: bot.targetInRange,
         los: bot.targetLOS,
         playerHpLost: 100000 - cs.player.hp,
         simS: +(cs.gameTime.now() - simT0).toFixed(2),
       };
       if (hidden.simS < 4) return { fail: 'simulation too slow to cover the spawn stagger', hidden };
-      if (!hidden.held || hidden.mode !== 'hold') return { fail: 'bot left hold while hidden', hidden };
-      if (hidden.endpoint) return { fail: 'hidden bot exposed an intent endpoint', hidden };
-      if (hidden.inRange || hidden.los === true) return { fail: 'hidden bot graded a current visual', hidden };
+      if (hidden.firstMode !== 'hold') return { fail: 'the unaware bot did not begin in the one-second patrol pause', hidden };
+      if (!hidden.sawPatrol) return { fail: 'the unaware bot never began patrolling', hidden };
+      if (hidden.patrolAfterS < 0.85) return { fail: 'patrol began before the one-second pause elapsed', hidden };
+      if (hidden.patrolDrift < 2) return { fail: 'patrol never travelled materially', hidden };
+      if (hidden.leftModes) return { fail: 'hidden bot left hold/patrol', hidden };
+      if (hidden.graded) return { fail: 'hidden bot graded a current visual', hidden };
       if (hidden.playerHpLost !== 0) return { fail: 'hidden bot damaged the player', hidden };
 
-      // 2) Acquisition: into the FOV on the bot's side of the wall, ~15 m out.
+      // 2) Acquisition: respawn drops every patrol/search state, then the
+      //    player steps into FOV + LOS on the bot's side of the wall, ~15 m
+      //    out — acquisition on the first eligible frame.
+      bot.respawn();
+      bot.mesh.position.set(BOT_SPOT[0], 0, BOT_SPOT[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      bot.path = [];
+      bot.leg = 0;
+      cs.player.alive = true;
       cs.player.pos.set(SOUTH[0], 1.7, SOUTH[1]);
       cs.player.vel.set(0, 0, 0);
       let acquired = false;
@@ -1911,12 +1940,234 @@ async function runMatchEndCheck() {
   await page.close();
 }
 
+// Idle patrol and the mobile damage search (the 6a follow-up), end to end.
+//
+// The pure suite pins the brain/selector seams; this phase owns the WIRING
+// through the real frame loop, staged on the arena's only clear ~90 m
+// sightline — the x = 12 lane through the mid-wall gap (x ∈ (2.5, 15)):
+//
+//   A. unaware patrol: the player is a non-candidate, so a lone T bot holds
+//      through its one-second stand-down, then patrols — travelling
+//      materially, never grading a shootable target — and respawn()
+//      restarts the cycle from hold.
+//   B. damage advance from beyond the 80 m perception range: a real SMG hit
+//      from 93 m starts a bearing search whose first seconds ADVANCE along
+//      the incoming bearing while the scan headings keep turning. The bot
+//      stays blind (range-gated) and never retaliates while hidden.
+//   C. closing the distance: the player steps down the same bearing to ~60 m
+//      and the bot acquires through the ordinary perception path — the
+//      player's HP must be untouched up to that frame.
+//
+// The long shot is real SMG fire, so the punch-steered aim is kept honest
+// with SHORT bursts: each burst's first rounds leave recoil nearly at rest,
+// and standing fire's only spread is the weapon's inherent cone.
+async function runPatrolCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      const clearLine = (a, b) => {
+        for (let t = 0; t <= 1; t += 0.02) {
+          const x = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t;
+          if (cs.colliders.some(c =>
+            x > c.min.x && x < c.max.x && z > c.min.z && z < c.max.z
+            && c.max.y > 1.6 && c.min.y < 2)) return false;
+        }
+        return true;
+      };
+      const BOT_A = [-20, -25];      // scenario A: open south ground
+      const BOT_B = [12, -45];       // scenario B: south end of the x=12 gap lane
+      const PLAYER_FAR = [12, 48];   // ~93 m from BOT_B, clear LOS through the gap
+      for (const [label, [x, z]] of [['patrol bot', BOT_A], ['hit bot', BOT_B], ['far player', PLAYER_FAR]]) {
+        if (blocked(x, z)) return { fail: `${label} spot (${x}, ${z}) is inside geometry` };
+      }
+      if (!clearLine(BOT_B, PLAYER_FAR)) {
+        return { fail: 'the 93 m firing line is not clear — the staging depends on it' };
+      }
+      cs.game.started = true;
+      cs.game.locked = true;
+      const simA0 = cs.gameTime.now();
+
+      // A. Unaware patrol: no candidates at all.
+      cs.player.alive = false;
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot || cs.bots.length !== 1) return { fail: `expected exactly one live T bot, got ${cs.bots.length}` };
+      bot.mesh.position.set(BOT_A[0], 0, BOT_A[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      bot.path = [];
+      bot.leg = 0;
+      let firstMode = null, sawPatrol = false, patrolAt = null, patrolDrift = 0, gradesOk = true;
+      let anchor = null;
+      const tA = performance.now();
+      while (performance.now() - tA < 25000 && cs.gameTime.now() - simA0 < 5) {
+        await frame();
+        if (firstMode === null) firstMode = bot.mode;
+        if (bot.mode === 'patrol') {
+          if (!sawPatrol) { sawPatrol = true; patrolAt = cs.gameTime.now() - simA0; anchor = bot.mesh.position.clone(); }
+          patrolDrift = Math.max(patrolDrift, bot.mesh.position.distanceTo(anchor));
+        } else if (bot.mode !== 'hold') {
+          return { fail: `unaware bot left hold/patrol (mode ${bot.mode})`, firstMode };
+        }
+        if (bot.targetInRange || bot.targetLOS === true) gradesOk = false;
+        if (cs.game.matchOver) return { fail: 'match ended while patrolling' };
+      }
+      const patrol = {
+        firstMode,
+        sawPatrol,
+        patrolAfterS: patrolAt === null ? null : +patrolAt.toFixed(2),
+        patrolDrift: +patrolDrift.toFixed(2),
+        gradesOk,
+      };
+      if (firstMode !== 'hold') return { fail: 'the unaware bot did not begin in the patrol pause (hold)', patrol };
+      if (patrolAt === null) return { fail: 'the unaware bot never began patrolling', patrol };
+      if (patrolAt < 0.85) return { fail: 'patrol began before the one-second pause elapsed', patrol };
+      if (patrol.patrolDrift < 3) return { fail: 'patrol never travelled materially', patrol };
+      if (!gradesOk) return { fail: 'patrol graded a shootable target', patrol };
+
+      // Respawn drops the patrol state: back to hold, and a fresh pause
+      // before a fresh leg.
+      const respawnT = cs.gameTime.now();
+      bot.respawn();
+      bot.mesh.position.set(BOT_A[0], 0, BOT_A[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      if (bot.mode !== 'hold') return { fail: 'respawn did not restore hold', mode: bot.mode };
+      let rePatrol = null;
+      const tR = performance.now();
+      while (performance.now() - tR < 15000 && cs.gameTime.now() - respawnT < 4) {
+        await frame();
+        if (bot.mode === 'patrol') { rePatrol = cs.gameTime.now() - respawnT; break; }
+        if (bot.mode !== 'hold') return { fail: 'respawned bot left hold unexpectedly', mode: bot.mode };
+      }
+      const respawn = { mode: bot.mode, rePatrolAfterS: rePatrol === null ? null : +rePatrol.toFixed(2) };
+      if (rePatrol === null) return { fail: 'respawned bot never re-entered patrol', mode: bot.mode, respawn };
+      if (rePatrol < 0.85) return { fail: 'respawn did not re-arm the patrol pause', respawn: { rePatrolAfterS: +rePatrol.toFixed(2) } };
+
+      // B. A real SMG hit from beyond the 80 m perception range.
+      cs.player.alive = true;
+      cs.player.hp = 100000;
+      cs.player.pos.set(PLAYER_FAR[0], 1.7, PLAYER_FAR[1]);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = 0;   // forward is -z: down the x=12 gap lane, at the bot
+      cs.game.pitch = 0;
+      bot.respawn();     // fresh brain; then pin it at the lane's south end
+      bot.mesh.position.set(BOT_B[0], 0, BOT_B[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      bot.path = [];
+      bot.leg = 0;
+      const dist0 = cs.player.pos.distanceTo(bot.eyePos());
+      if (dist0 <= 80) return { fail: `staging distance ${dist0} is not beyond the 80 m perception range` };
+      cs.weapon.mag = 30;
+      cs.weapon.lastShot = -9;
+      const botHp0 = bot.hp;
+      const tB = performance.now();
+      while (performance.now() - tB < 20000 && bot.hp >= botHp0) {
+        bot.mesh.position.set(BOT_B[0], 0, BOT_B[1]); // pin: patrol must not drag it off the firing line
+        bot.vy = 0;
+        bot.onGround = true;
+        cs.game.shooting = true;
+        const tBurst = performance.now();
+        while (performance.now() - tBurst < 150 && bot.hp >= botHp0) {
+          await frame();
+          bot.mesh.position.set(BOT_B[0], 0, BOT_B[1]);
+          bot.vy = 0;
+        }
+        cs.game.shooting = false;
+        while (performance.now() - tBurst < 350) await frame();
+      }
+      cs.game.shooting = false;
+      // The hit frame's decision has already run: it must be a bearing
+      // search facing the victim-to-player bearing (+z), with no grades.
+      const bear = { x: cs.player.pos.x - bot.mesh.position.x, z: cs.player.pos.z - bot.mesh.position.z };
+      const bl = Math.hypot(bear.x, bear.z);
+      bear.x /= bl; bear.z /= bl;
+      const bfx = Math.sin(bot.mesh.rotation.y), bzf = Math.cos(bot.mesh.rotation.y);
+      const bodyDot = bfx * bear.x + bzf * bear.z;
+      const hitState = { dist: +dist0.toFixed(1), mode: bot.mode, bodyDot: +bodyDot.toFixed(3), botHp: bot.hp };
+      if (bot.hp >= botHp0) return { fail: 'the SMG burst never landed at 93 m', hitState };
+      if (hitState.mode !== 'search') return { fail: `the hit did not start a bearing search (mode ${hitState.mode})`, hitState };
+      if (bodyDot < 0.99) return { fail: 'the damage frame did not face the incoming bearing', hitState };
+      if (bot.targetLOS === true || bot.targetInRange) return { fail: 'a blind hit graded a shootable target', hitState };
+
+      // The advance: normal-speed travel along the bearing while still
+      // hidden, zero retaliation. Closing below the 80 m perception range
+      // mid-advance is legitimate — ordinary perception takes over.
+      const advStartZ = bot.mesh.position.z;
+      let acquired = false, retaliated = false;
+      const advT0 = cs.gameTime.now();
+      const tAdv = performance.now();
+      while (performance.now() - tAdv < 15000 && cs.gameTime.now() - advT0 < 3.0) {
+        await frame();
+        if (bot.targetLOS === true) { acquired = true; break; }
+        if (bot.mode !== 'search') break;
+        if (cs.player.hp < 100000) { retaliated = true; break; }
+      }
+      const advanceDz = bot.mesh.position.z - advStartZ;
+      const advance = { acquired, advanceDz: +advanceDz.toFixed(2), retaliated, mode: bot.mode };
+      if (retaliated) return { fail: 'the bot retaliated while still blind', advance };
+      if (bot.targetLOS !== true && (bot.mode !== 'search' || advanceDz < 3)) {
+        return { fail: 'the damage search did not advance materially along the bearing while hidden', advance };
+      }
+      if (bot.targetLOS !== true && cs.player.hp !== 100000) {
+        return { fail: 'the bot retaliated before visual acquisition', advance };
+      }
+
+      // C. Closing the distance: the player steps down the same bearing to
+      //    ~60 m; ordinary perception must acquire without any further hit.
+      if (!acquired) {
+        const closeSpot = [bot.mesh.position.x, bot.mesh.position.z + 60];
+        if (blocked(closeSpot[0], closeSpot[1])) return { fail: 'the close-player spot is inside geometry', advance };
+        cs.player.pos.set(closeSpot[0], 1.7, closeSpot[1]);
+        cs.player.vel.set(0, 0, 0);
+        const tD = performance.now();
+        while (performance.now() - tD < 15000) {
+          await frame();
+          if (cs.player.hp < 100000 && bot.targetLOS !== true) return { fail: 'the bot fired before visual acquisition', advance };
+          if (bot.targetLOS === true) { acquired = true; break; }
+          if (cs.game.matchOver) return { fail: 'match ended before acquisition', advance };
+        }
+      }
+      if (!acquired) return { fail: 'the bot never acquired the player after closing distance', advance };
+      return {
+        patrol,
+        hit: { dist: +dist0.toFixed(1), bodyDot: +bodyDot.toFixed(3), modeAfterHit: bot.mode },
+        advance: { dz: +advanceDz.toFixed(2), gained: advanceDz > 3, mode: bot.mode },
+        acquiredBy: 'ordinary perception',
+        finalMode: bot.mode,
+        hpLostBeforeVisual: 100000 - cs.player.hp === 0 ? 0 : 'dropped',
+      };
+    });
+    if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
+    if (result.finalMode !== 'engage' && result.finalMode !== 'route') {
+      throw new Error(`acquisition did not engage (mode ${result.finalMode}): ${JSON.stringify(result)}`);
+    }
+    console.log('[patrol] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[patrol] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[patrol] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
   await runFlatRouteCheck();
   await runVisionAwarenessCheck();
+  await runPatrolCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();

@@ -49,9 +49,9 @@ export interface VisualObservation {
 
 /**
  * Perception range (m): full 3D eye-to-eye distance beyond which a candidate
- * is a cheap rejection. Inclusive boundary — exactly 60 m is still visible.
+ * is a cheap rejection. Inclusive boundary — exactly 80 m is still visible.
  */
-export const PERCEPTION_RANGE_M = 60;
+export const PERCEPTION_RANGE_M = 80;
 /**
  * Horizontal FOV (degrees, TOTAL cone width): candidates farther than half of
  * this off the bot's planar facing are cheap rejections. Vertical angle never

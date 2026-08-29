@@ -117,6 +117,19 @@ export interface BrainParams {
   scanPhase: number;
   /** Seconds a search runs from ENTRY before the memory is dropped (hold). */
   forgetTime: number;
+  /**
+   * Seconds a bot stands still before requesting (or resuming) a patrol:
+   * on spawn, respawn, search expiry, patrol arrival and failed patrol
+   * selection. The pause keeps a patrol graph selection from being re-requested
+   * every frame after a dead end.
+   */
+  patrolPause: number;
+  /**
+   * Seconds an incoming-fire search ADVANCES along the newest bearing at
+   * normal travel speed before it scans in place. A blocked advance stops
+   * permanently for that search; a later hit starts a fresh window.
+   */
+  damageAdvance: number;
 }
 
 /** The shipped bot behavior. */
@@ -145,6 +158,8 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   memoryArrivalRadius: 1, // planar; reached the remembered spot → scan here
   scanPhase: 0.75,        // per heading; the full sweep repeats every 2.25 s
   forgetTime: 8,          // drop the memory 8 s after the search began
+  patrolPause: 1,         // stand down one second between patrol legs
+  damageAdvance: 3,       // advance toward the shot for 3 s, then scan in place
 };
 
 /**
@@ -206,6 +221,22 @@ export interface BrainView {
    * only the direction and distance of the next leg — never its route graph.
    */
   nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | undefined | null;
+  /**
+   * Lazy patrol waypoint request — the patrol analogue of `nextWaypoint`,
+   * same three-way contract and the same lazy on purpose: pathfinding still
+   * obeys the shared one-A-star-per-frame budget, so the callback is only
+   * invoked when the brain has actually decided to patrol.
+   *
+   * - a `Vector3`: the next relative waypoint of a patrol route — walk it at
+   *   normal travel speed;
+   * - `undefined`: the route computation was DEFERRED (budget unavailable) —
+   *   nothing is known about the route, remain `patrol` without moving;
+   * - `null`: no usable patrol route or goal (nothing selected, a selected
+   *   node confirmed unreachable, or the final patrol node reached) — the
+   *   brain returns to its one-second pause and a fresh selection is made
+   *   after it.
+   */
+  nextPatrolWaypoint(): THREE.Vector3 | undefined | null;
 }
 
 /**
@@ -213,13 +244,15 @@ export interface BrainView {
  *
  * `engage` and `route` are the two active modes; `search` scans in place
  * from a remembered position's arrival, a routing dead end, or a
- * direction-only incoming-fire bearing; `hold` stands still on forget (or,
- * pre-memory, on plain sight loss). Reported for OBSERVABILITY, not
+ * direction-only incoming-fire bearing (the damage search advances for its
+ * first seconds); `patrol` walks a map-wide route with no target knowledge
+ * at all; `hold` stands still on forget, on plain sight loss (pre-memory),
+ * or inside the one-second patrol pause. Reported for OBSERVABILITY, not
  * consumed by the executor: hud.ts renders it in the DEV bot readout,
  * because "why is that bot doing that" is otherwise only answerable by
  * pausing in devtools.
  */
-export type BrainMode = 'hold' | 'search' | 'route' | 'engage';
+export type BrainMode = 'hold' | 'search' | 'route' | 'engage' | 'patrol';
 
 /** What a brain wants done this frame. */
 export interface BrainIntent {
@@ -355,7 +388,30 @@ export class DefaultBrain implements BotBrain {
    * Copied normalized planar victim-to-attacker bearing awaiting the next
    * decision, or null. Set by onIncomingFire, consumed by the next decide().
    */
+  /**
+   * Copied normalized planar victim-to-attacker bearing awaiting the next
+   * decision, or null. Set by onIncomingFire, consumed by the next decide().
+   */
   private pendingBearing: THREE.Vector3 | null = null;
+  /**
+   * Seconds still owed of the one-second stand-down before a patrol
+   * waypoint may be requested. Seeded at construction (spawn), reset by
+   * onRespawn, search expiry, patrol arrival and failed patrol selection.
+   */
+  private patrolPause = 0;
+  /**
+   * Whether the active search came from a damage bearing and therefore owns
+   * the `damageAdvance` window along its base bearing. Memory-arrival and
+   * dead-end searches scan in place. Reset by the next enterSearch and
+   * dropped by the forget expiry and onRespawn.
+   */
+  private advanceArmed = false;
+  /**
+   * True once the armed advance has been cut short by a blocked step — the
+   * advance stops permanently for THAT search (no replanning); a later hit
+   * re-arms it through enterSearch.
+   */
+  private advanceCancelled = false;
 
   constructor(
     private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
@@ -364,6 +420,8 @@ export class DefaultBrain implements BotBrain {
     this.strafeDir = this.rng() < 0.5 ? -1 : 1;
     // Staggered first shot so a fresh wave doesn't volley in unison.
     this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
+    // Spawn counts as a pause: the first patrol request waits one second.
+    this.patrolPause = this.params.patrolPause;
   }
 
   /** Read-only focus exposure for the executor's acquisition call. */
@@ -385,12 +443,16 @@ export class DefaultBrain implements BotBrain {
     this.stalledFor = 0;
     this.stallBase = Infinity;
     this.wasBlocked = false;
+    this.wasBlocked = false;
     this.focus = null;
     this.memory = null;
     this.searching = false;
     this.scanBase = null;
     this.scanElapsed = 0;
     this.pendingBearing = null;
+    this.patrolPause = this.params.patrolPause;
+    this.advanceArmed = false;
+    this.advanceCancelled = false;
   }
 
   /** See BotBrain.onIncomingFire. The bearing is copied and planar-normalized. */
@@ -413,10 +475,12 @@ export class DefaultBrain implements BotBrain {
   }
 
   /** Begin a scan at `base`: elapsed zero, every pursuit state dropped. */
-  private enterSearch(base: THREE.Vector3): void {
+  private enterSearch(base: THREE.Vector3, advance = false): void {
     this.searching = true;
     this.scanBase = base.clone();
     this.scanElapsed = 0;
+    this.advanceArmed = advance;
+    this.advanceCancelled = false;
     this.clearPursuitState();
   }
 
@@ -429,16 +493,34 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Intent for a search frame: stand still, face `heading`, look along it.
-   * The lookAt point rides the FROZEN eye height while memory exists; a
-   * direction-only damage search (memory already cleared) uses the bot eye
-   * convention off the bot's own feet.
+   * This frame's search step: normal-speed travel along the stored base
+   * bearing while the damage advance window is open, zero once it is closed.
+   * A blocked step cuts the advance permanently for this search — finish the
+   * scan in place rather than replanning.
    */
-  private searchFrameIntent(view: BrainView, heading: THREE.Vector3): BrainIntent {
+  private advanceStep(view: BrainView, dt: number): THREE.Vector3 {
+    const step = new THREE.Vector3();
+    if (!this.advanceArmed || this.advanceCancelled) return step;
+    if (view.moveBlocked) {
+      this.advanceCancelled = true;
+      return step;
+    }
+    if (this.scanElapsed >= this.params.damageAdvance) return step;
+    return this.scanBase!.clone().setY(0).normalize().multiplyScalar(view.selfSpeed * dt);
+  }
+
+  /**
+   * Intent for a search frame: face `heading` and look along it, with the
+   * damage advance (if armed and still inside its window) added on top of the
+   * standing scan. The lookAt point rides the FROZEN eye height while memory
+   * exists; a direction-only damage search (memory already cleared) uses the
+   * bot eye convention off the bot's own feet.
+   */
+  private searchFrameIntent(view: BrainView, heading: THREE.Vector3, step = new THREE.Vector3()): BrainIntent {
     const eyeY = this.memory !== null ? this.memory.eye.y : view.selfFeet.y + 1.9;
     const lookAt = new THREE.Vector3(view.selfFeet.x + heading.x, eyeY, view.selfFeet.z + heading.z);
     return {
-      step: new THREE.Vector3(),
+      step,
       wantShoot: false,
       mode: 'search',
       focusId: this.focus,
@@ -512,17 +594,19 @@ export class DefaultBrain implements BotBrain {
     // visual. The shot's direction is ALL that is known: no identity, no
     // distance, no destination. Drop the focus and any remembered position,
     // and search where it came from; a later ordinary visual observation
-    // replaces this normally.
+    // replaces this normally. The search ADVANCES along the bearing for its
+    // first seconds (the damage frame itself included) while still facing the
+    // scan headings.
     if (this.pendingBearing !== null) {
       const bearing = this.pendingBearing;
       this.pendingBearing = null;
       this.focus = null;
       this.memory = null;
-      this.enterSearch(bearing);
+      this.enterSearch(bearing, true);
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;
       }
-      return this.searchFrameIntent(view, bearing);
+      return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
     }
 
     const vis = view.visual;
@@ -530,22 +614,27 @@ export class DefaultBrain implements BotBrain {
       return this.visualIntent(view, vis, dt, jukeDraw);
     }
 
-    // Priority 3a: an active scan continues — stand still, never shoot,
-    // age the forget timer (which started only at search ENTRY, so route
-    // walks and deferred frames never aged the memory).
+    // Priority 3a: an active scan continues — never shoot, age the forget
+    // timer (which started only at search ENTRY, so route walks and deferred
+    // frames never aged the memory), and advance along the bearing while the
+    // damage search's window is open.
     if (this.searching) {
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;
       }
       this.scanElapsed += dt;
       if (this.scanElapsed >= this.params.forgetTime) {
-        // Forget: drop memory and every pursuit/scan state, hold facing.
+        // Forget: drop memory and every pursuit/scan state, hold facing —
+        // and stand down one second before the next patrol request.
         this.focus = null;
         this.memory = null;
         this.searching = false;
         this.scanBase = null;
         this.scanElapsed = 0;
+        this.advanceArmed = false;
+        this.advanceCancelled = false;
         this.clearPursuitState();
+        this.patrolPause = this.params.patrolPause;
         return {
           step: new THREE.Vector3(),
           wantShoot: false,
@@ -555,7 +644,7 @@ export class DefaultBrain implements BotBrain {
           facing: view.facing.clone(),
         };
       }
-      return this.searchFrameIntent(view, this.scanHeading());
+      return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
     }
 
     // Priority 3b: sight lost with a remembered position — pursue it.
@@ -563,13 +652,76 @@ export class DefaultBrain implements BotBrain {
       return this.memoryIntent(view, dt, jukeDraw);
     }
 
-    // Nothing seen, nothing remembered: hold. Stand still, keep the facing
-    // the body already has, expose no lookAt, never fire. The identity stays
-    // tracked so acquisition probes it first once a look could plausibly
-    // succeed again.
+    // Priority 4 — strictly lowest: nothing seen, nothing remembered, no
+    // live search. Patrol. The pause gates the request: hold for
+    // `patrolPause` seconds first (spawn, respawn, search expiry, patrol
+    // arrival and failed selection all land here), then ask the executor for
+    // a patrol waypoint — lazily, so the shared route budget is untouched
+    // until the brain has actually decided to walk.
+    return this.patrolIntent(view, dt, jukeDraw);
+  }
+
+  /**
+   * Priority 5 — strictly lowest: patrol. After the one-second pause the
+   * brain asks the executor for a patrol waypoint: a vector means travel at
+   * normal speed (mode `patrol`, never shoot, null focus, looking one metre
+   * along the next waypoint at eye height); `undefined` means the route
+   * computation was deferred — wait without moving, still `patrol`; `null`
+   * means no usable route or goal — restart the pause and hold. Any visual or
+   * damage stimulus outranks all of this and interrupts from the branches
+   * above.
+   */
+  private patrolIntent(view: BrainView, dt: number, jukeDraw: number): BrainIntent {
+    if (this.patrolPause > 0) {
+      this.patrolPause -= dt;
+      if (this.patrolPause > 0) {
+        return this.holdIntent(view);
+      }
+      // The pause just ended: fall through to the first patrol request.
+    }
+    const waypoint = view.nextPatrolWaypoint();
+    if (waypoint === null) {
+      // No usable route or goal (or the patrol node was just reached):
+      // restart the pause; the executor picks a fresh candidate after it.
+      this.patrolPause = this.params.patrolPause;
+      return this.holdIntent(view);
+    }
     if (jukeDraw < dt * this.params.jukeRate) {
       this.strafeDir = this.strafeDir === 1 ? -1 : 1;
     }
+    if (waypoint === undefined) {
+      // Route computation deferred: wait without moving, remaining patrol.
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'patrol',
+        focusId: null,
+        lookAt: null,
+        facing: view.facing.clone(),
+      };
+    }
+    // A real waypoint: walk it with the shared route walker (jam recovery
+    // included), looking one metre along the next waypoint at eye height.
+    const heading = waypoint.clone().setY(0).normalize();
+    const lookAt = new THREE.Vector3(
+      view.selfFeet.x + heading.x,
+      view.selfFeet.y + 1.9,
+      view.selfFeet.z + heading.z,
+    );
+    const step = new THREE.Vector3();
+    this.travel(step, waypoint, view, dt);
+    return {
+      step,
+      wantShoot: false,
+      mode: 'patrol',
+      focusId: null,
+      lookAt,
+      facing: heading,
+    };
+  }
+
+  /** The standing-down intent: no lookAt, no shot, facing preserved. */
+  private holdIntent(view: BrainView): BrainIntent {
     return {
       step: new THREE.Vector3(),
       wantShoot: false,

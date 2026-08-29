@@ -7,7 +7,7 @@
 // a collider, a mesh or a scene anywhere in sight.
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { buildNavGrid, findPath, navNode, nearestNode, type NavGrid, type NavLinkSpec, type NavProbe } from './navGrid';
+import { buildNavGrid, findPath, navNode, nearestNode, pickPatrolNode, type NavGrid, type NavLinkSpec, type NavProbe } from './navGrid';
 
 const STEP = 0.3;
 const HEAD = 2;
@@ -250,5 +250,55 @@ describe('findPath', () => {
   test('returns null when the goal is walled off entirely', () => {
     const grid = build(world([{ minX: 0, maxX: 10, minZ: 4.4, maxZ: 5.6 }]));
     expect(findPath(grid, at(5, 1), at(5, 9))).toBeNull();
+  });
+});
+
+describe('pickPatrolNode', () => {
+  /** An rng consuming a scripted sequence, then repeating its last value forever. */
+  function queue(values: number[]): { rng: () => number; draws: () => number } {
+    let i = 0;
+    return {
+      rng: () => {
+        const v = i < values.length ? values[i]! : values[values.length - 1] ?? 0;
+        i++;
+        return v;
+      },
+      draws: () => i,
+    };
+  }
+
+  const grid = build(world()); // 100 nodes at (0.5..9.5)²: index i is (0.5+⌊i/10⌋, 0.5+i%10)
+  const self = new THREE.Vector3(0.5, 0, 0.5);
+
+  test('samples at most eight nodes, even on a large graph', () => {
+    const { rng, draws } = queue([0.5]); // every draw: node 50 at (5.5, 0.5) — 5 m away
+    expect(pickPatrolNode(grid, self, 0, rng)).toBe(50); // farthest sampled non-current
+    expect(draws()).toBeLessThanOrEqual(8);
+  });
+
+  test('the first sampled node at least 12 m away wins immediately', () => {
+    // Sample 0 → index floor(0.99·100) = 99 → (9.5, 9.5), 12.73 m away.
+    const { rng, draws } = queue([0.99]);
+    expect(pickPatrolNode(grid, self, 0, rng)).toBe(99);
+    expect(draws()).toBe(1);
+  });
+
+  test('when nothing qualifies, the farthest sampled non-current node wins', () => {
+    // 0.0 is the bot's own node (skipped), 0.7 → node 70 (7.5 m away),
+    // 0.2 → node 20 (2.5 m). The farthest sample is 70.
+    const { rng } = queue([0.0, 0.7, 0.2]);
+    expect(pickPatrolNode(grid, self, 0, rng)).toBe(70);
+  });
+
+  test('no candidate when the only node is the bot’s own', () => {
+    const single = buildNavGrid({ bounds: { minX: 0, maxX: 1, minZ: 0, maxZ: 1 }, cell: 1, stepHeight: STEP, probe: world() });
+    expect(single.count).toBe(1);
+    expect(pickPatrolNode(single, self, nearestNode(single, self), () => 0)).toBe(-1);
+  });
+
+  test('no candidate from an empty graph', () => {
+    const empty = build(world([{ minX: 0, maxX: 10, minZ: 0, maxZ: 10 }]));
+    expect(empty.count).toBe(0);
+    expect(pickPatrolNode(empty, self, -1, () => 0.5)).toBe(-1);
   });
 });

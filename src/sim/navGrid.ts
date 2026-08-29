@@ -407,6 +407,49 @@ function nodeVec(grid: NavGrid, i: number): THREE.Vector3 {
   return new THREE.Vector3(grid.xs[i], grid.ys[i], grid.zs[i]);
 }
 
+/** Patrol candidate samples drawn per selection — bounds the selector's rng cost. */
+export const PATROL_SAMPLE_COUNT = 8;
+/**
+ * Planar distance (m) from the bot at which a sampled node qualifies
+ * outright. Patrol destinations must be materially elsewhere; the planar
+ * measure is the right one because the result steers a walk, while combat
+ * pursuit keeps its 3D ranges.
+ */
+export const PATROL_MIN_DISTANCE_M = 12;
+
+/**
+ * Pick a patrol destination over the graph's nodes — pure and deterministic
+ * under the injected `rng`, so selection policy stays out of engine/DOM code.
+ *
+ * At most `PATROL_SAMPLE_COUNT` nodes are drawn uniformly (fewer when the
+ * graph is smaller). The FIRST sampled node at least `PATROL_MIN_DISTANCE_M`
+ * away wins immediately; otherwise the farthest sampled node that is not the
+ * bot's own does. `-1` means no different node could be selected — an empty
+ * graph, or a sample that never left the bot's own node.
+ */
+export function pickPatrolNode(
+  grid: NavGrid,
+  selfFeet: THREE.Vector3,
+  currentIndex: number,
+  rng: () => number,
+): number {
+  if (grid.count === 0) return -1;
+  let best = -1;
+  let bestDist = -1;
+  const samples = Math.min(PATROL_SAMPLE_COUNT, grid.count);
+  for (let s = 0; s < samples; s++) {
+    const i = Math.floor(rng() * grid.count);
+    if (i === currentIndex) continue;
+    const d = Math.hypot(grid.xs[i]! - selfFeet.x, grid.zs[i]! - selfFeet.z);
+    if (d >= PATROL_MIN_DISTANCE_M) return i;
+    if (d > bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
 /** Min-heap of node indices, ordered by an external priority array. */
 class MinHeap {
   private readonly items: number[] = [];

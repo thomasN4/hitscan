@@ -350,6 +350,19 @@ target beyond engage range — while the hue stays the mode's.
   production preview for smoke diagnostics; the cost is paid only while that
   flag is up. Revisit only if profiling ever shows it.
 
+*(In-flight 6a annotation: the record above describes the pre-6a diagnostic
+architecture and is no longer the live contract. Tranche 6a makes visual
+acquisition gameplay: every living `Bot.update()` calls `acquireVisual()`
+regardless of `session.debugView`; cheap rejection may spend zero rays, and an
+eligible look spends at most one. `targetInRange`/`targetLOS` are derived every
+frame from that acquisition and its agreement with the brain intent, while the
+overlay and HUD only consume them. Consequently live data cannot produce
+`r-`: `rs` is an agreeing current visual inside engage range, `-s` is one
+beyond it, and `--` covers blocked or unprobed looks plus hold, memory and
+search. `[debugView]` now asserts that its toggles leave the gameplay-
+perception census unchanged; the pre-6a probe-count assertions are retired.
+No merge claim is made here.)*
+
 ### Flat routing (issue #44; PR #52)
 
 The nav graph has covered the whole map since tranche 5, but the brain only

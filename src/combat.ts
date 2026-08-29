@@ -6,9 +6,10 @@
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
 import type { Bot as BotShape, HitZone, MapName } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
+import * as THREE from 'three';
 import { sfxHurt } from './audio';
 import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud';
 import { showLoadoutPicker, showEndScreen } from './menu';
@@ -55,7 +56,37 @@ export function damagePlayer(dmg: number, attackerName: string): void {
 }
 
 /**
- * Apply damage to a bot and kill it if HP is exhausted.
+ * Resolve the incoming-fire stimulus for a bot about to take damage: a
+ * normalized PLANAR victim-to-attacker bearing, or null when no direction
+ * is known. An omitted `attackerName` means the live PLAYER; otherwise the
+ * live bot with that display name. Resolution failing (unknown or already
+ * dead attacker) or a degenerate zero planar offset yields no stimulus.
+ * The brain never learns WHO fired or HOW FAR away it was — only the
+ * direction.
+ */
+function incomingFireBearing(bot: BotShape, attackerName?: string): THREE.Vector3 | null {
+  let from: THREE.Vector3 | null;
+  if (attackerName === undefined) {
+    if (!player.alive) return null;
+    from = playerFeet(player);
+  } else {
+    const attacker = bots.find(b => b.name === attackerName);
+    from = attacker && attacker.alive ? attacker.mesh.position : null;
+  }
+  if (!from) return null;
+  const dx = from.x - bot.mesh.position.x;
+  const dz = from.z - bot.mesh.position.z;
+  const planar = Math.hypot(dx, dz);
+  if (planar === 0) return null;
+  return new THREE.Vector3(dx / planar, 0, dz / planar);
+}
+
+/**
+ * Apply damage to a bot and kill it if HP is exhausted. Before the HP
+ * mutation, a live attacker is resolved and a direction-only incoming-fire
+ * bearing is forwarded — the victim reacts to WHERE the shot came from on
+ * its next decision, even if this one kills it. It never learns the
+ * attacker's identity or position.
  * @param bot instance from core/state's `bots` registry
  * @param dmg already-multiplied damage from the shooter
  * @param part hit zone, used for the killfeed text
@@ -64,6 +95,8 @@ export function damagePlayer(dmg: number, attackerName: string): void {
  */
 export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerName?: string): void {
   if (!bot.alive) return;
+  const bearing = incomingFireBearing(bot, attackerName);
+  if (bearing) bot.onIncomingFire(bearing);
   bot.hp -= dmg;
   if (bot.hp <= 0) bot.die(part, attackerName);
 }
@@ -132,8 +165,10 @@ export function checkRoundEnd(): void {
       endMatch('CT');
     } else {
       addKillfeed('★ Bot down — respawning...');
-      // Game time: the wave stays dead while paused.
-      gameTime.schedule(2.5, () => bots.forEach(b => { b.hp = 100; b.alive = true; b.mesh.visible = true; b.spawnAtRandom(); }));
+      // Game time: the wave stays dead while paused. Every bot goes through
+      // the full respawn() reset (placement, brain state, cached routes),
+      // matching die()'s own revival path.
+      gameTime.schedule(2.5, () => bots.forEach(b => b.respawn()));
     }
   }
 }

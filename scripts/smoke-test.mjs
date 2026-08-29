@@ -703,16 +703,13 @@ async function runConfigCheck() {
 }
 
 // Two-sided combat: a CT and a T must actually fight. Headless bots converge
-// slowly from their spawn halves, so the phase TELEPORTS one of each side
-// adjacent to each other, at collider-free mid-field spots (an embedded bot
-// is stuck for life — see Bot.spawnAtRandom), and waits for evidence: any
-// bot below full HP or a named cross-team killfeed line. The player idles,
-// so only bot-vs-bot fire can produce either.
-// Contract: PROVE any cross-team engagement happens (an hp drop on either
-// side), not that a specific pair fights. The teleport loop below only
-// accelerates an encounter; with 4T/2CT loose on the map for ~15 s the
-// evidence may equally come from an unteleported pair wandering into range,
-// and that satisfies the assertion by design.
+// slowly from their spawn halves, so the phase isolates one of each side and
+// TELEPORTS that named pair face-to-face at collider-free mid-field spots.
+// Their +z/-z team spawn facings now put each straight inside the other's
+// horizontal FOV; the pre-6a x-offset fixture put both exactly 90° off-axis,
+// where non-omniscient bots correctly held forever. The player and bystanders
+// are made non-candidates, so only pair-specific HP or killfeed evidence can
+// pass — no incidental unteleported encounter lottery.
 async function runAllyCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -736,25 +733,38 @@ async function runAllyCheck() {
       const blocked = (x, z) => cs.colliders.some(c =>
         x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
       const spots = [[8, 8], [-8, 8], [8, -14], [-14, -8], [20, 20], [0, -30]]
-        .filter(([x, z]) => !blocked(x, z) && !blocked(x + 2.5, z));
+        .filter(([x, z]) => !blocked(x, z) && !blocked(x, z + 2.5));
       if (spots.length === 0) return { fail: 'no free meeting spots' };
 
       const t = cs.bots.find(b => b.team === 'T' && b.alive);
       const ct = cs.bots.find(b => b.team === 'CT' && b.alive);
       if (!t || !ct) return { fail: 'missing live bots of both teams' };
 
+      // Isolate the named pair before the first simulated frame. Dead entries
+      // stay in perception's candidate lists but are cheap rejections, which
+      // also pins the 6a liveness boundary this fixture depends on.
+      cs.player.alive = false;
+      for (const b of cs.bots) {
+        if (b === t || b === ct) continue;
+        b.alive = false;
+        b.mesh.visible = false;
+      }
+
       for (const [x, z] of spots) {
         t.mesh.position.set(x, 0, z);
-        ct.mesh.position.set(x + 2.5, 0, z);
+        ct.mesh.position.set(x, 0, z + 2.5);
+        t.mesh.rotation.y = 0;          // +z, toward CT
+        ct.mesh.rotation.y = Math.PI;  // -z, toward T
         const deadline = performance.now() + 2500;
         while (performance.now() < deadline) {
           await wait(200);
           const feed = document.getElementById('killfeed').textContent;
           const evidence = {
             spot: [x, z],
-            tHpDrop: cs.bots.some(b => b.team === 'T' && b.hp < 100),
-            ctHpDrop: cs.bots.some(b => b.team === 'CT' && b.hp < 100),
-            crossKill: /(T|CT)-\d+ killed (T|CT)-\d+/.test(feed),
+            tHpDrop: t.hp < 100,
+            ctHpDrop: ct.hp < 100,
+            crossKill: feed.includes(`${t.name} killed ${ct.name}`)
+              || feed.includes(`${ct.name} killed ${t.name}`),
           };
           if (evidence.tHpDrop || evidence.ctHpDrop || evidence.crossKill) {
             evidence.tHp = t.hp;
@@ -780,17 +790,23 @@ async function runAllyCheck() {
 // bot paces at the wall face (no `blk`: sliding keeps ~0.7 of its step) and
 // never arrives. The stagnation latch hands the problem to the graph.
 //
-// Geometry: the player spawns at (0, 48); T-1 is teleported to ≈(−6, −10).
-// Their straight line crosses z = 0 inside the west mid wall's span
-// (x ∈ [−52.5, 2.5]), so straight-line steering cannot arrive; the wall's
-// east gap (x ≈ [2.5, 15]) sits metres away — close enough that a lucky juke
-// slide occasionally carries an UNlatched bot through it, which one main run
-// demonstrated after #52. So the claim here is deliberately mechanism-free:
-// ARRIVAL within the budget, polled per lesson 26 with the wall clock only in
-// the give-up bound. Whether the bot routed (#44), committed a strafe slide
-// around the wall end (#45/#43), or simply got lucky is recorded in sawRoute
-// for information, not asserted — policy isolation belongs to the unit suite;
-// this phase owns the outcome "the trap does not hold".
+// 6a reshaped the premise: a bot must never know a position it has not SEEN,
+// so the phase seeds travel knowledge through a real visual first. The bot
+// and player start together north of the mid wall, in the bot's +z FOV with
+// clear LOS, and the phase polls until the bot reports a current visual and
+// an observed endpoint. Only then — in one synchronous step, no respawn and
+// no brain reset, so the copied observation stays the bot's ONLY travel
+// knowledge — the same bot is teleported to the original south start and the
+// live player moves to an occluded north-side point. The copied observation
+// is now the frozen-memory goal behind the wall: the phase verifies the
+// intent endpoint never follows the live hidden eye and grading stays
+// non-shootable, while the original outcome claim stands — ARRIVAL across
+// the wall (feet z ≥ 2) within the wall-clock give-up bound, mechanism-free
+// (lesson 28): whether the bot routed (#44), committed a strafe slide around
+// the wall end (#45/#43), or simply got lucky is recorded in sawRoute for
+// information, not asserted — policy isolation belongs to the unit suite;
+// this phase owns the outcome "the trap does not hold against legitimate
+// memory".
 async function runFlatRouteCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -814,9 +830,17 @@ async function runFlatRouteCheck() {
       // for life and would poison everything measured after the teleport.
       const blocked = (x, z) => cs.colliders.some(c =>
         x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
-      const spot = [-6, -10];
-      if (blocked(...spot)) return { fail: 'teleport spot is inside geometry' };
-      bot.mesh.position.set(spot[0], 0, spot[1]);
+      const SEED_BOT = [-6, 4];    // north of the mid wall, facing +z
+      const SEED_EYE = [0, 16];    // player eye: north, in the bot's FOV, LOS clear
+      const SOUTH_START = [-6, -10]; // the original south-side start
+      const HIDDEN = [-40, 2];     // occluded north-side player after the teleport
+      for (const [label, [x, z]] of [['seed bot', SEED_BOT], ['seed player', SEED_EYE], ['south start', SOUTH_START], ['hidden player', HIDDEN]]) {
+        if (blocked(x, z)) return { fail: `${label} spot (${x}, ${z}) is inside geometry` };
+      }
+
+      // Seed the memory through a real visual: 6a forbids travel knowledge
+      // the bot has not observed.
+      bot.mesh.position.set(SEED_BOT[0], 0, SEED_BOT[1]);
       bot.vy = 0;      // clear vertical state carried from wherever it spawned,
       bot.onGround = true; // like Bot.spawnAtRandom does
       // path/leg are TS-private ("written here only" in bots.ts); the harness
@@ -825,18 +849,56 @@ async function runFlatRouteCheck() {
       // ROUTE_ABANDON drift check drops it a frame later.
       bot.path = [];
       bot.leg = 0;
+      cs.player.pos.set(SEED_EYE[0], 1.7, SEED_EYE[1]);
+      cs.player.vel.set(0, 0, 0);
+      let seen = false;
+      const tSeed = performance.now();
+      while (performance.now() - tSeed < 8000) {
+        await wait(100);
+        if (!bot.alive) return { fail: 'bot died before seeding memory' };
+        if (bot.targetLOS === true) { seen = true; break; }
+      }
+      if (!seen || !bot.targetEye) {
+        return {
+          fail: 'bot never acquired the seeded player',
+          los: bot.targetLOS,
+          endpoint: bot.targetEye !== null,
+          botAt: [+bot.mesh.position.x.toFixed(1), +bot.mesh.position.z.toFixed(1)],
+          playerAt: [+cs.player.pos.x.toFixed(1), +cs.player.pos.z.toFixed(1)],
+        };
+      }
+      const observed = bot.targetEye.clone();
+
+      // One synchronous setup step before the next animation frame: same
+      // bot, no respawn, no brain reset — the copied observation at (0, 16)
+      // must remain its only travel knowledge.
+      bot.mesh.position.set(SOUTH_START[0], 0, SOUTH_START[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      bot.path = [];
+      bot.leg = 0;
+      cs.player.pos.set(HIDDEN[0], 1.7, HIDDEN[1]);
+      cs.player.vel.set(0, 0, 0);
 
       const t0 = performance.now();
-      let sawRoute = false;
+      let sawRoute = false, maxDrift = 0, minLive = Infinity, gradeOk = true;
       while (performance.now() - t0 < 45000) { // give-up bound, not the claim
         await wait(150);
         if (!bot.alive) return { fail: 'bot died before crossing', sawRoute };
         if (bot.mode === 'route') sawRoute = true;
+        if (bot.targetEye) {
+          maxDrift = Math.max(maxDrift, bot.targetEye.distanceTo(observed));
+          minLive = Math.min(minLive, bot.targetEye.distanceTo(cs.player.pos));
+        }
+        if (bot.targetInRange || bot.targetLOS === true) gradeOk = false;
         if (bot.mesh.position.z >= 2) {
           return {
             crossedZ: +bot.mesh.position.z.toFixed(2),
             crossedX: +bot.mesh.position.x.toFixed(1),
             sawRoute,
+            maxEndpointDrift: +maxDrift.toFixed(2),
+            minLiveEyeDist: minLive === Infinity ? null : +minLive.toFixed(2),
+            gradeOk,
             elapsedS: +((performance.now() - t0) / 1000).toFixed(1),
           };
         }
@@ -846,9 +908,15 @@ async function runFlatRouteCheck() {
         finalX: +bot.mesh.position.x.toFixed(1),
         finalZ: +bot.mesh.position.z.toFixed(1),
         sawRoute,
+        maxEndpointDrift: +maxDrift.toFixed(2),
+        minLiveEyeDist: minLive === Infinity ? null : +minLive.toFixed(2),
+        gradeOk,
       };
     });
     if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
+    if (result.maxEndpointDrift > 1) throw new Error(`intent endpoint left the seeded observation — travel knowledge must be the frozen memory: ${JSON.stringify(result)}`);
+    if (result.minLiveEyeDist === null || result.minLiveEyeDist < 8) throw new Error(`intent endpoint followed the live hidden player: ${JSON.stringify(result)}`);
+    if (!result.gradeOk) throw new Error(`memory pursuit graded shootable: ${JSON.stringify(result)}`);
     console.log('[flatRoute] OK', JSON.stringify(result));
   } catch (e) {
     failures++;
@@ -858,109 +926,268 @@ async function runFlatRouteCheck() {
   await page.close();
 }
 
-// The corner trap (issues #43/#45): a bot holding BAND range of a target it
-// cannot see used to pace across the occlusion forever — inside the band the
-// radial term is exactly zero and normalize() rescales the pure-strafe step
-// to full speed, so the only things that reversed it were the juke (a
-// symmetric coin flip) and per-frame collision flips that cancelled out. The
-// bot never rounded the corner; it just re-probed every 0.3 s.
+// Vision awareness (tranche 6a), end to end in the browser.
 //
-// Geometry: the player is placed at (-40, 2), north of arena's west mid wall
-// (x ∈ [-52.5, 2.5], z ∈ [-1, 1]); T-1 at (-40, -10) on the south side.
-// Planar distance is 12 m — dead centre of the [7, 14] band hold — and the
-// straight line crosses the wall, so LOS cannot clear without leaving the
-// south side. The west tip is 12.5 m away and the east gap ~42.5 m away, so a
-// lucky uninterrupted westward juke could otherwise satisfy LOS by rounding
-// the nearby tip. The harness removes that false pass: its test-only reach
-// into the brain makes every frame request a juke flip. Without #45 those
-// flips cancel the drift; with blocked-sight suppression they are consumed
-// but ignored, so the strafe commits. The #44 latch may also take over once
-// committed sliding carries the bot beyond farBand against the wall — either
-// escape satisfies the claim, which is recorded via sawRoute for exactly
-// that reason.
+// The pure suite pins the perception/brain seams; this phase owns the WIRING:
+// that the executor's acquisition, the brain's memory/search/damage policy and
+// the shot gate agree through the real frame loop. One T bot, one wall — the
+// arena's west mid wall (x ∈ [-52.5, 2.5], z ∈ [-1, 1]) — and five staged
+// claims, each polled on wall-clock give-up bounds (lesson 26) rather than
+// slept:
 //
-// The acceptance sensor is PR #50's overlay readout: with the debug view up,
-// Bot.targetLOS carries a fresh sight probe each frame, so "regained a
-// firing solution" is directly observable rather than inferred from damage
-// rolls.
-async function runCornerTrapCheck() {
+//   1. hidden: the bot faces the player across the wall but holds — no intent
+//      endpoint, no shootable grading, no damage — past the spawn shot
+//      stagger, measured on the game clock the stagger runs on.
+//   2. acquisition: the player steps into FOV + LOS on the bot's side; the
+//      bot engages and its intent endpoint is the observed eye.
+//   3. frozen memory: sight breaks; the bot routes to the COPIED last-known
+//      eye — the endpoint must not follow the live player — and grades
+//      non-shootable throughout.
+//   4. investigation: arrival stands a still scan (endpoint up, non-shootable)
+//      until the 8 s forget timer expires into hold, which clears both.
+//   5. damage priority through the real firing path: one SMG round lands, and
+//      the SAME frame's decision is a bearing search — body and endpoint face
+//      the planar victim-to-player bearing, grading stays non-shootable, and
+//      the bot does not retaliate. Damage must outrank the simultaneous
+//      ordinary visual the 5 m setup supplies, for that one decision.
+//
+// Assertions stay on public behavior (mode, targetEye, the r/s grading bits,
+// hp, the public respawn()); no private brain state, and no claim about WHICH
+// routing mechanism produced an allowed outcome.
+async function runVisionAwarenessCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
   const mapErrors = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=150', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
-      const wait = ms => new Promise(r => setTimeout(r, ms));
-      cs.game.started = true;
-      cs.game.locked = true;
-      cs.player.hp = 100000;
-      // Use the testing facade directly: KeyV is correctly DEV-only, while
-      // this acceptance sensor also needs to work against `vite preview`.
-      cs.game.debugView = true; // fresh LOS probes
-      await wait(100);
-
-      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
-      if (!bot) return { fail: 'no live T bot' };
-
+      const frame = () => new Promise(r => requestAnimationFrame(r));
       const blocked = (x, z) => cs.colliders.some(c =>
         x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
-      if (blocked(-40, -10)) return { fail: 'bot spot inside geometry' };
-      // Player state writes are what respawn() itself does; vel zeroed so
-      // nothing integrates the old value onward.
-      cs.player.pos.set(-40, cs.player.pos.y, 2);
+      const BOT_SPOT = [-40, -10]; // south side of the west mid wall
+      const NORTH = [-40, 2];      // north side, hidden from the bot
+      const SOUTH = [-27.3, -2];   // south side: 15.0 m from the bot, dot 0.53 into its 120° FOV
+      for (const [label, [x, z]] of [['bot', BOT_SPOT], ['north player', NORTH], ['south player', SOUTH]]) {
+        if (blocked(x, z)) return { fail: `${label} spot (${x}, ${z}) is inside geometry` };
+      }
+      cs.player.hp = 100000;
+      cs.player.pos.set(NORTH[0], 1.7, NORTH[1]);
       cs.player.vel.set(0, 0, 0);
-      bot.mesh.position.set(-40, 0, -10);
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot || cs.bots.length !== 1) return { fail: `expected exactly one live T bot, got ${cs.bots.length}` };
+      bot.mesh.position.set(BOT_SPOT[0], 0, BOT_SPOT[1]);
       bot.vy = 0;
       bot.onGround = true;
-      bot.path = [];
-      bot.leg = 0;
-      // Test-only private-field reach, like path/leg above: make the first
-      // blocked probe land this frame and leave its post-step flip pointing
-      // WEST. A zero draw then requests another flip every simulated frame.
-      // The unfixed policy re-flips continuously; sightBlocked must suppress
-      // those requests for the bot to keep the westward commitment and escape.
-      bot.brain.rng = () => 0;
-      bot.brain.cooldown = 0;
-      bot.brain.strafeDir = -1;
-      bot.brain.sightBlocked = false;
-
-      const planar = Math.hypot(bot.mesh.position.x - cs.player.pos.x, bot.mesh.position.z - cs.player.pos.z);
-      if (Math.abs(planar - 12) > 1) return { fail: `setup drifted out of band: ${planar.toFixed(1)} m` };
-
-      const t0 = performance.now();
-      let sawRoute = false;
-      while (performance.now() - t0 < 30000) { // give-up bound, not the claim
-        await wait(150);
-        if (!bot.alive) return { fail: 'bot died before regaining sight', sawRoute };
-        if (bot.mode === 'route') sawRoute = true;
-        if (bot.targetLOS === true) {
-          return {
-            losRegained: true,
-            sawRoute,
-            elapsedS: +((performance.now() - t0) / 1000).toFixed(1),
-            finalX: +bot.mesh.position.x.toFixed(1),
-            finalZ: +bot.mesh.position.z.toFixed(1),
-          };
-        }
+      // T spawn convention faces +z — toward the hidden player. The plan's
+      // "faces toward the player" gate, asserted before any frame runs.
+      const toHidden = { x: NORTH[0] - BOT_SPOT[0], z: NORTH[1] - BOT_SPOT[1] };
+      const fx = Math.sin(bot.mesh.rotation.y), fz = Math.cos(bot.mesh.rotation.y);
+      if ((fx * toHidden.x + fz * toHidden.z) / Math.hypot(toHidden.x, toHidden.z) < 0.5) {
+        return { fail: 'bot does not face the hidden player at setup' };
       }
-      return {
-        fail: 'bot never regained line of sight',
-        finalX: +bot.mesh.position.x.toFixed(1),
-        finalZ: +bot.mesh.position.z.toFixed(1),
-        sawRoute,
+      cs.game.started = true;
+      cs.game.locked = true;
+      const simT0 = cs.gameTime.now();
+
+      // 1) Hidden: observe past the spawn stagger (<= 3 s game time).
+      let held = true, observed = 0;
+      const t1 = performance.now();
+      while (performance.now() - t1 < 20000 && cs.gameTime.now() - simT0 < 4) {
+        await frame();
+        observed++;
+        if (bot.mode !== 'hold') held = false;
+        if (cs.game.matchOver) return { fail: 'match ended while hidden' };
+      }
+      const hidden = {
+        observed, held, mode: bot.mode,
+        endpoint: bot.targetEye !== null,
+        inRange: bot.targetInRange,
+        los: bot.targetLOS,
+        playerHpLost: 100000 - cs.player.hp,
+        simS: +(cs.gameTime.now() - simT0).toFixed(2),
       };
+      if (hidden.simS < 4) return { fail: 'simulation too slow to cover the spawn stagger', hidden };
+      if (!hidden.held || hidden.mode !== 'hold') return { fail: 'bot left hold while hidden', hidden };
+      if (hidden.endpoint) return { fail: 'hidden bot exposed an intent endpoint', hidden };
+      if (hidden.inRange || hidden.los === true) return { fail: 'hidden bot graded a current visual', hidden };
+      if (hidden.playerHpLost !== 0) return { fail: 'hidden bot damaged the player', hidden };
+
+      // 2) Acquisition: into the FOV on the bot's side of the wall, ~15 m out.
+      cs.player.pos.set(SOUTH[0], 1.7, SOUTH[1]);
+      cs.player.vel.set(0, 0, 0);
+      let acquired = false;
+      const t2 = performance.now();
+      while (performance.now() - t2 < 8000) {
+        await frame();
+        if (bot.targetLOS === true) { acquired = true; break; }
+        if (cs.game.matchOver) return { fail: 'match ended during acquisition' };
+      }
+      const seen = {
+        acquired,
+        mode: bot.mode,
+        endpoint: bot.targetEye ? { x: +bot.targetEye.x.toFixed(2), y: +bot.targetEye.y.toFixed(2), z: +bot.targetEye.z.toFixed(2) } : null,
+      };
+      if (!acquired) return { fail: 'bot never acquired a player in FOV+LOS', seen };
+      if (seen.mode !== 'engage') return { fail: `acquisition did not engage (mode ${seen.mode})`, seen };
+      if (!seen.endpoint) return { fail: 'engaged bot exposed no intent endpoint', seen };
+
+      // 3) Frozen memory: break sight north; the pursuit endpoint must stay
+      //    pinned to the COPIED pre-break eye and grade non-shootable.
+      const preBreak = bot.targetEye.clone();
+      cs.player.pos.set(NORTH[0], 1.7, NORTH[1]);
+      cs.player.vel.set(0, 0, 0);
+      let routed = false;
+      const t3 = performance.now();
+      while (performance.now() - t3 < 10000) {
+        await frame();
+        if (bot.mode === 'route') { routed = true; break; }
+        if (bot.mode === 'search' || bot.mode === 'hold') break;
+        if (cs.game.matchOver) return { fail: 'match ended while breaking sight' };
+      }
+      let maxDev = 0, minLive = Infinity, gradeOk = true;
+      const t3b = performance.now();
+      while (performance.now() - t3b < 20000) {
+        await frame();
+        if (bot.mode !== 'route') break; // arrival hands over to the scan
+        if (bot.targetEye) {
+          maxDev = Math.max(maxDev, bot.targetEye.distanceTo(preBreak));
+          minLive = Math.min(minLive, bot.targetEye.distanceTo(cs.player.pos));
+        }
+        if (bot.targetInRange || bot.targetLOS === true) gradeOk = false;
+        if (cs.game.matchOver) return { fail: 'match ended during memory pursuit' };
+      }
+      const mem = {
+        routed, mode: bot.mode,
+        maxEndpointDrift: +maxDev.toFixed(2),
+        minLiveEyeDist: minLive === Infinity ? null : +minLive.toFixed(2),
+        gradeOk,
+      };
+      if (!routed) return { fail: `sight loss never produced a route (mode ${mem.mode})`, mem };
+      if (mem.maxEndpointDrift > 1) return { fail: 'pursuit endpoint left the frozen last-known eye', mem };
+      if (mem.minLiveEyeDist === null || mem.minLiveEyeDist < 8) return { fail: 'pursuit endpoint followed the live player', mem };
+      if (!gradeOk) return { fail: 'memory pursuit graded shootable', mem };
+
+      // 4) Investigation: arrival -> standing scan -> forget (8 s) -> hold.
+      let searched = bot.mode === 'search';
+      const t4 = performance.now();
+      while (!searched && performance.now() - t4 < 15000) {
+        await frame();
+        if (bot.mode === 'search') searched = true;
+        else if (bot.mode === 'hold') break;
+        if (cs.game.matchOver) return { fail: 'match ended before the scan' };
+      }
+      if (!searched) return { fail: `arrival never entered search (mode ${bot.mode})` };
+      const scanPos = bot.mesh.position.clone();
+      const scanT = cs.gameTime.now();
+      let drift = 0, endpointUp = true, gradeOk2 = true;
+      const t4b = performance.now();
+      while (performance.now() - t4b < 30000) {
+        await frame();
+        drift = Math.max(drift, bot.mesh.position.distanceTo(scanPos));
+        if (bot.mode === 'hold') break;
+        if (bot.mode !== 'search') { endpointUp = false; break; }
+        if (bot.targetEye === null) endpointUp = false;
+        if (bot.targetInRange) gradeOk2 = false;
+        if (cs.game.matchOver) return { fail: 'match ended during the scan' };
+      }
+      const scan = {
+        mode: bot.mode,
+        drift: +drift.toFixed(2),
+        endpointUp, gradeOk: gradeOk2,
+        scanGameS: +(cs.gameTime.now() - scanT).toFixed(2),
+      };
+      if (scan.mode !== 'hold') return { fail: 'search never expired to hold', scan };
+      if (scan.drift > 0.4) return { fail: 'search did not stand still', scan };
+      if (!scan.endpointUp) return { fail: 'search lost its scan endpoint', scan };
+      if (!scan.gradeOk) return { fail: 'search graded shootable', scan };
+      if (bot.targetEye !== null) return { fail: 'hold kept an intent endpoint', scan };
+      if (bot.targetInRange || bot.targetLOS === true) return { fail: 'hold kept shootable grading', scan };
+
+      // 5) Damage priority through the real firing path: reset the SAME bot
+      //    via its public respawn(), stand 5 m apart in open arena, and fire
+      //    the SMG until one real round lands. The weapon's inherent rest
+      //    cone is NOT zero — it spreads ~1.4 cm at this range, which a
+      //    torso hit absorbs deterministically — so the setup forces the
+      //    situational spread layers to rest instead of pretending the gun
+      //    is a ray. The respawned T faces +z, straight at the player, so
+      //    the firing frame carries an eligible FOV/range/LOS candidate:
+      //    the simultaneous ordinary visual the incoming-fire bearing must
+      //    outrank for that one decision.
+      bot.respawn();
+      bot.hp = 100000; // the hit must be nonlethal
+      const BOT5 = [10, 5], PLAYER5 = [10, 10];
+      if (blocked(...BOT5) || blocked(...PLAYER5)) return { fail: 'damage-priority spots inside geometry' };
+      bot.mesh.position.set(BOT5[0], 0, BOT5[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      cs.player.pos.set(PLAYER5[0], 1.7, PLAYER5[1]);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = 0; // forward is -z: straight at the bot
+      cs.game.pitch = 0;
+      cs.weapon.mag = 30;
+      cs.weapon.lastShot = -9;
+      const playerHpBefore = cs.player.hp;
+      const botHpBefore = bot.hp;
+      cs.game.shooting = true;
+      let fired = false;
+      const t5 = performance.now();
+      while (performance.now() - t5 < 3000) {
+        await frame();
+        if (bot.hp < botHpBefore) { fired = true; break; }
+      }
+      // Freeze on the firing frame's edge: the reaction under test happened in
+      // the SAME frame (updateWeapon damages before updateBots decides).
+      cs.game.shooting = false;
+      cs.game.locked = false;
+      const bx = Math.sin(bot.mesh.rotation.y), bz = Math.cos(bot.mesh.rotation.y);
+      const bear = { x: PLAYER5[0] - bot.mesh.position.x, z: PLAYER5[1] - bot.mesh.position.z };
+      const bl = Math.hypot(bear.x, bear.z);
+      bear.x /= bl; bear.z /= bl;
+      const bodyDot = bx * bear.x + bz * bear.z;
+      let endDot = null, endLen = null;
+      if (bot.targetEye) {
+        const ex = bot.targetEye.x - bot.mesh.position.x, ez = bot.targetEye.z - bot.mesh.position.z;
+        endLen = Math.hypot(ex, ez);
+        endDot = endLen > 1e-6 ? (ex * bear.x + ez * bear.z) / endLen : null;
+      }
+      const dmg = {
+        fired,
+        botHp: +bot.hp.toFixed(1),
+        mode: bot.mode,
+        bodyDot: +bodyDot.toFixed(3),
+        endDot: endDot === null ? null : +endDot.toFixed(3),
+        endLen: endLen === null ? null : +endLen.toFixed(2),
+        inRange: bot.targetInRange,
+        los: bot.targetLOS,
+        playerHpLost: playerHpBefore - cs.player.hp,
+      };
+      if (!fired) return { fail: 'the SMG round never landed', dmg };
+      if (dmg.mode !== 'search') return { fail: `damage did not start a bearing search (mode ${dmg.mode})`, dmg };
+      if (dmg.bodyDot < 0.99) return { fail: 'body did not face the incoming bearing', dmg };
+      if (dmg.endDot === null || dmg.endDot < 0.98 || Math.abs(dmg.endLen - 1) > 0.2) {
+        return { fail: 'intent endpoint did not face the incoming bearing', dmg };
+      }
+      if (dmg.inRange) return { fail: 'damage reaction graded shootable range', dmg };
+      // EXACTLY false, not merely "not true": false proves acquisition spent
+      // the frame's probe on the eligible 5 m candidate but the
+      // higher-priority damage intent discarded its focus agreement (null
+      // would mean no probe was ever attempted, which would make the
+      // "simultaneous visual" claim vacuous).
+      if (dmg.los !== false) return { fail: 'the damage frame did not discard the simultaneous visual (targetLOS must be exactly false)', dmg };
+      if (dmg.playerHpLost !== 0) return { fail: 'the bot retaliated on the damage-priority frame', dmg };
+      return { hiddenSimS: hidden.simS, endpoint: seen.endpoint, mem, scan, dmg };
     });
     if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
-    console.log('[cornerTrap] OK', JSON.stringify(result));
+    console.log('[vision] OK', JSON.stringify(result));
   } catch (e) {
     failures++;
-    console.log(`[cornerTrap] FAIL: ${e.message}`);
+    console.log(`[vision] FAIL: ${e.message}`);
   }
-  errors.push(...mapErrors.map(e => `[cornerTrap] ${e}`));
+  errors.push(...mapErrors.map(e => `[vision] ${e}`));
   await page.close();
 }
 
@@ -1217,6 +1444,16 @@ async function runNavGraphCheck() {
 // AGAIN on re-press, which pins the inactive path clearing hud.ts's string
 // cache (an unchanged string must rewrite, not early-return against a hidden
 // element).
+//
+// The overlay is a NON-INFLUENCING consumer of gameplay perception: it reads
+// the already-computed result and controls neither its cost nor its timing.
+// So instead of the pre-6a probe-count census (which assumed the raycast was
+// gated on session.debugView), the phase captures the bot's gameplay-
+// perception state — mode, targetLOS, targetInRange, intent endpoint —
+// before, while on, after off, and after re-toggle, and asserts the bot
+// stays visibly engaged and shootable across all four samples. Toggling the
+// presentation must neither enable nor disable acquisition nor mutate its
+// gates.
 async function runDebugViewCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -1225,7 +1462,7 @@ async function runDebugViewCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=2&ctbots=1', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1233,6 +1470,40 @@ async function runDebugViewCheck() {
       cs.game.locked = true;
       cs.player.hp = 100000;
       const frames = async n => { for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r)); };
+      // One T bot, no CTs: unrelated bot fights would make the perception
+      // census noisy. North open ground on the elevation map: the two-story
+      // building spans z [-12, 12], so both spots below sit clear of it.
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      const BOT_SPOT = [0, 35], PLAYER_EYE = [0, 48];
+      if (blocked(...BOT_SPOT) || blocked(...PLAYER_EYE)) {
+        return { fail: `debug-view spot inside geometry: bot ${JSON.stringify(BOT_SPOT)}, player ${JSON.stringify(PLAYER_EYE)}` };
+      }
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+      bot.mesh.position.set(BOT_SPOT[0], 0, BOT_SPOT[1]);
+      bot.vy = 0;
+      bot.onGround = true;
+      bot.path = [];
+      bot.leg = 0;
+      cs.player.pos.set(PLAYER_EYE[0], 1.7, PLAYER_EYE[1]);
+      cs.player.vel.set(0, 0, 0);
+      // The T faces +z, straight at the player 13 m away in the open — the
+      // acquisition must exist BEFORE any V press, on gameplay perception
+      // alone (the overlay reads that result; it never creates it).
+      let seen = false;
+      const tSee = performance.now();
+      while (performance.now() - tSee < 8000) {
+        await frames(1);
+        if (bot.targetLOS === true) { seen = true; break; }
+      }
+      if (!seen) {
+        return {
+          fail: 'bot never acquired the player before any V press',
+          los: bot.targetLOS,
+          mode: bot.mode,
+        };
+      }
       // The scene is deliberately not on __cs, and widening that hook for a
       // DEV view is not worth it — every bot is scene-parented, so one bot's
       // mesh.parent IS the scene.
@@ -1253,48 +1524,44 @@ async function runDebugViewCheck() {
         const el = document.getElementById('botDebug');
         return el && { shown: getComputedStyle(el).display !== 'none', text: el.textContent };
       };
-      // The shot-gate readout (issue #46): while the view is up, bots pay one
-      // LOS raycast per frame and report it; while it is down, live bots must
-      // hold NO fresh probe — the raycast is DEV-only and lazy everywhere else.
-      // Dead bots are excluded: their update() early-returns, so a corpse that
-      // died mid-overlay legitimately keeps the last value it took.
-      const gateCensus = () => {
-        let probed = 0, alive = 0;
-        for (const b of cs.bots) {
-          if (!b.alive) continue;
-          alive++;
-          if (b.targetLOS !== null) probed++;
-        }
-        return { probed, alive };
-      };
+      // Gameplay-perception census: what the bot knows, independent of the
+      // overlay's visibility. No probe counts, no debug-only raycast claims.
+      const census = () => ({
+        mode: bot.mode,
+        los: bot.targetLOS,
+        inRange: bot.targetInRange,
+        endpoint: bot.targetEye !== null,
+      });
       const before = wireframeCount();
       const roBefore = readoutState();
-      const gatesBefore = gateCensus();
+      const censusBefore = census();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(30);
       const on = wireframeCount();
       const roOn = readoutState();
-      const gatesOn = gateCensus();
+      const censusOn = census();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(10);
       const off = wireframeCount();
       const roOff = readoutState();
-      const gatesOff = gateCensus();
+      const censusOff = census();
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV' }));
       await frames(10);
       const roBackOn = readoutState();
-      const gatesBackOn = gateCensus();
-      return { before, on, off, bots: cs.bots.length, roBefore, roOn, roOff, roBackOn,
-               gatesBefore, gatesOn, gatesOff, gatesBackOn };
+      const censusBackOn = census();
+      return { before, on, off, roBefore, roOn, roOff, roBackOn,
+               censusBefore, censusOn, censusOff, censusBackOn };
     });
+    if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
     if (result.before === -1) throw new Error('no bot mesh to reach the scene through');
     if (result.before !== 0) throw new Error(`level geometry was already wireframed before the toggle: ${JSON.stringify(result)}`);
     if (result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
     if (result.off !== 0) throw new Error(`toggling the debug view off left ${result.off} materials wireframed: ${JSON.stringify(result)}`);
-    if (result.gatesBefore.probed !== 0) throw new Error(`bots took LOS probes before any V press — the raycast must be gated on session.debugView: ${JSON.stringify(result)}`);
-    if (result.gatesOn.alive > 0 && result.gatesOn.probed === 0) throw new Error(`no live bot reported a sight probe while the debug view was up: ${JSON.stringify(result)}`);
-    if (result.gatesOff.probed !== 0) throw new Error(`live bots kept fresh LOS probes after the debug view went down: ${JSON.stringify(result)}`);
-    if (result.gatesBackOn.alive > 0 && result.gatesBackOn.probed === 0) throw new Error(`no live bot resumed sight probes on re-toggle: ${JSON.stringify(result)}`);
+    for (const [label, census] of [['before', result.censusBefore], ['on', result.censusOn], ['off', result.censusOff], ['re-toggle', result.censusBackOn]]) {
+      if (!census || census.mode !== 'engage' || census.los !== true || !census.inRange || !census.endpoint) {
+        throw new Error(`debug-view toggling changed gameplay perception at "${label}" — the overlay must not enable or disable acquisition: ${JSON.stringify({ ...result, label })}`);
+      }
+    }
     if (!result.roBefore || result.roBefore.shown) throw new Error(`bot readout was visible before any V press: ${JSON.stringify(result)}`);
     if (!result.roOn || !result.roOn.shown || result.roOn.text === '') throw new Error(`bot readout did not show with text while the debug view was up: ${JSON.stringify(result)}`);
     if (!result.roOff || result.roOff.shown) throw new Error(`bot readout stayed visible after the debug view went down: ${JSON.stringify(result)}`);
@@ -1649,7 +1916,7 @@ try {
   await runConfigCheck();
   await runAllyCheck();
   await runFlatRouteCheck();
-  await runCornerTrapCheck();
+  await runVisionAwarenessCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();

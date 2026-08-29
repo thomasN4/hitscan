@@ -37,6 +37,11 @@ height, navigation and senses work recorded below):
   `bots.ts` holds none.
 - **LOS is a thunk** (`BrainView.seeTarget`): the raycast is paid at most
   once per cooldown window, pinned by test.
+  *(In-flight 6a annotation: this was the pre-6a shot-gate design.
+  `BrainView.seeTarget` is retired; every living bot now runs
+  `acquireVisual()` before `decide()`, with cheap rejections spending no ray
+  and an eligible look spending at most one ray per frame. The brain receives
+  only the resulting zero-or-one copied `visual` observation.)*
 - **Ballistics are brain params.** Hit-chance curve and damage spread live
   in `BrainParams`, so future profiles vary accuracy without touching the
   executor.
@@ -44,6 +49,11 @@ height, navigation and senses work recorded below):
   OR CT); CTs target Ts. The player counts as CT-side. The player entry
   stays listed even while dead so `ctbots=0` behavior is bit-identical to
   pre-team days (chase continues, shooting gated by `targetAlive`).
+  *(In-flight 6a annotation: the team candidate sets survive, but nearest-
+  position targeting and `targetAlive` do not. Perception probes the tracked
+  identity first, otherwise fairly rotates through cheaply eligible opposing
+  candidates. A dead player remains listed only as a cheap rejection; without
+  another observation the bot holds and never chases the corpse.)*
 - **Friendly fire off.** Ally bodies stop player bullets (impact puff, no
   hitmarker, no damage). Bot-vs-bot fire only ever flows cross-team by
   construction.
@@ -350,6 +360,19 @@ target beyond engage range — while the hue stays the mode's.
   production preview for smoke diagnostics; the cost is paid only while that
   flag is up. Revisit only if profiling ever shows it.
 
+*(In-flight 6a annotation: the record above describes the pre-6a diagnostic
+architecture and is no longer the live contract. Tranche 6a makes visual
+acquisition gameplay: every living `Bot.update()` calls `acquireVisual()`
+regardless of `session.debugView`; cheap rejection may spend zero rays, and an
+eligible look spends at most one. `targetInRange`/`targetLOS` are derived every
+frame from that acquisition and its agreement with the brain intent, while the
+overlay and HUD only consume them. Consequently live data cannot produce
+`r-`: `rs` is an agreeing current visual inside engage range, `-s` is one
+beyond it, and `--` covers blocked or unprobed looks plus hold, memory and
+search. `[debugView]` now asserts that its toggles leave the gameplay-
+perception census unchanged; the pre-6a probe-count assertions are retired.
+No merge claim is made here.)*
+
 ### Flat routing (issue #44; PR #52)
 
 The nav graph has covered the whole map since tranche 5, but the brain only
@@ -449,6 +472,18 @@ but ignored and the bot commits. That was the point of bundling: neither half
 gets credit alone, since #43's per-frame flips would have cancelled any
 commitment #45 tried to make.
 
+*(In-flight 6a annotation: tranche 6a retires the `[cornerTrap]` smoke
+fixture. Its setup deliberately hands a bot an occluded opponent it has
+never seen and forces the pre-6a `sightBlocked`/juke machinery against it —
+under 6a's non-omniscient policy that target is intentionally unknowable
+and the only correct result is `hold`, which the `[vision]` phase now
+covers end to end, including the damage-priority frame. The hidden-behavior
+claim it carried is replaced by `[vision]`, and cross-wall navigation
+survives in `[flatRoute]` through observed, frozen memory. #43's contact-edge
+commitment remains pinned at the pure/unit layer; #45's `sightBlocked` branch
+is retired because blocked sight now yields no current visual for band
+steering to act on. No merge or PR number is claimed here.)*
+
 ## Planned
 
 ### Tranche 6 — senses
@@ -464,6 +499,9 @@ Land this in two implementation PRs. **6a establishes sight, memory and search
 first; 6b feeds sound into that settled stimulus seam.** Combining them would
 make a failed pursuit ambiguous between vision, memory, hearing and routing at
 the exact point the tranche is trying to make those causes observable.
+
+**Status: 6a is implementation-in-flight in this PR (not merged); 6b remains
+planned and unstarted.**
 
 #### 6a — vision, awareness and search
 
@@ -496,9 +534,10 @@ whether the look succeeds.
   rejection, continue the rotation until one eligible candidate spends the
   raycast or every opponent has been examined; an out-of-cone remembered target
   must not starve acquisition of somebody standing in view.
-- Do not reuse #46's diagnostic result as gameplay perception. The overlay can
-  be off, and when it is on its eager probe has a deliberately different cost
-  contract. The perception result may feed the display, never the reverse.
+- Retire #46's separate diagnostic probe rather than letting the display drive
+  gameplay. Visual acquisition runs independently of the overlay and feeds the
+  `targetInRange`/`targetLOS` readouts as a non-influencing consumer; the
+  perception result may feed the display, never the reverse.
 - A successful probe produces one visual observation: identity, copied feet
   and eye positions, planar/3D distance and rise. Failure produces no fresh
   target position. The currently identified target remains remembered at its
@@ -594,6 +633,62 @@ not tracked or shot; crossing into FOV + LOS acquires; breaking LOS routes to
 the frozen point; arrival scans then holds; and damaging a bot turns it toward
 the incoming bearing without granting immediate retaliation.
 
+#### 6a implementation record (in flight — not merged, no PR number)
+
+What the in-flight implementation built against the spec above:
+
+- **Engine-free perception seam** — `sim/perception.ts`: stable perception
+  identities (`'player'` / bot id), 120° horizontal FOV and 60 m range as
+  cheap rejections that never spend the ray, a tracked-first then
+  fair-rotation candidate schedule, and at most one LOS raycast per living
+  bot per frame through an injected callback — the same pure-seam pattern as
+  the rest of `sim/`.
+- **Copied brain memory/search/damage state** — `DefaultBrain` clones the
+  observed feet/eye into its memory on every successful look, pursues the
+  copy on sight loss (`route` until the 1 m arrival or a confirmed dead end),
+  then scans three headings (0.75 s each) and forgets 8 s after search entry
+  into `hold`. A direction-only incoming-fire bearing outranks a same-frame
+  visual for one decision, starts an in-place search, and can never
+  authorize a shot.
+- **Executor-only candidate/LOS/routing/shot agreement** — `bots.ts` owns the
+  candidate list, the raycast, route realization and the trigger: the brain
+  receives zero or one observation and never a position it did not see, and a
+  shot is realized only when the intent's focus id, the same frame's
+  observation id and the range gate all agree. Memory, search and bearing
+  intents are structurally unable to fire.
+- **Centralized respawn/debug observability** — every per-life field (body,
+  placement, brain policy state, perception cursor, cached route and
+  cooldown, mode and the `targetEye`/`targetInRange`/`targetLOS` readouts)
+  resets in `Bot.respawn()`, and those same public fields are what the DEV
+  overlay and HUD readout render.
+- **Pure tests** — the Node suite stands at 490 tests in 24 files, including
+  the FOV/range boundaries, one-ray budget, copied-memory, route-to-search
+  arrival, no-route fallback, scan cadence, forget expiry, damage priority,
+  no-memory-shot and respawn-reset pins.
+- **Browser acceptance** — the new `[vision]` smoke phase drives the wiring
+  end to end on the arena: hidden across the west mid wall → `hold` with no
+  intent endpoint, no shootable grading and no damage past the spawn
+  stagger; stepping into FOV+LOS → `engage` with the observed eye recorded;
+  breaking LOS → `route` pinned to the copied pre-break eye (never the live
+  player), non-shootable throughout; arrival → a standing `search` with a
+  scan endpoint that expires to `hold` clearing both; and a real SMG hit
+  through the firing path → a same-frame bearing `search` with no
+  retaliation. The damage frame's 5 m setup hands the bot an eligible
+  simultaneous ordinary visual, and the assertion is `targetLOS === false`
+  EXACTLY — proof the frame spent its perception probe and the
+  higher-priority incoming-fire bearing discarded the look's focus
+  agreement, rather than the cheaper reading that no probe was attempted.
+  The cross-wall routing outcome in `[flatRoute]` is reseeded to match 6a:
+  the bot first acquires the player through a real visual north of the mid
+  wall, then runs the original cross-wall claim on that copied observation
+  alone, with the intent endpoint held separated from the live hidden
+  player and grading non-shootable. The pre-6a `[cornerTrap]` fixture is
+  retired (its premise contradicts non-omniscience; see the annotation
+  beside it above), and `[debugView]`'s toggling is re-verified as a
+  non-influencing consumer: the gameplay-perception census (mode, target,
+  grading, endpoint) must be unchanged across the V toggles, replacing the
+  pre-6a probe-count assertions.
+
 #### 6b — hearing and sound events
 
 Add an engine-free `sim/soundEvents.ts` with a fixed-capacity **256-entry ring
@@ -658,10 +753,11 @@ already heard event.
 - **#44 (flat routing)** lets a bot reach an arbitrary remembered or heard
   position behind same-level walls. Without its stagnation latch, "search"
   would reintroduce the wall pacing that navigation already measured and fixed.
-- **#43 + #45 (committed band steering)** stop per-frame contact flips and
-  stand down random jukes while sight is blocked. LOS-gated awareness creates
-  more occluder approaches by design; without those fixes, searchers would
-  oscillate at the cover they are meant to clear.
+- **#43 (committed contact steering)** stops per-frame contact flips and still
+  applies whenever a current visual drives band steering. #45's blocked-sight
+  juke suppression is intentionally retired by 6a: blocked sight supplies no
+  current target, while remembered and search travel use their own committed
+  routing/slide machinery.
 
 6a therefore lands before 6b, and each receives its own feature PR, unit pins,
 smoke phase and playtest record. The document PR that records this plan changes

@@ -36,7 +36,8 @@ import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
 import { DefaultBrain, type BrainMode } from './sim/botBrains';
 import { acquireVisual, type PerceptionId } from './sim/perception';
-import { NAV_RADIUS, route } from './nav';
+import { NAV_RADIUS, route, navGrid } from './nav';
+import { nearestNode, navNode, pickPatrolNode } from './sim/navGrid';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -64,7 +65,7 @@ const MAX_AIM_PITCH = 1.2;
  */
 const WAYPOINT_REACHED = 1;
 
-/** Seconds between route recomputes for one bot, while it wants a route. */
+/** Seconds between route recomputes while pursuing a moving goal. */
 const ROUTE_INTERVAL = 1;
 
 /**
@@ -230,11 +231,22 @@ export class Bot implements BotShape {
   private routeCooldown = 0;
   /**
    * Which pursuit the cached route belongs to — 'v' (current-visual) or 'm'
-   * (memory) pursuit, plus the focus id. A remembered goal must not inherit
-   * a path computed for a different pursuit or a different target: the key
-   * is checked on every route request and the cache dropped on any change.
+   * (memory) pursuit, plus the focus id — or 'p' for a patrol leg. A
+   * remembered goal must not inherit a path computed for a different pursuit
+   * or a different target: the key is checked on every route request and the
+   * cache dropped on any change.
    */
   private routeKey: string | null = null;
+  /**
+   * World-space patrol node this bot is walking toward, or null when idle in
+   * the patrol pause. Selection is LAZY: the node is drawn (pure selector
+   * under the graph's rng contract) only when the brain's pause ends, and it
+   * is accepted only when the budgeted A* produces a route — an unreachable
+   * candidate is discarded and a fresh one is picked after the brain's next
+   * one-second pause. Cleared by any interrupt (visual, damage, hold) and by
+   * respawn.
+   */
+  private patrolGoal: THREE.Vector3 | null = null;
 
   constructor(team: Team = 'T') {
     // Plain assignments, not a parameter property: the `name` derivation must
@@ -334,6 +346,7 @@ export class Bot implements BotShape {
     this.brain.onRespawn();
     this.perceptionCursor = 0;
     this.clearRouteCache();
+    this.patrolGoal = null;
     this.routeCooldown = 0;
     this.mode = 'hold';
     this.targetEye = null;
@@ -410,15 +423,23 @@ export class Bot implements BotShape {
         // cache: a frame WITH an observation routes at what it sees; a frame
         // WITHOUT one (memory pursuit) routes at the frozen remembered feet.
         nextWaypoint: (goal) => this.waypointToward(goal, acquisition.observation !== null),
+        // The patrol analogue: lazily selects a map-wide patrol node and
+        // routes to it under the same one-A-star-per-frame budget. Only paid
+        // when the brain has already decided it has nothing better to do.
+        nextPatrolWaypoint: () => this.nextPatrolWaypoint(),
       },
       dt,
     );
 
     // Route-cache ownership: whenever the intent leaves route/engage — a
     // search or hold of any kind (arrival, dead end, damage reaction,
-    // forget) — drop the cached path so a later, unrelated goal cannot
-    // inherit it.
+    // forget, patrol pause) — drop the cached path so a later, unrelated
+    // goal cannot inherit it. And whenever the intent leaves patrol — a
+    // visual, damage reaction, search or hold interrupted it — the patrol
+    // goal is dead: drop it (and any patrol-owned path) so a later leg
+    // cannot inherit a stale destination.
     if (intent.mode === 'search' || intent.mode === 'hold') this.clearRouteCache();
+    if (intent.mode !== 'patrol') this.clearPatrolGoal();
 
     // Horizontal gate: the SAME axis-separated slide the player uses, with
     // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
@@ -497,11 +518,65 @@ export class Bot implements BotShape {
    * raycast and the graph, the brain owns the trigger and the route decision.
    */
   private waypointToward(goal: THREE.Vector3, visualPursuit: boolean): THREE.Vector3 | undefined | null {
-    const here = this.mesh.position;
     // A remembered goal must not inherit a path computed for a different
     // pursuit ('v' vs 'm') or a different target (focus id): key the cache
     // and drop it on any mismatch.
     const key = `${visualPursuit ? 'v' : 'm'}:${this.brain.focusId ?? '*'}`;
+    return this.waypointOnRoute(goal, key, false);
+  }
+
+  /**
+   * Lazy patrol leg: select a map-wide patrol node (pure, cheap) when none is
+   * active, then route to it under the SAME cached-path/budget machinery the
+   * combat pursuits use — with a distinct `'p'` route-owner key so changing
+   * owners clears stale paths.
+   *
+   * A candidate is accepted only when the budgeted A* produces a route; an
+   * unreachable one is discarded (the brain restarts its one-second pause and
+   * the next request picks a fresh node). Reaching the final node ends the
+   * leg: the goal and route are cleared and null is returned, which restarts
+   * the brain's one-second pause. A deferred budget keeps the candidate and
+   * returns undefined — the brain waits in `patrol` and asks again.
+   */
+  private nextPatrolWaypoint(): THREE.Vector3 | undefined | null {
+    const grid = navGrid();
+    if (grid === undefined || grid.count === 0) return null;
+    if (this.patrolGoal === null) {
+      const current = nearestNode(grid, this.mesh.position);
+      const idx = pickPatrolNode(grid, this.mesh.position, current, Math.random);
+      if (idx < 0) return null;
+      const n = navNode(grid, idx);
+      this.patrolGoal = new THREE.Vector3(n.x, n.y, n.z);
+      this.clearRouteCache();
+    }
+    const result = this.waypointOnRoute(this.patrolGoal, 'p', true);
+    if (result === null) {
+      // Arrival at the final patrol node, or a confirmed-unreachable
+      // candidate: either way the goal is spent — the brain's one-second
+      // pause runs, and the next request selects a fresh node.
+      this.clearPatrolGoal();
+    }
+    return result;
+  }
+
+  /**
+   * Shared route realization for every pursuit that walks the graph: key the
+   * cache by `key` (dropping stale paths on owner change), abandon drifted
+   * paths, recompute under the one-A-star-per-frame budget, then hand back
+   * the relative planar waypoint — or `null` (no route / zero-length leg) or
+   * `undefined` (budget deferred). Moving pursuit goals refresh periodically;
+   * an immutable patrol goal keeps its valid path until arrival or abandon.
+   *
+   * `patrolArrival` extends the one-metre waypoint threshold to the FINAL
+   * node: standing within it ends the patrol (clear route, return null)
+   * instead of pushing into the goal forever.
+   */
+  private waypointOnRoute(
+    goal: THREE.Vector3,
+    key: string,
+    patrolArrival: boolean,
+  ): THREE.Vector3 | undefined | null {
+    const here = this.mesh.position;
     if (this.routeKey !== key) {
       this.routeKey = key;
       this.path = [];
@@ -516,7 +591,8 @@ export class Bot implements BotShape {
         this.leg = 0;
       }
     }
-    const wantsRecompute = this.path.length === 0 || this.routeCooldown <= 0;
+    const wantsRecompute = this.path.length === 0
+      || (!patrolArrival && this.routeCooldown <= 0);
     let recomputed = false;
     if (wantsRecompute && routeBudget > 0) {
       // One A* per frame across all bots; whoever misses out keeps walking
@@ -548,6 +624,12 @@ export class Bot implements BotShape {
     }
     const w = this.path[this.leg]!;
     const to = new THREE.Vector3(w.x - here.x, 0, w.z - here.z);
+    // A patrol's FINAL node within the one-metre threshold IS the arrival:
+    // the leg is over, the goal and route die, and the brain stands down.
+    if (patrolArrival && this.leg === this.path.length - 1 && to.length() <= WAYPOINT_REACHED) {
+      this.clearRouteCache();
+      return null;
+    }
     return to.lengthSq() < 1e-8 ? null : to;
   }
 
@@ -556,6 +638,17 @@ export class Bot implements BotShape {
     this.path = [];
     this.leg = 0;
     this.routeKey = null;
+  }
+
+  /**
+   * End the current patrol leg: the goal dies, and any path cached for the
+   * patrol owner ('p') with it. Called when an intent leaves patrol — a
+   * visual or damage reaction, a search, a hold, a respawn — and when the
+   * leg itself ends (arrival or a confirmed-unreachable candidate).
+   */
+  private clearPatrolGoal(): void {
+    this.patrolGoal = null;
+    if (this.routeKey === 'p') this.clearRouteCache();
   }
 
   /**

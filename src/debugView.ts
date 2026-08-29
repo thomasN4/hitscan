@@ -50,19 +50,23 @@ const ROUTE_COLOR: Record<Team, readonly [number, number, number]> = {
 };
 
 /**
- * Intent-line colours, by brain mode — all four, exhaustively, since a
+ * Intent-line colours, by brain mode — all five, exhaustively, since a
  * Record<BrainMode, …> fails to compile when a mode is added without a
  * colour. `engage` and `route` are the two active modes the hysteresis in
  * botBrains.ts:DefaultBrain.decide flips between; `search` (memory scan:
  * remembered-position arrival, routing dead end, or damage reaction) and
- * `hold` (memory forgotten, or plain sight loss before any memory) get
- * distinct warm hues so a standing bot is never misread as routing.
+ * `hold` (memory forgotten, plain sight loss before any memory, or a patrol
+ * stand-down) get distinct warm hues so a standing bot is never misread as
+ * routing. `patrol` — a goalless route walk to a map-wide node — is the one
+ * cool hue: it is movement without a target, and must never be misread as
+ * engagement.
  */
 const MODE_COLOR: Record<BrainMode, readonly [number, number, number]> = {
   hold: [1.0, 0.5, 0.0],    // orange
   search: [1.0, 1.0, 0.0],  // yellow
   route: [0.1, 1.0, 0.35],  // green
   engage: [1.0, 0.0, 0.0],  // red
+  patrol: [0.0, 1.0, 1.0],  // cyan
 };
 
 /**

@@ -689,6 +689,59 @@ What the in-flight implementation built against the spec above:
   grading, endpoint) must be unchanged across the V toggles, replacing the
   pre-6a probe-count assertions.
 
+#### 6a follow-up — idle patrol and mobile damage search (in flight)
+
+The approved part 6a follow-up, landed on top of the record above. What it
+added, and what it deliberately did not:
+
+- **Perception range 60 m → 80 m** — `sim/perception.ts:PERCEPTION_RANGE_M`,
+  the FOV/occlusion machinery untouched. The 45 m engagement gate is
+  unchanged; the boundary pins in `perception.test.ts` follow the constant.
+- **Idle bots patrol** — a strictly lowest-priority fifth `BrainMode`:
+  `patrol`. With no visual, no remembered target and no active search, a bot
+  stands down for one second (`BrainParams.patrolPause` — armed at spawn,
+  respawn, search expiry, patrol arrival and failed selection), then asks
+  the executor for a patrol waypoint through a lazy `nextPatrolWaypoint()`
+  view callback with the same three-way contract as `nextWaypoint` (vector =
+  walk it, `undefined` = route budget deferred, `null` = no usable route →
+  restart the pause). Selection policy is the pure, rng-injected
+  `navGrid.ts:pickPatrolNode` — at most eight uniform samples over the
+  graph's nodes, first sample ≥ 12 m planar wins, otherwise the farthest
+  sampled non-current node — while the executor owns the per-bot patrol goal
+  and accepts a candidate only when the budgeted A* routes to it (unreachable
+  candidates are discarded; a fresh one is picked after the next pause).
+  Patrol legs share the existing cached path, leg, jam recovery, 1 m
+  waypoint threshold and one-A*-per-frame budget under a distinct `'p'`
+  route-owner key; reaching the final node ends the leg. Patrol never
+  shoots, carries null focus, grades non-shootable, and looks one metre
+  along the next waypoint at eye height. Any visual acquisition or incoming
+  damage interrupts immediately and clears the goal/path; respawn clears all
+  of it.
+- **Incoming fire advances before scanning** — a damage search keeps its
+  direction-only semantics and its 8 s lifetime, but now ADVANCES at normal
+  travel speed along the newest bearing for its first
+  `BrainParams.damageAdvance` (3 s), the damage frame itself included, while
+  continuing to face the three scan headings. A blocked step cancels the
+  advance permanently for that search (scan in place, no replanning); a
+  later hit re-arms a fresh window and clock on the newest bearing. No
+  attacker identity, distance, destination, focus or grade is synthesized,
+  and nothing can fire before ordinary visual acquisition.
+- **Debug presentation** — `patrol` is cyan in the debug overlay's
+  exhaustive mode map and appears in the HUD bot readout; the pure suite
+  pins the fifth distinct hue.
+- **Coverage** — pure: perception's 80 m boundary, the selector contract
+  (sample bound, min-distance preference, farthest fallback, impossible
+  cases), brain patrol (initial pause, post-arrival/failure pause, vector /
+  deferred / null outcomes, normal speed, null focus, visual and damage
+  priority, respawn re-arm) and the damage advance (entry frame movement,
+  strict-before-3 s boundary, cadence while moving, blocked-cancels-only,
+  clock/bearing reset, no firing, 8 s expiry). Browser: the new `[patrol]`
+  smoke phase (below).
+- **Deferred, unchanged by this follow-up**: cover seeking, inferred attacker
+  identity/distance/destination, return fire without visual acquisition, and
+  the Elevation stair/ceiling stall diagnosis. The controlled `[botClimb]`
+  scenario must continue to pass.
+
 #### 6b — hearing and sound events
 
 Add an engine-free `sim/soundEvents.ts` with a fixed-capacity **256-entry ring

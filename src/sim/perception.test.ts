@@ -59,9 +59,10 @@ describe('acquireVisual cheap gates', () => {
     expect(r.observation!.id).toBe(1);
   });
 
-  it('range boundary is inclusive at exactly 60 m, exclusive beyond', () => {
+  it('range boundary is inclusive at exactly 80 m, exclusive beyond', () => {
     const self = selfAt();
     const { los } = countingLos();
+    expect(PERCEPTION_RANGE_M).toBe(80);
     expect(acquireVisual(self, [cand(1, 0, PERCEPTION_RANGE_M)], null, 0, los).observation).not.toBeNull();
     expect(acquireVisual(self, [cand(2, 0, PERCEPTION_RANGE_M + 0.001)], null, 0, los).observation).toBeNull();
   });
@@ -69,10 +70,10 @@ describe('acquireVisual cheap gates', () => {
   it('range is the full 3D eye distance, not the planar one', () => {
     const self = selfAt();
     const { los } = countingLos();
-    // 40 m planar and 40 m up: eye-to-eye ~56.6 m — inside.
-    const inside = cand(1, 0, 40, { eyeY: 1.9 + 40, feetY: 40 });
-    // 40 m planar and 60 m up: eye-to-eye ~72.1 m — beyond.
-    const outside = cand(2, 0, 40, { eyeY: 1.9 + 60, feetY: 60 });
+    // 45 m planar and 45 m up: eye-to-eye ~63.6 m — inside.
+    const inside = cand(1, 0, 45, { eyeY: 1.9 + 45, feetY: 45 });
+    // 45 m planar and 80 m up: eye-to-eye ~92 m — beyond.
+    const outside = cand(2, 0, 45, { eyeY: 1.9 + 80, feetY: 80 });
     expect(acquireVisual(self, [inside], null, 0, los).observation).not.toBeNull();
     expect(acquireVisual(self, [outside], null, 0, los).observation).toBeNull();
   });

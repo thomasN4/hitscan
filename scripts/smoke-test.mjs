@@ -1118,10 +1118,6 @@ async function runVisionAwarenessCheck() {
       cs.player.vel.set(0, 0, 0);
       cs.game.yaw = 0; // forward is -z: straight at the bot
       cs.game.pitch = 0;
-      cs.game.spread = 0;
-      cs.game.spray = 1;
-      cs.game.recoil = 0;
-      cs.game.recoilYaw = 0;
       cs.weapon.mag = 30;
       cs.weapon.lastShot = -9;
       const playerHpBefore = cs.player.hp;

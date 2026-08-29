@@ -740,7 +740,6 @@ added, and what it deliberately did not:
 - **Deferred, unchanged by this follow-up**: cover seeking, inferred attacker
   identity/distance/destination, return fire without visual acquisition, and
   the Elevation stair/ceiling stall diagnosis. The controlled `[botClimb]`
-  the Elevation stair/ceiling stall diagnosis. The controlled `[botClimb]`
   scenario must continue to pass.
 
 #### 6b — hearing and sound events

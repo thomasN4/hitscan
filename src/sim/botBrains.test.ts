@@ -1179,8 +1179,6 @@ describe('DefaultBrain damage advance', () => {
   }
 
   /** Enter a damage search whose base bearing is due +x. */
-
-  /** Enter a damage search whose base bearing is due +x. */
   function advanceBrain(): { brain: DefaultBrain; entry: ReturnType<DefaultBrain['decide']> } {
     const brain = calmBrain();
     brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
@@ -1230,6 +1228,54 @@ describe('DefaultBrain damage advance', () => {
     expect(after.step.length()).toBe(0); // no replanning — advance stays cut
   });
 
+  it('a block inherited from before the hit does not suppress the entry step', () => {
+    // moveBlocked describes LAST frame's step. On the entry frame that step
+    // belonged to whatever the bot was doing before the hit — a patrol or
+    // combat move — so it is not evidence the new advance is blocked: the
+    // first damage frame must still request normal-speed movement.
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const entry = brain.decide(view({ visual: null, moveBlocked: true }), 0.5);
+    expect(entry.mode).toBe('search');
+    expect(entry.step.x).toBeCloseTo(4 * 0.5, 12); // entry step NOT suppressed
+    // The NEXT decision reports on the entry step itself — an advance step —
+    // so a block there cancels the remainder of this search's advance.
+    const next = brain.decide(view({ visual: null, moveBlocked: true }), 0.5);
+    expect(next.mode).toBe('search');
+    expect(next.step.length()).toBe(0);
+    const after = brain.decide(view({ visual: null }), 0.5);
+    expect(after.step.length()).toBe(0); // stays cut for this search
+  });
+
+  it('incoming damage interrupts an already-active patrol', () => {
+    let patrolAsked = 0;
+    const brain = calmBrain();
+    const walking = view({
+      visual: null,
+      nextPatrolWaypoint: () => { patrolAsked++; return new THREE.Vector3(0.5, 0, 0); },
+    });
+    for (let f = 1; f <= 5; f++) brain.decide(walking, 0.25); // pause spent, leg walking
+    expect(patrolAsked).toBeGreaterThanOrEqual(1);
+
+    // A direction-only hit lands mid-leg: the bearing outranks the patrol.
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const hit = brain.decide(view({ visual: null }), 0.25);
+    expect(hit.mode).toBe('search');
+    expect(hit.wantShoot).toBe(false);
+    expect(hit.focusId).toBeNull();
+    // The damage frame advances along the bearing, not the patrol leg.
+    expect(hit.step.x).toBeCloseTo(4 * 0.25, 12);
+    expect(hit.step.z).toBeCloseTo(0, 12);
+
+    // The leg never resumes: the damage search runs its course instead, and
+    // the patrol graph is not consulted for the rest of it.
+    const askedAtHit = patrolAsked;
+    for (let f = 1; f <= 4; f++) {
+      expect(brain.decide(view({ visual: null }), 0.25).mode, `search frame ${f}`).toBe('search');
+    }
+    expect(patrolAsked).toBe(askedAtHit);
+  });
+
   it('a later hit restarts the eight-second search and a fresh advance window', () => {
     const { brain } = advanceBrain();
     // The advance was cancelled by a blocked step one half-second in.
@@ -1246,6 +1292,18 @@ describe('DefaultBrain damage advance', () => {
     const cadence = brain.decide(view({ visual: null }), 0.75);
     expect(cadence.facing.x).toBeCloseTo(0.5, 12);
     expect(cadence.facing.z).toBeCloseTo(Math.sqrt(3) / 2, 12);
+
+    // The eight-second LIFETIME restarted too, not just the phase: elapsed
+    // stood at 1.0 s when the new bearing landed (the re-hit entry frame
+    // itself does not age it), so without the restart the search would forget
+    // after only 6.25 more seconds — the 13th of these frames. With it,
+    // elapsed after the cadence frame is 0.75 s, frames 1–14 (elapsed
+    // 1.25…7.75) still search and only the 15th (8.25 s from the re-hit)
+    // forgets.
+    for (let f = 1; f <= 14; f++) {
+      expect(brain.decide(view({ visual: null }), 0.5).mode, `lifetime frame ${f}`).toBe('search');
+    }
+    expect(brain.decide(view({ visual: null }), 0.5).mode).toBe('hold');
   });
 
   it('never fires during the advance without visual acquisition', () => {

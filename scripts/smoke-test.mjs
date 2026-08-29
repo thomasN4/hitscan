@@ -2141,7 +2141,7 @@ async function runPatrolCheck() {
       if (!acquired) return { fail: 'the bot never acquired the player after closing distance', advance };
       return {
         patrol,
-        hit: { dist: +dist0.toFixed(1), bodyDot: +bodyDot.toFixed(3), modeAfterHit: bot.mode },
+        hit: { dist: +dist0.toFixed(1), bodyDot: +bodyDot.toFixed(3), modeAfterHit: hitState.mode },
         advance: { dz: +advanceDz.toFixed(2), gained: advanceDz > 3, mode: bot.mode },
         acquiredBy: 'ordinary perception',
         finalMode: bot.mode,

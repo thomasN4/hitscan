@@ -70,7 +70,7 @@ describe('acquireVisual cheap gates', () => {
   it('range is the full 3D eye distance, not the planar one', () => {
     const self = selfAt();
     const { los } = countingLos();
-    // 60 m planar and 45 m up: eye-to-eye ~75 m — inside.
+    // 45 m planar and 45 m up: eye-to-eye ~63.6 m — inside.
     const inside = cand(1, 0, 45, { eyeY: 1.9 + 45, feetY: 45 });
     // 45 m planar and 80 m up: eye-to-eye ~92 m — beyond.
     const outside = cand(2, 0, 45, { eyeY: 1.9 + 80, feetY: 80 });

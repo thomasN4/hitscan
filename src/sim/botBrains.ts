@@ -388,10 +388,6 @@ export class DefaultBrain implements BotBrain {
    * Copied normalized planar victim-to-attacker bearing awaiting the next
    * decision, or null. Set by onIncomingFire, consumed by the next decide().
    */
-  /**
-   * Copied normalized planar victim-to-attacker bearing awaiting the next
-   * decision, or null. Set by onIncomingFire, consumed by the next decide().
-   */
   private pendingBearing: THREE.Vector3 | null = null;
   /**
    * Seconds still owed of the one-second stand-down before a patrol
@@ -412,6 +408,14 @@ export class DefaultBrain implements BotBrain {
    * re-arms it through enterSearch.
    */
   private advanceCancelled = false;
+  /**
+   * Whether the LAST requested movement step was an advance step of the
+   * current damage search. `moveBlocked` reports on that PREVIOUS step, so
+   * only a block arriving while this is set may cancel the advance — a block
+   * inherited from a patrol/combat step taken before the hit says nothing
+   * about the new advance, and must not cut it on the entry frame.
+   */
+  private advanceRequested = false;
 
   constructor(
     private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
@@ -443,7 +447,6 @@ export class DefaultBrain implements BotBrain {
     this.stalledFor = 0;
     this.stallBase = Infinity;
     this.wasBlocked = false;
-    this.wasBlocked = false;
     this.focus = null;
     this.memory = null;
     this.searching = false;
@@ -453,6 +456,7 @@ export class DefaultBrain implements BotBrain {
     this.patrolPause = this.params.patrolPause;
     this.advanceArmed = false;
     this.advanceCancelled = false;
+    this.advanceRequested = false;
   }
 
   /** See BotBrain.onIncomingFire. The bearing is copied and planar-normalized. */
@@ -481,6 +485,9 @@ export class DefaultBrain implements BotBrain {
     this.scanElapsed = 0;
     this.advanceArmed = advance;
     this.advanceCancelled = false;
+    // A fresh search re-arms the block tracking: the pre-hit step whose
+    // feedback may still be in flight belonged to whatever came before.
+    this.advanceRequested = false;
     this.clearPursuitState();
   }
 
@@ -496,16 +503,23 @@ export class DefaultBrain implements BotBrain {
    * This frame's search step: normal-speed travel along the stored base
    * bearing while the damage advance window is open, zero once it is closed.
    * A blocked step cuts the advance permanently for this search — finish the
-   * scan in place rather than replanning.
+   * scan in place rather than replanning — but only when the blocked report
+   * describes a step this advance itself requested: the first damage frame
+   * must move even if the step before the hit was refused.
    */
   private advanceStep(view: BrainView, dt: number): THREE.Vector3 {
     const step = new THREE.Vector3();
     if (!this.advanceArmed || this.advanceCancelled) return step;
-    if (view.moveBlocked) {
+    if (this.advanceRequested && view.moveBlocked) {
+      this.advanceRequested = false;
       this.advanceCancelled = true;
       return step;
     }
-    if (this.scanElapsed >= this.params.damageAdvance) return step;
+    if (this.scanElapsed >= this.params.damageAdvance) {
+      this.advanceRequested = false;
+      return step;
+    }
+    this.advanceRequested = true;
     return this.scanBase!.clone().setY(0).normalize().multiplyScalar(view.selfSpeed * dt);
   }
 
@@ -633,6 +647,7 @@ export class DefaultBrain implements BotBrain {
         this.scanElapsed = 0;
         this.advanceArmed = false;
         this.advanceCancelled = false;
+        this.advanceRequested = false;
         this.clearPursuitState();
         this.patrolPause = this.params.patrolPause;
         return {
@@ -652,7 +667,10 @@ export class DefaultBrain implements BotBrain {
       return this.memoryIntent(view, dt, jukeDraw);
     }
 
-    // Priority 4 — strictly lowest: nothing seen, nothing remembered, no
+    // Priority 4 — reserved for a future sound stimulus (hearing); nothing
+    // occupies it yet.
+
+    // Priority 5 — strictly lowest: nothing seen, nothing remembered, no
     // live search. Patrol. The pause gates the request: hold for
     // `patrolPause` seconds first (spawn, respawn, search expiry, patrol
     // arrival and failed selection all land here), then ask the executor for

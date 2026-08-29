@@ -703,16 +703,13 @@ async function runConfigCheck() {
 }
 
 // Two-sided combat: a CT and a T must actually fight. Headless bots converge
-// slowly from their spawn halves, so the phase TELEPORTS one of each side
-// adjacent to each other, at collider-free mid-field spots (an embedded bot
-// is stuck for life — see Bot.spawnAtRandom), and waits for evidence: any
-// bot below full HP or a named cross-team killfeed line. The player idles,
-// so only bot-vs-bot fire can produce either.
-// Contract: PROVE any cross-team engagement happens (an hp drop on either
-// side), not that a specific pair fights. The teleport loop below only
-// accelerates an encounter; with 4T/2CT loose on the map for ~15 s the
-// evidence may equally come from an unteleported pair wandering into range,
-// and that satisfies the assertion by design.
+// slowly from their spawn halves, so the phase isolates one of each side and
+// TELEPORTS that named pair face-to-face at collider-free mid-field spots.
+// Their +z/-z team spawn facings now put each straight inside the other's
+// horizontal FOV; the pre-6a x-offset fixture put both exactly 90° off-axis,
+// where non-omniscient bots correctly held forever. The player and bystanders
+// are made non-candidates, so only pair-specific HP or killfeed evidence can
+// pass — no incidental unteleported encounter lottery.
 async function runAllyCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -736,25 +733,38 @@ async function runAllyCheck() {
       const blocked = (x, z) => cs.colliders.some(c =>
         x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
       const spots = [[8, 8], [-8, 8], [8, -14], [-14, -8], [20, 20], [0, -30]]
-        .filter(([x, z]) => !blocked(x, z) && !blocked(x + 2.5, z));
+        .filter(([x, z]) => !blocked(x, z) && !blocked(x, z + 2.5));
       if (spots.length === 0) return { fail: 'no free meeting spots' };
 
       const t = cs.bots.find(b => b.team === 'T' && b.alive);
       const ct = cs.bots.find(b => b.team === 'CT' && b.alive);
       if (!t || !ct) return { fail: 'missing live bots of both teams' };
 
+      // Isolate the named pair before the first simulated frame. Dead entries
+      // stay in perception's candidate lists but are cheap rejections, which
+      // also pins the 6a liveness boundary this fixture depends on.
+      cs.player.alive = false;
+      for (const b of cs.bots) {
+        if (b === t || b === ct) continue;
+        b.alive = false;
+        b.mesh.visible = false;
+      }
+
       for (const [x, z] of spots) {
         t.mesh.position.set(x, 0, z);
-        ct.mesh.position.set(x + 2.5, 0, z);
+        ct.mesh.position.set(x, 0, z + 2.5);
+        t.mesh.rotation.y = 0;          // +z, toward CT
+        ct.mesh.rotation.y = Math.PI;  // -z, toward T
         const deadline = performance.now() + 2500;
         while (performance.now() < deadline) {
           await wait(200);
           const feed = document.getElementById('killfeed').textContent;
           const evidence = {
             spot: [x, z],
-            tHpDrop: cs.bots.some(b => b.team === 'T' && b.hp < 100),
-            ctHpDrop: cs.bots.some(b => b.team === 'CT' && b.hp < 100),
-            crossKill: /(T|CT)-\d+ killed (T|CT)-\d+/.test(feed),
+            tHpDrop: t.hp < 100,
+            ctHpDrop: ct.hp < 100,
+            crossKill: feed.includes(`${t.name} killed ${ct.name}`)
+              || feed.includes(`${ct.name} killed ${t.name}`),
           };
           if (evidence.tHpDrop || evidence.ctHpDrop || evidence.crossKill) {
             evidence.tHp = t.hp;

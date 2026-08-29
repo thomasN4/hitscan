@@ -69,14 +69,15 @@ const MODE_COLOR: Record<BrainMode, readonly [number, number, number]> = {
  * Brightness tiers over the mode tint, by whether THIS bot could actually
  * fire at its focus (issue #46): full = inside engage range with the frame's
  * own visual observation AGREEING with the intent's focus (sight is proven
- * by acquisition — no extra probe is paid); mid = inside range but sight
- * unproven or blocked; dim = no shootable observation at all — memory
- * pursuit and search never grade a line shootable, even when the bot
- * exposes a scan lookAt. Hue stays the mode's — the gates ride brightness
- * alone, so one legend covers both. Without the grading, every bot with a
- * live target drew an identical line however far away it was and however
- * many walls stood between, which read as "everyone is engaging me through
- * walls".
+ * by acquisition — no extra probe is paid); dim = no shootable observation
+ * at all — memory pursuit and search never grade a line shootable, even when
+ * the bot exposes a scan lookAt. The pure builder retains a defensive mid
+ * tier for structurally supplied `inRange && !sight`, but live Bot updates
+ * cannot emit that combination. Hue stays the mode's — the gates ride
+ * brightness alone, so one legend covers both. Without the grading, every
+ * bot with a live target drew an identical line however far away it was and
+ * however many walls stood between, which read as "everyone is engaging me
+ * through walls".
  */
 const GATE_BRIGHTNESS = { shoot: 1, range: 0.5, track: 0.25 } as const;
 

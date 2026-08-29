@@ -726,8 +726,9 @@ export interface SessionState {
   /**
    * Developer-facing bot-observation flag. The wireframe overlay, V binding,
    * and HUD readout are DEV-only, but the unconditional window.__cs facade may
-   * set this in a production preview so smoke tests can activate diagnostic
-   * LOS reads. Do not infer its value from the build mode alone.
+   * set this in a production preview so smoke tests can exercise those views.
+   * It controls consumers only: gameplay perception and its LOS budget must
+   * never depend on this flag. Do not infer its value from build mode alone.
    */
   debugView: boolean;
   /** The match has ended (clock expiry or elimination); written once by combat.ts:endMatch. */

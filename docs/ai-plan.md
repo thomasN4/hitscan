@@ -37,6 +37,11 @@ height, navigation and senses work recorded below):
   `bots.ts` holds none.
 - **LOS is a thunk** (`BrainView.seeTarget`): the raycast is paid at most
   once per cooldown window, pinned by test.
+  *(In-flight 6a annotation: this was the pre-6a shot-gate design.
+  `BrainView.seeTarget` is retired; every living bot now runs
+  `acquireVisual()` before `decide()`, with cheap rejections spending no ray
+  and an eligible look spending at most one ray per frame. The brain receives
+  only the resulting zero-or-one copied `visual` observation.)*
 - **Ballistics are brain params.** Hit-chance curve and damage spread live
   in `BrainParams`, so future profiles vary accuracy without touching the
   executor.
@@ -44,6 +49,11 @@ height, navigation and senses work recorded below):
   OR CT); CTs target Ts. The player counts as CT-side. The player entry
   stays listed even while dead so `ctbots=0` behavior is bit-identical to
   pre-team days (chase continues, shooting gated by `targetAlive`).
+  *(In-flight 6a annotation: the team candidate sets survive, but nearest-
+  position targeting and `targetAlive` do not. Perception probes the tracked
+  identity first, otherwise fairly rotates through cheaply eligible opposing
+  candidates. A dead player remains listed only as a cheap rejection; without
+  another observation the bot holds and never chases the corpse.)*
 - **Friendly fire off.** Ally bodies stop player bullets (impact puff, no
   hitmarker, no damage). Bot-vs-bot fire only ever flows cross-team by
   construction.
@@ -469,9 +479,10 @@ under 6a's non-omniscient policy that target is intentionally unknowable
 and the only correct result is `hold`, which the `[vision]` phase now
 covers end to end, including the damage-priority frame. The hidden-behavior
 claim it carried is replaced by `[vision]`, and cross-wall navigation
-survives in `[flatRoute]` through observed, frozen memory. The #43/#45
-steering policy itself remains pinned at the pure/unit layer for the case
-where a current visual exists. No merge or PR number is claimed here.)*
+survives in `[flatRoute]` through observed, frozen memory. #43's contact-edge
+commitment remains pinned at the pure/unit layer; #45's `sightBlocked` branch
+is retired because blocked sight now yields no current visual for band
+steering to act on. No merge or PR number is claimed here.)*
 
 ## Planned
 
@@ -523,9 +534,10 @@ whether the look succeeds.
   rejection, continue the rotation until one eligible candidate spends the
   raycast or every opponent has been examined; an out-of-cone remembered target
   must not starve acquisition of somebody standing in view.
-- Do not reuse #46's diagnostic result as gameplay perception. The overlay can
-  be off, and when it is on its eager probe has a deliberately different cost
-  contract. The perception result may feed the display, never the reverse.
+- Retire #46's separate diagnostic probe rather than letting the display drive
+  gameplay. Visual acquisition runs independently of the overlay and feeds the
+  `targetInRange`/`targetLOS` readouts as a non-influencing consumer; the
+  perception result may feed the display, never the reverse.
 - A successful probe produces one visual observation: identity, copied feet
   and eye positions, planar/3D distance and rise. Failure produces no fresh
   target position. The currently identified target remains remembered at its
@@ -741,10 +753,11 @@ already heard event.
 - **#44 (flat routing)** lets a bot reach an arbitrary remembered or heard
   position behind same-level walls. Without its stagnation latch, "search"
   would reintroduce the wall pacing that navigation already measured and fixed.
-- **#43 + #45 (committed band steering)** stop per-frame contact flips and
-  stand down random jukes while sight is blocked. LOS-gated awareness creates
-  more occluder approaches by design; without those fixes, searchers would
-  oscillate at the cover they are meant to clear.
+- **#43 (committed contact steering)** stops per-frame contact flips and still
+  applies whenever a current visual drives band steering. #45's blocked-sight
+  juke suppression is intentionally retired by 6a: blocked sight supplies no
+  current target, while remembered and search travel use their own committed
+  routing/slide machinery.
 
 6a therefore lands before 6b, and each receives its own feature PR, unit pins,
 smoke phase and playtest record. The document PR that records this plan changes

@@ -35,7 +35,7 @@ import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
 import { DefaultBrain, type BrainMode } from './sim/botBrains';
-import { acquireVisual, type PerceptionId, type VisualCandidate } from './sim/perception';
+import { acquireVisual, type PerceptionId } from './sim/perception';
 import { NAV_RADIUS, route } from './nav';
 
 /**
@@ -374,8 +374,6 @@ export class Bot implements BotShape {
       if (b === this || b.team === this.team) continue;
       enemies.push({ kind: 'bot', id: b.id, feet: b.mesh.position, eye: b.eyePos(), alive: b.alive, bot: b });
     }
-    const candidates: VisualCandidate[] = enemies.map(e => ({ id: e.id, feet: e.feet, eye: e.eye, alive: e.alive }));
-
     // ONE acquisition per living update: the brain's tracked identity is
     // probed first, else the cursor rotates fairly. Only its observation —
     // never the candidate list — reaches the brain.
@@ -385,7 +383,7 @@ export class Bot implements BotShape {
     );
     const acquisition = acquireVisual(
       { eye: selfEye, feet: this.mesh.position, facing: selfFacing },
-      candidates,
+      enemies,
       this.brain.focusId,
       this.perceptionCursor,
       (from, to) => hasLineOfSight(from, to, solids),
@@ -476,8 +474,10 @@ export class Bot implements BotShape {
         && this.brain.inRange(obs.dist3)) {
       // Identity agreement first: the intent's focus must be the SAME frame's
       // observation. Only then does the id resolve back to the stable
-      // candidate, and the die rolls from the ACTUAL post-move distance (see
-      // botBrains.ts:botHitChance).
+      // candidate. Keep this executor-owned lookup rather than returning a
+      // live Target from perception: observations cross that seam as copies
+      // plus stable identity, never entity references. The die rolls from the
+      // ACTUAL post-move distance (see botBrains.ts:botHitChance).
       const target = enemies.find(e => e.id === obs.id);
       if (target) this.shoot(this.eyePos().distanceTo(obs.eye), target);
     }

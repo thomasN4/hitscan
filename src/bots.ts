@@ -65,7 +65,7 @@ const MAX_AIM_PITCH = 1.2;
  */
 const WAYPOINT_REACHED = 1;
 
-/** Seconds between route recomputes for one bot, while it wants a route. */
+/** Seconds between route recomputes while pursuing a moving goal. */
 const ROUTE_INTERVAL = 1;
 
 /**
@@ -564,7 +564,8 @@ export class Bot implements BotShape {
    * cache by `key` (dropping stale paths on owner change), abandon drifted
    * paths, recompute under the one-A-star-per-frame budget, then hand back
    * the relative planar waypoint — or `null` (no route / zero-length leg) or
-   * `undefined` (budget deferred).
+   * `undefined` (budget deferred). Moving pursuit goals refresh periodically;
+   * an immutable patrol goal keeps its valid path until arrival or abandon.
    *
    * `patrolArrival` extends the one-metre waypoint threshold to the FINAL
    * node: standing within it ends the patrol (clear route, return null)
@@ -590,7 +591,8 @@ export class Bot implements BotShape {
         this.leg = 0;
       }
     }
-    const wantsRecompute = this.path.length === 0 || this.routeCooldown <= 0;
+    const wantsRecompute = this.path.length === 0
+      || (!patrolArrival && this.routeCooldown <= 0);
     let recomputed = false;
     if (wantsRecompute && routeBudget > 0) {
       // One A* per frame across all bots; whoever misses out keeps walking

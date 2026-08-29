@@ -333,8 +333,8 @@ describe('DefaultBrain routing', () => {
   });
 
   it('asks the route for a path TO THE OBSERVED FEET', () => {
-    // The brain never learns where it is; it only names the goal — and the
-    // goal must be what it SAW, not anything inferred.
+    // The brain knows its own feet and names a world-space goal, while the
+    // route answer is relative. The goal must be what it SAW, not inferred.
     let got: THREE.Vector3 | null = null;
     const v = onRoute({ nextWaypoint: (goal) => { got = goal.clone(); return NORTH(); } });
     calmBrain().decide(v, STEP_DT);

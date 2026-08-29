@@ -271,6 +271,15 @@ export const player: PlayerState = {
 };
 
 /**
+ * Copy a player's world-space FEET position from the canonical eye-position
+ * convention. Keep this conversion here so perception and damage awareness
+ * cannot disagree about whether `PlayerState.pos` means eyes or feet.
+ */
+export function playerFeet(p: PlayerState): THREE.Vector3 {
+  return new THREE.Vector3(p.pos.x, p.pos.y - p.eyeHeight, p.pos.z);
+}
+
+/**
  * Ceiling on accumulated recoil units, applied in `weapons.ts:shoot()` when a
  * shot adds its kick. Decay rate (`recoilRecover`) and scope gating
  * (`scopeGate`) are per-weapon and independent of this — the cap only bounds

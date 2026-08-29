@@ -6,7 +6,7 @@
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
 import type { Bot as BotShape, HitZone, MapName } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
@@ -68,8 +68,7 @@ function incomingFireBearing(bot: BotShape, attackerName?: string): THREE.Vector
   let from: THREE.Vector3 | null;
   if (attackerName === undefined) {
     if (!player.alive) return null;
-    // player.pos is an EYE (core/state.ts) — drop eyeHeight for feet.
-    from = new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z);
+    from = playerFeet(player);
   } else {
     const attacker = bots.find(b => b.name === attackerName);
     from = attacker && attacker.alive ? attacker.mesh.position : null;

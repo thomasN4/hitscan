@@ -201,8 +201,9 @@ export interface BrainView {
    *   frame;
    * - `null`: the graph was asked and confirmed there is NO route.
    *
-   * Relative to the bot's own feet — a brain never learns where it is, only
-   * which way to go.
+   * The answer is relative to the bot's own feet: although `selfFeet` gives
+   * the brain its position and `goal` is world-space, the executor exposes
+   * only the direction and distance of the next leg — never its route graph.
    */
   nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | undefined | null;
 }

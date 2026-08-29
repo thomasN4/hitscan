@@ -26,7 +26,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, gameTime, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, gameTime, playerFeet, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -140,9 +140,10 @@ export function botFor(obj: THREE.Object3D): BotShape | undefined {
  * The player and bot targets differ in where shot damage is routed.
  *
  * `feet` is the target's FEET on both arms (see VisualCandidate) — the
- * player's own `pos` is its EYE (core/state.ts), so the player arm has to
- * drop eyeHeight rather than pass the state vector straight through. `eye`
- * is the LOS endpoint: the camera for the player, the bot's eyePos().
+ * player's own `pos` is its EYE (core/state.ts), so the player arm uses the
+ * shared `playerFeet()` conversion rather than passing the state vector
+ * straight through. `eye` is the LOS endpoint: the camera for the player,
+ * the bot's eyePos().
  */
 type Target =
   | { kind: 'player'; id: PerceptionId; feet: THREE.Vector3; eye: THREE.Vector3; alive: boolean }
@@ -365,7 +366,7 @@ export class Bot implements BotShape {
         // Feet, not the eye that `player.pos` holds: rise and the planar
         // closure measure compare these against bot feet, and passing the
         // eye through would hand every bot 1.7 m of phantom height.
-        feet: new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z),
+        feet: playerFeet(player),
         eye: camera.position,
         alive: player.alive,
       });

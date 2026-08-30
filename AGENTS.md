@@ -214,9 +214,12 @@ the Gitea UI, and the grant does not carry to the next PR.
    tea actions variables list --repo thomasN4/another-cs-clone --name ENABLE_AI_REVIEW
    ```
 
-   Only the literal `false` disables reviews. If it *is* `false`, stop and ask —
-   the user set it deliberately, and stripping the prefix anyway would mark the
-   PR ready with no review at all. Otherwise note which route `AI_REVIEWER`
+   Only the literal `false` disables reviews. Unset is the default and means
+   enabled, and the lookup reports that as `Error: variable not found` — so read
+   the value, not the exit status, or the one case that needs no action reads as
+   the one that stops you. If it *is* `false`, stop and ask: the user set it
+   deliberately, and stripping the prefix anyway would mark the PR ready with no
+   review at all. Otherwise note which route `AI_REVIEWER`
    selects, then drop the prefix with `tea pr edit`, which is itself the
    `edited` event that starts the run.
 6. **The planner waits** — arm a background watcher, then leave the PR alone
@@ -253,9 +256,10 @@ and a planner waiting on it cannot tell the difference from the outside:
   thread — with the `Co-authored-by` trailer, like every other PR comment — and
   do not restart the loop.
 - **A failed reviewer posts nothing at all.** A usage limit or provider error
-  leaves the model's output file empty, which fails the job's export step, which
-  leaves the `post` job's condition unsatisfied. No comment appears and none
-  ever will. A watcher that greps only for the comment therefore hangs forever;
+  exits the model command nonzero, which fails the Review step it runs in and
+  skips everything after it; the export step's empty-file check is the narrower
+  case where the command exited 0 having written nothing. Either way the `post`
+  job's condition goes unsatisfied, no comment appears, and none ever will. A watcher that greps only for the comment therefore hangs forever;
   watch the workflow run's terminal status alongside it, and give the wait a
   deadline past the sum of the jobs it waits on. Those run in sequence and cap
   at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
@@ -281,14 +285,15 @@ and a planner waiting on it cannot tell the difference from the outside:
   in-flight review exactly as a push does. Find out which happened before
   re-arming from step 5; only the push case also changed what is being
   reviewed.
-- **A body edit is inert only once a review has posted.** Then the marker
-  dedupe stops it posting a second review of identical code, which is what it is
-  for, and it equally cannot unstick a stuck review — only a new commit or a
-  `WIP: ` toggle will. **Before** a review has posted the dedupe returns false,
-  so the same edit cancels the in-flight run and starts the reviewer over on an
-  unchanged head. That is the concrete reason step 6 says to leave the PR alone
-  while the watcher runs: mid-flight, a typo fix in the description costs a
-  whole review.
+- **The marker, not the kind of edit, decides what an `edited` event does.** A
+  description fix and a `WIP: ` toggle produce the same event, and the dedupe
+  reads only the head SHA. So before a review has posted, *either* restarts the
+  reviewer — which mid-flight means cancelling the run in progress and starting
+  over on an unchanged head, so a typo fix in the description costs a whole
+  review and step 6's "leave the PR alone" is not a politeness. After one has
+  posted, *neither* does anything: the toggle is no more able to force a second
+  opinion on a reviewed commit than the body edit is. Only a new commit moves
+  the head, and only a new head earns a new review.
 
 ## Commands
 

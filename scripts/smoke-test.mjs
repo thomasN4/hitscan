@@ -215,10 +215,14 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         cs.game.pitch = 0;
         const feet = () => cs.player.pos.y - cs.player.eyeHeight;
 
-        // Beside the pad on open floor: must just stand there. The pad fires on
-        // FOOTPRINT OVERLAP, and the exact edge cases for that live in
-        // sim/lift.test.ts; what this phase is for is the wiring — that the
-        // registry player.ts consults is the map's and not every solid in it.
+        // Beside the pad on open floor: must just stand there AND must rest
+        // at feet 0. The two guards below prove it together — the launch
+        // guard alone can never trip, because REST_TOLERANCE (0.05) is
+        // measured against a 0.25 m pad top, so a sample sitting on geometry
+        // would read as a pass. The pad fires on FOOTPRINT OVERLAP, and the
+        // exact edge cases for that live in sim/lift.test.ts; what this phase
+        // is for is the wiring — that the registry player.ts consults is the
+        // map's and not every solid in it.
         cs.player.pos.set(spec.beside[0], cs.player.eyeHeight, spec.beside[1]);
         cs.player.vel.set(0, 0, 0);
         for (let i = 0; i < 30; i++) await new Promise(r => requestAnimationFrame(r));
@@ -248,6 +252,9 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         return result;
       }, liftCheck);
       if (lift.besideFeet > liftCheck.padTop) throw new Error(`standing beside the pad launched the player: ${JSON.stringify(lift)}`);
+      // The control's premise: the sample really rested on open floor, not
+      // inside or on top of something — otherwise the guard above is vacuous.
+      if (Math.abs(lift.besideFeet) > 0.01) throw new Error(`lift control sample did not rest on open floor: ${JSON.stringify(lift)}`);
       if (lift.apex <= liftCheck.deckFeet) throw new Error(`lift arc never cleared the deck it serves: ${JSON.stringify(lift)}`);
       if (!lift.onGround || Math.abs(lift.restFeet - liftCheck.deckFeet) > 0.05) throw new Error(`lift did not put the player down on the catwalk: ${JSON.stringify(lift)}`);
       console.log(`[lift] OK`, JSON.stringify(lift));
@@ -2244,9 +2251,12 @@ try {
   await runMap('warehouse2', '/?map=warehouse2', {
     botCheck: true,
     stairsCheck: STAIRS.warehouse2,
-    // Pad A at (8, -10), which serves the -z band; yaw 0 faces -z, so holding
-    // W through the arc carries the player onto it.
-    liftCheck: { pad: [8, -10], beside: [0, -10], padTop: 0.25, deckFeet: 5.1, rideYaw: 0 },
+    // Pad A at (8, -9), which serves the -z band; yaw 0 faces -z, so holding
+    // W through the arc carries the player onto it. The control stands at
+    // (0, -6) — genuinely open floor: the central racks are z [-4, -2] / [2, 4]
+    // and the pallet block is z [-11, -7], so a 0.45 m footprint at z = -6
+    // spans [-6.45, -5.55] and touches neither.
+    liftCheck: { pad: [8, -9], beside: [0, -6], padTop: 0.25, deckFeet: 5.1, rideYaw: 0 },
   });
 
   await runMap('range', '/?map=range', { sprintCheck: true });

@@ -153,7 +153,7 @@ const LIFT_GAP_MARGIN = 2;
  * actually matters is how long the body spends ABOVE DECK_Y, because until it
  * clears the deck its head is under the slab and slideMoveXZ will not let it
  * move over. 17 m/s gives ~0.73 s over the deck, ~4.7 m of travel at walk
- * speed against the ~2.5 m a pad centre needs. At 16 that window halves and
+ * speed against the ~3 m a pad centre needs. At 16 that window halves and
  * bots start clipping the lip and falling back in.
  */
 const LAUNCH_VEL = 17;
@@ -161,6 +161,29 @@ const LAUNCH_VEL = 17;
 const PAD_H = 0.25;
 /** Pad footprint. */
 const PAD_W = 4;
+/**
+ * Largest body footprint radius on the map.
+ *
+ * Two sources, and the larger wins: bots.ts:BOT_RADIUS is nav.ts:NAV_RADIUS =
+ * 0.5, and core/state.ts:player.radius is 0.45.
+ */
+const BODY_RADIUS_MAX = 0.5;
+/**
+ * How far a pad's far edge stands back from the void lip.
+ *
+ * The ring slab's underside is at DECK_Y - SLAB_T = 4.7 and its collider runs
+ * from the lip outward, so a footprint that reaches under it gets its head
+ * swept by collision.ts:resolveVertical, clamped to feet 4.7 - HEAD_HEIGHT =
+ * 2.7, and dropped straight back onto the pad — which fires again. A
+ * permanent bounce, not a ride. LIP_GAP is at least twice BODY_RADIUS_MAX,
+ * so "footprint overlaps the slab" (z < -VOID_Z + r) and "footprint overlaps
+ * the pad" (z > padMinZ - r) are disjoint sets: a body the ceiling stops is
+ * by construction no longer on the pad, so it lands on the floor and stays
+ * there. It is a floor strip, not a rail — the pad is still walked onto from
+ * the lip side, it just no longer reaches it. Proven in checkClearances()
+ * and pinned in sim/lift.test.ts.
+ */
+const LIP_GAP = 1;
 
 /**
  * Minimum clear width of anything meant to be walked down.
@@ -380,13 +403,18 @@ function buildFlights(): void {
 }
 
 // ---------- E. Cargo lifts ----------
-// One per half, rotationally symmetric with the flights. Each sits with its
-// far edge ON the void lip, so the arc only has to carry a body the ~2.5 m
-// from the pad's centre, and comes down through a rail gap cut for it.
+// One per half, rotationally symmetric with the flights. Each stands LIP_GAP
+// back from the void lip — a pad flush with it launches bodies into the ring
+// slab's underside, which is the permanent bounce LIP_GAP exists to remove —
+// so the arc now carries a body the ~3 m from the pad's centre to the lip,
+// and comes down through a rail gap cut for it.
 
-/** Pad centres. Each lands on the band its far edge already touches. */
-const PAD_A_X = 8, PAD_A_Z = -(VOID_Z - PAD_W / 2);   // (8, -10) -> the -z band
-const PAD_B_X = -8, PAD_B_Z = VOID_Z - PAD_W / 2;     // (-8, 10) -> the +z band
+/**
+ * Pad centres. Each lands on the band its arc is aimed at, a LIP_GAP short of
+ * the lip.
+ */
+const PAD_A_X = 8, PAD_A_Z = -(VOID_Z - PAD_W / 2 - LIP_GAP);  // (8, -9) -> the -z band
+const PAD_B_X = -8, PAD_B_Z = VOID_Z - PAD_W / 2 - LIP_GAP;    // (-8, 9) -> the +z band
 /** How far onto the band the arc is aimed — clear of the lip, short of the wall. */
 const PAD_LANDING_INSET = 2;
 
@@ -417,7 +445,11 @@ const CORNER_X = 28, CORNER_Z = 16, CORNER_SIZE = 3, CORNER_H = 2.4;
 function buildCover(): void {
   addSolidBox(0, 0, -RACK_Z, RACK_W, RACK_H, RACK_D, matRack);
   addSolidBox(0, 0,  RACK_Z, RACK_W, RACK_H, RACK_D, matRack);
-  // Pallet blocks closing the ends of the central lane.
+  // Pallet blocks: mid-lane cover in the two outer lanes (x [-3, 3], at
+  // z [-11, -7] and [7, 11]), breaking up the long run between the racks and
+  // the under-ring corridor. The central lane between the racks (z [-2, 2])
+  // stays open end to end — its ends at x = ±17 and the void lip at ±22 are
+  // untouched.
   addSolidBox(0, 0, -9, 6, RACK_H, 4, matCrate);
   addSolidBox(0, 0,  9, 6, RACK_H, 4, matCrate);
   // Corner stacks. 2.4 m is over the ~1.45 m jump apex, so these are cover and
@@ -634,6 +666,12 @@ function checkClearances(): void {
   atLeast('lift apex over the deck', apex - DECK_Y, 0.5);
   atMost('lift landing inset', PAD_LANDING_INSET, RING - AISLE_MIN / 2);
   atLeast('lift rail gap', PAD_W + 2 * LIFT_GAP_MARGIN, AISLE_MIN + PAD_W / 2);
+  // review-bot caught this group testing the apex and the landing inset but
+  // never the lip gap itself; the relaunch bounce it prevents is LIP_GAP's.
+  for (const padZ of [PAD_A_Z, PAD_B_Z]) {
+    atLeast('lift pad gap to the void lip',
+      VOID_Z - (Math.abs(padZ) + PAD_W / 2), 2 * BODY_RADIUS_MAX);
+  }
 
   // Flush joins. Both void flights must top out exactly on the void lip, or
   // the NavLink aims at a point that is not the deck.

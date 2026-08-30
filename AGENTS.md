@@ -16,17 +16,25 @@ a deliberate choice, not a default:
 - **`gitea-lan`** — the user (`thomasN4`), who owns the repo. Everything that
   reads, and everything the user does by hand. It is the fallback login, so an
   unflagged `tea` command runs as the user.
-- **`code-bot`** — a dedicated collaborator account with **write, not admin**.
-  This is the identity the planner acts under in **Review Loop** below: its
-  pushes, its PR, its `WIP: ` toggles and its comments. Reach it with
+- **`code-bot`** — a dedicated collaborator account with write permission. This
+  is the identity the planner acts under in **Review Loop** below: its pushes,
+  its PR, its `WIP: ` toggles and its comments. Reach it with
   `--login code-bot`; nothing selects it implicitly.
 
-The write/admin gap is load-bearing rather than incidental. `code-bot` can push,
-open and edit PRs and comment, but **admin-only reads fail under it** — most
-importantly `tea actions variables list`, which Review Loop step 5 depends on
-and which answers a `code-bot` token with HTTP 403. A 403 there is easy to
-misread as the "variable not found" that step 5 warns about, and the two mean
-opposite things, so keep that lookup on `gitea-lan`.
+**`code-bot` is a collaborator, and one thing Review Loop needs is gated on
+being the repo's owner instead.** `tea actions variables list`, which step 5
+depends on, answers a `code-bot` token with HTTP 403 and
+`user should be the owner of the repo`. That is not a permission level to be
+raised past: the account was tested at both `write` and `admin` and got the same
+403, while the owner's token succeeds holding no admin scope at all
+(`write:issue,write:repository,read:user`). Ownership is the gate, no
+collaborator role clears it, so that lookup stays on `gitea-lan` permanently.
+Do not try to fix it by promoting the bot — that buys nothing and costs the
+`main` protection below, since a repo admin can override a merge whitelist.
+
+The 403 also has to be told apart from the `variable not found` that step 5
+warns about. They look alike and mean opposite things: not-found means unset,
+which means reviews are *enabled*, while a 403 means the value was never read.
 
 Both logins live in `~/.config/tea/config.yml` (mode 0600). Git access as the
 bot is a separate credential from its API token — an SSH key registered on the
@@ -250,9 +258,11 @@ git remote add code-bot ssh://gitea-code-bot/thomasN4/another-cs-clone.git
 
 `main`'s branch protection whitelists `thomasN4` for push and merge, so the ban
 on `tea pr merge` is now enforced by the server for this account and not only by
-this document. Do not read that as the ban having become someone else's problem:
-it holds for `code-bot` alone, and every rule here is still written for an agent
-that also holds the user's key.
+this document — and only for as long as `code-bot` stays a non-admin
+collaborator, because the rule leaves `block_admin_merge_override` off. Do not
+read any of it as the ban having become someone else's problem: it holds for
+`code-bot` alone, and every rule here is still written for an agent that also
+holds the user's key.
 
 1. **The planner and the user agree the PR** — its scope, the commits it should
    arrive in, and whether implementation runs under Plan Relay.
@@ -276,9 +286,9 @@ that also holds the user's key.
    prefix. It is a repo Actions variable, not anything in the tree, and the
    Gitea SDK cannot list them, so read it by name — and pass `--repo`, because
    `origin`'s SSH port does not match the login's and auto-detection fails. This
-   is the one Review Loop command that must **not** run as `code-bot`: reading
-   Actions variables needs repo admin, `code-bot` has only write, and it answers
-   403 rather than a value.
+   is the one Review Loop command that must **not** run as `code-bot`: the
+   endpoint requires the repo's owner, which no collaborator role satisfies, so
+   `code-bot` gets a 403 rather than a value. See Project above.
 
    ```sh
    tea actions variables list --repo thomasN4/another-cs-clone --name ENABLE_AI_REVIEW

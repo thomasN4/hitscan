@@ -34,7 +34,7 @@ import {
 import { requireEl } from './hud';
 
 const SUBTITLES: Record<MapName, string> = {
-  arena: 'Clone Demo \u2014 eliminate all Ts to win the round',
+  arena: 'Eliminate all Ts to win the round',
   range: 'Practice your aim \u2014 silhouettes with bullseyes at 10\u201360 m',
   elevation: 'Bot testbed \u2014 stairs, decks and drops: watch how the AI handles height',
   warehouse1: 'Racking aisles, a contested mezzanine, and conveyors only you can vault',

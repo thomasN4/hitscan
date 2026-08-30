@@ -1055,7 +1055,8 @@ export const wpn: WeaponDynamics = {
                    // +sprayKick per shot up to the weapon's sprayCap, decaying
                    // back toward 1 at sprayRecover/s. Scales only the
                    // situational terms; `inherent` is unaffected by it.
-  recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
+  recoil: 0,       // raw aim recoil; player.ts reshapes it only for viewmodel kick.
+                   // Decays at weapon.recoilRecover/s.
                    // While above the live weapon's scopeGate, a new RMB press
                    // can't enter the scope (main.ts)
   recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot

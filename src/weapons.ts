@@ -20,7 +20,15 @@ import { spawnImpact, spawnBulletHole } from './effects';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
 import { roundInterval, roundTransfer, planReload } from './sim/ammo';
-import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
+import {
+  aimPitch,
+  aimYaw,
+  convertOnSwap,
+  decayRecoil,
+  decaySpray,
+  decayToward,
+  viewmodelRecoil,
+} from './sim/recoil';
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
@@ -209,6 +217,15 @@ const VIEWMODELS: Record<WeaponId, ViewModel> = {
  */
 export function viewmodelAimOffset(): { x: number; y: number } {
   return VIEWMODELS[equippedId(wpn.slot)].aimOffset;
+}
+
+/**
+ * Bounded recoil signal for player.ts:updateViewmodel. This is deliberately a
+ * separate binding from currentAimPitch(): only the cosmetic weapon transform
+ * is reshaped; the camera and shot direction keep using raw recoil.
+ */
+export function currentViewmodelRecoil(): number {
+  return viewmodelRecoil(wpn.recoil, currentDef().recoilKick);
 }
 
 // Per-weapon shot sound; keyed by WeaponId so no weapon can miss.

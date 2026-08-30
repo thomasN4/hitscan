@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'vitest';
-import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './recoil';
+import {
+  aimPitch,
+  aimYaw,
+  convertOnSwap,
+  decayRecoil,
+  decaySpray,
+  decayToward,
+  viewmodelRecoil,
+} from './recoil';
 import { WEAPONS, RECOIL_CAP, RECOIL_YAW_CAP } from '../core/state';
 import type { WeaponDef } from '../core/state';
 
@@ -44,6 +52,37 @@ describe('aimYaw', () => {
     const deg = aimYaw(0, RECOIL_YAW_CAP, WEAPONS.smg.punchRad) * 180 / Math.PI;
     expect(deg).toBeGreaterThan(1.5);
     expect(deg).toBeLessThan(2.5);
+  });
+});
+
+describe('viewmodelRecoil', () => {
+  test('keeps rest and sub-kick recoil linear', () => {
+    expect(viewmodelRecoil(0, 1)).toBe(0);
+    expect(viewmodelRecoil(0.6, 1)).toBe(0.6);
+  });
+
+  test('preserves the first kick for every weapon, including the knife', () => {
+    for (const def of Object.values(WEAPONS)) {
+      expect(viewmodelRecoil(def.recoilKick, def.recoilKick)).toBe(def.recoilKick);
+    }
+  });
+
+  test('responds immediately as sustained recoil begins to recover', () => {
+    expect(viewmodelRecoil(5.9, WEAPONS.smg.recoilKick))
+      .toBeLessThan(viewmodelRecoil(6, WEAPONS.smg.recoilKick));
+  });
+
+  test('stays strictly below twice the weapon kick', () => {
+    for (const def of Object.values(WEAPONS)) {
+      expect(viewmodelRecoil(RECOIL_CAP, def.recoilKick))
+        .toBeLessThan(2 * def.recoilKick);
+    }
+  });
+
+  test('maps a full smg climb to roughly two visual recoil units', () => {
+    const visual = viewmodelRecoil(RECOIL_CAP, WEAPONS.smg.recoilKick);
+    expect(visual).toBeGreaterThan(1.9);
+    expect(visual).toBeLessThan(2);
   });
 });
 

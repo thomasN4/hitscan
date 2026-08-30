@@ -1,4 +1,4 @@
-# Counter-Strike Clone Demo
+# Hitscan
 
 A browser-based FPS demo inspired by Counter-Strike, built with [Three.js](https://threejs.org/) and Vite. Fight waves of AI bots in a dust-style arena with hitscan gunplay, iron sights, crouching, and synthesized audio — no asset files required.
 

@@ -12,6 +12,9 @@ dist
 # repo.
 review.md
 
-# Plan Relay keeps approved plan copies and OpenCode JSONL transcripts here.
-# They are local execution records, not source artifacts.
+# Plan Relay keeps approved plan copies, OpenCode JSONL transcripts and the
+# per-run summary.json here. They are local execution records, not source
+# artifacts, and they are routinely pruned — the committed record is the
+# planner's wave entry in docs/plan-relay-log.md, which cites a run directory by
+# name and has to survive that directory going away.
 .plan-relay

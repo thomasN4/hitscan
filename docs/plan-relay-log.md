@@ -30,6 +30,7 @@ Rules:
 | Relay | Date | Change |
 |---|---|---|
 | v1 | 2026-08-30 | First digest-pinned version. Adds `summary.json` per run, the `PLAN_RELAY_WAVE` stamp, the fan-out protocol in AGENTS.md, and this log. The relay existed unversioned before this. |
+| v2 | 2026-08-30 | Count a newly written file's lines. Only `edit` carries a `filediff`; a `write` reports content and `exists: false`, so v1 recorded every created file as +0/-0. A write over an existing file stays unattributed, since its deletions are not in the stream. |
 
 ## Waves
 
@@ -48,3 +49,26 @@ summed executor time.
 Verdict: what merged, what deviated, what you fixed by hand, what to change in
 the next wave's plans.
 -->
+
+### 2026-08-30 — wave `smoke-1` — 1 executor
+
+Relay v1, plan schema v1. Baseline `f24c8699a869`. A wave of one, run to
+validate the relay's own new instrumentation end to end; wall clock 3m 38s.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/relay-smoke` | `f24c8699a869.oF3akb` | 1 | 3m 38s | $0.0082 | 2 (+58/-0) | pass |
+
+Verdict: merged nothing — this branch is scratch — but the run earned its cost
+twice. The executor followed the plan exactly (two new files, no existing file
+touched, 14 steps, 17 tool calls), and `npm test`, `npm run lint` and
+`npm run typecheck` all passed on an independent rerun.
+
+Two findings. First, the run exposed a bug in v1's own accounting: it recorded
+both created files as `+0/-0`, because only `edit` carries a `filediff` and a
+whole-file `write` does not. v2 fixes that, and the `+58` above is the run
+re-summarized under v2 — the one number in this table that its own
+`summary.json` does not contain. Second, both denied calls were `bash`
+commands chaining with `;` (`ls -ld node_modules && env | rg ...`); the
+allowlist takes one command per call, and a plan that invites a chain wastes a
+step. Next wave: say so in the Test Plan, as this plan already did for pipes.

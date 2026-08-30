@@ -96,6 +96,12 @@ function splitTurns(entries, boundaries) {
   return turns.length > 0 ? turns : [[]];
 }
 
+function countLines(content) {
+  if (typeof content !== 'string') return null;
+  const body = content.endsWith('\n') ? content.slice(0, -1) : content;
+  return body === '' ? 0 : body.split('\n').length;
+}
+
 function relativize(path, worktree) {
   if (typeof path !== 'string' || path.length === 0) return path;
   if (!worktree) return path;
@@ -206,9 +212,21 @@ export function summarizeEvents(jsonl, { worktree = '', boundaries = [] } = {}) 
         if (path) {
           const record = files.get(path) ?? { path, edits: 0, additions: 0, deletions: 0 };
           record.edits += 1;
+          // Only `edit` carries a filediff. A `write` creating a file reports
+          // just content and exists:false, so count its lines rather than
+          // record a new file as +0/-0. A write OVER an existing file stays
+          // unattributed: its deletions are genuinely not in the stream, and a
+          // one-sided count would read as a pure addition.
+          const written =
+            !diff && tool === 'write' && state.metadata?.exists === false
+              ? countLines(state.input?.content)
+              : null;
           if (Number.isFinite(diff?.additions)) {
             record.additions += diff.additions;
             additions += diff.additions;
+          } else if (written !== null) {
+            record.additions += written;
+            additions += written;
           }
           if (Number.isFinite(diff?.deletions)) {
             record.deletions += diff.deletions;

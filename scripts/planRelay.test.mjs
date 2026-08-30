@@ -814,6 +814,44 @@ describe('Plan Relay summary', () => {
     expect(summary.totals.event_lines).toBe(7);
   });
 
+  test('counts a new file written whole, which carries no filediff', () => {
+    // opencode reports `write` with content and exists:false and no filediff,
+    // so a created file would otherwise land in the record as +0/-0.
+    const created = summarizeEvents(
+      stream({
+        type: 'tool_use',
+        part: {
+          tool: 'write',
+          state: {
+            status: 'completed',
+            input: { filePath: '/w/src/new.ts', content: 'a\nb\nc\n' },
+            metadata: { exists: false },
+          },
+        },
+      }),
+      { worktree: '/w' },
+    );
+    expect(created.files).toEqual([{ path: 'src/new.ts', edits: 1, additions: 3, deletions: 0 }]);
+
+    // A write OVER an existing file has deletions that are simply not in the
+    // stream, so it stays unattributed rather than reading as a pure addition.
+    const overwritten = summarizeEvents(
+      stream({
+        type: 'tool_use',
+        part: {
+          tool: 'write',
+          state: {
+            status: 'completed',
+            input: { filePath: '/w/src/old.ts', content: 'a\nb\n' },
+            metadata: { exists: true },
+          },
+        },
+      }),
+      { worktree: '/w' },
+    );
+    expect(overwritten.files).toEqual([{ path: 'src/old.ts', edits: 1, additions: 0, deletions: 0 }]);
+  });
+
   test('rejects an unknown or malformed option rather than dropping a field', () => {
     expect(() => parseOptions(['--duration-s=4'])).toThrow(/unknown option/);
     expect(() => parseOptions(['--gate'])).toThrow(/malformed option/);

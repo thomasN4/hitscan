@@ -155,7 +155,7 @@ AGENTS.md and the plan are binding. Make only the planned repository changes, ru
 The bash tool is restricted. Allowed commands are: $allowed_commands. All unlisted shell commands are denied and return no output, so do not retry them. Use the read tool with offsets and limits for file contents. The generic grep tool is denied because a file path may broaden to its parent directory; use rg with an explicit, narrow file or directory path. Keep reconnaissance targeted to the plan's named interfaces, and begin with the smallest planned edit once those interfaces are confirmed."
 
 relay_started_at=$SECONDS
-started_at="$(printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 set +e
 OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
 XDG_CONFIG_HOME="$runtime/config" \
@@ -239,10 +239,10 @@ if test "$status" -eq 0; then
   fi
 fi
 
-# Every run gets a machine record, the failures most of all: a watchdog kill or a
-# gate rejection is the run whose cost, last tool call and denied commands the
-# planner actually needs. Every path that created a run directory funnels here,
-# and every early exit 2 happens before one exists.
+# Every run attempts a machine record, the failures most of all: a watchdog kill
+# or a gate rejection is the run whose cost, last tool call and denied commands
+# the planner actually needs. Every path that created a run directory funnels
+# here, and every early exit 2 happens before one exists.
 #
 # `set -e` is back on, so the summary's own failure must not become the run's
 # exit status — that is lesson 22 (a wrapper eating a gate's result), and the
@@ -258,7 +258,7 @@ if node "$summary_script" "$events" "$summary" \
   --baseline="$baseline" \
   --node_modules_shared="$node_modules_shared" \
   --started_at="$started_at" \
-  --ended_at="$(printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)" \
+  --ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --duration_s="$((SECONDS - relay_started_at))" \
   --watchdog_s="$timeout_secs" \
   --turns_launched="$turns_launched" \

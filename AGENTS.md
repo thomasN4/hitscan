@@ -120,11 +120,13 @@ baseline_commit: <40-character Git commit>
 The runner refuses a primary worktree, `main`, dirty state, malformed plan, or
 baseline mismatch. It copies the approved input and OpenCode JSONL events to an
 ignored `.plan-relay/<baseline>.<random>/` directory, whose path it prints, and
-writes a `summary.json` beside them — cost, tokens, per-turn timing, files
-touched, denied tool calls, gate verdict — for **every** run, including the ones
-the watchdog killed, because those are the runs whose cost you cannot otherwise
-account for. That directory stays local evidence and is routinely pruned; the
-committed record is the planner's short wave entry in
+attempts to write a `summary.json` beside them — cost, tokens, per-turn timing,
+files touched, denied tool calls, gate verdict — for **every** run, including the
+ones the watchdog killed, because those are the runs whose cost you cannot
+otherwise account for. A summary failure is reported but does not replace the
+executor's exit status; use the retained `events.jsonl` as the fallback record.
+That directory stays local evidence and is routinely pruned; the committed
+record is the planner's short wave entry in
 [`docs/plan-relay-log.md`](docs/plan-relay-log.md), which cites the run and adds
 what deviated, what the planner fixed afterwards, and whether the relay was
 worth using. OpenCode must treat both this file and the copied plan as binding;

@@ -4,10 +4,11 @@
 // does no I/O, so unit tests feed synthetic streams and a run retained months
 // ago can be re-summarized from disk.
 //
-// The runner writes this for EVERY run, the failures most of all — a watchdog
+// The runner attempts this for EVERY run, the failures most of all — a watchdog
 // kill or a gate rejection is the run whose cost, last tool call and denied
 // commands the planner actually needs, and it is the one the transcript makes
-// hardest to read by hand.
+// hardest to read by hand. A summary failure is reported without replacing the
+// executor's status, so the retained event stream remains the fallback record.
 //
 // The planner copies the numbers into a wave entry in docs/plan-relay-log.md.
 // This file is local and pruned; that entry is the committed record.
@@ -98,8 +99,9 @@ function splitTurns(entries, boundaries) {
 
 function countLines(content) {
   if (typeof content !== 'string') return null;
-  const body = content.endsWith('\n') ? content.slice(0, -1) : content;
-  return body === '' ? 0 : body.split('\n').length;
+  if (content === '') return 0;
+  const lines = content.split('\n').length;
+  return content.endsWith('\n') ? lines - 1 : lines;
 }
 
 function relativize(path, worktree) {

@@ -2,10 +2,12 @@
 
 Committed record of Plan Relay waves. The machine half of a run — cost, tokens,
 per-turn timing, files touched, denied tool calls, gate verdict — is written
-automatically to `.plan-relay/<run>/summary.json`, which is ignored and local.
-This file is the half a machine cannot write: which runs belonged to one wave,
-what deviated from the plan, what the planner had to fix afterwards, and whether
-the relay was worth using for that work.
+automatically to `.plan-relay/<run>/summary.json`, which is ignored and local;
+if that write fails, the runner reports it and retains `events.jsonl` without
+replacing the executor's exit status. This file is the half a machine cannot
+write: which runs belonged to one wave, what deviated from the plan, what the
+planner had to fix afterwards, and whether the relay was worth using for that
+work.
 
 Rules:
 
@@ -31,6 +33,7 @@ Rules:
 |---|---|---|
 | v1 | 2026-08-30 | First digest-pinned version. Adds `summary.json` per run, the `PLAN_RELAY_WAVE` stamp, the fan-out protocol in AGENTS.md, and this log. The relay existed unversioned before this. |
 | v2 | 2026-08-30 | Count a newly written file's lines. Only `edit` carries a `filediff`; a `write` reports content and `exists: false`, so v1 recorded every created file as +0/-0. A write over an existing file stays unattributed, since its deletions are not in the stream. |
+| v3 | 2026-08-30 | Emit runner timestamps in UTC even under a non-UTC `TZ`, and count a newly written file containing one blank line as one addition. Clarify that every run attempts a summary, while summary failure preserves the executor status and retained event stream. |
 
 ## Waves
 

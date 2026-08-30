@@ -602,6 +602,19 @@ describe('Plan Relay runner', () => {
     expect(summary.final_text).toBe('Implementation complete.');
   });
 
+  test('writes UTC summary timestamps under a non-UTC timezone', () => {
+    const fixture = createFixture();
+    const before = Date.now();
+    const result = run(fixture, fixture.linked, { TZ: 'America/New_York' });
+    const after = Date.now();
+    expect(result.status, result.stderr).toBe(0);
+    const summary = summaryOf(fixture);
+    expect(Date.parse(summary.started_at)).toBeGreaterThanOrEqual(before - 1000);
+    expect(Date.parse(summary.started_at)).toBeLessThanOrEqual(after + 1000);
+    expect(Date.parse(summary.ended_at)).toBeGreaterThanOrEqual(before - 1000);
+    expect(Date.parse(summary.ended_at)).toBeLessThanOrEqual(after + 1000);
+  });
+
   test('defaults the wave to the run directory, never to something shared-looking', () => {
     const fixture = createFixture();
     expect(run(fixture).status).toBe(0);
@@ -832,6 +845,24 @@ describe('Plan Relay summary', () => {
       { worktree: '/w' },
     );
     expect(created.files).toEqual([{ path: 'src/new.ts', edits: 1, additions: 3, deletions: 0 }]);
+
+    const oneBlankLine = summarizeEvents(
+      stream({
+        type: 'tool_use',
+        part: {
+          tool: 'write',
+          state: {
+            status: 'completed',
+            input: { filePath: '/w/src/blank.txt', content: '\n' },
+            metadata: { exists: false },
+          },
+        },
+      }),
+      { worktree: '/w' },
+    );
+    expect(oneBlankLine.files).toEqual([
+      { path: 'src/blank.txt', edits: 1, additions: 1, deletions: 0 },
+    ]);
 
     // A write OVER an existing file has deletions that are simply not in the
     // stream, so it stays unattributed rather than reading as a pure addition.

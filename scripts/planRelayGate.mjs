@@ -16,17 +16,27 @@ import { pathToFileURL } from 'node:url';
 
 const EDIT_TOOLS = new Set(['edit', 'write']);
 
-function parseEvents(jsonl) {
-  const events = [];
-  for (const line of jsonl.split('\n')) {
-    if (!line.trim()) continue;
+// Line numbers ride along because the runner records a turn boundary as a line
+// count (`wc -l`), and blank or unparsable lines mean an event's index cannot
+// stand in for its line. The gate needs only the events; planRelaySummary.mjs
+// needs the numbering, and both must agree on what counts as parsable.
+export function parseEventLines(jsonl) {
+  const parsed = [];
+  let line = 0;
+  for (const text of jsonl.split('\n')) {
+    line += 1;
+    if (!text.trim()) continue;
     try {
-      events.push(JSON.parse(line));
+      parsed.push({ line, event: JSON.parse(text) });
     } catch {
       // The stream is evidence, not a contract; skip anything unparsable.
     }
   }
-  return events;
+  return parsed;
+}
+
+function parseEvents(jsonl) {
+  return parseEventLines(jsonl).map((entry) => entry.event);
 }
 
 function hasCompletedEdit(events) {

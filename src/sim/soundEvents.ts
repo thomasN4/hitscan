@@ -58,6 +58,21 @@ export type SoundEmission = Omit<SoundEvent, 'seq'>;
 export const SOUND_RING_CAPACITY = 256;
 
 /**
+ * Audible radius of any firearm (m), player's and bots' alike.
+ *
+ * Deliberately ONE number for all five firearms rather than per-weapon
+ * loudness: it matches perception.ts's PERCEPTION_RANGE_M, so a shot a bot
+ * could have SEEN is a shot it can hear, which keeps the two senses' reach
+ * comparable while hearing is new. A `WeaponDef.soundRadius` (sniper louder
+ * than pistol) is deferred until the uniform version has been playtested.
+ */
+export const GUNSHOT_RADIUS_M = 80;
+/** Audible radius of a sprinting footstep (m) — a third of a gunshot's. */
+export const FOOTSTEP_RUN_RADIUS_M = 24;
+/** Audible radius of a walking or aim-walking footstep (m): half of running. */
+export const FOOTSTEP_WALK_RADIUS_M = 12;
+
+/**
  * A fixed-capacity ring of sound events with cursor reads.
  *
  * Deliberately a class with no module-level instance: the live one belongs in

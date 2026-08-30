@@ -26,7 +26,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, playerFeet, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -37,6 +37,7 @@ import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
 import { DefaultBrain, type BrainMode } from './sim/botBrains';
 import { acquireVisual, type PerceptionId } from './sim/perception';
+import { GUNSHOT_RADIUS_M } from './sim/soundEvents';
 import { NAV_RADIUS, route, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode } from './sim/navGrid';
 
@@ -709,8 +710,22 @@ export class Bot implements BotShape {
    * rng stream.
    */
   private shoot(dist: number, target: Target): void {
+    const muzzle = this.muzzlePos();
     sfxEnemyShoot(this.mesh.position);
-    spawnImpact(this.muzzlePos()); // cheap muzzle flash, from the barrel tip
+    spawnImpact(muzzle); // cheap muzzle flash, from the barrel tip
+    // Emitted BEFORE the hit die, so a miss is exactly as audible as a hit —
+    // hearing reports that a trigger was pulled, not that it landed. At the
+    // FEET rather than the muzzle, for the reason weapons.ts states: a heard
+    // position is a routing goal, and nearestNode's height weighting would
+    // send a listener to the deck overhead.
+    soundEvents.emit({
+      kind: 'gunshot',
+      sourceId: this.id,
+      team: this.team,
+      pos: this.mesh.position,
+      radius: GUNSHOT_RADIUS_M,
+      t: gameTime.now(),
+    });
 
     if (!this.brain.rollHit(dist)) return;
     const dmg = this.brain.rollDamage();

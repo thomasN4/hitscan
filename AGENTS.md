@@ -8,8 +8,83 @@ Browser FPS demo: Three.js + Vite, TypeScript throughout `src/`, no framework. A
 
 The canonical remote is a self-hosted Gitea instance on the LAN:
 `http://192.168.2.161:3000/thomasN4/another-cs-clone` (`origin`). GitHub is no
-longer the source of truth — `gh` is the wrong tool here; use `tea` (configured
-login: `gitea-lan`).
+longer the source of truth — `gh` is the wrong tool here; use `tea`.
+
+**Every repository-scoped `tea` command here needs
+`--repo thomasN4/another-cs-clone`** — `tea pr`, `tea comments`, `tea issues`,
+`tea actions`. Auto-detection cannot supply it: `origin`'s SSH port (2222) does
+not match the login's `ssh_host` (`192.168.2.161:3000`), so it fails even from
+inside a worktree, with `remote repository required: specify id via --repo`. The
+flag is scoped to those commands and not global — `tea logins add` rejects it
+outright with `flag provided but not defined: -repo`.
+
+**Commands acting on an existing issue or PR additionally need its index**, as a
+positional argument: `tea pr edit <index>`, `tea comments add <index>`. Omitting
+it fails separately, with `must specify at least one pull request index` and
+`please specify issue / pr index` respectively. `tea pr create` takes no index —
+it is what mints one.
+
+Both failures are loud on the terminal and *silent about the workflow*, which is
+the part that catches you: an arming command that errors changes no title, fires
+no `edited` event, and leaves step 6 waiting on a run that was never created.
+
+There are **two** configured `tea` logins, and which one a command runs under is
+a deliberate choice, not a default:
+
+- **`gitea-lan`** — the user (`thomasN4`), who owns the repo. Everything that
+  reads, and everything the user does by hand. It is the fallback login, so an
+  unflagged `tea` command runs as the user.
+- **`code-bot`** — a dedicated collaborator account with write permission. This
+  is the identity the planner acts under in **Review Loop** below: its pushes,
+  its PR, its `WIP: ` toggles and its comments. Reach it with
+  `--login code-bot`; nothing selects it implicitly.
+
+**`code-bot` is a collaborator, and one thing Review Loop needs is gated on
+being the repo's owner instead.** `tea actions variables list`, which step 5
+depends on, answers a `code-bot` token with HTTP 403 and
+`user should be the owner of the repo`. That is not a permission level to be
+raised past: the account was tested at both `write` and `admin` and got the same
+403, while the owner's token succeeds holding no admin scope at all
+(`write:issue,write:repository,read:user`). Ownership is the gate, no
+collaborator role clears it, so that lookup stays on `gitea-lan` permanently.
+Do not try to fix it by promoting the bot — that buys nothing and costs the
+`main` protection below, since a repo admin can override a merge whitelist.
+
+The 403 also has to be told apart from the `variable not found` that step 5
+warns about. They look alike and mean opposite things: not-found means unset,
+which means reviews are *enabled*, while a 403 means the value was never read.
+
+Both logins live in `~/.config/tea/config.yml` (mode 0600). Git access as the
+bot is a separate credential from its API token — an SSH key registered on the
+`code-bot` account, reached through a host alias, so no token ever sits in a
+remote URL and there is no ambiguity about which account a push authenticates
+as. One-time setup on a new machine:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_code_bot -C code-bot -N ""
+tea logins add --name code-bot --url http://192.168.2.161:3000 --token <CODE_BOT_TOKEN>
+# add ~/.ssh/id_ed25519_code_bot.pub to the code-bot account's SSH keys
+# (needs a token with write:user scope, or paste it in that account's Settings)
+
+cat >> ~/.ssh/config <<'EOF'
+Host gitea-code-bot
+    HostName 192.168.2.161
+    Port 2222
+    User git
+    IdentityFile ~/.ssh/id_ed25519_code_bot
+    IdentitiesOnly yes
+EOF
+
+# Repo-wide, once — both of these live in the shared .git/config, so every
+# linked worktree gets them and a second Review Loop must not repeat them.
+git remote add code-bot ssh://gitea-code-bot/thomasN4/another-cs-clone.git
+git config extensions.worktreeConfig true
+```
+
+`main` is protected: push and merge are whitelisted to `thomasN4`, so `code-bot`
+is mechanically unable to merge a PR or push to `main`. That backs the standing
+rule below rather than replacing it — outside Review Loop the agent still acts
+through the user's own key, where nothing but the rule stops it.
 
 ## Workflow
 
@@ -36,13 +111,16 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    Co-authored-by: <model> <noreply@acsc>
    ```
 
-   Every commit message MUST end with a `Co-authored-by` trailer naming the model that produced it (at minimum `Co-authored-by: <model>` — use the full `Name <email>` form when possible).
+   Every commit message MUST end with a trailer naming the model that produced it, in the full `Name <email>` form where possible. **Which trailer depends on who authored the commit:**
+
+   - Authored by the user (`Thomas Nguyen <…>`) — `Co-authored-by: <model>`. The model worked alongside a human author, which is what the trailer says.
+   - Authored by `code-bot`, as every Review Loop commit is — `Authored-by: <model>`. There is no human author for the model to be "co-" with; the model wrote it and the bot account committed it. Note the cost of being accurate here: `Co-authored-by` is a trailer Gitea parses and renders as an additional author, and `Authored-by` is not, so on those commits the model appears as plain trailer text only.
 4. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
-   - `tea pr create --draft --title "<imperative summary>" --description "..."`
+   - `tea pr create --draft --repo thomasN4/another-cs-clone --title "<imperative summary>" --description "..."`
    - Gitea has no draft flag on the pull request itself. `--draft` prepends
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
-   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a `Co-authored-by` trailer (same form as commit messages, e.g. `Co-authored-by: Muse Spark <muse-spark@meta>`).
+   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a trailer, chosen by the same rule as commit messages: `Co-authored-by: Muse Spark <muse-spark@meta>` when the user posts it, `Authored-by: Muse Spark <muse-spark@meta>` when `code-bot` does.
 5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
@@ -188,6 +266,38 @@ a grant that omitted that would stall the cycle it exists to allow.
 `tea pr merge` stays banned, the user still merges by hand in
 the Gitea UI, and the grant does not carry to the next PR.
 
+**All four are exercised as `code-bot`, never as the user.** Commit as
+`code-bot <code-bot@example.com>`, push to the `code-bot` remote, and pass
+`--login code-bot` to every `tea` write. The point is legibility: with one
+account doing both, a reader of the PR timeline cannot tell which prefix toggle
+or which comment was the agent's, and that distinction is the whole basis on
+which the user reviews what the loop did.
+
+The bot identity is set **per worktree, with `--worktree`**, and that flag is the
+whole point rather than a flourish:
+
+```sh
+git config --worktree user.name code-bot
+git config --worktree user.email code-bot@example.com
+```
+
+A plain `git config user.name` inside a linked worktree does not scope to that
+worktree — it writes the repository's shared `.git/config`, which every worktree
+reads. Set it that way and the primary checkout on `main`, and every other
+feature worktree, silently starts authoring its commits as `code-bot` too; you
+find out when a commit you made somewhere else carries the bot's name. `--worktree`
+needs `extensions.worktreeConfig`, which is part of the one-time repo setup
+above, alongside the `code-bot` remote — that remote is shared for the same
+reason, so add it once for the repository and never per worktree.
+
+`main`'s branch protection whitelists `thomasN4` for push and merge, so the ban
+on `tea pr merge` is now enforced by the server for this account and not only by
+this document — and only for as long as `code-bot` stays a non-admin
+collaborator, because the rule leaves `block_admin_merge_override` off. Do not
+read any of it as the ban having become someone else's problem: it holds for
+`code-bot` alone, and every rule here is still written for an agent that also
+holds the user's key.
+
 1. **The planner and the user agree the PR** — its scope, the commits it should
    arrive in, and whether implementation runs under Plan Relay.
 2. **The planner plans** — one approved plan per commit-sized unit of work.
@@ -199,16 +309,20 @@ the Gitea UI, and the grant does not carry to the next PR.
    worktree each, under the fan-out protocol above; or the planner implements
    directly. Either way the planner verifies independently before anything is
    pushed, and a relay run is logged before that.
-4. **The planner publishes** — commit, push, and open the PR with
-   `tea pr create --draft` if it is not already open. **Push every commit of the
+4. **The planner publishes** — commit, `git push code-bot HEAD`, and open the PR
+   with `tea pr create --draft --login code-bot --repo thomasN4/another-cs-clone`
+   if it is not already open.
+   **Push every commit of the
    round before step 5.** `review.yml`'s concurrency group is keyed by PR number
    with `cancel-in-progress`, so a push landing during an in-flight review kills
    that review. Nothing is posted, but the run itself records the cancellation
    as its terminal status, which is the state step 6's watcher reads.
 5. **The planner arms the reviewer** — read `ENABLE_AI_REVIEW`, then strip the
    prefix. It is a repo Actions variable, not anything in the tree, and the
-   Gitea SDK cannot list them, so read it by name — and pass `--repo`, because
-   `origin`'s SSH port does not match the login's and auto-detection fails:
+   Gitea SDK cannot list them, so read it by name. This
+   is the one Review Loop command that must **not** run as `code-bot`: the
+   endpoint requires the repo's owner, which no collaborator role satisfies, so
+   `code-bot` gets a 403 rather than a value. See Project above.
 
    ```sh
    tea actions variables list --repo thomasN4/another-cs-clone --name ENABLE_AI_REVIEW
@@ -217,11 +331,15 @@ the Gitea UI, and the grant does not carry to the next PR.
    Only the literal `false` disables reviews. Unset is the default and means
    enabled, and the lookup reports that as `Error: variable not found` — so read
    the value, not the exit status, or the one case that needs no action reads as
-   the one that stops you. If it *is* `false`, stop and ask: the user set it
+   the one that stops you. A 403 is neither: it means the command ran under the
+   wrong login and the variable was never read at all, so re-run it on
+   `gitea-lan` rather than treating it as unset. If it *is* `false`, stop and
+   ask: the user set it
    deliberately, and stripping the prefix anyway would mark the PR ready with no
    review at all. Otherwise note which route `AI_REVIEWER`
-   selects, then drop the prefix with `tea pr edit`, which is itself the
-   `edited` event that starts the run.
+   selects, then drop the prefix with
+   `tea pr edit <index> --ready --login code-bot --repo thomasN4/another-cs-clone`,
+   which is itself the `edited` event that starts the run.
 6. **The planner waits** — arm a background watcher, then leave the PR alone
    until it fires. The watcher must exit on the failure paths too, not only on
    the review landing: a reviewer that dies posts nothing at all, and silence
@@ -242,10 +360,17 @@ the Gitea UI, and the grant does not carry to the next PR.
    tell you which of the two it is answering:
 
    ```sh
-   git fetch origin main && git merge-tree --write-tree origin/main HEAD
+   git fetch origin main    # a failure here is a fetch failure, not an answer
+   git merge-tree --write-tree origin/main HEAD; echo "merge-tree: $?"
    ```
 
-   Exit 1 is a conflict, 0 is clean, and neither depends on the title.
+   Run them as two commands and read only the second. `merge-tree`'s exit 1 is a
+   conflict and 0 is clean, neither depending on the title; anything else — 128,
+   say — is the tool failing rather than a verdict, so report it as that.
+   Chaining them with `&&` merges two different failures into one status: the
+   canonical remote is a LAN box, and when it is unreachable the compound exits
+   nonzero having compared nothing at all, which under the reading above is
+   indistinguishable from a real conflict.
 
 Every rule below exists because this machinery fails quietly rather than loudly,
 and a planner waiting on it cannot tell the difference from the outside:
@@ -257,8 +382,9 @@ and a planner waiting on it cannot tell the difference from the outside:
 - **Only substance earns a round.** A finding earns another round when it is a
   correctness bug, or when it violates a rule in Architecture rules or Gotchas
   learned the hard way. Style and preference findings are answered in the PR
-  thread — with the `Co-authored-by` trailer, like every other PR comment — and
-  do not restart the loop.
+  thread, `tea comments add <index> --login code-bot --repo thomasN4/another-cs-clone`,
+  ending in the `Authored-by`
+  trailer that a `code-bot` post takes — and do not restart the loop.
 - **A failed reviewer posts nothing at all.** A usage limit or provider error
   exits the model command nonzero, which fails the Review step it runs in and
   skips everything after it; the export step's empty-file check is the narrower
@@ -281,8 +407,17 @@ and a planner waiting on it cannot tell the difference from the outside:
   retrying the same exhausted `AI_REVIEWER` spends another 25 minutes failing
   identically. Switching to `claude` or `opencode` spends a *different*
   subscription of the user's — ask first, and never rotate routes unattended.
-- **Two failed rounds is a stop, not a third try.** Report which routes failed
-  and hand the decision back; the third attempt is the user's to authorize.
+- **Two failed rounds is a stop, not a third try.** Re-add the `WIP: ` prefix
+  first, then report which routes failed and hand the decision back; the third
+  attempt is the user's to authorize. The prefix goes back on for **every** exit
+  from the loop that did not get a review, not just this one — that is the
+  invariant, and step 5 already enforces it for the `ENABLE_AI_REVIEW=false`
+  case, refusing to strip the prefix "because stripping it anyway would mark the
+  PR ready with no review at all". Stripping the prefix is what arms the
+  reviewer, so by the time a failure is known the prefix is already off: a stop
+  that only reports leaves behind a PR that is prefix-off, green on `ci.yml` and
+  unreviewed, which is indistinguishable from one the loop finished. That is the
+  single end state this loop must never produce by accident.
 - **A cancelled run means a newer event landed, not necessarily a push.** The
   concurrency group is keyed by PR number and does not care which event opened
   the run, so an `edited` — a title toggle, or a description fix — cancels an

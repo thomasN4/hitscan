@@ -43,7 +43,7 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
    - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a `Co-authored-by` trailer (same form as commit messages, e.g. `Co-authored-by: Muse Spark <muse-spark@meta>`).
-5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR.
+5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
      diff and posts a comment-review as `review-bot`, once per head commit.
@@ -88,7 +88,8 @@ valid. When Plan Relay is chosen, its ownership boundary is strict:
 4. **The planner verifies** — read the retained transcript and working-tree
    diff, rerun the plan's checks independently, and report deviations before
    the normal commit / draft-PR stages continue. Git publication remains the
-   user's decision.
+   user's decision — under **Review Loop** below, that decision is the one the
+   user made in choosing the workflow.
 5. **The planner logs** — append a wave entry to
    [`docs/plan-relay-log.md`](docs/plan-relay-log.md), taking the numbers from
    each run's `summary.json` and adding the verdict a machine cannot write.
@@ -166,6 +167,137 @@ together: there is no cross-worktree lock, no shared state and no wave registry,
 and adding one would trade the relay's independent worktrees for exactly the
 shared mutable state this repository bans elsewhere. Unset, a run's wave id
 defaults to its own run directory, so a solo run never claims a fan-out.
+
+### Review Loop (planner drives one PR to ready)
+
+**Review Loop** is the named workflow for driving one PR from an approved plan
+to merge-ready, taking the arming, waiting, reading and disposition of the
+reviewer off the user. It does not remove the user from planning: under Plan
+Relay every remediation plan still needs approval, so those rounds keep a user
+turn by design. Its subject is exactly one
+PR, and its terminal state is that PR with the `WIP: ` prefix off, `ci.yml`
+green, and every review finding either fixed or answered in writing. The planner
+is whichever agent the user is working in, as in Plan Relay above.
+
+Choosing Review Loop for a PR **is** the explicit instruction step 5 of the
+workflow above requires. For that one named PR it grants the planner four
+things and no others: pushing the branch, opening its draft PR, toggling its
+`WIP: ` prefix, and answering findings in the PR thread — the fourth because the
+loop's own stopping rule below tells it to answer some findings in writing, and
+a grant that omitted that would stall the cycle it exists to allow.
+`tea pr merge` stays banned, the user still merges by hand in
+the Gitea UI, and the grant does not carry to the next PR.
+
+1. **The planner and the user agree the PR** — its scope, the commits it should
+   arrive in, and whether implementation runs under Plan Relay.
+2. **The planner plans** — one approved plan per commit-sized unit of work.
+   Under Plan Relay that is the handoff document above, and its step 2 is
+   unchanged: the user approves each one, including the ones a review sends the
+   loop back for. Otherwise it is the ordinary step-1 agreement. An unresolved choice is a planning blocker here
+   too.
+3. **The executors implement** — `scripts/plan-relay.sh <plan.md>` per plan, one
+   worktree each, under the fan-out protocol above; or the planner implements
+   directly. Either way the planner verifies independently before anything is
+   pushed, and a relay run is logged before that.
+4. **The planner publishes** — commit, push, and open the PR with
+   `tea pr create --draft` if it is not already open. **Push every commit of the
+   round before step 5.** `review.yml`'s concurrency group is keyed by PR number
+   with `cancel-in-progress`, so a push landing during an in-flight review kills
+   that review. Nothing is posted, but the run itself records the cancellation
+   as its terminal status, which is the state step 6's watcher reads.
+5. **The planner arms the reviewer** — read `ENABLE_AI_REVIEW`, then strip the
+   prefix. It is a repo Actions variable, not anything in the tree, and the
+   Gitea SDK cannot list them, so read it by name — and pass `--repo`, because
+   `origin`'s SSH port does not match the login's and auto-detection fails:
+
+   ```sh
+   tea actions variables list --repo thomasN4/another-cs-clone --name ENABLE_AI_REVIEW
+   ```
+
+   Only the literal `false` disables reviews. Unset is the default and means
+   enabled, and the lookup reports that as `Error: variable not found` — so read
+   the value, not the exit status, or the one case that needs no action reads as
+   the one that stops you. If it *is* `false`, stop and ask: the user set it
+   deliberately, and stripping the prefix anyway would mark the PR ready with no
+   review at all. Otherwise note which route `AI_REVIEWER`
+   selects, then drop the prefix with `tea pr edit`, which is itself the
+   `edited` event that starts the run.
+6. **The planner waits** — arm a background watcher, then leave the PR alone
+   until it fires. The watcher must exit on the failure paths too, not only on
+   the review landing: a reviewer that dies posts nothing at all, and silence
+   looks exactly like a slow review.
+7. **The planner reads the review** — it is a pull-request review rather than an
+   issue comment (Gitea has no commit-comment API), so it is the body under
+   `/pulls/{index}/reviews` carrying this head commit's
+   `<!-- ai-review:<sha> -->` marker.
+8. **The planner decides** — another round, or stop. Another round re-adds the
+   `WIP: ` prefix first and returns to step 2. Stopping means reporting to the
+   user: `ci.yml`'s result, and every finding marked fixed or declined with its
+   reason. Report it that way rather than as "nothing is blocking" — the review
+   gates nothing by construction. What does block a merge is `ci.yml`, the
+   `WIP: ` prefix, and a conflict with `main`, which the other two cannot see: a
+   PR whose base moved under it stays green with every finding resolved and
+   still will not merge. Ask Git for that one rather than the PR — Gitea reports
+   `mergeable: false` for a `WIP: `-prefixed PR as well, so mid-loop it cannot
+   tell you which of the two it is answering:
+
+   ```sh
+   git fetch origin main && git merge-tree --write-tree origin/main HEAD
+   ```
+
+   Exit 1 is a conflict, 0 is clean, and neither depends on the title.
+
+Every rule below exists because this machinery fails quietly rather than loudly,
+and a planner waiting on it cannot tell the difference from the outside:
+
+- **Three automatic rounds, then stop.** Cap the cycle at three arms of the
+  reviewer without a user turn. The reviewer is advisory and will nearly always
+  find something, so the loop has no fixed point of its own and would otherwise
+  spend the user's quota indefinitely.
+- **Only substance earns a round.** A finding earns another round when it is a
+  correctness bug, or when it violates a rule in Architecture rules or Gotchas
+  learned the hard way. Style and preference findings are answered in the PR
+  thread — with the `Co-authored-by` trailer, like every other PR comment — and
+  do not restart the loop.
+- **A failed reviewer posts nothing at all.** A usage limit or provider error
+  exits the model command nonzero, which fails the Review step it runs in and
+  skips everything after it; the export step's empty-file check is the narrower
+  case where the command exited 0 having written nothing. Either way the `post`
+  job's condition goes unsatisfied, no comment appears, and none ever will. A watcher that greps only for the comment therefore hangs forever;
+  watch the workflow run's terminal status alongside it, and give the wait a
+  deadline past the sum of the jobs it waits on. Those run in sequence and cap
+  at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
+  `timeout-minutes: 25` can fire during a healthy run. `timeout-minutes` bounds
+  execution and not the wait for a free runner, and the Codex route queues for
+  the dedicated `ai-review` one, so no deadline is safe as a verdict. Treat its
+  expiry as the cue to go read the run's status, never as proof the reviewer
+  died.
+- **Re-triggering costs no commit.** `edited` is in the workflow's trigger list,
+  so re-adding `WIP: ` and stripping it again re-runs the reviewer against the
+  same head commit. That is safe to do without checking first: `already-reviewed`
+  keys off the per-commit marker, so if a review did post, the rerun is a no-op
+  rather than a duplicate.
+- **Switch route before retrying a quota failure.** Quota is per-provider, so
+  retrying the same exhausted `AI_REVIEWER` spends another 25 minutes failing
+  identically. Switching to `claude` or `opencode` spends a *different*
+  subscription of the user's — ask first, and never rotate routes unattended.
+- **Two failed rounds is a stop, not a third try.** Report which routes failed
+  and hand the decision back; the third attempt is the user's to authorize.
+- **A cancelled run means a newer event landed, not necessarily a push.** The
+  concurrency group is keyed by PR number and does not care which event opened
+  the run, so an `edited` — a title toggle, or a description fix — cancels an
+  in-flight review exactly as a push does. Find out which happened before
+  re-arming from step 5; only the push case also changed what is being
+  reviewed.
+- **The marker, not the kind of edit, decides what an `edited` event does.** A
+  description fix and a `WIP: ` toggle produce the same event, and the dedupe
+  reads only the head SHA. So before a review has posted, *either* restarts the
+  reviewer — which mid-flight means cancelling the run in progress and starting
+  over on an unchanged head, so a typo fix in the description costs a whole
+  review and step 6's "leave the PR alone" is not a politeness. After one has
+  posted, *neither* does anything: the toggle is no more able to force a second
+  opinion on a reviewed commit than the body edit is. Only a new commit moves
+  the head, and only a new head earns a new review.
 
 ## Commands
 

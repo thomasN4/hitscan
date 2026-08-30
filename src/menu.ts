@@ -37,6 +37,8 @@ const SUBTITLES: Record<MapName, string> = {
   arena: 'Clone Demo \u2014 eliminate all Ts to win the round',
   range: 'Practice your aim \u2014 silhouettes with bullseyes at 10\u201360 m',
   elevation: 'Bot testbed \u2014 stairs, decks and drops: watch how the AI handles height',
+  warehouse1: 'Racking aisles, a contested mezzanine, and conveyors only you can vault',
+  warehouse2: 'A catwalk ring over an open floor \u2014 stairs, cargo lifts, and nowhere to hide from above',
 };
 
 /** What the menu does on Play/Resume/Quit/Deploy — main.ts supplies the behaviors. */

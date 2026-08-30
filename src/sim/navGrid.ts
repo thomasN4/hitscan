@@ -39,6 +39,8 @@ export interface NavLinkSpec {
   top: THREE.Vector3;
   /** Half the traversable width across the line of travel (m). */
   halfWidth: number;
+  /** Upward only. Omitted means both ways, which is what a flight of stairs is. */
+  oneWay?: boolean;
 }
 
 /** Rectangular XZ extent the graph covers. */
@@ -185,15 +187,23 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     }
   }
 
-  for (const link of opts.links ?? []) {
-    const a = nearestOf(nodes, link.bottom);
-    const b = nearestOf(nodes, link.top);
+  for (const spec of opts.links ?? []) {
+    const a = nearestOf(nodes, spec.bottom);
+    const b = nearestOf(nodes, spec.top);
     if (a < 0 || b < 0 || a === b) continue;
-    const join = (i: number, j: number): void => {
+    // One DIRECTED edge, charged its true 3D length (see edgeLength).
+    const edge = (i: number, j: number): void => {
       const cost = edgeLength(nodes[i]!, nodes[j]!);
-      // Both ways: a flight is as walkable down as up.
       edges[i]!.push(j); costs[i]!.push(cost);
-      edges[j]!.push(i); costs[j]!.push(cost);
+    };
+    // Stairs are as walkable down as up, so a flight joins BOTH ways — but a
+    // one-way link must not: a cargo lift throws a body upward and offers
+    // nothing on the way back, and an edge claiming otherwise routes bots off
+    // the deck and onto the pad, which launches them again.
+    const join = (i: number, j: number): void => {
+      edge(i, j);
+      if (spec.oneWay) return;
+      edge(j, i);
     };
     join(a, b);
 
@@ -208,13 +218,23 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     // that climbs. It then walks up, gets re-routed down, and oscillates in
     // place. Observed as a bot frozen two risers up for fifteen seconds,
     // never blocked.
+    //
+    // On a one-way link the intermediates are directed too, and UPHILL ONLY:
+    // bottom → intermediate and intermediate → top, never back down. A
+    // bidirectional intermediate edge would let A* route a bot on the deck
+    // down onto a lift pad — the exact loop one-way exists to prevent.
     for (let i = 0; i < nodes.length; i++) {
       if (i === a || i === b) continue;
       const n = nodes[i]!;
-      if (n.y <= link.bottom.y + 1e-6 || n.y >= link.top.y - 1e-6) continue;
-      if (distanceToSegmentXZ(n, link.bottom, link.top) > link.halfWidth) continue;
-      join(i, a);
-      join(i, b);
+      if (n.y <= spec.bottom.y + 1e-6 || n.y >= spec.top.y - 1e-6) continue;
+      if (distanceToSegmentXZ(n, spec.bottom, spec.top) > spec.halfWidth) continue;
+      if (spec.oneWay) {
+        edge(a, i);
+        edge(i, b);
+      } else {
+        join(i, a);
+        join(i, b);
+      }
     }
   }
 

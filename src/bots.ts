@@ -26,10 +26,11 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, gameTime, playerFeet, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
-import { solids, colliders } from './world';
+import { bots, score, session, gameTime, playerFeet, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { solids, colliders, liftPads } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
+import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
@@ -293,26 +294,36 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Place on this bot's own half: Ts in the far band (z ∈ [-55, -20], away
-   * from player spawn), CTs mirrored onto the player's half (z ∈ [20, 55]).
+   * Place inside this team's spawn zone for this map (core/state.ts:BOT_SPAWNS).
    * Rejection-sampled against `colliders` — a blind draw lands inside a
    * corner block or crate ~20% of the time, and a bot spawned inside
    * geometry is stuck there for life (the move gate only blocks entering).
+   *
+   * The zone's `y` is passed through to findFreeSpawn as the candidate's FEET,
+   * not left at the floor: maps/warehouse2.ts spawns Ts on the catwalk, and
+   * testing those against the ground-floor geometry beneath the ring would
+   * reject the good draws and keep the bad ones.
    */
   spawnAtRandom(): void {
-    const zSign = this.team === 'T' ? -1 : 1;
+    const zone = BOT_SPAWNS[session.map][this.team];
     const p = findFreeSpawn(
-      () => new THREE.Vector3((Math.random() - 0.5) * 90, 0, zSign * (20 + Math.random() * 35)),
+      () => new THREE.Vector3(
+        zone.minX + Math.random() * (zone.maxX - zone.minX),
+        zone.y,
+        zone.minZ + Math.random() * (zone.maxZ - zone.minZ),
+      ),
       BOT_RADIUS,
       colliders,
+      32,
+      zone.y,
     );
     this.respawnPoint.copy(p);
     this.mesh.position.copy(p);
-    // Spawn facing is a team convention, not a gameplay input: Ts look down
-    // the arena toward +z (the player's half), CTs back the other way. The
-    // first perception frame reads its facing basis off this yaw.
+    // Spawn facing is a team convention, not a gameplay input: Ts look toward
+    // +z and CTs toward -z. The first perception frame reads its facing basis
+    // off this yaw.
     this.mesh.rotation.y = this.team === 'T' ? 0 : Math.PI;
-    // Spawns are on open ground: clear vertical state carried from the life
+    // The zone is standable by construction: clear vertical state carried from
     // that just ended rather than relying on resolveVertical to self-heal it.
     this.vy = 0;
     this.onGround = true;
@@ -461,6 +472,17 @@ export class Bot implements BotShape {
     this.mesh.position.y = vert.feetY;
     this.vy = vert.velY;
     this.onGround = vert.onGround;
+
+    // Cargo lift. AFTER the resolve, because it keys off the grounded state
+    // this frame actually produced, and it overwrites that state rather than
+    // feeding into it. The launch begins after this frame's resolve; later
+    // rising frames still pass through resolveVertical's ceiling sweep.
+    const lift = launchFrom(this.mesh.position.x, this.mesh.position.z, vert.feetY,
+      this.onGround, BOT_RADIUS, liftPads);
+    if (lift !== null) {
+      this.vy = lift;
+      this.onGround = false;
+    }
 
     this.mode = intent.mode;
 

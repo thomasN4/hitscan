@@ -210,8 +210,8 @@ export interface Impact {
 }
 
 // ---------- Shared collections ----------
-// Level geometry registries (`solids`, `colliders`) live in world.ts, which
-// owns the one path by which geometry is registered.
+// Level registries (`solids`, `colliders`, `navLinks`, `liftPads`) live in
+// world.ts, which owns their registration paths.
 /** All Bot instances (see bots.ts). */
 export const bots: Bot[] = [];
 /** Short-lived bullet impact puffs (see effects.ts). */
@@ -680,7 +680,183 @@ export function sanitizeLoadout(v: unknown): LoadoutState | undefined {
 }
 
 /** Maps selectable from the start menu (the ?map= part of the config query). */
-export type MapName = 'arena' | 'range' | 'elevation';
+export type MapName = 'arena' | 'range' | 'elevation' | 'warehouse1' | 'warehouse2';
+
+/**
+ * A map's sky, fog and lighting.
+ *
+ * Lighting used to be four colour literals inlined in `initEngine()`, which
+ * made every map share the arena's desert sun — fine while every map WAS a
+ * sunlit desert, wrong the moment one is a steel warehouse. The table lives
+ * here rather than in `core/engine.ts` because it is pure data over MapName:
+ * that keeps it unit-testable (engine.ts is browser-only and banned from the
+ * test suite by eslint's no-restricted-imports) and puts it beside the other
+ * per-map Records the compiler already polices.
+ */
+export interface Ambience {
+  /** Scene background AND fog colour — they must match or the horizon banding shows. */
+  background: number;
+  /** Distance (m) at which fog starts. */
+  fogNear: number;
+  /** Distance (m) at which fog is total. Keep under the camera's far plane (300). */
+  fogFar: number;
+  /** Directional "sun" colour. */
+  sunColor: number;
+  /** Hemisphere light sky colour (lights upward-facing surfaces). */
+  hemiSky: number;
+  /** Hemisphere light ground colour (bounce onto downward-facing surfaces). */
+  hemiGround: number;
+  /**
+   * Directional "sun" intensity.
+   *
+   * Here rather than hardcoded in initEngine for the same reason the colours
+   * are: maps/warehouse2.ts has a ROOF whose opaque slabs shadow most of the
+   * interior, so indoors leans on the hemisphere — its two skylight strips
+   * admit the sun only in bands. A map that changes what light reaches it
+   * has to be able to say so.
+   */
+  sunIntensity: number;
+  /** Hemisphere light intensity — the main fill under a roof, where sun comes only through skylights. */
+  hemiIntensity: number;
+}
+
+/**
+ * The dusty outdoor look every map shipped with before ambience was per-map.
+ * These are the exact values `initEngine()` used to hardcode, so the three
+ * maps that reference it render identically to before (pinned in state.test.ts).
+ */
+export const DESERT_AMBIENCE: Ambience = {
+  background: 0xbfae8f,
+  fogNear: 40,
+  fogFar: 140,
+  sunColor: 0xffeecc,
+  hemiSky: 0xfff3e0,
+  hemiGround: 0x8a7a5c,
+  sunIntensity: 1.4,
+  hemiIntensity: 0.85,
+};
+
+/**
+ * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN_Z /
+ * SUBTITLES: adding a MapName must fail to compile until the new map says what
+ * it looks like, rather than silently inheriting the desert.
+ */
+export const AMBIENCE: Record<MapName, Ambience> = {
+  arena: DESERT_AMBIENCE,
+  range: DESERT_AMBIENCE,
+  elevation: DESERT_AMBIENCE,
+  // Overcast daylight through a shed roof: cool grey-blue rather than sand.
+  // Fog starts at 60 rather than 40 because a racking aisle runs the better
+  // part of 90 m and the far end has to stay readable; 200 is still well
+  // inside the camera's far plane.
+  warehouse1: {
+    background: 0x9aa3ad,
+    fogNear: 60,
+    fogFar: 200,
+    sunColor: 0xf2f4f8,
+    hemiSky: 0xdfe6ee,
+    // Bright for a "ground" colour, and deliberately so: this is the only
+    // light reaching faces the sun does not, and a concrete floor bounces a
+    // lot. Taken down to a realistic dark grey it renders every shaded face
+    // — parapets, stair risers, the dock lip — as a black silhouette you
+    // cannot read the shape of.
+    hemiGround: 0x7a828b,
+    // Unchanged from when initEngine hardcoded them, so warehouse1 renders
+    // exactly as it did before intensities became per-map.
+    sunIntensity: 1.4,
+    hemiIntensity: 0.85,
+  },
+  // Roofed shed inside a fenced yard. The sky colour is what you see over the
+  // fence, so it stays an outdoor overcast; fog is tighter than warehouse1's
+  // because the whole level fits in a 111 m diagonal rather than a 90 m aisle.
+  //
+  // The intensities are the point of this entry. The roof blocks the
+  // directional sun over the entire interior, so indoors is lit by the
+  // hemisphere ALONE — no direction, no shadows. Raising hemiIntensity past
+  // the outdoor 0.85 is what stops the shell reading as a black box, and the
+  // sun is kept at full strength because the yard is still open to it.
+  warehouse2: {
+    background: 0x8e99a6,
+    fogNear: 45,
+    fogFar: 170,
+    sunColor: 0xf4f6fa,
+    hemiSky: 0xd6dfe8,
+    // Same argument as warehouse1's, and stronger: under a roof EVERY
+    // interior face is a shaded face, so this colour is doing all the work.
+    hemiGround: 0x848d97,
+    sunIntensity: 1.4,
+    hemiIntensity: 2.4,
+  },
+};
+
+/**
+ * The box a team's bots are drawn from when they enter or re-enter the world.
+ *
+ * `y` is what makes this more than the hardcoded band it replaces: it is the
+ * FEET height of the zone, so a zone can sit on a catwalk rather than the
+ * floor. maps/warehouse2.ts spawns one whole team five metres up, which is the
+ * reason this type exists.
+ *
+ * The box must lie entirely over standable surface. Nothing here checks that —
+ * bots.ts rejection-samples against `colliders`, which catches a candidate
+ * INSIDE geometry but not one over thin air, and a zone hanging over a void
+ * simply drops its bots.
+ */
+export interface SpawnZone {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  /** Feet height of the zone's floor. 0 is open ground. */
+  y: number;
+}
+
+/**
+ * Where each team enters, per map.
+ *
+ * bots.ts used to draw every spawn from one hardcoded band — x ±45, |z| 20..55
+ * — for every map, which is why maps/warehouse1.ts had to adopt the arena's
+ * exact 120 x 120 footprint rather than the footprint it wanted
+ * (maps/warehouse1.ts:25-27). A map smaller than that band strands bots
+ * outside its own geometry.
+ *
+ * A full Record for the same reason as BUILDERS / SPAWN_Z / AMBIENCE: adding a
+ * MapName must fail to compile until the new map says where its bots start.
+ *
+ * The first four entries reproduce that old band exactly — `x ∈ [-45, 45]`,
+ * `|z| ∈ [20, 55]`, Ts on -z away from the player spawn and CTs mirrored —
+ * so making this per-map changed nothing about the maps that predate it.
+ * state.test.ts pins that.
+ */
+export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
+  arena: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  range: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  elevation: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  warehouse1: {
+    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
+    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+  },
+  // The asymmetric one, and the reason the table has a `y`. CTs muster in the
+  // +z yard between the shell and the fence and have to come THROUGH a
+  // doorway; Ts start already on the catwalk ring's -z band, five metres up.
+  // Bounds are inset from the geometry by more than NAV_RADIUS so no draw
+  // straddles an edge: the yard band stops short of the fence at z = 34 and
+  // the shell wall at z = 20.5, the catwalk band short of the wall at
+  // z = -19.5 and the void lip at z = -12.
+  warehouse2: {
+    T:  { minX: -28, maxX: 28, minZ: -19, maxZ: -13, y: 5.1 },
+    CT: { minX: -26, maxX: 26, minZ:  23, maxZ:  32, y: 0 },
+  },
+};
 
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every

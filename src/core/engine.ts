@@ -17,7 +17,7 @@
 // consumer for a violation the contract already rules out. See main.ts for
 // the required init order.
 import * as THREE from 'three';
-import { BASE_FOV } from './state';
+import { AMBIENCE, BASE_FOV, type MapName } from './state';
 
 export let renderer: THREE.WebGLRenderer;
 export let scene: THREE.Scene;
@@ -31,9 +31,16 @@ let initialized = false;
  * Must be called exactly once, before any other init* function or any code
  * that touches `scene`/`camera`. A second call THROWS rather than no-opping:
  * it would orphan the first canvas, so the loud failure is the point.
+ *
+ * @param map which map is about to be built — selects the sky/fog/light
+ *        palette from `state.ts:AMBIENCE`. Passed in rather than read from
+ *        `session` so this module keeps no opinion about where config comes
+ *        from; main.ts has already parsed the query by the time it calls here.
  */
-export function initEngine(): void {
+export function initEngine(map: MapName): void {
   if (initialized) throw new Error('initEngine() called twice');
+
+  const amb = AMBIENCE[map];
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
@@ -43,15 +50,17 @@ export function initEngine(): void {
   document.body.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xbfae8f); // dusty haze
-  scene.fog = new THREE.Fog(0xbfae8f, 40, 140);
+  // Background and fog share one colour so geometry fades into the horizon
+  // instead of silhouetting against it.
+  scene.background = new THREE.Color(amb.background);
+  scene.fog = new THREE.Fog(amb.background, amb.fogNear, amb.fogFar);
 
   // FOV is animated by weapons.ts when aiming (BASE_FOV hip-fire -> per-weapon
   // zoom targets, down to ~6° at full sniper zoom).
   camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.1, 300);
 
-  scene.add(new THREE.HemisphereLight(0xfff3e0, 0x8a7a5c, 0.85));
-  const sun = new THREE.DirectionalLight(0xffeecc, 1.4);
+  scene.add(new THREE.HemisphereLight(amb.hemiSky, amb.hemiGround, amb.hemiIntensity));
+  const sun = new THREE.DirectionalLight(amb.sunColor, amb.sunIntensity);
   sun.position.set(40, 60, 25);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);

@@ -21,11 +21,12 @@ import * as THREE from 'three';
 import { camera } from './core/engine';
 import { player, input, aim, wpn, motion, keys, gameTime } from './core/state';
 import { slideMoveXZ, resolveVertical } from './collision';
-import { colliders } from './world';
+import { colliders, liftPads } from './world';
 import { sfxFootstep } from './audio';
 import { gunGroup, currentAimPitch, currentAimYaw, viewmodelAimOffset } from './weapons';
 import { crosshair } from './hud';
 import { speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
+import { launchFrom } from './sim/lift';
 import { approach, deadZone } from './sim/smoothing';
 
 const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex
@@ -115,6 +116,17 @@ export function updateMovement(dt: number): void {
   player.pos.y = vert.feetY + player.eyeHeight;
   player.vel.y = vert.velY;
   player.onGround = vert.onGround;
+
+  // Cargo lift. AFTER the resolve, because it keys off the grounded state
+  // this frame actually produced, and it overwrites that state rather than
+  // feeding into it. The launch begins after this frame's resolve; later
+  // rising frames still pass through resolveVertical's ceiling sweep.
+  const lift = launchFrom(player.pos.x, player.pos.z, vert.feetY, player.onGround,
+    player.radius, liftPads);
+  if (lift !== null) {
+    player.vel.y = lift;
+    player.onGround = false;
+  }
 
   const pressingMove = move.lengthSq() > 0;
   // Grounded motion only: gates footsteps and view bob.

@@ -8,14 +8,21 @@
 // each used to carry their own copy of this logic, and the range copy shipped
 // without the `colliders` push — the whole map was no-clip (`431ac6e`).
 //
-// Only `addSolidBox` touches the scene. Everything else is pure, so the two
+// Two more registries live here, both bot-facing and both populated only by
+// the builders below: `navLinks` (traversable level changes, read by
+// sim/navGrid.ts) and `liftPads` (launch triggers, read by sim/lift.ts).
+//
+// Only `addSolidBox` touches the scene — `addOpenStairs` composes it for the
+// treads and adds its stringer group directly, making it the one other scene
+// reader. Everything else is pure, so the two
 // invariants that have actually broken here — registering both registries,
 // and flushing a group's world matrix before measuring it — are unit-tested
-// in plain Node. `scene` is imported but read only inside `addSolidBox`, and
+// in plain Node. `scene` is never read at module scope, and
 // core/engine.ts has no module-scope side effects, so importing this file
 // outside a browser is safe.
 import * as THREE from 'three';
 import { scene } from './core/engine';
+import type { LiftPad } from './sim/lift';
 
 /** Meshes that block bullets AND bot line-of-sight. */
 export const solids: THREE.Object3D[] = [];
@@ -24,7 +31,7 @@ export const colliders: THREE.Box3[] = [];
 
 /**
  * A level change a walker can traverse but a grid of standable cells cannot
- * express cheaply — today, exactly one flight of stairs.
+ * express cheaply — today, a stair flight or a lift launch arc.
  *
  * The navigation grid (sim/navGrid.ts) samples at 1 m, and a 0.75 m tread
  * means one cell along a flight climbs more than STEP_HEIGHT; sampled that
@@ -43,10 +50,26 @@ export interface NavLink {
    * can route onward instead of back to the mouth.
    */
   halfWidth: number;
+  /**
+   * Traversable in the up direction only. Omitted means both ways, which is
+   * right for stairs and wrong for a cargo lift: a bidirectional lift edge
+   * tells a bot it can descend by stepping off the deck onto the pad below —
+   * which launches it straight back up, and it oscillates there forever.
+   */
+  oneWay?: boolean;
 }
 
-/** Traversable level changes, one per flight. Populated by addStairs. */
+/** Traversable level changes, one per flight or lift. Populated by the stair and lift builders. */
 export const navLinks: NavLink[] = [];
+
+/**
+ * Launch pads, in the pure form sim/lift.ts tests against.
+ *
+ * A separate registry from `colliders` because a pad is BOTH — it is an
+ * ordinary solid you stand on, registered as one, and additionally a trigger.
+ * player.ts and bots.ts read this after their vertical resolve.
+ */
+export const liftPads: LiftPad[] = [];
 
 /**
  * Register a mesh as a raycast target only — no movement AABB.
@@ -204,6 +227,170 @@ export function addStairs(
 }
 
 /**
+ * Build an OPEN flight — thin treads on two stringers, with air underneath.
+ *
+ * `addStairs` builds each step as a full-height box from the ground up, which
+ * is what makes it bulletproof and also what makes it a wall: a solid flight
+ * standing in the open is a 13 m wedge of cover. maps/warehouse2.ts puts both
+ * its main flights in the middle of a 44 x 24 void, where that wedge would
+ * dominate the space the void exists to create. These are the steel stairs the
+ * greybox draws instead, and you can walk under them.
+ *
+ * Walk-under needs no special case anywhere. collision.ts:blocks already
+ * ignores a collider whose UNDERSIDE is at or above `feet + HEAD_HEIGHT`, so a
+ * tread stops blocking as soon as the flight has climbed clear of a standing
+ * body — at stepH 0.3 and treadT 0.16 that is the eighth tread up, leaving the
+ * rest of the run open. The graph gets it for free too: sim/navGrid.ts seeds
+ * ground into every column before probing surface tops, precisely so a floor
+ * under something elevated keeps its cells.
+ *
+ * Tread TOPS sit exactly where addStairs' step tops sit, so climbing,
+ * descend-stick and the NavLink arithmetic are all identical — resolveVertical
+ * is swept and explicitly documented against thin treads, so nothing tunnels
+ * through them either.
+ *
+ * The stringers are registered SHOOTABLE BUT NOT BLOCKING, which is the split
+ * registerGroupParts exists for. They have to be: they are rotated meshes, and
+ * a rotated box's world AABB is the entire wedge — giving them collision would
+ * wall off the underside and undo the whole point of the flight.
+ *
+ * Browser-only: composes addSolidBox, which touches the scene.
+ *
+ * @param x centre x of the flight's first tread
+ * @param y base y — the ground the stairs stand on
+ * @param z centre z of the flight's first tread
+ * @param width stair width across the direction of travel (m)
+ * @param stepH riser height per step; keep at or below STEP_HEIGHT
+ * @param stepD tread depth per step (m)
+ * @param count number of steps
+ * @param treadT tread thickness (m) — the visible plate, hung below its top
+ * @param mat surface material; omitted means Mesh's own default
+ * @param dir direction of ascent
+ */
+export function addOpenStairs(
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  stepH: number,
+  stepD: number,
+  count: number,
+  treadT: number,
+  mat?: THREE.Material,
+  dir: StairDir = 'z+',
+): void {
+  navLinks.push(stairLink(x, y, z, width, stepH, stepD, count, dir));
+  const alongZ = dir === 'z+' || dir === 'z-';
+  for (let i = 0; i < count; i++) {
+    const run = (i + 0.5) * stepD;
+    const cx = dir === 'x+' ? x + run : dir === 'x-' ? x - run : x;
+    const cz = dir === 'z+' ? z + run : dir === 'z-' ? z - run : z;
+    addSolidBox(cx, openTreadBase(y, i, stepH, treadT), cz,
+      alongZ ? width : stepD,
+      treadT,
+      alongZ ? stepD : width,
+      mat);
+  }
+
+  // Stringers: one rotated beam per side, spanning mouth to landing.
+  const totalRun = count * stepD;
+  const totalRise = count * stepH;
+  const angle = Math.atan2(totalRise, totalRun);
+  const length = Math.hypot(totalRun, totalRise);
+  const sign = dir === 'x+' || dir === 'z+' ? 1 : -1;
+  const group = new THREE.Group();
+  const parts: THREE.Mesh[] = [];
+  for (const side of [-1, 1] as const) {
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(alongZ ? 0.2 : length, 0.34, alongZ ? length : 0.2),
+      mat);
+    const offset = side * (width / 2 - 0.1);
+    beam.position.set(
+      alongZ ? x + offset : x + sign * totalRun / 2,
+      y + totalRise / 2 - 0.2,
+      alongZ ? z + sign * totalRun / 2 : z + offset,
+    );
+    if (alongZ) beam.rotation.x = -sign * angle;
+    else beam.rotation.z = sign * angle;
+    beam.castShadow = beam.receiveShadow = true;
+    group.add(beam);
+    parts.push(beam);
+  }
+  scene.add(group);
+  registerGroupParts(group, { shootable: parts });
+}
+
+/**
+ * Build a cargo lift: a low pad that throws whatever stands on it up to
+ * `landing`.
+ *
+ * The pad itself is an ordinary solid — you walk onto it, it is shot at, it
+ * takes decals — so it goes through addSolidBox like anything else. What makes
+ * it a lift is the second registration into `liftPads`, which player.ts and
+ * bots.ts consult through sim/lift.ts:launchFrom after their vertical resolve.
+ *
+ * Keep `h` at or below collision.ts:STEP_HEIGHT. A taller pad has to be JUMPED
+ * onto, and bots have no jump in BrainIntent — they would path to a lift they
+ * could never board.
+ *
+ * The published NavLink is `oneWay`, which is what the name promises: routing
+ * a bot DOWN a lift would walk it off the deck onto the pad, which launches it
+ * again, forever.
+ *
+ * @param x centre x of the pad
+ * @param y base y — the ground the pad sits on
+ * @param z centre z of the pad
+ * @param w/d pad footprint (m)
+ * @param h pad height; at or below STEP_HEIGHT so it can be walked onto
+ * @param launchVel upward velocity imparted (m/s); see sim/lift.ts:launchApex
+ * @param landing where the arc is meant to put a body down — the NavLink's top
+ * @param mat surface material
+ */
+export function addLiftPad(
+  x: number,
+  y: number,
+  z: number,
+  w: number,
+  d: number,
+  h: number,
+  launchVel: number,
+  landing: THREE.Vector3,
+  mat?: THREE.Material,
+): void {
+  addSolidBox(x, y, z, w, h, d, mat);
+  liftPads.push({
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+    topY: y + h,
+    launchVel,
+  });
+  navLinks.push({
+    bottom: new THREE.Vector3(x, y + h, z),
+    top: landing.clone(),
+    halfWidth: Math.min(w, d) / 2,
+    oneWay: true,
+  });
+}
+
+/**
+ * Base y of an open flight's tread `index`, counting from 0.
+ *
+ * Pure and separate for the same reason createSolidBox is: the convention it
+ * encodes is invertible-looking and load-bearing. addSolidBox takes a BASE, but
+ * what a walker meets is the TOP, and the top has to land on exactly the same
+ * `(index + 1) * stepH` a solid step from addStairs would — otherwise climbing,
+ * descend-stick and the NavLink all disagree about where the flight is. So the
+ * plate hangs BELOW its walking surface rather than sitting on it, and the
+ * thickness is subtracted rather than added.
+ *
+ * It is also what decides how much of the flight you can walk under: a tread
+ * stops blocking a body once this base clears collision.ts:HEAD_HEIGHT.
+ */
+export function openTreadBase(y: number, index: number, stepH: number, treadT: number): number {
+  return y + (index + 1) * stepH - treadT;
+}
+
+/**
  * The endpoints addStairs would build a flight between, without building it.
  *
  * Pure and separate so the arithmetic is testable against the coordinates the
@@ -236,9 +423,58 @@ export function stairLink(
   };
 }
 
+/** Two solids whose TOP faces share a plane, and the footprint they share. */
+export interface CoplanarTop {
+  /** The plane both tops lie in. */
+  y: number;
+  /** The shared footprint, in world x/z. */
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  /** Area of that footprint, m^2 — how much surface is fighting. */
+  area: number;
+}
+
+/**
+ * Every pair of boxes whose top faces are coplanar AND overlap in x/z.
+ *
+ * That combination is a rendering bug with no visual tell in the source: two
+ * up-facing surfaces at the same height write the same depth, so which one
+ * wins is decided by the opaque draw order, three.js re-sorts that by distance
+ * every frame, and the winner flips as the camera moves. It reads as a patch
+ * of surface flickering between two materials. Coincident faces pointing in
+ * OPPOSITE directions (a slab resting on a wall) are fine — backface culling
+ * means only one of them is ever drawn — which is why this looks only at tops.
+ *
+ * Pure, and O(n^2) over the collider list, so it is for a DEV-only check at
+ * build time rather than anything per-frame.
+ *
+ * @param tol how far apart two tops may sit and still count as one plane, and
+ *   how much footprint overlap to dismiss as float noise (m). The colliders
+ *   are measured from float32 vertex data, where one ulp at this map's scale
+ *   is ~2e-6 m; the default sits 50x above that and 600x below the smallest
+ *   overlap a builder could write by hand.
+ */
+export function coplanarTopOverlaps(boxes: readonly THREE.Box3[], tol = 1e-4): CoplanarTop[] {
+  const found: CoplanarTop[] = [];
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!, b = boxes[j]!;
+      if (Math.abs(a.max.y - b.max.y) > tol) continue;
+      const minX = Math.max(a.min.x, b.min.x), maxX = Math.min(a.max.x, b.max.x);
+      const minZ = Math.max(a.min.z, b.min.z), maxZ = Math.min(a.max.z, b.max.z);
+      if (maxX - minX <= tol || maxZ - minZ <= tol) continue;
+      found.push({ y: a.max.y, minX, maxX, minZ, maxZ, area: (maxX - minX) * (maxZ - minZ) });
+    }
+  }
+  return found;
+}
+
 /** Empty both registries. Used by tests to isolate cases; not used at runtime. */
 export function resetWorld(): void {
   solids.length = 0;
   colliders.length = 0;
   navLinks.length = 0;
+  liftPads.length = 0;
 }

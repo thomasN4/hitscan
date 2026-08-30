@@ -37,10 +37,12 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 
 Before deploying you pick a **loadout**: one primary and one secondary from the weapon catalog (SMG / sniper / shotgun primaries; pistol / revolver secondaries). The picker opens at match start (after Play) and again on death, pre-filled with your last pick; Deploy commits it and enters the game. In-game, `1`/`2` switch between the two positions and `Q` quick-swaps. Your pick survives map switches via sessionStorage.
 
-Three maps plus the match setup (enemy/allied bot counts, round length in minutes), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…`) and reloads the page:
+Five maps plus the match setup (enemy/allied bot counts, round length in minutes), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…`) and reloads the page:
 
 - **Arena** (`src/maps/arena.ts`) — enemy bots (menu-configured count, default 6) spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
 - **Elevation** (`src/maps/elevation.ts`) — a playtest map for watching how the bots cope with height: a two-story building with an internal stairwell and an external flight, an unrailed bridge to a tower, a plateau, and a jump-only route no bot can ever take. Bots route over a navigation graph when a target is a level above them (`src/nav.ts`), so this is where you see how they find stairs, decks and drops — press `V` in a dev build to watch the routes themselves.
+- **Warehouse (aisles)** (`src/maps/warehouse1.ts`) — a distribution warehouse built as an aisle grid: six racking rows with cross-aisles, a mezzanine office straddling the mid-line as the contested high ground, loading docks at both ends, and flank conveyors low enough for you to vault but too high for a bot to walk, so you get a mobility edge they can't answer.
+- **Warehouse (vertical stack)** (`src/maps/warehouse2.ts`) — the same building turned on its side: an 8 m catwalk ring runs the full perimeter five metres up, and the whole 44 × 24 middle is cut away, so the ring looks down on the floor and the floor looks up at the ring. Two open stairs stand in the void (you can walk under them), two cargo lifts throw you onto the ring one-way, and the spawns are asymmetric — you muster in the fenced yard and have to come through a doorway, while the enemy starts already holding the high ground.
 - **Shooting Range** (`src/maps/range.ts`) — a private lane with floor markers at 10–50 m and bot-silhouette targets (identical hitbox dimensions to real bots) wearing elliptical bullseye rings at 10–60 m. Nothing shoots back; `R` restores your full loadout without consuming reserve ammo. Use it to practice accuracy and recoil patterns.
 
 Common rules:
@@ -73,7 +75,10 @@ src/
 │   ├── index.ts     # MapName -> builder registry; a new map must register here
 │   ├── arena.ts     # de_dust-style arena (walls, buildings, crates)
 │   ├── range.ts     # shooting range (lane, distance markers, silhouette targets)
-│   └── elevation.ts # bot testbed (two-story building, bridge, plateau)
+│   ├── elevation.ts # bot testbed (two-story building, bridge, plateau)
+│   ├── warehouse1.ts # aisle grid (racking rows, mezzanine, docks, conveyors)
+│   ├── warehouse2.ts # vertical stack (catwalk ring over an open floor, lifts)
+│   └── mockups/     # greybox references the maps were built from (not built)
 ├── main.ts       # entry point: init order, input, pointer lock/menus, game loop
 ├── world.ts      # solids/colliders registries — the ONE way to register geometry
 ├── collision.ts  # AABB movement collision + line-of-sight raycast (pure)

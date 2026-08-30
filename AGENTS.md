@@ -315,10 +315,17 @@ that also holds the user's key.
    tell you which of the two it is answering:
 
    ```sh
-   git fetch origin main && git merge-tree --write-tree origin/main HEAD
+   git fetch origin main    # a failure here is a fetch failure, not an answer
+   git merge-tree --write-tree origin/main HEAD; echo "merge-tree: $?"
    ```
 
-   Exit 1 is a conflict, 0 is clean, and neither depends on the title.
+   Run them as two commands and read only the second. `merge-tree`'s exit 1 is a
+   conflict and 0 is clean, neither depending on the title; anything else — 128,
+   say — is the tool failing rather than a verdict, so report it as that.
+   Chaining them with `&&` merges two different failures into one status: the
+   canonical remote is a LAN box, and when it is unreachable the compound exits
+   nonzero having compared nothing at all, which under the reading above is
+   indistinguishable from a real conflict.
 
 Every rule below exists because this machinery fails quietly rather than loudly,
 and a planner waiting on it cannot tell the difference from the outside:

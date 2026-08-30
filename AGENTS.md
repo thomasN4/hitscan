@@ -354,8 +354,17 @@ and a planner waiting on it cannot tell the difference from the outside:
   retrying the same exhausted `AI_REVIEWER` spends another 25 minutes failing
   identically. Switching to `claude` or `opencode` spends a *different*
   subscription of the user's — ask first, and never rotate routes unattended.
-- **Two failed rounds is a stop, not a third try.** Report which routes failed
-  and hand the decision back; the third attempt is the user's to authorize.
+- **Two failed rounds is a stop, not a third try.** Re-add the `WIP: ` prefix
+  first, then report which routes failed and hand the decision back; the third
+  attempt is the user's to authorize. The prefix goes back on for **every** exit
+  from the loop that did not get a review, not just this one — that is the
+  invariant, and step 5 already enforces it for the `ENABLE_AI_REVIEW=false`
+  case, refusing to strip the prefix "because stripping it anyway would mark the
+  PR ready with no review at all". Stripping the prefix is what arms the
+  reviewer, so by the time a failure is known the prefix is already off: a stop
+  that only reports leaves behind a PR that is prefix-off, green on `ci.yml` and
+  unreviewed, which is indistinguishable from one the loop finished. That is the
+  single end state this loop must never produce by accident.
 - **A cancelled run means a newer event landed, not necessarily a push.** The
   concurrency group is keyed by PR number and does not care which event opened
   the run, so an `edited` — a title toggle, or a description fix — cancels an

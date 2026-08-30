@@ -1,0 +1,78 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "snapshot": false,
+  "autoupdate": false,
+  "enabled_providers": ["openrouter"],
+  "provider": {
+    "openrouter": {
+      "models": {
+        "z-ai/glm-5.3-flash": {
+          "name": "GLM-5.3-Flash",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 1310720,
+            "output": 131072
+          },
+          "variants": {
+            "high": {
+              "reasoning": {
+                "effort": "high"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "agent": {
+    "executor": {
+      "description": "Implement one approved Plan Relay document in the current worktree and validate it without committing or publishing.",
+      "mode": "primary",
+      "permission": {
+        "*": "deny",
+        "read": {
+          "*": "allow",
+          "*.env": "deny",
+          "*.env.*": "deny",
+          "*.env.example": "allow"
+        },
+        "glob": "allow",
+        "grep": "deny",
+        "list": "allow",
+        "edit": "allow",
+        "lsp": "allow",
+        "todowrite": "allow",
+        "doom_loop": "allow",
+        "external_directory": "deny",
+        "bash": {
+          "*": "deny",
+          "rg": "allow",
+          "rg *": "allow",
+          "git status": "allow",
+          "git status *": "allow",
+          "git diff": "allow",
+          "git diff *": "allow",
+          "git log": "allow",
+          "git log *": "allow",
+          "git show *": "allow",
+          "git rev-parse *": "allow",
+          "npm test": "allow",
+          "npm test *": "allow",
+          "npm run lint": "allow",
+          "npm run lint *": "allow",
+          "npm run typecheck": "allow",
+          "npm run typecheck *": "allow",
+          "npm run build": "allow",
+          "npm run build *": "allow",
+          "npm run dev -- --port * --strictPort": "allow",
+          "node scripts/smoke-test.mjs": "allow",
+          "CS_SMOKE_BASE=http://localhost:* node scripts/smoke-test.mjs": "allow",
+          "ls": "allow",
+          "ls *": "allow"
+        }
+      }
+    }
+  }
+}

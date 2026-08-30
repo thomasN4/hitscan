@@ -6,7 +6,7 @@
 // they are caught by review and by scripts/smoke-test.mjs.)
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
-         sanitizeLoadout, session, player, equippedId,
+         sanitizeLoadout, session, player, playerFeet, equippedId,
          AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS } from './state';
 
 describe('state module purity', () => {
@@ -137,8 +137,10 @@ describe('player entity', () => {
     // The initial spawn sits on open ground, so eye = eyeHeight exactly.
     // On stairs/platforms pos.y rides higher: feet = pos.y - eyeHeight is
     // what collision.ts resolves against (see collision.test.ts).
+    const feet = playerFeet(player);
     expect(player.pos.y).toBe(player.eyeHeight);
-    expect(player.pos.y - player.eyeHeight).toBe(0);
+    expect(feet.toArray()).toEqual([player.pos.x, 0, player.pos.z]);
+    expect(feet).not.toBe(player.pos); // callers receive a copy, never live state
   });
 });
 

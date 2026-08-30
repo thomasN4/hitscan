@@ -92,13 +92,25 @@ describe('buildDebugSegments', () => {
     expectVertex(pos, 1, 10, 5.3, 0);
   });
 
-  it('colours the intent line by brain mode', () => {
+  it('colours the intent line by brain mode, all five distinct', () => {
     const { pos, col } = buffers();
     const target = new THREE.Vector3(1, 1, 1);
-    buildDebugSegments([bot({ mode: 'route', targetEye: target })], pos, col, VIEW);
-    const routing = [col[0], col[1], col[2]];
-    buildDebugSegments([bot({ mode: 'engage', targetEye: target })], pos, col, VIEW);
-    expect([col[0], col[1], col[2]]).not.toEqual(routing);
+    const seen: number[][] = [];
+    for (const mode of ['hold', 'search', 'route', 'engage', 'patrol'] as const) {
+      buildDebugSegments([bot({ mode, targetEye: target })], pos, col, VIEW);
+      seen.push([col[0]!, col[1]!, col[2]!]);
+    }
+    // Every mode tint must be distinguishable from every other — the overlay
+    // is the only place a bot's mode is visible at a glance.
+    for (let i = 0; i < seen.length; i++) {
+      for (let j = i + 1; j < seen.length; j++) {
+        expect(seen[i]).not.toEqual(seen[j]);
+      }
+    }
+    // Patrol is pinned to cyan explicitly: it is the one cool hue, and the
+    // goalless route walk must never read as any combat mode. The bot fixture
+    // exposes no shootable observation, so the tint is the dim tier.
+    expect(seen[4]).toEqual([0.0, 0.25, 0.25]);
   });
 
   // Issue #46: the old single-brightness line read as "everyone is engaging
@@ -130,6 +142,45 @@ describe('buildDebugSegments', () => {
     it('dims a bot whose target is beyond engage range, whatever the sight', () => {
       expect(tierColor({ targetInRange: false, targetLOS: true })).toEqual([0.25, 0, 0]);
       expect(tierColor({ targetInRange: false, targetLOS: false })).toEqual([0.25, 0, 0]);
+    });
+
+    it('never grants full brightness to a holding bot', () => {
+      // Hold (stage 1): no visual observation, no lookAt, no shot. The
+      // marker still floats — a standing bot must stay visible — but at the
+      // dim tier in its own hue, never the shootable one.
+      const { pos, col } = buffers();
+      const verts = buildDebugSegments(
+        [bot({ mode: 'hold', targetEye: null, targetInRange: false, targetLOS: null })],
+        pos, col, VIEW,
+      );
+      // No intent line (nothing to look at): the marker alone, dimmed orange.
+      expect(verts).toBe(MARKER_VERTS);
+      expect(col[0]).toBeCloseTo(0.25, 12);      // 0.25 × hold red
+      expect(col[1]).toBeCloseTo(0.125, 12);     // 0.25 × hold green
+      expect(col[2]).toBeCloseTo(0, 12);
+    });
+
+    it('keeps a search intent line dim even though its endpoint is non-null', () => {
+      // A memory or damage search exposes a scan lookAt (a frozen remembered
+      // eye, or a direction-only heading), but the endpoint is NOT a seen
+      // target: the line is drawn, yet stays at the dim, non-shootable tier
+      // in the search hue.
+      const { pos, col } = buffers();
+      const verts = buildDebugSegments(
+        [bot({
+          mode: 'search',
+          targetEye: new THREE.Vector3(3, 1.9, 0),
+          targetInRange: false,
+          targetLOS: null,
+        })],
+        pos, col, VIEW,
+      );
+      expect(verts).toBe(2 + MARKER_VERTS); // the intent line is still emitted
+      expectVertex(pos, 0, 0, 1.9, 0);
+      expectVertex(pos, 1, 3, 1.9, 0);
+      expect(col[0]).toBeCloseTo(0.25, 12); // 0.25 × search yellow
+      expect(col[1]).toBeCloseTo(0.25, 12);
+      expect(col[2]).toBeCloseTo(0, 12);
     });
   });
 

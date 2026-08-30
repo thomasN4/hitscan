@@ -118,6 +118,14 @@ export interface WeaponDef {
    * Required whenever `melee` is present.
    */
   arcRad?: number;
+  /**
+   * Backstab damage multiplier: a strike delivered from within 60° of
+   * directly behind the victim (sim/melee.ts:isBackstab) multiplies the
+   * ordinary zone damage by this. Required whenever `melee` is present and
+   * meaningless otherwise — validateWeapons owns both directions of the
+   * pairing, exactly like range/arcRad. Absent means 1 (no backstab bonus).
+   */
+  backstabMult?: number;
 }
 
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
@@ -154,21 +162,44 @@ export interface Bot {
   readonly navPath: readonly THREE.Vector3[];
   /** How far along `navPath` the bot has got — waypoints before this are consumed. Display only. */
   readonly navLeg: number;
-  /** Eye position of whatever the bot is currently targeting, or null when it has none. Display only. */
+  /**
+   * World-space point the brain's intent looks at — the observed eye while
+   * engaging, a copied remembered-eye or scan-bearing point while pursuing
+   * memory or searching — or null when holding. Display only.
+   */
   readonly targetEye: THREE.Vector3 | null;
-  /** Whether that target sits inside the brain's engage range. Display only. */
+  /** Whether that focus sits inside the brain's engage range. Display only. */
   readonly targetInRange: boolean;
   /**
-   * Result of a line-of-sight probe against the current target this frame,
-   * or null when none was taken (overlay off, or no live target). Display
-   * only — the probe itself is DEV-gated; see bots.ts.
+   * Sight gate for the current focus: true only while the frame's own
+   * visual observation agrees with the intent's focus (acquisition spent
+   * the frame's ray — no extra probe is paid), false when a look was
+   * attempted and blocked, null when no ray was spent at all. Memory and
+   * damage-search frames stay dim even if acquisition saw something the
+   * brain discarded. Display only; see bots.ts.
    */
   readonly targetLOS: boolean | null;
   update(dt: number, player: PlayerState): void;
   eyePos(): THREE.Vector3;
   /** @param killerName display name of a bot killer; omitted for player kills */
   die(part: HitZone, killerName?: string): void;
+  /** Place on a fresh spawn point; placement only — see respawn() for the full-life reset. */
   spawnAtRandom(): void;
+  /**
+   * Full-life reset: revive (hp/alive/visibility), replace, and drop every
+   * per-life state — brain policy state, perception cursor, cached route,
+   * DEV gates, movement feedback and aim pose. Both scheduled revival paths
+   * (bots.ts:die's six-second callback, combat.ts's 2.5-second wave reset)
+   * route through this.
+   */
+  respawn(): void;
+  /**
+   * Direction-only "shot came from this way" stimulus: a copied, normalized
+   * PLANAR victim-to-attacker bearing. No attacker identity, distance or
+   * destination travels with it — the brain may search toward the bearing
+   * but can never know (or shoot at) what sent it.
+   */
+  onIncomingFire(bearing: THREE.Vector3): void;
 }
 
 /** One transient impact puff tracked by effects.ts. */
@@ -238,6 +269,15 @@ export const player: PlayerState = {
   radius: 0.45,
   eyeHeight: 1.7,
 };
+
+/**
+ * Copy a player's world-space FEET position from the canonical eye-position
+ * convention. Keep this conversion here so perception and damage awareness
+ * cannot disagree about whether `PlayerState.pos` means eyes or feet.
+ */
+export function playerFeet(p: PlayerState): THREE.Vector3 {
+  return new THREE.Vector3(p.pos.x, p.pos.y - p.eyeHeight, p.pos.z);
+}
 
 /**
  * Ceiling on accumulated recoil units, applied in `weapons.ts:shoot()` when a
@@ -463,7 +503,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                                // the contract rather than broken tuning
     fireRate: 0.45,  // swing cadence (~2.2 swings/sec click ceiling)
     reloadTime: 0,   // never reloads; tryReload() no-ops on a melee def
-    damage: 55,      // two swings to kill ANYWHERE on the body; legs x0.75
+    damage: 55,      // two FRONT swings to kill anywhere on the body; legs x0.75.
+                     // A backstab (x3 below) kills a full-health bot in one
     headshotMult: 1, // NO head premium. The arc strikes the NEAREST part, and
                      // point-blank that is usually the head — with x4 every
                      // close swing one-tapped (the smoke phase measured -120
@@ -490,6 +531,9 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     melee: true,
     range: 2.0,        // metres from the eye a strike reaches
     arcRad: 0.6,       // rad (~34°) total apex angle — forgiving CS-style arc
+    backstabMult: 3,   // strike from within 60° of directly behind and the
+                       // zone damage triples: 55 x 3 = 165 — the CS-style
+                       // one-hit backstab on a full-health bot (issue #37)
   },
 };
 
@@ -866,8 +910,9 @@ export interface SessionState {
   /**
    * Developer-facing bot-observation flag. The wireframe overlay, V binding,
    * and HUD readout are DEV-only, but the unconditional window.__cs facade may
-   * set this in a production preview so smoke tests can activate diagnostic
-   * LOS reads. Do not infer its value from the build mode alone.
+   * set this in a production preview so smoke tests can exercise those views.
+   * It controls consumers only: gameplay perception and its LOS budget must
+   * never depend on this flag. Do not infer its value from build mode alone.
    */
   debugView: boolean;
   /** The match has ended (clock expiry or elimination); written once by combat.ts:endMatch. */

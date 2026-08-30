@@ -144,7 +144,8 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     }
 
     // Melee pairing, the same both-directions pattern as pellets/pelletCone:
-    // the reach fields exist exactly when the def swings.
+    // the reach fields and the backstab multiplier exist exactly when the
+    // def swings.
     if (def.melee) {
       if (!(def.range !== undefined && def.range > 0)) {
         out.push(`${name}: range ${num(def.range ?? NaN)} must be > 0 when melee — a swing without reach connects with nothing`);
@@ -152,8 +153,12 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
       if (!(def.arcRad !== undefined && def.arcRad > 0 && def.arcRad <= Math.PI)) {
         out.push(`${name}: arcRad ${num(def.arcRad ?? NaN)} must lie in (0, π] when melee — an arc at/below 0 swings at nothing, past a half-turn it strikes behind`);
       }
-    } else if (def.range !== undefined || def.arcRad !== undefined) {
-      out.push(`${name}: range/arcRad without melee does nothing — only a melee weapon swings`);
+      if (!(def.backstabMult !== undefined &&
+            Number.isFinite(def.backstabMult) && def.backstabMult >= 1)) {
+        out.push(`${name}: backstabMult ${num(def.backstabMult ?? NaN)} must be finite and >= 1 when melee — a backstab can never pay less than a front strike`);
+      }
+    } else if (def.range !== undefined || def.arcRad !== undefined || def.backstabMult !== undefined) {
+      out.push(`${name}: range/arcRad/backstabMult without melee does nothing — only a melee weapon swings`);
     }
     if (!(def.damage > 0)) {
       out.push(`${name}: damage ${num(def.damage)} must be > 0 — the weapon cannot hurt anything`);

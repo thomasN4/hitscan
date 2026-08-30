@@ -3,27 +3,30 @@
 // instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
-// Each frame update() picks the best opposing entity (player or bot) under
-// the brain's own ranking, builds a passive BrainView around it (planar
-// steering vector, 3D range and rise, a lazy LOS thunk, last frame's
-// collision outcome), hands it to decide(), then
-// realizes the BrainIntent: attempt the returned step against world
-// geometry through the SAME feet-aware gates the player uses (slideMoveXZ +
-// resolveVertical, so bots climb stairs and land off edges), reporting
-// rejection back as moveBlocked, and looses a shot if asked. All tuning of
-// behavior lives in BrainParams / brain classes; this file holds no policy
-// numbers.
+// Each frame update() runs ONE visual acquisition (sim/perception.ts) over
+// the opposing candidates, hands the brain a passive BrainView around its
+// zero-or-one observation (own feet and facing, movement feedback, a lazy
+// route thunk), then realizes the BrainIntent: attempt the returned step
+// against world geometry through the SAME feet-aware gates the player uses
+// (slideMoveXZ + resolveVertical, so bots climb stairs and land off edges),
+// report rejection back as moveBlocked, face the intent's facing, aim the
+// barrel at its lookAt, and loose a shot only when the frame's observation
+// agrees with the intent's focus. All tuning of behavior lives in
+// BrainParams / brain classes; this file holds no policy numbers.
 //
 // Shot gating contract (realized by the default brain): fire only when a
-// cooldown expires AND line of sight passes; without sight it retries on a
-// short 0.3s cooldown so bots keep hunting instead of shooting through walls.
+// cooldown expires AND the bot currently SEES its focus — the observation is
+// the LOS proof, so a bot that sees nothing holds instead of shooting
+// through walls. On sight loss it pursues the FROZEN last-known position
+// (brain-owned memory) and scans on arrival; the executor keeps its route
+// cache only while it still belongs to the same active goal.
 //
 // Hit zones: each body part is its own mesh with `userData.bot` pointing at
 // this instance — weapons.ts raycasts against head/torso/legs directly and
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, playerFeet, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -32,8 +35,10 @@ import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
-import { DefaultBrain, nearestOpposing, type BrainMode } from './sim/botBrains';
-import { NAV_RADIUS, route } from './nav';
+import { DefaultBrain, type BrainMode } from './sim/botBrains';
+import { acquireVisual, type PerceptionId } from './sim/perception';
+import { NAV_RADIUS, route, navGrid } from './nav';
+import { nearestNode, navNode, pickPatrolNode } from './sim/navGrid';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -61,7 +66,7 @@ const MAX_AIM_PITCH = 1.2;
  */
 const WAYPOINT_REACHED = 1;
 
-/** Seconds between route recomputes for one bot, while it wants a route. */
+/** Seconds between route recomputes while pursuing a moving goal. */
 const ROUTE_INTERVAL = 1;
 
 /**
@@ -133,16 +138,18 @@ export function botFor(obj: THREE.Object3D): BotShape | undefined {
 }
 
 /**
- * One entity this bot may fight. The player and bot targets differ in how
- * their LOS endpoint is derived and where shot damage is routed.
+ * One entity this bot may fight, carrying its stable perception identity.
+ * The player and bot targets differ in where shot damage is routed.
  *
- * `pos` is the target's FEET on both arms — see OpposingCandidate. The
- * player's own `pos` is its EYE (core/state.ts), so the player arm has to
- * drop eyeHeight rather than pass the state vector straight through.
+ * `feet` is the target's FEET on both arms (see VisualCandidate) — the
+ * player's own `pos` is its EYE (core/state.ts), so the player arm uses the
+ * shared `playerFeet()` conversion rather than passing the state vector
+ * straight through. `eye` is the LOS endpoint: the camera for the player,
+ * the bot's eyePos().
  */
 type Target =
-  | { kind: 'player'; pos: THREE.Vector3; alive: boolean }
-  | { kind: 'bot'; pos: THREE.Vector3; alive: boolean; bot: BotShape };
+  | { kind: 'player'; id: PerceptionId; feet: THREE.Vector3; eye: THREE.Vector3; alive: boolean }
+  | { kind: 'bot'; id: PerceptionId; feet: THREE.Vector3; eye: THREE.Vector3; alive: boolean; bot: BotShape };
 
 /** Concrete Bot: implements the structural `Bot` shape core/state.ts declares for the registry. */
 export class Bot implements BotShape {
@@ -168,11 +175,12 @@ export class Bot implements BotShape {
   /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
   private readonly brain = new DefaultBrain();
   /**
-   * The brain's target ranking, bound once. Which enemy is worth chasing is
-   * policy, so it comes from the brain; hoisting it to a field keeps
-   * nearestOpposing from allocating a fresh closure per bot per frame.
+   * Fair-rotation cursor for the per-frame visual acquisition: the index the
+   * next scan starts from when the brain's tracked identity is not cheaply
+   * eligible. Advanced by acquisition only (see sim/perception.ts); reset
+   * with the rest of the per-life state on respawn.
    */
-  private readonly targetScore = this.brain.targetScore;
+  private perceptionCursor = 0;
   /**
    * Whether last frame's intended step was rejected by world collision.
    *
@@ -192,36 +200,54 @@ export class Bot implements BotShape {
    * Public for the same reason moveBlocked is: it is part of the structural
    * Bot shape and the readout renders it. Written here only.
    */
-  mode: BrainMode = 'engage';
+  mode: BrainMode = 'hold';
   /** Waypoints the bot is currently walking, nav-graph order; empty when none. */
   private path: THREE.Vector3[] = [];
   /** How far along `path` the bot has got. */
   private leg = 0;
   /**
-   * Eye position of this frame's target, for debugView.ts's intent line.
+   * World-space point the brain's intent looks at (a copy of the observed
+   * eye), for debugView.ts's intent line; null when the brain has nothing
+   * to look at (hold).
    *
    * Public for the same reason `mode` is: part of the structural Bot shape,
-   * rendered by a DEV view, written here only. It holds the REFERENCE the LOS
-   * ray already uses (`camera.position`, or the target's `eyePos()` result), so
-   * it costs no allocation of its own.
+   * rendered by a DEV view, written here only.
    */
   targetEye: THREE.Vector3 | null = null;
   /**
    * Shot-gate readout for debugView.ts's intent line (issue #46): whether
-   * this bot could actually FIRE at its current target, split into the two
+   * this bot could actually FIRE at its current focus, split into the two
    * gates the trigger applies — range, and sight.
    *
    * Public for the same reason `targetEye` is: part of the structural Bot
-   * shape, rendered by a DEV view, written here only. The range half is a
-   * comparison and is kept fresh every frame; the sight half costs a real
-   * raycast, so it is only paid while session.debugView is up and holds null
-   * otherwise. The key binding is DEV-only, but the debug facade may enable
-   * the flag explicitly in a production preview for smoke-test diagnostics.
+   * shape, rendered by a DEV view, written here only. Sight here is the
+   * frame's own observation (acquisition spent the frame's ray), so no
+   * extra probe is paid for the readout; it is fresh every frame. The key
+   * binding is DEV-only, but the debug facade may enable the flag explicitly
+   * in a production preview for smoke-test diagnostics.
    */
   targetInRange = false;
   targetLOS: boolean | null = null;
   /** Seconds until this bot may spend the frame's route budget again. */
   private routeCooldown = 0;
+  /**
+   * Which pursuit the cached route belongs to — 'v' (current-visual) or 'm'
+   * (memory) pursuit, plus the focus id — or 'p' for a patrol leg. A
+   * remembered goal must not inherit a path computed for a different pursuit
+   * or a different target: the key is checked on every route request and the
+   * cache dropped on any change.
+   */
+  private routeKey: string | null = null;
+  /**
+   * World-space patrol node this bot is walking toward, or null when idle in
+   * the patrol pause. Selection is LAZY: the node is drawn (pure selector
+   * under the graph's rng contract) only when the brain's pause ends, and it
+   * is accepted only when the budgeted A* produces a route — an unreachable
+   * candidate is discarded and a fresh one is picked after the brain's next
+   * one-second pause. Cleared by any interrupt (visual, damage, hold) and by
+   * respawn.
+   */
+  private patrolGoal: THREE.Vector3 | null = null;
 
   constructor(team: Team = 'T') {
     // Plain assignments, not a parameter property: the `name` derivation must
@@ -293,109 +319,138 @@ export class Bot implements BotShape {
     );
     this.respawnPoint.copy(p);
     this.mesh.position.copy(p);
+    // Spawn facing is a team convention, not a gameplay input: Ts look toward
+    // +z and CTs toward -z. The first perception frame reads its facing basis
+    // off this yaw.
+    this.mesh.rotation.y = this.team === 'T' ? 0 : Math.PI;
     // The zone is standable by construction: clear vertical state carried from
-    // the life that just ended rather than relying on resolveVertical to
-    // self-heal it.
+    // that just ended rather than relying on resolveVertical to self-heal it.
     this.vy = 0;
     this.onGround = true;
   }
 
   /**
-   * Per-frame executor pass: pick a target, build the view, take the
-   * brain's intent, realize it. No policy decisions live here.
+   * Direction-only "shot came from this way" stimulus, forwarded to the
+   * brain. The bearing is a normalized planar victim-to-attacker direction;
+   * no attacker identity, distance or destination passes through here.
+   */
+  onIncomingFire(bearing: THREE.Vector3): void {
+    this.brain.onIncomingFire(bearing);
+  }
+
+  /**
+   * Full-life reset: revive, replace, and drop every per-life state — body
+   * (hp/visibility/vertical state), placement, brain policy state (stagger,
+   * focus, memory, scan, damage reaction), perception cursor, cached route
+   * and its cooldown, mode/intent target/DEV gates, movement-blocked state
+   * and aim pitch. BOTH scheduled revival paths (die()'s six-second
+   * self-revival and combat.ts's 2.5-second wave reset) route through here,
+   * so neither can revive a bot halfway.
+   */
+  respawn(): void {
+    this.hp = 100;
+    this.alive = true;
+    this.mesh.visible = true;
+    this.spawnAtRandom();
+    // The brain outlived the body: re-arm its spawn stagger and drop the
+    // corpse's attention, memory and reactions — a new life inherits nothing.
+    this.brain.onRespawn();
+    this.perceptionCursor = 0;
+    this.clearRouteCache();
+    this.patrolGoal = null;
+    this.routeCooldown = 0;
+    this.mode = 'hold';
+    this.targetEye = null;
+    this.targetInRange = false;
+    this.targetLOS = null;
+    this.moveBlocked = false;
+    this.aim.rotation.x = 0;
+  }
+
+  /**
+   * Per-frame executor pass: run one visual acquisition, build the view,
+   * take the brain's intent, realize it. No policy decisions live here.
    * @param dt delta time (s)
    * @param player the player entity
    */
   update(dt: number, player: PlayerState): void {
     if (!this.alive) return;
 
-    // Opposing entities: Ts fight the player and every CT; CTs fight every
-    // T. The player is listed even while dead — with ctbots=0 that keeps an
-    // enemy chasing the corpse position exactly as pre-team behavior did,
-    // while shooting stays gated off by targetAlive.
+    // Opposing entities as STABLE CANDIDATES — no positional selection here.
+    // Perception owns acquisition; the brain only ever learns about the one
+    // candidate the frame's single ray successfully looked at. Ts fight the
+    // player and every CT; CTs fight every T. The player is listed even
+    // while dead — a dead candidate is a cheap rejection, so the bot holds
+    // rather than chasing the corpse position.
     const enemies: Target[] = [];
     if (this.team === 'T') {
       enemies.push({
         kind: 'player',
-        // Feet, not the eye that `player.pos` holds: `rise` and the brain's
-        // target ranking both compare this against bot feet, and passing
-        // the eye through would hand every bot 1.7 m of phantom height.
-        pos: new THREE.Vector3(player.pos.x, player.pos.y - player.eyeHeight, player.pos.z),
+        id: 'player',
+        // Feet, not the eye that `player.pos` holds: rise and the planar
+        // closure measure compare these against bot feet, and passing the
+        // eye through would hand every bot 1.7 m of phantom height.
+        feet: playerFeet(player),
+        eye: camera.position,
         alive: player.alive,
       });
     }
     for (const b of bots) {
       if (b === this || b.team === this.team) continue;
-      enemies.push({ kind: 'bot', pos: b.mesh.position, alive: b.alive, bot: b });
+      enemies.push({ kind: 'bot', id: b.id, feet: b.mesh.position, eye: b.eyePos(), alive: b.alive, bot: b });
     }
-    const target = nearestOpposing(this.mesh.position, enemies, this.targetScore)
-      ?? enemies[0]; // no live opponent: Ts fall back to the inert player entry, CTs stand down
-
-    if (!target) {
-      this.moveBlocked = false;
-      this.targetEye = null;
-      this.targetInRange = false;
-      this.targetLOS = null;
-      return;
-    }
-
-    const toTarget = new THREE.Vector3().subVectors(target.pos, this.mesh.position);
-    const rise = toTarget.y; // target feet minus own feet, before y is stripped
-    toTarget.y = 0; // STEERING is planar — a step only ever moves in x/z
-    const dist = toTarget.length();
-
-    // RANGING is not. The eye-to-eye distance the hit die already rolled on
-    // is what the brain's bands and engage gate read too, so a target on a
-    // deck overhead stops reading as point-blank.
+    // ONE acquisition per living update: the brain's tracked identity is
+    // probed first, else the cursor rotates fairly. Only its observation —
+    // never the candidate list — reaches the brain.
     const selfEye = this.eyePos();
-    const targetEye = target.kind === 'player' ? camera.position : target.bot.eyePos();
-    const dist3 = selfEye.distanceTo(targetEye);
-    this.targetEye = targetEye;
-
-    // Face the target, and tip the aim barrel at it so a bot firing up at a
-    // deck visibly aims up. The mesh yaw puts local +z on the target, and a
-    // positive x-rotation tips that forward axis DOWN — hence the negation.
-    this.mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
-    const pitch = Math.atan2(targetEye.y - selfEye.y, Math.max(dist, 1e-6));
-    this.aim.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_AIM_PITCH, MAX_AIM_PITCH);
-
-    const losTo = target.kind === 'player'
-      ? () => hasLineOfSight(this.eyePos(), camera.position, solids)
-      : () => hasLineOfSight(this.eyePos(), target.bot.eyePos(), solids);
-
-    // DEV overlay readout of the shot gates (issue #46): the trigger is
-    // range-gated AND LOS-gated, and the overlay exists to say which of the
-    // three states a bot is in — can shoot, in range but unproven/blocked
-    // sight, or merely tracking. The probe here is deliberately NOT lazy:
-    // seeTarget stays at-most-once-per-cooldown for the policy itself, while
-    // the overlay pays one raycast per bot per frame for as long as it is up.
-    this.targetInRange = this.brain.inRange(dist3);
-    this.targetLOS = session.debugView && target.alive ? losTo() : null;
+    const selfFacing = new THREE.Vector3(
+      Math.sin(this.mesh.rotation.y), 0, Math.cos(this.mesh.rotation.y),
+    );
+    const acquisition = acquireVisual(
+      { eye: selfEye, feet: this.mesh.position, facing: selfFacing },
+      enemies,
+      this.brain.focusId,
+      this.perceptionCursor,
+      (from, to) => hasLineOfSight(from, to, solids),
+    );
+    this.perceptionCursor = acquisition.cursor;
 
     // Clamped, not free-running: a bot that spends minutes not routing would
     // otherwise drift the timer arbitrarily negative for no benefit, and the
     // first request after a lull should fire immediately either way.
     this.routeCooldown = Math.max(0, this.routeCooldown - dt);
+
     const intent = this.brain.decide(
       {
-        toTarget,
-        dist,
-        dist3,
-        rise,
+        selfFeet: this.mesh.position,
+        facing: selfFacing,
+        visual: acquisition.observation,
         onGround: this.onGround,
-        targetAlive: target.alive,
-        // Lazy on purpose, like seeTarget: pathfinding is the expensive
-        // thing here, so it is only paid when the policy has already decided
-        // it wants to travel rather than fight where it stands.
-        nextWaypoint: () => this.waypointToward(target.pos),
-        // Lazy on purpose: the raycast is only paid when the trigger is
-        // otherwise ready — see BrainView.seeTarget.
-        seeTarget: losTo,
         selfSpeed: this.speed,
         moveBlocked: this.moveBlocked,
+        // Lazy on purpose: pathfinding is the expensive thing here, so it is
+        // only paid when the policy has already decided it wants to travel
+        // rather than fight where it stands. The pursuit flag keys the route
+        // cache: a frame WITH an observation routes at what it sees; a frame
+        // WITHOUT one (memory pursuit) routes at the frozen remembered feet.
+        nextWaypoint: (goal) => this.waypointToward(goal, acquisition.observation !== null),
+        // The patrol analogue: lazily selects a map-wide patrol node and
+        // routes to it under the same one-A-star-per-frame budget. Only paid
+        // when the brain has already decided it has nothing better to do.
+        nextPatrolWaypoint: () => this.nextPatrolWaypoint(),
       },
       dt,
     );
+
+    // Route-cache ownership: whenever the intent leaves route/engage — a
+    // search or hold of any kind (arrival, dead end, damage reaction,
+    // forget, patrol pause) — drop the cached path so a later, unrelated
+    // goal cannot inherit it. And whenever the intent leaves patrol — a
+    // visual, damage reaction, search or hold interrupted it — the patrol
+    // goal is dead: drop it (and any patrol-owned path) so a later leg
+    // cannot inherit a stale destination.
+    if (intent.mode === 'search' || intent.mode === 'hold') this.clearRouteCache();
+    if (intent.mode !== 'patrol') this.clearPatrolGoal();
 
     // Horizontal gate: the SAME axis-separated slide the player uses, with
     // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
@@ -431,43 +486,157 @@ export class Bot implements BotShape {
 
     this.mode = intent.mode;
 
-    if (intent.wantShoot) {
-      // Re-measured AFTER the move, unlike the view's dist3: the bot has
-      // stepped since, and the die should roll from where it is actually
-      // shooting (see botBrains.ts:botHitChance).
-      this.shoot(this.eyePos().distanceTo(targetEye), target);
+    // Face where the brain looked, and tip the aim barrel at it so a bot
+    // firing up at a deck visibly aims up. The mesh yaw puts local +z on the
+    // intent facing, and a positive x-rotation tips that forward axis DOWN —
+    // hence the negation. A holding bot exposes no lookAt, so the last
+    // barrel pose is kept.
+    this.mesh.rotation.y = Math.atan2(intent.facing.x, intent.facing.z);
+    if (intent.lookAt) {
+      const planar = Math.hypot(intent.lookAt.x - selfEye.x, intent.lookAt.z - selfEye.z);
+      const pitch = Math.atan2(intent.lookAt.y - selfEye.y, Math.max(planar, 1e-6));
+      this.aim.rotation.x = -THREE.MathUtils.clamp(pitch, -MAX_AIM_PITCH, MAX_AIM_PITCH);
+    }
+    this.targetEye = intent.lookAt;
+
+    // DEV overlay readout of the shot gates (issue #46): the trigger is
+    // range-gated AND sight-gated, and the overlay exists to say which
+    // state a bot is in — shootable (`rs`, a current observation inside
+    // engage range) or not (`--`; `-s` when the seen target sits beyond
+    // engageRange). The gates are written only when the SAME frame's
+    // observation agrees with the intent's focus, so a memory or damage
+    // search stays dim even if acquisition happened to see something on a
+    // damage-priority frame — the brain discarded that look. Sight here is
+    // the frame's own observation (acquisition already spent the frame's
+    // ray), so the readout costs no extra probe and is fresh every frame.
+    const obs = acquisition.observation;
+    const focusSeen = obs !== null && obs.id === intent.focusId;
+    this.targetInRange = focusSeen && this.brain.inRange(obs.dist3);
+    this.targetLOS = focusSeen ? true : acquisition.attempted !== null ? false : null;
+
+    if (intent.wantShoot && obs && obs.id === intent.focusId
+        && this.brain.inRange(obs.dist3)) {
+      // Identity agreement first: the intent's focus must be the SAME frame's
+      // observation. Only then does the id resolve back to the stable
+      // candidate. Keep this executor-owned lookup rather than returning a
+      // live Target from perception: observations cross that seam as copies
+      // plus stable identity, never entity references. The die rolls from the
+      // ACTUAL post-move distance (see botBrains.ts:botHitChance).
+      const target = enemies.find(e => e.id === obs.id);
+      if (target) this.shoot(this.eyePos().distanceTo(obs.eye), target);
     }
   }
 
   /**
-   * Planar vector to the next waypoint on a route to `goal`, or null when the
-   * graph has none.
+   * Planar vector to the next waypoint on a route to `goal`, with a
+   * three-way outcome: a waypoint when a (cached or fresh) path exists,
+   * `undefined` when the shared one-A-star-per-frame budget deferred the
+   * request, `null` when the graph confirmed there is no route.
    *
    * Mechanism, not policy: this keeps and refreshes the path and decides which
-   * waypoint is "next", while the brain decides whether to walk it at all.
-   * Same split as seeTarget — the executor owns the raycast, the brain owns
-   * the trigger.
+   * waypoint is "next", while the brain decides whether to walk it at all —
+   * and only ever names the goal, which is whatever it currently SEES or last
+   * remembered. Same split as the old seeTarget: the executor owns the
+   * raycast and the graph, the brain owns the trigger and the route decision.
    */
-  private waypointToward(goal: THREE.Vector3): THREE.Vector3 | null {
+  private waypointToward(goal: THREE.Vector3, visualPursuit: boolean): THREE.Vector3 | undefined | null {
+    // A remembered goal must not inherit a path computed for a different
+    // pursuit ('v' vs 'm') or a different target (focus id): key the cache
+    // and drop it on any mismatch.
+    const key = `${visualPursuit ? 'v' : 'm'}:${this.brain.focusId ?? '*'}`;
+    return this.waypointOnRoute(goal, key, false);
+  }
+
+  /**
+   * Lazy patrol leg: select a map-wide patrol node (pure, cheap) when none is
+   * active, then route to it under the SAME cached-path/budget machinery the
+   * combat pursuits use — with a distinct `'p'` route-owner key so changing
+   * owners clears stale paths.
+   *
+   * A candidate is accepted only when the budgeted A* produces a route; an
+   * unreachable one is discarded (the brain restarts its one-second pause and
+   * the next request picks a fresh node). Reaching the final node ends the
+   * leg: the goal and route are cleared and null is returned, which restarts
+   * the brain's one-second pause. A deferred budget keeps the candidate and
+   * returns undefined — the brain waits in `patrol` and asks again.
+   */
+  private nextPatrolWaypoint(): THREE.Vector3 | undefined | null {
+    const grid = navGrid();
+    if (grid === undefined || grid.count === 0) return null;
+    if (this.patrolGoal === null) {
+      const current = nearestNode(grid, this.mesh.position);
+      const idx = pickPatrolNode(grid, this.mesh.position, current, Math.random);
+      if (idx < 0) return null;
+      const n = navNode(grid, idx);
+      this.patrolGoal = new THREE.Vector3(n.x, n.y, n.z);
+      this.clearRouteCache();
+    }
+    const result = this.waypointOnRoute(this.patrolGoal, 'p', true);
+    if (result === null) {
+      // Arrival at the final patrol node, or a confirmed-unreachable
+      // candidate: either way the goal is spent — the brain's one-second
+      // pause runs, and the next request selects a fresh node.
+      this.clearPatrolGoal();
+    }
+    return result;
+  }
+
+  /**
+   * Shared route realization for every pursuit that walks the graph: key the
+   * cache by `key` (dropping stale paths on owner change), abandon drifted
+   * paths, recompute under the one-A-star-per-frame budget, then hand back
+   * the relative planar waypoint — or `null` (no route / zero-length leg) or
+   * `undefined` (budget deferred). Moving pursuit goals refresh periodically;
+   * an immutable patrol goal keeps its valid path until arrival or abandon.
+   *
+   * `patrolArrival` extends the one-metre waypoint threshold to the FINAL
+   * node: standing within it ends the patrol (clear route, return null)
+   * instead of pushing into the goal forever.
+   */
+  private waypointOnRoute(
+    goal: THREE.Vector3,
+    key: string,
+    patrolArrival: boolean,
+  ): THREE.Vector3 | undefined | null {
     const here = this.mesh.position;
+    if (this.routeKey !== key) {
+      this.routeKey = key;
+      this.path = [];
+      this.leg = 0;
+    }
     // Drop a path the bot is no longer on: it fell off an edge, got shoved,
     // or respawned across the map still holding last life's route.
     if (this.path.length > 0) {
       const leg = this.path[Math.min(this.leg, this.path.length - 1)]!;
-      if (Math.hypot(leg.x - here.x, leg.z - here.z) > ROUTE_ABANDON) this.path = [];
+      if (Math.hypot(leg.x - here.x, leg.z - here.z) > ROUTE_ABANDON) {
+        this.path = [];
+        this.leg = 0;
+      }
     }
-    if ((this.path.length === 0 || this.routeCooldown <= 0) && routeBudget > 0) {
+    const wantsRecompute = this.path.length === 0
+      || (!patrolArrival && this.routeCooldown <= 0);
+    let recomputed = false;
+    if (wantsRecompute && routeBudget > 0) {
       // One A* per frame across all bots; whoever misses out keeps walking
       // whatever it already has.
       routeBudget--;
+      recomputed = true;
       this.routeCooldown = ROUTE_INTERVAL;
       const found = route(here, goal);
       if (found) {
         this.path = found;
         this.leg = 0;
+      } else {
+        // A failed recompute must not keep walking a stale path.
+        this.path = [];
+        this.leg = 0;
       }
     }
-    if (this.path.length === 0) return null;
+    if (this.path.length === 0) {
+      // Deferred (budget spent elsewhere) vs confirmed dead end — the brain
+      // waits on the first and starts searching on the second.
+      return recomputed ? null : undefined;
+    }
 
     // Consume waypoints already stood on, planar — the step is planar too.
     while (this.leg < this.path.length - 1) {
@@ -477,7 +646,31 @@ export class Bot implements BotShape {
     }
     const w = this.path[this.leg]!;
     const to = new THREE.Vector3(w.x - here.x, 0, w.z - here.z);
+    // A patrol's FINAL node within the one-metre threshold IS the arrival:
+    // the leg is over, the goal and route die, and the brain stands down.
+    if (patrolArrival && this.leg === this.path.length - 1 && to.length() <= WAYPOINT_REACHED) {
+      this.clearRouteCache();
+      return null;
+    }
     return to.lengthSq() < 1e-8 ? null : to;
+  }
+
+  /** Drop the cached route: path, leg and goal key. */
+  private clearRouteCache(): void {
+    this.path = [];
+    this.leg = 0;
+    this.routeKey = null;
+  }
+
+  /**
+   * End the current patrol leg: the goal dies, and any path cached for the
+   * patrol owner ('p') with it. Called when an intent leaves patrol — a
+   * visual or damage reaction, a search, a hold, a respawn — and when the
+   * leg itself ends (arrival or a confirmed-unreachable candidate).
+   */
+  private clearPatrolGoal(): void {
+    this.patrolGoal = null;
+    if (this.routeKey === 'p') this.clearRouteCache();
   }
 
   /**
@@ -556,19 +749,11 @@ export class Bot implements BotShape {
     debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();
     gameTime.schedule(6, () => {
-      this.hp = 100;
-      this.alive = true;
-      this.mesh.visible = true;
-      this.spawnAtRandom();
-      // The brain outlived the body: re-arm its spawn stagger so a revived
-      // bot does not open fire on whatever cooldown its corpse was carrying.
-      this.brain.onRespawn();
-      this.path = [];
-      this.leg = 0;
-      this.mode = 'engage';
-      this.targetEye = null;
-      this.targetInRange = false;
-      this.targetLOS = null;
+      // The wave reset (combat.ts, 2.5 s) may already have revived this bot
+      // via respawn(); guard so a later callback does not teleport an
+      // already-revived bot a second time.
+      if (this.alive) return;
+      this.respawn();
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }

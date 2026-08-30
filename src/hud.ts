@@ -188,22 +188,34 @@ export function updateHUD(): void {
 
 // ---------- Bot readout (DEV, while the V overlay is up) ----------
 // What a bot is doing — how high its feet are, whether it is grounded, whether
-// geometry just rejected its step, whether it could FIRE at its target, and
-// which behavior its brain is running — is otherwise only reachable by pausing
-// in devtools. It rides session.debugView (the wireframe overlay's flag)
-// because both answer the same question, "what is this bot thinking", and the
-// overlay is the explicit opt-in; on any map, since nothing here is
+// geometry just rejected its step, whether it could FIRE at its focus, and
+// which behavior its brain is running — is otherwise only reachable by
+// pausing in devtools. It rides session.debugView (the wireframe overlay's
+// flag) because both answer the same question, "what is this bot thinking",
+// and the overlay is the explicit opt-in; on any map, since nothing here is
 // elevation-specific.
-// `route` with `blk` flickering is a bot squeezing past something; `route`
-// that never becomes `engage` means it is not arriving. Rendered as one cached
-// string because updateHUD runs every frame; a bot standing still must not
-// touch the DOM. Mesh y IS the bot's feet height (bots.ts positions by feet).
+// Modes are hold/search/route/engage/patrol (botBrains.ts:BrainMode). `search`
+// is a memory scan — arrival at a remembered position, a routing dead end, or
+// a direction-only incoming-fire reaction (the damage search advances along
+// its bearing for its first seconds, so it may show motion). `route` with
+// `blk` flickering is a bot squeezing past something; `route` that never
+// becomes `engage` means it is not arriving. `patrol` is a goalless walk to a
+// map-wide node. Rendered as one cached string because updateHUD runs
+// every frame; a bot standing still must not touch the DOM. Mesh y IS the
+// bot's feet height (bots.ts positions by feet). padEnd(6) fits the widest
+// mode.
 //
 // The r/s pair restates the shot gates as text, because the overlay's
 // brightness tiers are hard to tell apart at a glance and not
-// colorblind-trivial: `rs` = inside engage range AND sight proven (can and
-// will fire), `r-` = in range but sight unproven or blocked, `--` = target
-// beyond engage range. Same gates that grade the intent line's tint.
+// colorblind-trivial: `rs` = the bot currently SEES its focus (the frame's
+// visual observation agreeing with the intent's focus) AND it is inside
+// engage range (can and will fire), `--` = no shootable observation at all
+// (a holding, memory-pursuing or searching bot sits here). Same gates that
+// grade the intent line's tint. The gates are written only from a CURRENT
+// observation that agrees with the intent's focus (bots.ts), so an `r-`
+// state — in range without a current agreeing observation — is not
+// reachable: the readout shows shootable `rs` or non-shootable `--` (`-s`
+// when a seen target sits beyond engageRange).
 //
 // lastBotDebug doubles as shown-state: it is non-empty exactly when the text
 // was last written AND revealed, so the inactive path can hide with one check.

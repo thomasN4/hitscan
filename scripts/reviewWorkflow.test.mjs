@@ -5,6 +5,8 @@ import { describe, expect, test } from 'vitest';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const workflow = readFileSync(join(scriptsDir, '../.github/workflows/review.yml'), 'utf8');
+const codexJob = workflow.slice(workflow.indexOf('  codex_review:'), workflow.indexOf('  claude_review:'));
+const opencodeJob = workflow.slice(workflow.indexOf('  opencode_review:'), workflow.indexOf('  post:'));
 
 describe('AI review workflow', () => {
   test('installs and invokes Claude Code from an isolated per-job prefix', () => {
@@ -13,5 +15,15 @@ describe('AI review workflow', () => {
     );
     expect(workflow).toContain('/tmp/claude-code/node_modules/.bin/claude -p');
     expect(workflow).not.toMatch(/npm (?:i|install) -g @anthropic-ai\/claude-code/);
+  });
+
+  test('sources reviewer tools from pinned npm artifacts without APT', () => {
+    expect(workflow).not.toContain('apt-get');
+    expect(codexJob).toContain('@openai/codex@0.149.1');
+    expect(codexJob).toContain("-path '*/codex-resources/bwrap'");
+    expect(codexJob).toContain('install -m 0755 "$bundled_bwrap" /usr/bin/bwrap');
+    expect(opencodeJob).toContain('@vscode/ripgrep@1.18.0');
+    expect(opencodeJob).toContain('install -m 0755 "$rg_path" /usr/local/bin/rg');
+    expect(opencodeJob).toContain('command -v rg');
   });
 });

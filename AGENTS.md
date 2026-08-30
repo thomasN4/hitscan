@@ -44,10 +44,70 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
      diff and posts a comment-review as `review-bot`, once per head commit.
      Codex is the default; the repo Actions variable `AI_REVIEWER=claude` or
-     `AI_REVIEWER=opencode` selects Claude or OpenCode manually. It is advisory
-     and gates nothing — `npm run lint`,
-     `npm run typecheck`, `npm test`, and `npm run build` in `ci.yml` remain the
-     only checks that can fail a PR.
+     `AI_REVIEWER=opencode` selects Claude or OpenCode manually. AI review is
+     enabled by default; setting the repo Actions variable
+     `ENABLE_AI_REVIEW=false` temporarily skips it, while unsetting the variable
+     or setting it to `true` enables it. It is advisory and gates nothing —
+     `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` in
+     `ci.yml` remain the only checks that can fail a PR.
+
+### Plan Relay (Codex planner → OpenCode executor)
+
+**Plan Relay** is the optional split-agent implementation path for a task whose
+plan should be agreed in Codex and executed by the repository's pinned OpenCode
+agent. The ordinary single-agent loop above remains valid. When Plan Relay is
+chosen, its ownership boundary is strict:
+
+1. **Codex plans** — inspect the worktree read-only, settle every product and
+   implementation decision with the user, and write an approved Markdown plan.
+2. **The user approves** — an unresolved choice is a planning blocker, not a
+   decision for the executor to improvise.
+3. **OpenCode implements** — from the clean linked worktree, run:
+
+   ```sh
+   scripts/plan-relay.sh <plan.md>
+   ```
+
+   The runner pins the repository's `executor` agent, model, permissions and
+   runtime isolation. The executor runs under a watchdog (`OPENCODE_TIMEOUT`,
+   default 2700 s) whose nonzero status — including the watchdog's own 124 —
+   propagates; an exit-0 session must additionally pass a liveness gate over
+   the retained event stream
+   (`scripts/planRelayGate.mjs`), because a `length`-truncated final step
+   otherwise exits 0 over a session that did nothing. It never commits,
+   pushes or opens a PR.
+4. **Codex verifies** — read the retained transcript and working-tree diff,
+   rerun the plan's checks independently, and report deviations before the
+   normal commit / draft-PR stages continue. Git publication remains the
+   user's decision.
+
+The handoff plan is a public interface between the two agents. It must be a
+non-empty Markdown file with exactly one version and baseline in YAML
+frontmatter, plus all five required sections:
+
+```md
+---
+plan_relay_version: 1
+baseline_commit: <40-character Git commit>
+---
+
+# Task title
+
+## Summary
+## Interfaces
+## Implementation
+## Test Plan
+## Assumptions
+```
+
+`baseline_commit` is the clean worktree commit the plan was written against.
+The runner refuses a primary worktree, `main`, dirty state, malformed plan, or
+baseline mismatch. It copies the approved input and OpenCode JSONL events to an
+ignored `.plan-relay/<baseline>.<random>/` directory, whose path it prints.
+Those records are local evidence, not project documentation. OpenCode must
+treat both this file and the copied plan as binding; if repository truth
+contradicts the plan, it stops and reports the conflict instead of redesigning
+the task.
 
 Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
 
@@ -127,7 +187,7 @@ and two copies drifted apart within one PR the first time there were two.
   `registerSolid` is narrower than it looks: it is right for the ground planes because a flat `PlaneGeometry` measures to a **zero-height** box at y ≈ 0 — always steppable under the feet-aware collision model (`STEP_HEIGHT`), so an AABB there would do nothing at all — movement is bounded by the perimeter/lane walls instead. Geometry with real height (a floor slab, a raised platform, a ramp) is **not** this case and must go through `addSolidBox`/`registerSolidBox`, or you ship a walk-through floor.
 
   Only `addSolidBox` (and `addStairs` / `addOpenStairs` / `addLiftPad`, through it) touches the scene; the rest are pure and unit-tested, because both bugs this has caused (`431ac6e` no-clip, `faa52c5` AABBs at the origin) live in the scene-free half — as does the base-vs-centre offset, which has not bitten yet but had no test until `createSolidBox` gave it a seam.
-- **Movement collision is feet-aware; elevation is resolved in `collision.ts`, not per entity.** Entities are positioned by their FEET height: `collidesAt(pos, radius, feetY, colliders)` blocks only geometry rising more than `STEP_HEIGHT` above the feet (so risers don't block), and `resolveVertical` integrates gravity against `supportHeightAt` with a swept ceiling — that one rule produces resting, step-up, swept landings (no tunneling) and walking off edges. `slideMoveXZ` also takes a blocked axis move when it strictly UNWEDGES — every collider blocking at the destination overlaps the footprint less along the moving axis than it does now — because a binary overlap test otherwise refuses every direction to an entity already inside geometry, the way out included (lesson 23). Strictly-worse vetoes, so approaching from outside is refused exactly as before and walls stay solid; unchanged is indifferent, not a veto. A grounded entity additionally STICKS to support within one `STEP_HEIGHT` below its feet (`wasGrounded` param fed back from the caller's last frame): without it, descending a flight micro-free-falls every riser (~13 frames of near-full air-accuracy penalty per tread). Deeper drops — ledges — still go airborne; jumps still rise because the `velY > 0` check comes first. Player AND bots go through the shared `slideMoveXZ` + `resolveVertical` pair; do not open-code a second gate. **A bot STEERS planar but RANGES in 3D**: `BrainView.toTarget`/`dist` stay y-stripped because a step only ever moves in x/z (facing comes off them too), while every range decision — the chase bands, `engageRange`, the hit die, and which candidate is worth chasing — reads `dist3`/`rise`, so elevation makes shots genuinely farther rather than just occluded. Ranging on the planar number is what once made a target on a deck overhead read as point-blank and pushed bots away from the stairs that reach it. Candidate positions handed to `nearestOpposing` are FEET on every arm — `player.pos` is an EYE, so `bots.ts` drops `eyeHeight` before listing it. The player's `pos` stays the EYE position (`feet = pos.y − eyeHeight`); physics snaps to support instantly while the camera rides `motion.groundSmoothY` (~80 ms blend) so stairs don't jitter the view.
+- **Movement collision is feet-aware; elevation is resolved in `collision.ts`, not per entity.** Entities are positioned by their FEET height: `collidesAt(pos, radius, feetY, colliders)` blocks only geometry rising more than `STEP_HEIGHT` above the feet (so risers don't block), and `resolveVertical` integrates gravity against `supportHeightAt` with a swept ceiling — that one rule produces resting, step-up, swept landings (no tunneling) and walking off edges. `slideMoveXZ` also takes a blocked axis move when it strictly UNWEDGES — every collider blocking at the destination overlaps the footprint less along the moving axis than it does now — because a binary overlap test otherwise refuses every direction to an entity already inside geometry, the way out included (lesson 23). Strictly-worse vetoes, so approaching from outside is refused exactly as before and walls stay solid; unchanged is indifferent, not a veto. A grounded entity additionally STICKS to support within one `STEP_HEIGHT` below its feet (`wasGrounded` param fed back from the caller's last frame): without it, descending a flight micro-free-falls every riser (~13 frames of near-full air-accuracy penalty per tread). Deeper drops — ledges — still go airborne; jumps still rise because the `velY > 0` check comes first. Player AND bots go through the shared `slideMoveXZ` + `resolveVertical` pair; do not open-code a second gate. **A bot STEERS planar but RANGES in 3D**: `perception.ts` reports both the observed feet and eye plus planar `dist`, eye-to-eye `dist3`, and feet-relative `rise`. `botBrains.ts` derives its y-stripped steering vector from `BrainView.selfFeet` and `visual.feet`, while the chase bands and `engageRange` read `visual.dist3`/`visual.rise`; the executor's hit die likewise uses the actual post-move 3D distance. Ranging on the planar number is what once made a target on a deck overhead read as point-blank and pushed bots away from the stairs that reach it. Every `VisualCandidate` carries FEET and EYE separately — `player.pos` is an EYE, so both `bots.ts` and `combat.ts` call `core/state.ts:playerFeet()` when they need the player's feet. The player's `pos` stays the EYE position (`feet = pos.y − eyeHeight`); physics snaps to support instantly while the camera rides `motion.groundSmoothY` (~80 ms blend) so stairs don't jitter the view.
 - **Match config is committed as one URL query, and map switching is a full page reload.** The start menu encodes `?map=&tbots=&ctbots=&time=` (time in SECONDS; `core/sessionConfig.ts` parses/clamps it — pure and unit-tested — and `main.ts` writes the result into `session` at startup). Play navigates only when the form differs from the applied config; otherwise it just re-locks. Never hot-swap scene contents at runtime — the map builders in `src/maps/` assume a fresh scene. Any new map needs: a builder in `src/maps/` listed in `maps/index.ts`'s `BUILDERS` (a full `Record<MapName, () => void>`, so widening `MapName` fails to compile until it is registered), a `MapName` entry in state.ts + sessionConfig's `asMapName` (shared with the menu form — do NOT re-derive the map from `mapSel.value` in menu.ts), an `<option>` in index.html, a `SUBTITLES` line in menu.ts, a `combat.ts:SPAWN_Z` entry, a `state.ts:AMBIENCE` entry (sky/fog/light colours AND intensities, consumed by `initEngine(map)`; point it at `DESERT_AMBIENCE` to keep the original look), a `state.ts:BOT_SPAWNS` entry (the box each team is drawn from, feet-height aware so a zone can sit on a catwalk — it lives in state.ts rather than bots.ts only because eslint bars the unit suite from importing the browser half), and a smoke-test pass. All but the `<option>` are full `Record<MapName, …>` tables, so the compiler demands each one — the `<option>` is the single site it cannot see, and the one you can forget.
 - **Damage flows through `combat.ts`** (`damagePlayer` / `damageBot`) — don't mutate HP from callers.
 - DOM writes only in `hud.ts` (in-game HUD) and `menu.ts` (`#startMenu` / `#pauseMenu` / `#loadoutScreen`). Sound synthesis only in `audio.ts`. Every `getElementById` outside markup goes through `hud.ts:requireEl`, so a missing id is a named startup error; every read of three.js's `userData` goes through one owned accessor per tag (`bots.ts:botFor`, `weapons.ts:magBaseY`) rather than scattered casts. The loadout has ONE writer: the picker's Deploy path calls `setLoadout()` (which validates the primary/secondary class split and arms ammo + the live weapon via `armLoadout()`) — never mutate `loadout`/`ammoStore`/`weapon` directly from elsewhere. sessionStorage persistence of the last loadout lives in `menu.ts` because `state.ts` must stay Node-pure; `sanitizeLoadout()` there owns what may be applied.

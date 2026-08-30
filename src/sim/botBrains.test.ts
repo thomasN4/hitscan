@@ -3,9 +3,12 @@
 // The expected values below are restated independently (longhand vector
 // arithmetic), NOT by mirroring decide()'s code paths — a transcription
 // slip in the seam must fail here. Time-dependent behavior (first-shot
-// stagger, post-shot cadence, blocked-sight retries) is tested by REPLAYING
-// frames against a queued RNG, not by seeding internal state directly
-// (review lessons 6/19/20).
+// stagger, post-shot cadence) is tested by REPLAYING frames against a queued
+// RNG, not by seeding internal state directly (review lessons 6/19/20).
+//
+// Since the perception seam, the brain's only target knowledge is the frame's
+// zero-or-one VisualObservation: the view builder fabricates observations
+// whose geometry matches what the executor's acquisition would produce.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import {
@@ -13,11 +16,10 @@ import {
   DefaultBrain,
   botDamageRoll,
   botHitChance,
-  nearestOpposing,
   type BrainParams,
   type BrainView,
-  type OpposingCandidate,
 } from './botBrains';
+import type { PerceptionId, VisualObservation } from './perception';
 
 const DT = 1 / 60;
 
@@ -44,26 +46,58 @@ function moveParams(): BrainParams {
   return { ...DEFAULT_BRAIN_PARAMS, engageRange: 0 };
 }
 
-/** Canonical view: target due +x, mid-band, LEVEL, alive, visible, 4 m/s. */
-function view(overrides: Partial<BrainView> = {}): BrainView {
-  const dist = overrides.dist ?? 10;
+/**
+ * A visual observation the executor could have produced: a target due +x at
+ * planar `dist`, feet at `rise`, eye 1.9 m above its feet (matching the
+ * executor's eye convention), both eyes level so dist3 closes to the planar
+ * distance unless a test overrides it.
+ */
+function visualAt(dist = 10, rise = 0, dist3 = Math.hypot(dist, rise), id: PerceptionId = 'player'): VisualObservation {
   return {
-    toTarget: new THREE.Vector3(1, 0, 0),
+    id,
+    feet: new THREE.Vector3(dist, rise, 0),
+    eye: new THREE.Vector3(dist, rise + 1.9, 0),
     dist,
-    // Level ground unless a test says otherwise: with rise 0 the eye-to-eye
-    // range IS the planar range, so every band test that drives `dist` keeps
-    // meaning exactly what it meant before the brain learned about height.
-    dist3: dist,
-    rise: 0,
-    onGround: true,
+    dist3,
+    rise,
+  };
+}
+
+/** Options for the canonical view builder; `visual: null` is the hold case. */
+interface ViewOpts {
+  dist?: number;
+  dist3?: number;
+  rise?: number;
+  visualId?: PerceptionId;
+  /** Explicit null = no observation this frame (hold); omitted = build one. */
+  visual?: VisualObservation | null;
+  onGround?: boolean;
+  moveBlocked?: boolean;
+  selfSpeed?: number;
+  facing?: THREE.Vector3;
+  nextWaypoint?: (goal: THREE.Vector3) => THREE.Vector3 | undefined | null;
+  /** Patrol thunk outcome, like nextWaypoint; default null = nothing usable. */
+  nextPatrolWaypoint?: () => THREE.Vector3 | undefined | null;
+}
+
+/** Canonical view: observed target due +x, mid-band, LEVEL, 4 m/s. */
+function view(o: ViewOpts = {}): BrainView {
+  const visual = o.visual === undefined
+    ? visualAt(o.dist ?? 10, o.rise ?? 0, o.dist3, o.visualId)
+    : o.visual;
+  return {
+    selfFeet: new THREE.Vector3(0, 0, 0),
+    facing: o.facing ?? new THREE.Vector3(1, 0, 0),
+    visual,
+    onGround: o.onGround ?? true,
+    selfSpeed: o.selfSpeed ?? 4,
+    moveBlocked: o.moveBlocked ?? false,
     // No route by default: every pre-routing test describes a bot fighting
     // where it stands, and the brain only asks when it wants to travel.
-    nextWaypoint: () => null,
-    targetAlive: true,
-    seeTarget: () => true,
-    selfSpeed: 4,
-    moveBlocked: false,
-    ...overrides,
+    nextWaypoint: o.nextWaypoint ?? (() => null),
+    // No patrol route by default either: the patrol tests pass their own
+    // thunk, and the pause-before-patrol tests want a goalless answer (null).
+    nextPatrolWaypoint: o.nextPatrolWaypoint ?? (() => null),
   };
 }
 
@@ -197,97 +231,89 @@ describe('DefaultBrain strafe steering', () => {
   });
 });
 
-// Issue #45's corner trap: a bot holding band range with cover between it
-// and its target paced across the occlusion forever — the band hold is PURE
-// strafe, and the juke flipped it symmetrically while blocked-sight retries
-// only shortened a cooldown. Now each failed probe records sightBlocked and
-// the juke stands down, committing the strafe one way so the bot walks
-// around the cover instead of across its face. dt = 1 makes the juke
-// threshold 0.5, so scripted draws below it are unambiguous flips; the
-// trigger needs an expired cooldown, so constructor draw 0 puts the first
-// probe on frame 1.
-describe('DefaultBrain blocked-sight strafe', () => {
-  const dt = 1;
+// Stage 1 of visual awareness: the brain's only target knowledge is the
+// frame's visual observation. No observation -> hold: stand still, keep the
+// body's facing, expose no lookAt, never fire. Memory and scanning (the
+// `search` mode) are stage 2 and have no tests yet by design.
+describe('DefaultBrain hold without a visual', () => {
+  const held = view({ visual: null });
 
-  it('stands down the juke while probes come back blocked', () => {
-    const v = view({ dist: 10, seeTarget: () => false });
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
-      0.9, 0,          // dir+, stagger 1.0 s → probe fires on F1
-      /* F1 */ 0.9,    // pre-probe draw: no flip regardless
-      /* F2 */ 0.4,    // WOULD flip; probe failed on F1 → suppressed
-      /* F3 */ 0.4,    // ditto
-    ]));
-    const signs = [1, 2, 3].map(() => Math.sign(brain.decide(v, dt).step.z));
-    expect(signs).toEqual([1, 1, 1]);
+  it('stands still and reports hold', () => {
+    const intent = calmBrain().decide(held, DT);
+    expect(intent.mode).toBe('hold');
+    expect(intent.step.length()).toBe(0);
   });
 
-  it('the same draws flip freely when nothing probes', () => {
-    // Out of engageRange the trigger short-circuits BEFORE probing, so
-    // sightBlocked is never set: isolates the suppression to blocked probes
-    // rather than the draw sequence.
-    const far = view({ dist: 100, dist3: 100 });
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
-      0.9, 0, 0.9, 0.4, 0.4,
-    ]));
-    const signs = [1, 2, 3].map(() => Math.sign(brain.decide(far, dt).step.z));
-    // F2's 0.4 flips AFTER its own step (steers from F3), so signs lag by one.
-    expect(signs).toEqual([1, 1, -1]);
+  it('never requests a shot, even with an expired cooldown', () => {
+    // Constructor draw 0: the staggered first shot is already due.
+    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
+    for (let f = 1; f <= 5; f++) {
+      expect(brain.decide(held, DT).wantShoot, `frame ${f}`).toBe(false);
+    }
   });
 
-  it('a successful probe re-arms the juke', () => {
-    let sight = false;
-    const v = view({ dist: 10, seeTarget: () => sight });
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
-      0.9, 0,          // dir+, stagger 1.0 s
-      /* F1 */ 0.9,    // pre-probe draw; probe fails → committed
-      /* F2 */ 0.4,    // sight cleared BEFORE this frame, but the juke draw
-                       // runs BEFORE the probe (one-frame lag, like
-                       // moveBlocked): still suppressed…
-      /* F2 shot */ 0.5, // …then the probe succeeds and consumes its reroll
-      /* F3 */ 0.1,    // sightBlocked is false now: flips, steering from F4
-      /* F4 */ 0.9,
-    ]));
-    const signs = [1, 2, 3, 4].map((f) => {
-      if (f === 2) sight = true; // clear just before F2; the juke resumes from F3
-      return Math.sign(brain.decide(v, dt).step.z);
-    });
-    expect(signs).toEqual([1, 1, 1, -1]);
+  it('exposes no lookAt and preserves the body facing', () => {
+    const v = view({ visual: null, facing: new THREE.Vector3(0, 0, 1) });
+    const intent = calmBrain().decide(v, DT);
+    expect(intent.lookAt).toBeNull();
+    expect(intent.facing.x).toBeCloseTo(0, 12);
+    expect(intent.facing.z).toBeCloseTo(1, 12);
   });
 
-  it.each([
-    ['the target leaves engage range', view({ dist: 100, dist3: 100 })],
-    ['the target dies', view({ dist: 10, targetAlive: false })],
-  ])('re-arms the juke when %s', (_reason, released) => {
-    const blocked = view({ dist: 10, seeTarget: () => false });
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
-      0.9, 0,          // dir+, stagger 1.0 s
-      /* F1 */ 0.9,    // probe fails → sightBlocked
-      /* F2 */ 0.4,    // gate clears AFTER this suppressed draw
-      /* F3 */ 0.4,    // juke resumes, steering from F4
-      /* F4 */ 0.9,
-    ]));
-    const signs = [
-      Math.sign(brain.decide(blocked, dt).step.z),
-      Math.sign(brain.decide(released, dt).step.z),
-      Math.sign(brain.decide(released, dt).step.z),
-      Math.sign(brain.decide(released, dt).step.z),
-    ];
-    expect(signs).toEqual([1, 1, 1, -1]);
+  it('retains the observed identity as focus across sight loss', () => {
+    const brain = calmBrain();
+    const seen = brain.decide(view({ visualId: 3 }), DT);
+    expect(seen.focusId).toBe(3);
+    expect(brain.focusId).toBe(3);
+    const lost = brain.decide(held, DT);
+    expect(lost.focusId).toBe(3);
+    expect(brain.focusId).toBe(3);
   });
 
-  it('onRespawn clears the commitment', () => {
-    const v = view({ dist: 10, seeTarget: () => false });
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
-      0.9, 0,          // dir+, stagger 1.0 s
-      /* F1 */ 0.9,    // probe fails → sightBlocked; would-be flips stay dead
-      /* respawn */ 0.9, // fresh stagger ≈ 2.8 s: no early probe to re-block
-      /* F2 */ 0.4,    // juke resumes (flag cleared) — steers from F3
-      /* F3 */ 0.9,
-    ]));
-    expect(Math.sign(brain.decide(v, dt).step.z)).toBe(1); // F1: commit
+  it('onRespawn clears the focus', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visualId: 3 }), DT);
+    expect(brain.focusId).toBe(3);
     brain.onRespawn();
-    expect(Math.sign(brain.decide(v, dt).step.z)).toBe(1); // F2: flag cleared, flip drawn
-    expect(Math.sign(brain.decide(v, dt).step.z)).toBe(-1); // F3: F2's resumed juke lands
+    expect(brain.focusId).toBeNull();
+  });
+});
+
+describe('DefaultBrain visual intent', () => {
+  it('focuses the observed identity and looks at a COPY of its eye point', () => {
+    const brain = calmBrain();
+    const v = view({ visualId: 'player' });
+    const intent = brain.decide(v, DT);
+    expect(intent.focusId).toBe('player');
+    expect(intent.lookAt).not.toBeNull();
+    expect(intent.lookAt!.equals(v.visual!.eye)).toBe(true);
+    // A copy: mutating the intent must not corrupt the observation the
+    // executor still reads this frame.
+    expect(intent.lookAt).not.toBe(v.visual!.eye);
+    intent.lookAt!.set(999, 999, 999);
+    expect(v.visual!.eye.x).toBe(10);
+  });
+
+  it('faces the visible point, planar-normalized', () => {
+    // Visual at (30, 40) planar: facing must be that direction normalized.
+    const target = new THREE.Vector3(30, 0, 40);
+    const vis = visualAt(0);
+    vis.feet.copy(target);
+    vis.eye.set(target.x, 1.9, target.z);
+    vis.dist = Math.hypot(30, 40);
+    vis.dist3 = 50;
+    const intent = calmBrain().decide(view({ visual: vis, facing: new THREE.Vector3(0, 0, 1) }), DT);
+    expect(intent.facing.x).toBeCloseTo(0.6, 12);
+    expect(intent.facing.z).toBeCloseTo(0.8, 12);
+  });
+
+  it('falls back to the body facing for a degenerate (zero planar offset) visual', () => {
+    const vis = visualAt(0);
+    vis.feet.set(0, 0, 0);
+    vis.eye.set(0, 1.9, 0);
+    vis.dist = 0;
+    const intent = calmBrain().decide(view({ visual: vis, facing: new THREE.Vector3(0, 0, 1) }), DT);
+    expect(intent.facing.z).toBeCloseTo(1, 12);
   });
 });
 
@@ -300,7 +326,7 @@ describe('DefaultBrain routing', () => {
   const STEP_DT = 0.1;
   const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
   /** Target a level up, with a route available. */
-  const onRoute = (overrides: Partial<BrainView> = {}): BrainView =>
+  const onRoute = (overrides: ViewOpts = {}): BrainView =>
     view({ dist: 20, rise: 3.6, nextWaypoint: () => NORTH(), ...overrides });
 
   it('walks the waypoint, not the target, and adds no drift', () => {
@@ -311,13 +337,22 @@ describe('DefaultBrain routing', () => {
     expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
   });
 
+  it('asks the route for a path TO THE OBSERVED FEET', () => {
+    // The brain knows its own feet and names a world-space goal, while the
+    // route answer is relative. The goal must be what it SAW, not inferred.
+    let got: THREE.Vector3 | null = null;
+    const v = onRoute({ nextWaypoint: (goal) => { got = goal.clone(); return NORTH(); } });
+    calmBrain().decide(v, STEP_DT);
+    expect(got!.equals(v.visual!.feet)).toBe(true);
+  });
+
   it('ignores a route while the target is on this level', () => {
     let asked = 0;
     const level = view({ dist: 20, rise: 0, nextWaypoint: () => { asked++; return NORTH(); } });
     const { step, mode } = calmBrain().decide(level, STEP_DT);
     expect(mode).toBe('engage');
     expect(step.x).toBeGreaterThan(0); // approaching the target, with drift
-    // Lazy like seeTarget: no path is asked for when none is wanted.
+    // Lazy like the old seeTarget: no path is asked for when none is wanted.
     expect(asked).toBe(0);
   });
 
@@ -423,7 +458,7 @@ describe('DefaultBrain flat-routing latch', () => {
   const CADENCE_DT = 0.25;
   const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
   /** Same-level target beyond farBand, graph available. */
-  const stalled = (overrides: Partial<BrainView> = {}): BrainView =>
+  const stalled = (overrides: ViewOpts = {}): BrainView =>
     view({ dist: 20, rise: 0, nextWaypoint: () => NORTH(), ...overrides });
   const latchParams = (): BrainParams => ({ ...moveParams(), noProgressTime: 0.5 });
 
@@ -574,39 +609,23 @@ describe('DefaultBrain trigger', () => {
     expect(shots).toEqual([4, 10]);
   });
 
-  it('never shoots through blocked sight; re-probes on the short retry cooldown', () => {
-    // cd hits 0 at F4, sight blocked → cd=0.3 → next probe F6, F8, ... F20.
+  it('holds fire on a visual beyond engage range, but still moves on it', () => {
+    // The gate reads dist3, so a planar-close target high above is out of
+    // range too — and agrees with the die rollHit rolls on. Movement is NOT
+    // gated: the bot approaches what it sees whatever the range.
     const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
-    let probes = 0;
-    const v = view({ dist: 10, seeTarget: () => { probes++; return false; } });
-    for (let f = 1; f <= 20; f++) {
-      expect(brain.decide(v, CADENCE_DT).wantShoot, `frame ${f}`).toBe(false);
+    const far = view({ dist: 2, dist3: 50, rise: 50 });
+    for (let f = 1; f <= 8; f++) {
+      const intent = brain.decide(far, CADENCE_DT);
+      expect(intent.wantShoot, `frame ${f}`).toBe(false);
+      expect(intent.mode).toBe('engage');
+      expect(intent.step.x).toBeGreaterThan(0);
     }
-    expect(probes).toBe(9); // F4, F6, F8, …, F20
   });
 
-  it('spends no LOS raycast while the trigger is cold or out of range', () => {
-    let probes = 0;
-    const probing = (): BrainView => view({ dist: 10, seeTarget: () => { probes++; return true; } });
-
-    // Expired cooldown but beyond engageRange: the range gate short-circuits
-    // before the probe, so an unreachable target costs no raycasts at all.
-    const ranged = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
-    const far = view({ dist: 50, seeTarget: () => { probes++; return true; } });
-    for (let f = 0; f < 8; f++) expect(ranged.decide(far, CADENCE_DT).wantShoot).toBe(false);
-    expect(probes).toBe(0);
-
-    // The gate reads dist3, so a planar-close target high above is out of
-    // range too — and agrees with the die rollHit rolls on.
-    const below = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
-    const overhead = view({ dist: 2, dist3: 50, rise: 50, seeTarget: () => { probes++; return true; } });
-    for (let f = 0; f < 8; f++) expect(below.decide(overhead, CADENCE_DT).wantShoot).toBe(false);
-    expect(probes).toBe(0);
-
-    // In range but inside the staggered first-shot delay: still cold.
+  it('spends no shot while the staggered first-shot delay runs', () => {
     const fresh = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0.99])); // cd ≈ 2.98 s
-    for (let f = 0; f < 4; f++) expect(fresh.decide(probing(), CADENCE_DT).wantShoot).toBe(false);
-    expect(probes).toBe(0);
+    for (let f = 1; f <= 4; f++) expect(fresh.decide(view(), CADENCE_DT).wantShoot).toBe(false);
   });
 
   it('re-arms the staggered first shot on respawn', () => {
@@ -636,17 +655,9 @@ describe('DefaultBrain trigger', () => {
     expect(second).toEqual([4]);
   });
 
-  it('does not shoot a dead target even with sight and range', () => {
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
-    let probes = 0;
-    const v = view({ dist: 10, targetAlive: false, seeTarget: () => { probes++; return true; } });
-    for (let f = 0; f < 4; f++) expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(false);
-    expect(probes).toBe(0);
-  });
-
   it('inRange mirrors the trigger\'s exclusive engageRange comparison', () => {
-    // The DEV overlay reports this predicate as "could fire" (issue #46), so
-    // it must agree with decide() exactly — same bound, same exclusivity.
+    // The executor requires this predicate to pass before realizing a shot,
+    // so it must agree with decide() exactly — same bound, same exclusivity.
     const brain = new DefaultBrain({ ...DEFAULT_BRAIN_PARAMS, engageRange: 45 }, calmRng);
     expect(brain.inRange(44.9)).toBe(true);
     expect(brain.inRange(45)).toBe(false);
@@ -697,47 +708,619 @@ describe('ballistic rolls', () => {
   });
 });
 
-describe('nearestOpposing', () => {
-  const at = (x: number, z: number, y = 0): THREE.Vector3 => new THREE.Vector3(x, y, z);
-  const cand = (x: number, z: number, alive = true, y = 0): OpposingCandidate & { tag: string } => ({
-    pos: at(x, z, y),
-    alive,
-    tag: `${x},${z}`,
+// Phase 2: memory pursuit, the scan search, and the direction-only
+// incoming-fire reaction. All of it is replayed through decide() against a
+// blind view — memory is private state, observable only through where the
+// brain asks to route, where it looks and what it reports.
+describe('DefaultBrain memory pursuit', () => {
+  /** Goal vector the brain handed to nextWaypoint, cloned at the boundary. */
+  function routeSpy(into: THREE.Vector3[], result: THREE.Vector3 | undefined | null = null) {
+    return (goal: THREE.Vector3): THREE.Vector3 | undefined | null => {
+      into.push(goal.clone());
+      return result;
+    };
+  }
+
+  it('freezes a COPY of the observation: mutating the source cannot drift the memory', () => {
+    const brain = calmBrain();
+    const vis = visualAt(10); // feet (10,0,0), eye (10,1.9,0)
+    brain.decide(view({ visual: vis }), DT); // memory taken
+    vis.feet.set(99, 5, 99); // the target "moves" by mangling the executor's record
+    vis.eye.set(99, 99, 99);
+
+    const goals: THREE.Vector3[] = [];
+    const intent = brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
+
+    expect(goals).toHaveLength(1);
+    expect(goals[0]!.x).toBeCloseTo(10, 12);
+    expect(goals[0]!.y).toBeCloseTo(0, 12);
+    expect(goals[0]!.z).toBeCloseTo(0, 12);
+    expect(intent.lookAt!.x).toBeCloseTo(10, 12);
+    expect(intent.lookAt!.y).toBeCloseTo(1.9, 12);
   });
-  const origin = at(0, 0);
 
-  it('returns undefined with no candidates or none alive', () => {
-    expect(nearestOpposing(origin, [])).toBeUndefined();
-    expect(nearestOpposing(origin, [cand(1, 1, false), cand(50, 50, false)])).toBeUndefined();
+  it('routes to the remembered FEET on sight loss and returns a copied lookAt', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT);
+
+    const goals: THREE.Vector3[] = [];
+    const first = brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
+    expect(goals[0]!.x).toBeCloseTo(10, 12);
+    expect(first.lookAt!.clone()).toEqual(new THREE.Vector3(10, 1.9, 0));
+    expect(first.wantShoot).toBe(false);
+    expect(first.mode).toBe('route');
+
+    // The returned lookAt is a copy: mangling it cannot corrupt the memory
+    // the next blind frame reads back.
+    first.lookAt!.set(0, 0, 0);
+    const second = brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
+    expect(goals[1]!.x).toBeCloseTo(10, 12);
+    expect(second.lookAt!.x).toBeCloseTo(10, 12);
+    expect(second.lookAt!.y).toBeCloseTo(1.9, 12);
   });
 
-  it('defaults to planar ranking: height cannot outrank ground distance', () => {
-    // With no scorer the pre-3D behavior stands — the (2,0) entry is nearer
-    // in the GROUND plane even though the high one wins a 3D comparison.
-    const near = cand(2, 0);
-    const farButLowY = cand(5, 0, true, 100);
-    expect(nearestOpposing(origin, [farButLowY, near])).toBe(near);
+  it('never orders a shot from memory, even with the cooldown long expired', () => {
+    const brain = new DefaultBrain(
+      { ...DEFAULT_BRAIN_PARAMS, cooldownMin: -5, cooldownSpan: 0 },
+      calmRng,
+    );
+    brain.decide(view({ visual: visualAt(10) }), DT); // reroll parks cd at −5
+    for (let f = 1; f <= 5; f++) {
+      const intent = brain.decide(
+        view({ visual: null, nextWaypoint: () => new THREE.Vector3(0.5, 0, 0) }),
+        DT,
+      );
+      expect(intent.wantShoot, `frame ${f}`).toBe(false);
+    }
   });
 
-  it('skips corpses between the bot and its prey', () => {
-    const corpseBetween = cand(1, 0, false);
-    const prey = cand(4, 0);
-    expect(nearestOpposing(origin, [corpseBetween, prey])).toBe(prey);
+  it('waits in route on a deferred (undefined) waypoint: zero step, timer untouched', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT);
+    for (let f = 1; f <= 5; f++) {
+      const intent = brain.decide(view({ visual: null, nextWaypoint: () => undefined }), DT);
+      expect(intent.mode).toBe('route');
+      expect(intent.step.length()).toBe(0);
+      expect(intent.wantShoot).toBe(false);
+      expect(intent.focusId).toBe('player');
+      expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(10, 1.9, 0));
+    }
   });
 
-  it('ranks by the supplied scorer, so the brain owns target choice', () => {
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, calmRng);
-    // verticalWeight 2: 3 m of height scores (2·3)² = 36, worse than 5 m of
-    // flat ground at 25 — reaching the high one costs a stair detour.
-    expect(brain.targetScore(5, 0, 0)).toBeCloseTo(25, 12);
-    expect(brain.targetScore(0, 3, 0)).toBeCloseTo(36, 12);
-    expect(brain.targetScore(0, -3, 0)).toBeCloseTo(36, 12); // below counts the same
+  it('starts a search on a confirmed dead end, facing the remembered spot', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT);
+    const intent = brain.decide(view({ visual: null, nextWaypoint: () => null }), DT);
+    expect(intent.mode).toBe('search');
+    expect(intent.step.length()).toBe(0);
+    expect(intent.wantShoot).toBe(false);
+    expect(intent.focusId).toBe('player'); // identity survives into the scan
+    expect(intent.facing.x).toBeCloseTo(1, 12);
+    expect(intent.facing.z).toBeCloseTo(0, 12);
+    expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.9, 0));
+  });
 
-    const flat = cand(5, 0);
-    const high = cand(0, 0, true, 3);
-    // Default (planar) scoring still prefers the one overhead…
-    expect(nearestOpposing(origin, [flat, high])).toBe(high);
-    // …and the brain's weighted scoring sends the bot after the reachable one.
-    expect(nearestOpposing(origin, [flat, high], brain.targetScore)).toBe(flat);
+  it('the inclusive 1 m arrival boundary starts a search without consulting the graph', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(1) }), DT); // memory exactly 1 m away
+    let asked = 0;
+    const intent = brain.decide(view({
+      visual: null,
+      nextWaypoint: () => { asked++; return null; },
+    }), DT);
+    expect(asked).toBe(0); // arrival is decided before the graph is ever asked
+    expect(intent.mode).toBe('search');
+    expect(intent.facing.x).toBeCloseTo(1, 12);
+    expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.9, 0));
+  });
+
+  it('a visual reacquisition refreshes the memory and exits an active search', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT);
+    brain.decide(view({ visual: null, nextWaypoint: () => null }), DT); // search begins
+
+    const reacquired = brain.decide(view({ visual: visualAt(20) }), DT);
+    expect(reacquired.mode).toBe('engage');
+    expect(reacquired.focusId).toBe('player');
+
+    const goals: THREE.Vector3[] = [];
+    brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
+    expect(goals[0]!.x).toBeCloseTo(20, 12); // NEW feet, not the stale (10,0,0)
+  });
+
+  it('memory pursuit arms the climb hysteresis for the next visible frame', () => {
+    const brain = calmBrain();
+    // Seen level (rise under climbThreshold): nothing wants a route yet.
+    brain.decide(view({ visual: visualAt(10, 0) }), DT);
+
+    // Sight lost, the graph hands over a real waypoint: memory pursuit is
+    // routing, and that state must LATCH, not just move this frame.
+    const pursued = brain.decide(view({
+      visual: null,
+      nextWaypoint: () => new THREE.Vector3(0.5, 0, 0),
+    }), DT);
+    expect(pursued.mode).toBe('route');
+
+    // Reacquired at a rise strictly between climbExit (0.45) and
+    // climbThreshold (1.5) — one that only CONTINUES a route. The latch the
+    // memory pursuit raised must keep this frame routing; a fresh entry at
+    // climbThreshold would read this as engage.
+    const reacquired = brain.decide(view({
+      visual: visualAt(10, 1),
+      nextWaypoint: () => new THREE.Vector3(0.5, 0, 0),
+    }), DT);
+    expect(reacquired.mode).toBe('route');
+  });
+});
+
+describe('DefaultBrain scan search', () => {
+  /**
+   * Enter a scan whose base bearing is due +x: see a target 10 m east, then
+   * hit a confirmed dead end pursuing it. The entry frame itself is the
+   * elapsed-zero heading; later frames age the timer by their dt.
+   */
+  function scanBrain(): { brain: DefaultBrain; entry: ReturnType<DefaultBrain['decide']> } {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT);
+    return { brain, entry: brain.decide(view({ visual: null, nextWaypoint: () => null }), DT) };
+  }
+
+  it('begins at elapsed zero with the base heading, then repeats +120°, −120°', () => {
+    const { brain, entry } = scanBrain();
+    // Elapsed zero: the entry heading IS the base bearing.
+    expect(entry.facing.x).toBeCloseTo(1, 12);
+    expect(entry.facing.z).toBeCloseTo(0, 12);
+    expect(entry.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.9, 0));
+
+    // dt = one full scan phase: each frame lands exactly on a phase boundary.
+    // Three.js positive-Y rotation: +120° takes (1,0,0) to (cos120°, 0, −sin120°).
+    const S = Math.sqrt(3) / 2;
+    const f1 = brain.decide(view({ visual: null }), 0.75);
+    expect(f1.facing.x).toBeCloseTo(-0.5, 12);
+    expect(f1.facing.z).toBeCloseTo(-S, 12);
+    expect(f1.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(f1.lookAt!.x).toBeCloseTo(-0.5, 12);
+    expect(f1.lookAt!.z).toBeCloseTo(-S, 12);
+
+    const f2 = brain.decide(view({ visual: null }), 0.75);
+    expect(f2.facing.x).toBeCloseTo(-0.5, 12);
+    expect(f2.facing.z).toBeCloseTo(S, 12);
+    expect(f2.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(f2.lookAt!.x).toBeCloseTo(-0.5, 12);
+    expect(f2.lookAt!.z).toBeCloseTo(S, 12);
+
+    const f3 = brain.decide(view({ visual: null }), 0.75); // 2.25 s: full sweep repeats
+    expect(f3.facing.x).toBeCloseTo(1, 12);
+    expect(f3.facing.z).toBeCloseTo(0, 12);
+  });
+
+  it('never ages the forget timer while the route walks, and expires into hold exactly at 8 s of search', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT);
+    // 10 s of routed memory pursuit — longer than forgetTime — must leave
+    // the memory unexpired: every frame still routes.
+    for (let f = 0; f < 40; f++) {
+      const intent = brain.decide(
+        view({ visual: null, nextWaypoint: () => new THREE.Vector3(0.5, 0, 0) }),
+        0.25,
+      );
+      expect(intent.mode, `route frame ${f}`).toBe('route');
+    }
+    // Dead end: the scan starts fresh, with the full 8 s ahead of it.
+    const entry = brain.decide(view({ visual: null, nextWaypoint: () => null }), 0.25);
+    expect(entry.mode).toBe('search');
+
+    // dt 0.25: frames at elapsed 0.25 … 7.75 still search; 8.0 forgets.
+    for (let f = 1; f <= 31; f++) {
+      expect(brain.decide(view({ visual: null }), 0.25).mode, `search frame ${f}`).toBe('search');
+    }
+    const hold = brain.decide(view({ visual: null }), 0.25);
+    expect(hold.mode).toBe('hold');
+    expect(hold.focusId).toBeNull(); // focus cleared into the forget
+    expect(hold.lookAt).toBeNull();
+    // The memory is gone with it: the next blind frame holds again rather
+    // than resurrecting the pursuit.
+    let asked = 0;
+    const after = brain.decide(view({
+      visual: null,
+      nextWaypoint: () => { asked++; return null; },
+    }), 0.25);
+    expect(asked).toBe(0);
+    expect(after.mode).toBe('hold');
+  });
+});
+
+describe('DefaultBrain incoming fire', () => {
+  /** Params that keep every cooldown pinned at/below zero except the spawn stagger. */
+  function hotParams(): BrainParams {
+    return {
+      ...DEFAULT_BRAIN_PARAMS,
+      firstDelayMin: 0,
+      firstDelaySpan: 0,
+      cooldownMin: -5,
+      cooldownSpan: 0,
+    };
+  }
+
+  it('copies and normalizes the bearing and never retains the caller’s vector', () => {
+    const brain = calmBrain();
+    const bearing = new THREE.Vector3(3, 7, 4); // planar (3,4), length 5
+    brain.onIncomingFire(bearing);
+    bearing.set(0, 0, 1); // the caller's vector is theirs alone
+
+    const intent = brain.decide(view({ visual: null }), DT);
+    expect(intent.mode).toBe('search');
+    expect(intent.facing.x).toBeCloseTo(0.6, 12);
+    expect(intent.facing.y).toBeCloseTo(0, 12);
+    expect(intent.facing.z).toBeCloseTo(0.8, 12);
+    // Direction-only: no memory, so the scan look rides the bot eye
+    // convention off the bot's own feet.
+    expect(intent.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(intent.lookAt!.x).toBeCloseTo(0.6, 12);
+    expect(intent.lookAt!.z).toBeCloseTo(0.8, 12);
+  });
+
+  it('outranks a simultaneous visual: search, focus cleared, no shot', () => {
+    const brain = new DefaultBrain(hotParams(), calmRng);
+    brain.decide(view({ visual: visualAt(10) }), DT); // would fire: cd ≤ 0
+    brain.onIncomingFire(new THREE.Vector3(3, 0, 4));
+
+    const intent = brain.decide(view({ visual: visualAt(10) }), DT);
+    expect(intent.mode).toBe('search'); // not engage — the bearing outranks the look
+    expect(intent.wantShoot).toBe(false);
+    expect(intent.focusId).toBeNull(); // identity dropped
+    expect(intent.facing.x).toBeCloseTo(0.6, 12);
+    expect(intent.facing.z).toBeCloseTo(0.8, 12);
+    // The damage frame itself advances at normal speed along the bearing.
+    expect(intent.step.x).toBeCloseTo(0.6 * 4 * DT, 12);
+    expect(intent.step.z).toBeCloseTo(0.8 * 4 * DT, 12);
+  });
+
+  it('never shoots during the damage search and a later visual reacquires normally', () => {
+    const brain = new DefaultBrain(hotParams(), calmRng);
+    brain.decide(view({ visual: visualAt(10) }), DT); // fires; reroll parks cd at −5
+    brain.onIncomingFire(new THREE.Vector3(3, 0, 4));
+
+    expect(brain.decide(view({ visual: visualAt(10) }), DT).wantShoot).toBe(false);
+    const second = brain.decide(view({ visual: visualAt(10) }), DT); // bearing consumed
+    expect(second.mode).toBe('engage');
+    expect(second.wantShoot).toBe(true); // the look may fire again — memory is sight
+    expect(second.focusId).toBe('player');
+  });
+
+  it('ignores a zero planar bearing defensively', () => {
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(0, 5, 0)); // all-vertical: no direction
+    const intent = brain.decide(view({ visual: visualAt(10) }), DT);
+    expect(intent.mode).toBe('engage'); // no damage search was queued
+    expect(intent.focusId).toBe('player');
+  });
+
+  it('onRespawn clears active memory, search and a pending bearing', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT); // memory + focus
+    brain.decide(view({ visual: null, nextWaypoint: () => null }), DT); // active search
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0)); // pending damage stimulus
+    brain.onRespawn();
+
+    let asked = 0;
+    const blind = brain.decide(view({
+      visual: null,
+      nextWaypoint: () => { asked++; return null; },
+    }), DT);
+    expect(blind.mode).toBe('hold'); // no search, no memory pursuit, no bearing
+    expect(blind.focusId).toBeNull();
+    expect(blind.lookAt).toBeNull();
+    expect(asked).toBe(0);
+
+    const seen = brain.decide(view({ visual: visualAt(10) }), DT);
+    expect(seen.mode).toBe('engage'); // not a damage search
+    expect(seen.focusId).toBe('player');
+  });
+});
+
+describe('DefaultBrain patrol', () => {
+  it('waits one second after spawn before the first patrol request', () => {
+    let asked = 0;
+    const brain = calmBrain();
+    const v = view({ visual: null, nextPatrolWaypoint: () => { asked++; return new THREE.Vector3(4, 0, 0); } });
+    for (let f = 1; f <= 3; f++) {
+      expect(brain.decide(v, 0.25).mode, `frame ${f}`).toBe('hold');
+    }
+    expect(asked).toBe(0); // the graph is never asked during the pause
+    const walked = brain.decide(v, 0.25);
+    expect(walked.mode).toBe('patrol'); // the pause ends; the request fires
+    expect(walked.step.length()).toBeCloseTo(4 * 0.25, 12);
+  });
+
+  it('travels the patrol waypoint at normal speed, never shooting, null focus', () => {
+    let asked = 0;
+    const brain = calmBrain();
+    const v = view({
+      visual: null,
+      nextPatrolWaypoint: () => { asked++; return new THREE.Vector3(3, 0, 4); },
+    });
+    for (let f = 1; f <= 4; f++) {
+      const intent = brain.decide(v, 0.25);
+      if (f < 4) expect(intent.mode, `frame ${f}`).toBe('hold');
+    }
+    expect(asked).toBe(1); // lazily asked exactly once — on the frame the pause ended
+    const walked = brain.decide(v, 0.25);
+    expect(walked.mode).toBe('patrol');
+    expect(walked.wantShoot).toBe(false);
+    expect(walked.focusId).toBeNull();
+    // Normal travel speed, planar: (3,4)/5 · speed · dt.
+    expect(walked.step.length()).toBeCloseTo(4 * 0.25, 12);
+    expect(walked.step.x).toBeCloseTo(0.6 * 4 * 0.25, 12);
+    expect(walked.step.z).toBeCloseTo(0.8 * 4 * 0.25, 12);
+    // Looking one metre along the next waypoint at eye height.
+    expect(walked.lookAt!.x).toBeCloseTo(0.6, 12);
+    expect(walked.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(walked.lookAt!.z).toBeCloseTo(0.8, 12);
+  });
+
+  it('a deferred budget keeps the bot in patrol without moving or re-asking', () => {
+    const brain = calmBrain();
+    const walking = view({
+      visual: null,
+      nextPatrolWaypoint: () => new THREE.Vector3(0.5, 0, 0),
+    });
+    for (let f = 1; f <= 4; f++) brain.decide(walking, 0.25); // pause spent on frame 4
+    expect(brain.decide(walking, 0.25).mode).toBe('patrol'); // walking the leg
+    let asked = 0;
+    const intent = brain.decide(view({
+      visual: null,
+      nextPatrolWaypoint: () => { asked++; return undefined; },
+    }), 0.25);
+    expect(intent.mode).toBe('patrol');
+    expect(intent.step.length()).toBe(0);
+    expect(intent.wantShoot).toBe(false);
+    expect(asked).toBe(1); // asked once, exactly like the walking leg above
+    // Facing preserved, no endpoint to expose.
+    expect(intent.lookAt).toBeNull();
+    expect(intent.facing.x).toBeCloseTo(1, 12);
+  });
+
+  it('a null patrol answer restarts the one-second pause', () => {
+    let asked = 0;
+    const brain = calmBrain();
+    for (let f = 1; f <= 4; f++) {
+      brain.decide(view({ visual: null, nextPatrolWaypoint: () => { asked++; return null; } }), 0.25);
+    }
+    expect(asked).toBe(1);
+    for (let f = 1; f <= 4; f++) {
+      const intent = brain.decide(view({
+        visual: null,
+        nextPatrolWaypoint: () => { asked++; return null; },
+      }), 0.25);
+      expect(intent.mode, `restart frame ${f}`).toBe('hold');
+    }
+    expect(asked).toBe(2); // one fresh request after the full pause
+  });
+
+  it('search expiry stands down one second before the first patrol request', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(10) }), DT);
+    // Enter a search via a confirmed dead end, then run out the 8 s forget.
+    brain.decide(view({ visual: null, nextWaypoint: () => null }), 0.25);
+    for (let f = 1; f <= 31; f++) brain.decide(view({ visual: null }), 0.25);
+    const expired = brain.decide(view({ visual: null }), 0.25); // elapsed 8 s
+    expect(expired.mode).toBe('hold');
+    // The pause now gates the next patrol request for one more second.
+    let asked = 0;
+    for (let f = 1; f <= 3; f++) {
+      expect(brain.decide(view({ visual: null, nextPatrolWaypoint: () => { asked++; return null; } }), 0.25).mode).toBe('hold');
+    }
+    expect(asked).toBe(0);
+    const entered = brain.decide(view({ visual: null, nextPatrolWaypoint: () => new THREE.Vector3(0, 0, 4) }), 0.25);
+    expect(entered.mode).toBe('patrol');
+  });
+
+  it('a memory-arrival search scans in place and never advances', () => {
+    const brain = calmBrain();
+    brain.decide(view({ visual: visualAt(1) }), DT); // memory exactly at the arrival radius
+    const entry = brain.decide(view({
+      visual: null,
+      nextWaypoint: () => null,
+      nextPatrolWaypoint: () => new THREE.Vector3(0, 0, 4), // irrelevant: arrival precedes the ask
+    }), DT);
+    expect(entry.mode).toBe('search');
+    expect(entry.step.length()).toBe(0); // no advance outside a damage search
+    expect(brain.decide(view({ visual: null }), 0.25).step.length()).toBe(0);
+  });
+
+  it('a visual interrupting patrol takes priority and the leg never returns', () => {
+    const brain = calmBrain();
+    const walking = view({
+      visual: null,
+      nextPatrolWaypoint: () => new THREE.Vector3(0.5, 0, 0),
+    });
+    for (let f = 1; f <= 4; f++) {
+      brain.decide(walking, 0.25);
+    }
+    const walked = brain.decide(walking, 0.25);
+    expect(walked.mode).toBe('patrol');
+    expect(walked.wantShoot).toBe(false);
+    expect(walked.lookAt).not.toBeNull(); // intent faces one metre along the waypoint
+    // A visual lands: patrol loses immediately.
+    const seen = brain.decide(view({ visual: visualAt(10) }), 0.25);
+    expect(seen.mode).toBe('engage');
+    expect(seen.focusId).toBe('player');
+    expect(brain.focusId).toBe('player');
+  });
+
+  it('onRespawn re-arms the full one-second patrol pause', () => {
+    const brain = calmBrain();
+    for (let f = 1; f <= 4; f++) brain.decide(view({ visual: null }), 0.25); // pause spent, patrolling
+    brain.onRespawn();
+    let asked = 0;
+    for (let f = 1; f <= 3; f++) {
+      expect(brain.decide(view({
+        visual: null,
+        nextPatrolWaypoint: () => { asked++; return new THREE.Vector3(4, 0, 0); },
+      }), 0.25).mode, `respawned frame ${f}`).toBe('hold');
+    }
+    expect(asked).toBe(0);
+  });
+});
+
+describe('DefaultBrain damage advance', () => {
+  const HALF_DT = 0.5; // whole-half frames: the 3 s boundary is exact
+
+  /** Params that keep every cooldown pinned at/below zero except the spawn stagger. */
+  function hotParams(): BrainParams {
+    return {
+      ...DEFAULT_BRAIN_PARAMS,
+      firstDelayMin: 0,
+      firstDelaySpan: 0,
+      cooldownMin: -5,
+      cooldownSpan: 0,
+    };
+  }
+
+  /** Enter a damage search whose base bearing is due +x. */
+  function advanceBrain(): { brain: DefaultBrain; entry: ReturnType<DefaultBrain['decide']> } {
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    return { brain, entry: brain.decide(view({ visual: null }), HALF_DT) };
+  }
+
+  it('the damage frame itself requests normal-speed movement along the bearing', () => {
+    const { entry } = advanceBrain();
+    expect(entry.mode).toBe('search');
+    expect(entry.step.x).toBeCloseTo(4 * HALF_DT, 12);
+    expect(entry.step.y).toBe(0);
+    expect(entry.step.z).toBeCloseTo(0, 12);
+    // ...while still facing the scan heading (the base bearing at elapsed 0).
+    expect(entry.facing.x).toBeCloseTo(1, 12);
+  });
+
+  it('advances strictly before three seconds and stands at the boundary', () => {
+    const { brain, entry } = advanceBrain();
+    expect(entry.step.length()).toBeGreaterThan(0);
+    // Frames at elapsed 0.5 … 2.5 still advance; 3.0 is the boundary.
+    for (let f = 1; f <= 5; f++) {
+      const intent = brain.decide(view({ visual: null }), 0.5);
+      expect(intent.step.x, `advance frame ${f}`).toBeCloseTo(4 * 0.5, 12);
+      expect(intent.mode).toBe('search');
+    }
+    const boundary = brain.decide(view({ visual: null }), 0.5);
+    expect(boundary.step.length()).toBe(0); // 3.0 s elapsed: advance closed
+    expect(boundary.mode).toBe('search');
+  });
+
+  it('faces the rotating scan headings while advancing, cadence intact', () => {
+    const { brain } = advanceBrain();
+    const f1 = brain.decide(view({ visual: null }), 0.75); // elapsed 0.75: heading +120°
+    // The step stays on the STORED base bearing while the heading rotates.
+    expect(f1.step.x).toBeCloseTo(4 * 0.75, 12);
+    expect(f1.step.z).toBeCloseTo(0, 12);
+    // +120°: (1,0,0) → (cos120°, 0, −sin120°)
+    expect(f1.facing.x).toBeCloseTo(-0.5, 12);
+    expect(f1.facing.z).toBeCloseTo(-Math.sqrt(3) / 2, 12);
+  });
+
+  it('a blocked step cancels only the advance; the scan finishes standing', () => {
+    const { brain } = advanceBrain();
+    brain.decide(view({ visual: null, moveBlocked: true }), 0.75); // blocked: advance cut
+    const after = brain.decide(view({ visual: null }), 0.75);
+    expect(after.mode).toBe('search');
+    expect(after.step.length()).toBe(0); // no replanning — advance stays cut
+  });
+
+  it('a block inherited from before the hit does not suppress the entry step', () => {
+    // moveBlocked describes LAST frame's step. On the entry frame that step
+    // belonged to whatever the bot was doing before the hit — a patrol or
+    // combat move — so it is not evidence the new advance is blocked: the
+    // first damage frame must still request normal-speed movement.
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const entry = brain.decide(view({ visual: null, moveBlocked: true }), 0.5);
+    expect(entry.mode).toBe('search');
+    expect(entry.step.x).toBeCloseTo(4 * 0.5, 12); // entry step NOT suppressed
+    // The NEXT decision reports on the entry step itself — an advance step —
+    // so a block there cancels the remainder of this search's advance.
+    const next = brain.decide(view({ visual: null, moveBlocked: true }), 0.5);
+    expect(next.mode).toBe('search');
+    expect(next.step.length()).toBe(0);
+    const after = brain.decide(view({ visual: null }), 0.5);
+    expect(after.step.length()).toBe(0); // stays cut for this search
+  });
+
+  it('incoming damage interrupts an already-active patrol', () => {
+    let patrolAsked = 0;
+    const brain = calmBrain();
+    const walking = view({
+      visual: null,
+      nextPatrolWaypoint: () => { patrolAsked++; return new THREE.Vector3(0.5, 0, 0); },
+    });
+    for (let f = 1; f <= 5; f++) brain.decide(walking, 0.25); // pause spent, leg walking
+    expect(patrolAsked).toBeGreaterThanOrEqual(1);
+
+    // A direction-only hit lands mid-leg: the bearing outranks the patrol.
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const hit = brain.decide(view({ visual: null }), 0.25);
+    expect(hit.mode).toBe('search');
+    expect(hit.wantShoot).toBe(false);
+    expect(hit.focusId).toBeNull();
+    // The damage frame advances along the bearing, not the patrol leg.
+    expect(hit.step.x).toBeCloseTo(4 * 0.25, 12);
+    expect(hit.step.z).toBeCloseTo(0, 12);
+
+    // The leg never resumes: the damage search runs its course instead, and
+    // the patrol graph is not consulted for the rest of it.
+    const askedAtHit = patrolAsked;
+    for (let f = 1; f <= 4; f++) {
+      expect(brain.decide(view({ visual: null }), 0.25).mode, `search frame ${f}`).toBe('search');
+    }
+    expect(patrolAsked).toBe(askedAtHit);
+  });
+
+  it('a later hit restarts the eight-second search and a fresh advance window', () => {
+    const { brain } = advanceBrain();
+    // The advance was cancelled by a blocked step one half-second in.
+    brain.decide(view({ visual: null, moveBlocked: true }), 0.5);
+    brain.decide(view({ visual: null }), 0.5);
+    // A new bearing resets BOTH clocks: fresh 8 s search, fresh 3 s window.
+    brain.onIncomingFire(new THREE.Vector3(-1, 0, 0));
+    const fresh = brain.decide(view({ visual: null }), 0.5);
+    expect(fresh.mode).toBe('search');
+    expect(fresh.facing.x).toBeCloseTo(-1, 12); // the newest bearing
+    expect(fresh.step.x).toBeCloseTo(-4 * 0.5, 12); // advancing again, new direction
+    // The scan cadence restarted with it: one full scan phase later the
+    // heading is the base rotated +120° — impossible unless elapsed restarted.
+    const cadence = brain.decide(view({ visual: null }), 0.75);
+    expect(cadence.facing.x).toBeCloseTo(0.5, 12);
+    expect(cadence.facing.z).toBeCloseTo(Math.sqrt(3) / 2, 12);
+
+    // The eight-second LIFETIME restarted too, not just the phase: elapsed
+    // stood at 1.0 s when the new bearing landed (the re-hit entry frame
+    // itself does not age it), so without the restart the search would forget
+    // after only 6.25 more seconds — the 13th of these frames. With it,
+    // elapsed after the cadence frame is 0.75 s, frames 1–14 (elapsed
+    // 1.25…7.75) still search and only the 15th (8.25 s from the re-hit)
+    // forgets.
+    for (let f = 1; f <= 14; f++) {
+      expect(brain.decide(view({ visual: null }), 0.5).mode, `lifetime frame ${f}`).toBe('search');
+    }
+    expect(brain.decide(view({ visual: null }), 0.5).mode).toBe('hold');
+  });
+
+  it('never fires during the advance without visual acquisition', () => {
+    const brain = new DefaultBrain(hotParams(), calmRng); // every cooldown due
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    for (let f = 0; f < 5; f++) {
+      expect(brain.decide(view({ visual: null }), 0.5).wantShoot, `frame ${f}`).toBe(false);
+    }
+  });
+
+  it('expires into hold at the ordinary eight seconds, advance or not', () => {
+    const { brain } = advanceBrain();
+    // Entry + 31 frames of 0.25 s = 8.0 s: the last one forgets.
+    expect(brain.decide(view({ visual: null }), 0.25).mode).toBe('search'); // elapsed 0.25
+    for (let f = 2; f <= 31; f++) {
+      expect(brain.decide(view({ visual: null }), 0.25).mode, `search frame ${f}`).toBe('search');
+    }
+    expect(brain.decide(view({ visual: null }), 0.25).mode).toBe('hold');
   });
 });

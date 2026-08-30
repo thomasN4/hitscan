@@ -184,6 +184,19 @@ describe('melee weapons', () => {
     expect(matching([tuned({ range: NaN }, KNIFE)], 'KNIFE', 'range')).toHaveLength(1);
     expect(matching([tuned({ arcRad: NaN }, KNIFE)], 'KNIFE', 'arcRad')).toHaveLength(1);
   });
+
+  test('backstabMult exists exactly when the def swings, finite and >= 1', () => {
+    // The shipped knife's x3 passes — pinned in isolation, like the reach
+    // fields, so a knife-specific regression names itself.
+    expect(matching([KNIFE], 'backstabMult')).toHaveLength(0);
+    // Missing on a melee def must be flagged, never silently defaulted.
+    expect(matching([tuned({ backstabMult: undefined }, KNIFE)], 'KNIFE', 'backstabMult')).toHaveLength(1);
+    expect(matching([tuned({ backstabMult: 0.99 }, KNIFE)], 'KNIFE', 'backstabMult')).toHaveLength(1);
+    expect(matching([tuned({ backstabMult: NaN }, KNIFE)], 'KNIFE', 'backstabMult')).toHaveLength(1);
+    expect(matching([tuned({ backstabMult: Infinity }, KNIFE)], 'KNIFE', 'backstabMult')).toHaveLength(1);
+    // A firearm backstab multiplier is a dead field, like range without melee.
+    expect(matching([tuned({ backstabMult: 3 })], 'SMG', 'backstabMult')).toHaveLength(1);
+  });
 });
 
 describe('a fully valid def', () => {

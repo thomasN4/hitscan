@@ -43,8 +43,8 @@ function hasCompletedEdit(events) {
  *
  * Only the observed death mode is recoverable: a zero-exit turn that consumed
  * its reasoning allowance before making any edit. A partial implementation
- * must remain stopped for Codex to inspect instead of receiving an automatic
- * second chance to compound it.
+ * must remain stopped for the planner to inspect instead of receiving an
+ * automatic second chance to compound it.
  */
 export function recoverySession(jsonl) {
   const events = parseEvents(jsonl);

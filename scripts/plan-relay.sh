@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Plan Relay — run the repository's pinned OpenCode executor against one
-# approved, baseline-bound Codex plan. The ignored run directory retains the
-# exact input and JSONL event stream for Codex's independent verification.
+# approved, baseline-bound plan. The ignored run directory retains the exact
+# input and JSONL event stream for the planner's independent verification.
 set -euo pipefail
 
 usage() {

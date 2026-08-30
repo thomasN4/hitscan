@@ -55,15 +55,18 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` in
      `ci.yml` remain the only checks that can fail a PR.
 
-### Plan Relay (Codex planner → OpenCode executor)
+### Plan Relay (planning agent → OpenCode executor)
 
 **Plan Relay** is the optional split-agent implementation path for a task whose
-plan should be agreed in Codex and executed by the repository's pinned OpenCode
-agent. The ordinary single-agent loop above remains valid. When Plan Relay is
-chosen, its ownership boundary is strict:
+plan should be settled up front by a planning agent and executed by the
+repository's pinned OpenCode agent. The planner is whichever agent the user is
+working in — the relay assumes nothing about which, and the approved plan
+document is the whole interface. The ordinary single-agent loop above remains
+valid. When Plan Relay is chosen, its ownership boundary is strict:
 
-1. **Codex plans** — inspect the worktree read-only, settle every product and
-   implementation decision with the user, and write an approved Markdown plan.
+1. **The planner plans** — inspect the worktree read-only, settle every product
+   and implementation decision with the user, and write an approved Markdown
+   plan.
 2. **The user approves** — an unresolved choice is a planning blocker, not a
    decision for the executor to improvise.
 3. **OpenCode implements** — from the clean linked worktree, run:
@@ -80,9 +83,9 @@ chosen, its ownership boundary is strict:
    (`scripts/planRelayGate.mjs`), because a `length`-truncated final step
    otherwise exits 0 over a session that did nothing. It never commits,
    pushes or opens a PR.
-4. **Codex verifies** — read the retained transcript and working-tree diff,
-   rerun the plan's checks independently, and report deviations before the
-   normal commit / draft-PR stages continue. Git publication remains the
+4. **The planner verifies** — read the retained transcript and working-tree
+   diff, rerun the plan's checks independently, and report deviations before
+   the normal commit / draft-PR stages continue. Git publication remains the
    user's decision.
 
 The handoff plan is a public interface between the two agents. It must be a

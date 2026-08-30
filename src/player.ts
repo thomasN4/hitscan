@@ -23,7 +23,13 @@ import { player, input, aim, wpn, motion, keys, gameTime } from './core/state';
 import { slideMoveXZ, resolveVertical } from './collision';
 import { colliders, liftPads } from './world';
 import { sfxFootstep } from './audio';
-import { gunGroup, currentAimPitch, currentAimYaw, viewmodelAimOffset } from './weapons';
+import {
+  gunGroup,
+  currentAimPitch,
+  currentAimYaw,
+  currentViewmodelRecoil,
+  viewmodelAimOffset,
+} from './weapons';
 import { crosshair } from './hud';
 import { speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
@@ -212,9 +218,11 @@ export function updateViewmodel(): void {
   // Bob phase runs on game time so a pause doesn't snap the weapon to an
   // arbitrary point of the cycle on resume.
   gunGroup.position.y = aimOffset.y * wpn.adsLerp + Math.sin(gameTime.now() * 10) * motion.bobAmt;
-  gunGroup.position.z = wpn.recoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
-  gunGroup.rotation.x = wpn.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
-                                             // so a full climb must stay a nudge, not a tilt
+  // Accumulated recoil is reshaped only for this cosmetic transform. Raw
+  // recoil still drives the camera and bullets through currentAimPitch().
+  const visualRecoil = currentViewmodelRecoil();
+  gunGroup.position.z = visualRecoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
+  gunGroup.rotation.x = visualRecoil * 0.015;
   gunGroup.rotation.y = -wpn.recoilYaw * 0.01; // subtle sideways pull matching the walk
 
   // Crosshair tightens/fades when aiming (sight picture takes over);

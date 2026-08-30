@@ -7,9 +7,16 @@
 //
 // A ring rather than a list because emission is unbounded (every trigger pull,
 // every footstep) while interest is not: a bot cares about the last second or
-// two. 256 entries is ~4 s of a twelve-bot firefight at SMG cadence, and the
-// buffer costs a fixed 256 slots forever instead of growing until the match
-// ends.
+// two, and the buffer costs a fixed 256 slots forever instead of growing until
+// the match ends.
+//
+// What 256 buys, at the configurable worst case of 24 bots (12 per team) with
+// the player holding the trigger and running: bots fire on the BRAIN's
+// cooldown, not their weapon's — `cooldownMin` 0.7 + up to `cooldownSpan` 1.2,
+// so ~1/1.3 s each, ~18/s across 24 — plus the player's SMG at 13.3/s and
+// footsteps at 3.3/s. Call it 35 events/s, so the ring retains ~7 s. A reader
+// hears everything as long as it reads at all; the depth is slack for one that
+// misses frames, not a window anyone waits out.
 //
 // Reads are NON-DESTRUCTIVE and cursor-based, which is the whole point of the
 // shape: every bot must be able to hear the same gunshot, so no listener may

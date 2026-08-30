@@ -56,6 +56,11 @@ Host gitea-code-bot
     IdentityFile ~/.ssh/id_ed25519_code_bot
     IdentitiesOnly yes
 EOF
+
+# Repo-wide, once — both of these live in the shared .git/config, so every
+# linked worktree gets them and a second Review Loop must not repeat them.
+git remote add code-bot ssh://gitea-code-bot/thomasN4/another-cs-clone.git
+git config extensions.worktreeConfig true
 ```
 
 `main` is protected: push and merge are whitelisted to `thomasN4`, so `code-bot`
@@ -248,13 +253,24 @@ the Gitea UI, and the grant does not carry to the next PR.
 `--login code-bot` to every `tea` write. The point is legibility: with one
 account doing both, a reader of the PR timeline cannot tell which prefix toggle
 or which comment was the agent's, and that distinction is the whole basis on
-which the user reviews what the loop did. Per Review Loop worktree:
+which the user reviews what the loop did.
+
+The bot identity is set **per worktree, with `--worktree`**, and that flag is the
+whole point rather than a flourish:
 
 ```sh
-git config user.name code-bot
-git config user.email code-bot@example.com
-git remote add code-bot ssh://gitea-code-bot/thomasN4/another-cs-clone.git
+git config --worktree user.name code-bot
+git config --worktree user.email code-bot@example.com
 ```
+
+A plain `git config user.name` inside a linked worktree does not scope to that
+worktree — it writes the repository's shared `.git/config`, which every worktree
+reads. Set it that way and the primary checkout on `main`, and every other
+feature worktree, silently starts authoring its commits as `code-bot` too; you
+find out when a commit you made somewhere else carries the bot's name. `--worktree`
+needs `extensions.worktreeConfig`, which is part of the one-time repo setup
+above, alongside the `code-bot` remote — that remote is shared for the same
+reason, so add it once for the repository and never per worktree.
 
 `main`'s branch protection whitelists `thomasN4` for push and merge, so the ban
 on `tea pr merge` is now enforced by the server for this account and not only by

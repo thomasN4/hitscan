@@ -829,7 +829,16 @@ seconds of combat that occurred while it was absent.
 Heard positions enter the same route → arrival scan → forget → hold pipeline
 6a established, at the priority slot 6a left open for them —
 `sim/botBrains.ts`'s "Priority 4 — reserved for a future sound stimulus", which
-sits below memory and above patrol. A heard position carries NO focus id, so
+sits below memory and above patrol.
+*(Annotation, the 6b implementation: that sentence, written in the PR #81 doc
+refresh, took the placeholder comment's POSITION as the design. It contradicts
+this tranche's own ladder above, which reads
+`… > newly heard gunshot > newly heard footstep > remembered position >`. The
+ladder won — freshness is the whole argument for hearing, and a noise from this
+second is better evidence than a memory from ten seconds ago. Hearing is
+therefore checked between the visual and the scan/memory branches, and the
+placeholder's slot number moved with it.)*
+A heard position carries NO focus id, so
 the executor's three-way shot agreement (intent focus, this frame's
 observation, range gate) already makes firing on sound impossible; no new gate
 is needed. Visible combat ignores ordinary sound; direct damage remains a
@@ -842,6 +851,73 @@ gunshot/footstep priority, stance radii and respawn cursor reset. Smoke pins
 hostile gunshot investigation through a wall, run-full/walk-half boundaries,
 crouch silence, allied-sound rejection and damage-bearing precedence over an
 already heard event.
+
+#### 6b implementation record (in flight — not merged, no PR number)
+
+What the implementation built, and where it departed from the spec above:
+
+- **The ring** — `sim/soundEvents.ts`: an immutable `SoundEvent` (monotonic
+  `seq`, game-time `t`, kind, `PerceptionId` source, team, COPIED position,
+  radius), a 256-entry `SoundRing` with non-destructive `since(cursor,
+  highWater)` reads, `withinEarshot`, and the three radii. `Team` is a
+  type-only import, so the one runtime edge stays `core/state.ts` → `sim/`.
+  The live instance is `core/state.ts:soundEvents`.
+- **Three emitters** — as specified, with one correction: **both gunshots emit
+  at the shooter's FEET, not at the eye or muzzle the rays leave from.** A
+  heard position is a place to walk to, and `navGrid.ts:nearestNode` scores a
+  metre of height like four of ground, so an eye-height goal snaps to the deck
+  ABOVE the shooter wherever one exists — a bot investigating a ground-floor
+  shot would route upstairs. The 1.7 m is nothing to an 80 m radius.
+- **The policy** — `pickHeardLead` (gunshot over footstep, newest within a
+  kind, position never consulted: the emitter's radius already decided what is
+  audible) plus `adoptHeard`, which clears the focus and installs the heard
+  point as the investigation goal. `DefaultBrain.memory` gained a NULLABLE
+  `eye`, because a noise leaves a spot on the ground and no pair of eyes;
+  `goalLookAt` supplies eye height above the point instead, the same
+  convention a scan bearing uses.
+- **The executor** — a per-bot `soundCursor`, a single `soundHighWater`
+  captured in `updateBots` before any bot runs, team + earshot filtering down
+  to the reduced `HeardSound` the brain sees, and a cursor jump to the present
+  in `respawn()`. One further executor fix: `waypointToward` keys its route
+  cache on the GOAL when there is no focus id, because two successive noises
+  would otherwise share the owner `m:*` and the second would walk the first
+  one's cached path until `ROUTE_INTERVAL` happened to expire.
+- **Nothing new authorizes a shot.** A heard goal carries a null focus, and
+  the executor's existing three-way agreement (intent focus, this frame's
+  observation, range gate) makes firing on it structurally impossible — the
+  same property memory already had, reused rather than re-implemented.
+- **Coverage** — 617 pure tests: the ring's sequencing, non-consuming reads,
+  independent listeners, retention boundary, stale-cursor recovery, high-water
+  snapshots and copied positions; `pickHeardLead`'s kind and recency ordering;
+  and the brain's route-to-noise, copied goal, null focus, no-shot,
+  visible-ignores-sound, bearing-outranks-sound, sound-replaces-memory,
+  sound-interrupts-scan, arrive-scan-forget and respawn pins. Browser: the new
+  `[hearing]` phase.
+- **`[hearing]`** — arena's west mid wall as the fixture, so nothing a bot does
+  about the player can have come from sight: a hostile gunshot through the
+  wall is pointed at within 0.02 s and closed on, graded non-shootable
+  throughout, with the player unharmed; a CT bot 35 m from the same shot stays
+  in hold/patrol because the shooter is its ALLY; the player's own running
+  footsteps through the wall are investigated the same way; and the identical
+  path crouched is silent, guarded by proof that the player really moved and
+  really stayed inside the 12 m walking radius.
+
+Two things the phase cost before it was right, both fixture rather than
+product. The crouch step first ran at the footstep distances, where a walk
+would have been inaudible anyway — the setup guard caught it, which is the
+whole reason it was written. Then it failed with 53 frames of `engage`: the CT
+bot left alive by the ally step is an ENEMY of the T under test, so the T was
+engaging IT, and the mode histogram cannot tell one cause from another. See
+lesson 29.
+
+Also investigated and NOT a 6b regression: one full-suite run had `[vision]`
+report that its unaware bot never began patrolling, with `[patrol]` measuring
+its first leg at 4.04 s against main's 1.01 s. A position-fixed probe put both
+branches at 1.02 s over three runs each, and 6b is inert in that fixture by
+construction — the player is dead, so `updateMovement` returns before the
+footstep cadence, and nothing shoots, so `heard` is empty on every frame.
+Two later full-suite runs passed it. Load-sensitive, pre-existing, and left
+alone.
 
 #### Why the preceding work is prerequisite
 
@@ -966,3 +1042,18 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
     outcome, asserting which one ran is testing yesterday's implementation;
     the units own mechanism isolation, where the rng is scripted and no
     second solver can sneak in.
+29. **Every actor a fixture leaves alive is part of the fixture.** The
+    `[hearing]` crouch step asserts that a bot never leaves hold/patrol while a
+    crouching player walks past the other side of a wall. It failed with 53
+    frames of `engage` — and the bot was right: the CT bot left over from the
+    ally step two phases earlier is an ENEMY of the T under test, and seeing it
+    is a perfectly good reason to engage. The observable the phase reads (did
+    this bot start investigating?) cannot say WHICH entity caused it, so any
+    second live entity silently satisfies the claim. It passed three isolated
+    runs first, because the ally's patrol goal is drawn at random and it
+    usually wandered somewhere harmless. Both fixes were fixture work: pin the
+    ally while its own claim still needs it, retire it the moment that claim is
+    made. The rule generalizes past bots — whenever more than one entity in a
+    scenario can produce the signal being measured, the ones not under test
+    must be pinned or removed, or the phase reports on whichever happened to
+    move.

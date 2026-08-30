@@ -26,7 +26,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, playerFeet, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -37,6 +37,7 @@ import { spawnImpact } from './effects';
 import { addKillfeed, updateScore } from './hud';
 import { DefaultBrain, type BrainMode } from './sim/botBrains';
 import { acquireVisual, type PerceptionId } from './sim/perception';
+import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, route, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode } from './sim/navGrid';
 
@@ -86,6 +87,14 @@ const ROUTE_ABANDON = 6;
  * per frame in updateBots.
  */
 let routeBudget = 1;
+
+/**
+ * The sound sequence every bot reads through THIS frame, captured once in
+ * updateBots before any bot runs. It is what makes hearing independent of
+ * registry order: a gunshot emitted mid-frame lands beyond the snapshot and
+ * reaches every bot together on the next one.
+ */
+let soundHighWater = 0;
 
 /** Serial source for Bot ids; 1-based per match, unique across teams. */
 let nextBotId = 1;
@@ -181,6 +190,17 @@ export class Bot implements BotShape {
    * with the rest of the per-life state on respawn.
    */
   private perceptionCursor = 0;
+  /**
+   * Sequence of the last sound event this bot has been offered. Advances to
+   * the frame's high-water mark every living update, whether or not anything
+   * survived the team and earshot filters — an event this bot could not hear
+   * is still an event it has now been past.
+   *
+   * A corpse's update() early-returns, so a dead bot's cursor stands still;
+   * respawn() jumps it to the present rather than replaying the firefight it
+   * missed.
+   */
+  private soundCursor = 0;
   /**
    * Whether last frame's intended step was rejected by world collision.
    *
@@ -356,6 +376,9 @@ export class Bot implements BotShape {
     // corpse's attention, memory and reactions — a new life inherits nothing.
     this.brain.onRespawn();
     this.perceptionCursor = 0;
+    // The present, not zero: six seconds of combat happened while this bot
+    // was a corpse and none of it is news.
+    this.soundCursor = soundEvents.latestSeq;
     this.clearRouteCache();
     this.patrolGoal = null;
     this.routeCooldown = 0;
@@ -415,6 +438,19 @@ export class Bot implements BotShape {
     );
     this.perceptionCursor = acquisition.cursor;
 
+    // Everything audible since this bot last looked, filtered down to what it
+    // is entitled to have heard. Team filtering drops allied noise AND its
+    // own by the same test, since a bot shares a team with itself. The
+    // reduced HeardSound is what crosses the seam: the brain gets a place and
+    // a kind, never the emitter's identity.
+    const heard: HeardSound[] = [];
+    for (const ev of soundEvents.since(this.soundCursor, soundHighWater)) {
+      if (ev.team === this.team) continue;
+      if (!withinEarshot(ev, this.mesh.position)) continue;
+      heard.push({ seq: ev.seq, t: ev.t, kind: ev.kind, pos: ev.pos.clone() });
+    }
+    this.soundCursor = soundHighWater;
+
     // Clamped, not free-running: a bot that spends minutes not routing would
     // otherwise drift the timer arbitrarily negative for no benefit, and the
     // first request after a lull should fire immediately either way.
@@ -428,6 +464,7 @@ export class Bot implements BotShape {
         onGround: this.onGround,
         selfSpeed: this.speed,
         moveBlocked: this.moveBlocked,
+        heard,
         // Lazy on purpose: pathfinding is the expensive thing here, so it is
         // only paid when the policy has already decided it wants to travel
         // rather than fight where it stands. The pursuit flag keys the route
@@ -543,7 +580,13 @@ export class Bot implements BotShape {
     // A remembered goal must not inherit a path computed for a different
     // pursuit ('v' vs 'm') or a different target (focus id): key the cache
     // and drop it on any mismatch.
-    const key = `${visualPursuit ? 'v' : 'm'}:${this.brain.focusId ?? '*'}`;
+    // A heard goal carries no focus id to key on (a noise identifies nobody),
+    // so it keys on the GOAL itself, rounded to a decimetre. Without that,
+    // two successive noises would share the owner `m:*` and the second would
+    // walk the first one's cached path until ROUTE_INTERVAL happened to
+    // expire.
+    const owner = this.brain.focusId ?? `${goal.x.toFixed(1)},${goal.y.toFixed(1)},${goal.z.toFixed(1)}`;
+    const key = `${visualPursuit ? 'v' : 'm'}:${owner}`;
     return this.waypointOnRoute(goal, key, false);
   }
 
@@ -709,8 +752,22 @@ export class Bot implements BotShape {
    * rng stream.
    */
   private shoot(dist: number, target: Target): void {
+    const muzzle = this.muzzlePos();
     sfxEnemyShoot(this.mesh.position);
-    spawnImpact(this.muzzlePos()); // cheap muzzle flash, from the barrel tip
+    spawnImpact(muzzle); // cheap muzzle flash, from the barrel tip
+    // Emitted BEFORE the hit die, so a miss is exactly as audible as a hit —
+    // hearing reports that a trigger was pulled, not that it landed. At the
+    // FEET rather than the muzzle, for the reason weapons.ts states: a heard
+    // position is a routing goal, and nearestNode's height weighting would
+    // send a listener to the deck overhead.
+    soundEvents.emit({
+      kind: 'gunshot',
+      sourceId: this.id,
+      team: this.team,
+      pos: this.mesh.position,
+      radius: GUNSHOT_RADIUS_M,
+      t: gameTime.now(),
+    });
 
     if (!this.brain.rollHit(dist)) return;
     const dmg = this.brain.rollDamage();
@@ -768,5 +825,10 @@ export function spawnBots(count: number, team: Team): void {
 export function updateBots(dt: number, player: PlayerState): void {
   // One route per frame, shared out first-come: see routeBudget.
   routeBudget = 1;
+  // ONE hearing snapshot for the whole frame, captured BEFORE any bot runs.
+  // Without it, a shot fired by an early bot would be audible to the bots
+  // after it in this array and not to the ones before — hearing would depend
+  // on registry order. With it, every bot hears it on the next frame.
+  soundHighWater = soundEvents.latestSeq;
   bots.forEach(b => b.update(dt, player));
 }

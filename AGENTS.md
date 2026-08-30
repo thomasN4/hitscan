@@ -32,13 +32,17 @@ Default loop for every non-trivial change: **plan → worktree → implement →
 
    ```
    Fix missing player import breaking reload; add smoke test and debug hook
+
+   Co-authored-by: <model> <noreply@acsc>
    ```
+
+   Every commit message MUST end with a `Co-authored-by` trailer naming the model that produced it (at minimum `Co-authored-by: <model>` — use the full `Name <email>` form when possible).
 4. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
    - `tea pr create --draft --title "<imperative summary>" --description "..."`
    - Gitea has no draft flag on the pull request itself. `--draft` prepends
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
-   - PR body: what changed, why, and verification results.
+   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a `Co-authored-by` trailer (same form as commit messages, e.g. `Co-authored-by: Muse Spark <muse-spark@meta>`).
 5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the

@@ -31,9 +31,18 @@
 // "in my face at dist ~ 0" and pushed bots away from the stairs that reach it.
 import * as THREE from 'three';
 import type { PerceptionId, VisualObservation } from './perception';
+import type { HeardSound } from './soundEvents';
 
 /** Shared +Y axis for the scan rotation (Three.js positive-Y convention). */
 const UP_Y = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Height above a bot's own feet that a look-at point takes when nothing
+ * observed supplies one — a scan bearing, a patrol waypoint, a heard
+ * position. Matches the executor's bot eye convention (bots.ts:eyePos), so
+ * the barrel tips level rather than at the floor.
+ */
+const LOOK_EYE_HEIGHT = 1.9;
 
 /** Tunables of a reactive policy. Lengths in metres, times in seconds. */
 export interface BrainParams {
@@ -206,6 +215,16 @@ export interface BrainView {
   /** Whether LAST frame's step was rejected by world collision. */
   moveBlocked: boolean;
   /**
+   * Hostile noises heard SINCE the last frame — already filtered by the
+   * executor for team and earshot, so an entry here is by construction
+   * something this bot is entitled to have heard. Usually empty.
+   *
+   * A heard entry is a place and a kind, never an identity: acting on one
+   * yields a null focus, and the executor's shot agreement then makes firing
+   * on it structurally impossible, exactly as it does for memory.
+   */
+  heard: readonly HeardSound[];
+  /**
    * Planar vector to the next waypoint on the executor's route toward
    * `goal`, with a THREE-way outcome so a policy can tell waiting from a
    * dead end without any extra pathfinding:
@@ -329,6 +348,32 @@ export interface BotBrain {
   inRange(dist: number): boolean;
 }
 
+/**
+ * Which of this frame's noises to investigate: a gunshot over any footstep,
+ * and the NEWEST within one kind.
+ *
+ * Gunshots win because they mean a fight rather than a walk, and newest wins
+ * because a sound is evidence about a moment — an older event in the same
+ * frame's batch is already superseded. Distance does not enter: the emitter's
+ * radius has already decided what is audible, and preferring the nearer of
+ * two audible gunshots would quietly reintroduce ranking by position.
+ *
+ * Exported for its own unit pins; it is policy, so it lives with the brain
+ * rather than with the ring.
+ */
+export function pickHeardLead(heard: readonly HeardSound[]): HeardSound | null {
+  let best: HeardSound | null = null;
+  for (const h of heard) {
+    if (best === null) { best = h; continue; }
+    if (h.kind === best.kind) {
+      if (h.seq > best.seq) best = h;
+    } else if (h.kind === 'gunshot') {
+      best = h;
+    }
+  }
+  return best;
+}
+
 /** The shipped bot policy, parameterized for future variants. */
 export class DefaultBrain implements BotBrain {
   private strafeDir: 1 | -1;
@@ -372,12 +417,15 @@ export class DefaultBrain implements BotBrain {
    */
   private focus: PerceptionId | null = null;
   /**
-   * Frozen last-known position: cloned feet and eye from the most recent
-   * visual observation. COPIES, never a live reference — the observation is
-   * the executor's and the target moves. Pursued on sight loss; dropped by
-   * the search expiry and onRespawn.
+   * The place this brain is investigating: cloned feet and eye from the most
+   * recent visual observation, or a heard position with a null `eye` (a noise
+   * gives a spot on the ground, not a pair of eyes). COPIES, never a live
+   * reference — the observation is the executor's and the target moves.
+   * Pursued on sight loss or on a noise; dropped by the search expiry and
+   * onRespawn. A heard goal is distinguishable by `focus === null`, and that
+   * null is what makes it unshootable.
    */
-  private memory: { feet: THREE.Vector3; eye: THREE.Vector3 } | null = null;
+  private memory: { feet: THREE.Vector3; eye: THREE.Vector3 | null } | null = null;
   /** True while an active search owns the bot (the forget timer runs). */
   private searching = false;
   /** Normalized planar base bearing of the active search; null when none. */
@@ -491,6 +539,39 @@ export class DefaultBrain implements BotBrain {
     this.clearPursuitState();
   }
 
+  /**
+   * Where to look while pursuing the investigation goal: the frozen eye when
+   * sight put it there, else eye height above the goal itself. A heard
+   * position has no eye to remember — inventing one at the listener's own
+   * height would tip the barrel at the floor over long distances.
+   */
+  private goalLookAt(mem: { feet: THREE.Vector3; eye: THREE.Vector3 | null }): THREE.Vector3 {
+    if (mem.eye !== null) return mem.eye.clone();
+    return new THREE.Vector3(mem.feet.x, mem.feet.y + LOOK_EYE_HEIGHT, mem.feet.z);
+  }
+
+  /**
+   * Adopt a heard noise as the investigation goal, dropping whatever was
+   * being investigated before.
+   *
+   * Freshness wins: the tranche's priority ladder puts a newly heard hostile
+   * event above a remembered position, so a new noise replaces an older lead
+   * rather than queueing behind it. The focus goes to NULL — a noise
+   * identifies nobody — and that is what makes the resulting pursuit
+   * unshootable, through the same executor agreement memory already relies on.
+   */
+  private adoptHeard(h: HeardSound): void {
+    this.focus = null;
+    this.memory = { feet: h.pos.clone(), eye: null };
+    this.searching = false;
+    this.scanBase = null;
+    this.scanElapsed = 0;
+    this.advanceArmed = false;
+    this.advanceCancelled = false;
+    this.advanceRequested = false;
+    this.clearPursuitState();
+  }
+
   /** Heading for the current scan phase: base, base+120°, base−120°, repeating. */
   private scanHeading(): THREE.Vector3 {
     const phase = Math.floor(this.scanElapsed / this.params.scanPhase) % 3;
@@ -531,7 +612,8 @@ export class DefaultBrain implements BotBrain {
    * bot eye convention off the bot's own feet.
    */
   private searchFrameIntent(view: BrainView, heading: THREE.Vector3, step = new THREE.Vector3()): BrainIntent {
-    const eyeY = this.memory !== null ? this.memory.eye.y : view.selfFeet.y + 1.9;
+    const mem = this.memory;
+    const eyeY = mem !== null && mem.eye !== null ? mem.eye.y : view.selfFeet.y + LOOK_EYE_HEIGHT;
     const lookAt = new THREE.Vector3(view.selfFeet.x + heading.x, eyeY, view.selfFeet.z + heading.z);
     return {
       step,
@@ -625,10 +707,29 @@ export class DefaultBrain implements BotBrain {
 
     const vis = view.visual;
     if (vis) {
+      // Priority 2: something is actually in sight. Ordinary sound never
+      // pulls a bot off an opponent it can see, so this frame's noises go
+      // unread — the executor has already advanced the cursor past them.
       return this.visualIntent(view, vis, dt, jukeDraw);
     }
 
-    // Priority 3a: an active scan continues — never shoot, age the forget
+    // Priority 3: a newly heard hostile noise. It outranks BOTH a remembered
+    // position and an in-progress scan, because it is evidence from this
+    // moment and those are evidence from an older one — the tranche's ladder
+    // reads `gunshot > footstep > remembered position`. Adopting sets the
+    // goal and falls through to the pursuit below, so hearing reuses the
+    // route → arrival → scan → forget pipeline rather than growing a second.
+    //
+    // Note what the damage branch above therefore does: a bearing frame
+    // returns before this line, so that frame's noises are dropped with the
+    // cursor already past them. That is what keeps "damage reveals a
+    // DIRECTION, not a position" true even though the attacker's own gunshot
+    // is sitting in the ring — while a SECOND shot, heard on an ordinary
+    // frame, legitimately upgrades the bearing to a place.
+    const lead = pickHeardLead(view.heard);
+    if (lead !== null) this.adoptHeard(lead);
+
+    // Priority 4: an active scan continues — never shoot, age the forget
     // timer (which started only at search ENTRY, so route walks and deferred
     // frames never aged the memory), and advance along the bearing while the
     // damage search's window is open.
@@ -662,15 +763,13 @@ export class DefaultBrain implements BotBrain {
       return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
     }
 
-    // Priority 3b: sight lost with a remembered position — pursue it.
+    // Priority 5: an investigation goal — sight lost with a remembered
+    // position, or a noise just adopted above. Pursue it.
     if (this.memory !== null) {
       return this.memoryIntent(view, dt, jukeDraw);
     }
 
-    // Priority 4 — reserved for a future sound stimulus (hearing); nothing
-    // occupies it yet.
-
-    // Priority 5 — strictly lowest: nothing seen, nothing remembered, no
+    // Priority 6 — strictly lowest: nothing seen, nothing remembered, no
     // live search. Patrol. The pause gates the request: hold for
     // `patrolPause` seconds first (spawn, respawn, search expiry, patrol
     // arrival and failed selection all land here), then ask the executor for
@@ -680,7 +779,7 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 5 — strictly lowest: patrol. After the one-second pause the
+   * Priority 6 — strictly lowest: patrol. After the one-second pause the
    * brain asks the executor for a patrol waypoint: a vector means travel at
    * normal speed (mode `patrol`, never shoot, null focus, looking one metre
    * along the next waypoint at eye height); `undefined` means the route
@@ -723,7 +822,7 @@ export class DefaultBrain implements BotBrain {
     const heading = waypoint.clone().setY(0).normalize();
     const lookAt = new THREE.Vector3(
       view.selfFeet.x + heading.x,
-      view.selfFeet.y + 1.9,
+      view.selfFeet.y + LOOK_EYE_HEIGHT,
       view.selfFeet.z + heading.z,
     );
     const step = new THREE.Vector3();
@@ -897,9 +996,9 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 3: pursue the frozen last-known position. Route to the
-   * remembered FEET — never a candidate's live position — face the frozen
-   * point, and NEVER shoot: the memory is not sight, and no ray was spent
+   * Priority 5: pursue the investigation goal. Route to the remembered or
+   * heard FEET — never a candidate's live position — face that point, and
+   * NEVER shoot: neither a memory nor a noise is sight, and no ray was spent
    * to confirm anything is still there. A deferred route waits in `route`
    * with zero step (and does not age the forget timer, which starts only at
    * search entry); a confirmed dead end and the inclusive arrival radius
@@ -929,7 +1028,7 @@ export class DefaultBrain implements BotBrain {
         wantShoot: false,
         mode: 'route',
         focusId: this.focus,
-        lookAt: mem.eye.clone(),
+        lookAt: this.goalLookAt(mem),
         facing: toward.clone(),
       };
     }
@@ -954,7 +1053,7 @@ export class DefaultBrain implements BotBrain {
       wantShoot: false,
       mode: 'route',
       focusId: this.focus,
-      lookAt: mem.eye.clone(),
+      lookAt: this.goalLookAt(mem),
       facing: toward.clone(),
     };
   }

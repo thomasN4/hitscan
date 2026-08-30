@@ -51,6 +51,26 @@ export interface SoundEvent {
 export type SoundEmission = Omit<SoundEvent, 'seq'>;
 
 /**
+ * One event as a LISTENER receives it, after the executor has filtered by
+ * team and earshot.
+ *
+ * Deliberately NOT a `SoundEvent`: `sourceId` and `team` stay on the
+ * executor's side of the seam. A noise identifies NOBODY — it is a place and
+ * a kind — and handing the brain an id would let policy track an entity it
+ * has never seen, which is the omniscience tranche 6a removed. `pos` is a
+ * copy, like every position that crosses into a brain.
+ */
+export interface HeardSound {
+  /** The originating event's sequence — the brain's "which is newest" test. */
+  readonly seq: number;
+  /** Game-time seconds at emission. */
+  readonly t: number;
+  readonly kind: SoundKind;
+  /** COPY of where the noise came from; a routable, ground-level position. */
+  readonly pos: THREE.Vector3;
+}
+
+/**
  * Retained events. Older ones are overwritten in place, so a listener that
  * stops reading for longer than this loses the overflow rather than stalling
  * the emitters.

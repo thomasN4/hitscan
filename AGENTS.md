@@ -10,6 +10,17 @@ The canonical remote is a self-hosted Gitea instance on the LAN:
 `http://192.168.2.161:3000/thomasN4/another-cs-clone` (`origin`). GitHub is no
 longer the source of truth — `gh` is the wrong tool here; use `tea`.
 
+**Every `tea` command here needs `--repo thomasN4/another-cs-clone`**, and every
+command that acts on a PR needs that PR's index as a positional argument. Neither
+is inferred: `origin`'s SSH port (2222) does not match the login's `ssh_host`
+(`192.168.2.161:3000`), so repository auto-detection fails even from inside a
+worktree, with `remote repository required: specify id via --repo`. Omitting the
+index fails separately — `must specify at least one pull request index` for
+`tea pr edit`, `please specify issue / pr index` for `tea comments add`. Both are
+loud, but both are also *silent about the workflow*: an arming command that
+errors changes no title, fires no `edited` event, and leaves step 6 waiting on a
+run that was never created.
+
 There are **two** configured `tea` logins, and which one a command runs under is
 a deliberate choice, not a default:
 
@@ -98,7 +109,7 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    - Authored by the user (`Thomas Nguyen <…>`) — `Co-authored-by: <model>`. The model worked alongside a human author, which is what the trailer says.
    - Authored by `code-bot`, as every Review Loop commit is — `Authored-by: <model>`. There is no human author for the model to be "co-" with; the model wrote it and the bot account committed it. Note the cost of being accurate here: `Co-authored-by` is a trailer Gitea parses and renders as an additional author, and `Authored-by` is not, so on those commits the model appears as plain trailer text only.
 4. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
-   - `tea pr create --draft --title "<imperative summary>" --description "..."`
+   - `tea pr create --draft --repo thomasN4/another-cs-clone --title "<imperative summary>" --description "..."`
    - Gitea has no draft flag on the pull request itself. `--draft` prepends
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
@@ -292,7 +303,8 @@ holds the user's key.
    directly. Either way the planner verifies independently before anything is
    pushed, and a relay run is logged before that.
 4. **The planner publishes** — commit, `git push code-bot HEAD`, and open the PR
-   with `tea pr create --draft --login code-bot` if it is not already open.
+   with `tea pr create --draft --login code-bot --repo thomasN4/another-cs-clone`
+   if it is not already open.
    **Push every commit of the
    round before step 5.** `review.yml`'s concurrency group is keyed by PR number
    with `cancel-in-progress`, so a push landing during an in-flight review kills
@@ -300,8 +312,7 @@ holds the user's key.
    as its terminal status, which is the state step 6's watcher reads.
 5. **The planner arms the reviewer** — read `ENABLE_AI_REVIEW`, then strip the
    prefix. It is a repo Actions variable, not anything in the tree, and the
-   Gitea SDK cannot list them, so read it by name — and pass `--repo`, because
-   `origin`'s SSH port does not match the login's and auto-detection fails. This
+   Gitea SDK cannot list them, so read it by name. This
    is the one Review Loop command that must **not** run as `code-bot`: the
    endpoint requires the repo's owner, which no collaborator role satisfies, so
    `code-bot` gets a 403 rather than a value. See Project above.
@@ -319,7 +330,8 @@ holds the user's key.
    ask: the user set it
    deliberately, and stripping the prefix anyway would mark the PR ready with no
    review at all. Otherwise note which route `AI_REVIEWER`
-   selects, then drop the prefix with `tea pr edit --ready --login code-bot`,
+   selects, then drop the prefix with
+   `tea pr edit <index> --ready --login code-bot --repo thomasN4/another-cs-clone`,
    which is itself the `edited` event that starts the run.
 6. **The planner waits** — arm a background watcher, then leave the PR alone
    until it fires. The watcher must exit on the failure paths too, not only on
@@ -363,7 +375,8 @@ and a planner waiting on it cannot tell the difference from the outside:
 - **Only substance earns a round.** A finding earns another round when it is a
   correctness bug, or when it violates a rule in Architecture rules or Gotchas
   learned the hard way. Style and preference findings are answered in the PR
-  thread, `tea comments add --login code-bot`, ending in the `Authored-by`
+  thread, `tea comments add <index> --login code-bot --repo thomasN4/another-cs-clone`,
+  ending in the `Authored-by`
   trailer that a `code-bot` post takes — and do not restart the loop.
 - **A failed reviewer posts nothing at all.** A usage limit or provider error
   exits the model command nonzero, which fails the Review step it runs in and

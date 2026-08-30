@@ -1,10 +1,12 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +15,15 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { evaluateEvents, recoverySession } from './planRelayGate.mjs';
 import { formatAllowedCommands } from './planRelayPrompt.mjs';
+import { parseOptions, summarizeEvents } from './planRelaySummary.mjs';
+import {
+  PLAN_RELAY_VERSION,
+  SOURCE_DIGEST,
+  SOURCE_FILES,
+  computeDigest,
+  digestFromDisk,
+  driftMessage,
+} from './planRelayVersion.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const runner = join(scriptsDir, 'plan-relay.sh');
@@ -30,7 +41,7 @@ function createFixture({ primaryBranch = 'main', linkedBranch = 'feat/test' } = 
   git(primary, ['init', '--quiet', '--initial-branch', primaryBranch]);
   git(primary, ['config', 'user.name', 'Plan Relay Test']);
   git(primary, ['config', 'user.email', 'plan-relay@example.invalid']);
-  writeFileSync(join(primary, '.gitignore'), '.plan-relay\n');
+  writeFileSync(join(primary, '.gitignore'), '.plan-relay\nnode_modules\n');
   writeFileSync(join(primary, 'tracked.txt'), 'base\n');
   git(primary, ['add', '.gitignore', 'tracked.txt']);
   git(primary, ['commit', '--quiet', '-m', 'Create fixture']);
@@ -78,14 +89,28 @@ printf '%s\\n' "$call_index" > "$PLAN_RELAY_TEST_COUNT"
 printf '%s\\n' "$@" > "$PLAN_RELAY_TEST_ARGS.$call_index"
 printf '%s' "$OPENCODE_CONFIG_CONTENT" > "$PLAN_RELAY_TEST_CONFIG"
 printf '%s\\n' "$XDG_CONFIG_HOME" > "$PLAN_RELAY_TEST_XDG"
+worktree=""
+previous=""
+for argument in "$@"; do
+  if test "$previous" = "--dir"; then worktree="$argument"; fi
+  previous="$argument"
+done
 healthy_stream() {
     printf '%s\\n' \\
-      '{"type":"step_start","part":{}}' \\
-      '{"type":"tool_use","part":{"tool":"edit","state":{"status":"completed","input":{"filePath":"src/x.ts"}}}}' \\
-      '{"type":"step_finish","part":{"reason":"tool-calls"}}' \\
-      '{"type":"step_start","part":{}}' \\
-      '{"type":"text","part":{"text":"Implementation complete."}}' \\
-      '{"type":"step_finish","part":{"reason":"stop"}}'
+      '{"type":"step_start","sessionID":"ses_fixture","timestamp":1700000000000,"part":{}}' \\
+      '{"type":"tool_use","sessionID":"ses_fixture","timestamp":1700000001000,"part":{"tool":"edit","state":{"status":"completed","input":{"filePath":"src/x.ts"},"metadata":{"filediff":{"file":"'"$worktree"'/src/x.ts","additions":12,"deletions":3}}}}}' \\
+      '{"type":"step_finish","sessionID":"ses_fixture","timestamp":1700000002000,"part":{"reason":"tool-calls","cost":0.01,"tokens":{"input":100,"output":20,"reasoning":5,"total":125,"cache":{"read":50,"write":0}}}}' \\
+      '{"type":"step_start","sessionID":"ses_fixture","timestamp":1700000003000,"part":{}}' \\
+      '{"type":"text","sessionID":"ses_fixture","timestamp":1700000004000,"part":{"text":"Implementation complete."}}' \\
+      '{"type":"step_finish","sessionID":"ses_fixture","timestamp":1700000005000,"part":{"reason":"stop","cost":0.02,"tokens":{"input":200,"output":30,"reasoning":10,"total":240,"cache":{"read":80,"write":0}}}}'
+}
+denied_stream() {
+    printf '%s\\n' \\
+      '{"type":"step_start","sessionID":"ses_fixture","timestamp":1700000000000,"part":{}}' \\
+      '{"type":"tool_use","sessionID":"ses_fixture","timestamp":1700000001000,"part":{"tool":"bash","state":{"status":"error","input":{"command":"npm run dev > /tmp/x.log 2>&1 &"},"error":"The user has specified a rule which prevents you from using this specific tool call. PERMISSION TABLE: bash deny ..."}}}' \\
+      '{"type":"tool_use","sessionID":"ses_fixture","timestamp":1700000002000,"part":{"tool":"edit","state":{"status":"completed","input":{"filePath":"src/x.ts"},"metadata":{"filediff":{"file":"'"$worktree"'/src/x.ts","additions":4,"deletions":1}}}}}' \\
+      '{"type":"text","sessionID":"ses_fixture","timestamp":1700000003000,"part":{"text":"Done."}}' \\
+      '{"type":"step_finish","sessionID":"ses_fixture","timestamp":1700000004000,"part":{"reason":"stop","cost":0.05}}'
 }
 activity_without_finish_stream() {
     printf '%s\\n' \\
@@ -127,6 +152,9 @@ case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
       healthy_stream
     fi
     ;;
+  denied)
+    denied_stream
+    ;;
   dead)
     printf '%s\\n' '{"type":"tool_use","part":{"tool":"read","state":{"status":"completed","input":{"filePath":"x"}}}}'
     ;;
@@ -157,6 +185,14 @@ exec grep "$@"
   const fakeTimeout = join(fakeBin, 'timeout');
   writeFileSync(fakeTimeout, `#!/usr/bin/env bash
 printf '%s\\n' "$2" >> "$PLAN_RELAY_TEST_TIMEOUTS"
+# The runner's "no watchdog budget remains" branch needs a turn that overruns
+# the budget and still exits zero, which the real timeout makes impossible: it
+# kills such a turn. Dropping --kill-after and the seconds leaves the executor
+# to run free while the budget arithmetic in the runner is unchanged.
+if test -n "\${PLAN_RELAY_TEST_NO_WATCHDOG:-}"; then
+  shift 2
+  exec "$@"
+fi
 exec ${JSON.stringify(realTimeout)} "$@"
 `);
   chmodSync(fakeTimeout, 0o755);
@@ -188,6 +224,14 @@ function run(fixture, cwd = fixture.linked, extraEnv = {}) {
     env: { ...fixture.env, ...extraEnv },
     encoding: 'utf8',
   });
+}
+
+function summaryOf(fixture) {
+  const runs = readdirSync(join(fixture.linked, '.plan-relay'));
+  expect(runs).toHaveLength(1);
+  return JSON.parse(
+    readFileSync(join(fixture.linked, '.plan-relay', runs[0], 'summary.json'), 'utf8'),
+  );
 }
 
 function stream(...events) {
@@ -427,6 +471,10 @@ describe('Plan Relay runner', () => {
     const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_EXIT: '17' });
     expect(result.status).toBe(17);
     expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
+    const summary = summaryOf(fixture);
+    expect(summary.exit_status).toBe(17);
+    expect(summary.gate).toBe('skipped');
+    expect(summary.turns_launched).toBe(1);
   });
 
   test('continues a no-edit length-truncated session once and gates the combined stream', () => {
@@ -512,6 +560,113 @@ describe('Plan Relay runner', () => {
     const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_STREAM: 'sleep', OPENCODE_TIMEOUT: '1' });
     expect(result.status).toBe(124);
     expect(result.stderr).not.toContain('liveness gate');
+    // The killed run is the one whose record matters most, and the summary must
+    // not have replaced the watchdog's status with its own.
+    const summary = summaryOf(fixture);
+    expect(summary.exit_status).toBe(124);
+    expect(summary.gate).toBe('skipped');
+    expect(summary.watchdog_s).toBe(1);
+  });
+
+  test('writes a summary stamped with the wave, the relay version and the run totals', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_WAVE: 'warehouse-lighting' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('Plan Relay summary: .plan-relay/');
+    const summary = summaryOf(fixture);
+    expect(summary.wave).toBe('warehouse-lighting');
+    expect(summary.gate).toBe('pass');
+    expect(summary.exit_status).toBe(0);
+    expect(summary.turns_launched).toBe(1);
+    expect(summary.recovery).toBe('not-applicable');
+    expect(summary.recovery_session).toBeNull();
+    expect(summary.plan_relay_version).toBe(PLAN_RELAY_VERSION);
+    expect(summary.plan_document_version).toBe('1');
+    expect(summary.branch).toBe('feat/test');
+    expect(summary.baseline).toBe(fixture.baseline);
+    expect(summary.node_modules_shared).toBe(false);
+    expect(summary.turn_boundaries).toBe('runner');
+    expect(summary.sessions).toEqual(['ses_fixture']);
+    expect(summary.totals.cost_usd).toBeCloseTo(0.03, 10);
+    expect(summary.totals.tokens).toEqual({
+      input: 300,
+      output: 50,
+      reasoning: 15,
+      total: 365,
+      cache_read: 130,
+      cache_write: 0,
+    });
+    expect(summary.totals.span_ms).toBe(5000);
+    // The executor reports an absolute path; a log entry needs a repo-relative one.
+    expect(summary.files).toEqual([{ path: 'src/x.ts', edits: 1, additions: 12, deletions: 3 }]);
+    expect(summary.final_text).toBe('Implementation complete.');
+  });
+
+  test('defaults the wave to the run directory, never to something shared-looking', () => {
+    const fixture = createFixture();
+    expect(run(fixture).status).toBe(0);
+    const runs = readdirSync(join(fixture.linked, '.plan-relay'));
+    const summary = summaryOf(fixture);
+    expect(summary.wave).toBe(runs[0]);
+    expect(summary.run).toBe(runs[0]);
+  });
+
+  test('records a failed gate and the recovery it attempted', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_STREAM: 'length' });
+    expect(result.status).toBe(1);
+    const summary = summaryOf(fixture);
+    expect(summary.gate).toBe('fail');
+    expect(summary.recovery).toBe('taken');
+    expect(summary.turns_launched).toBe(2);
+    expect(summary.turns).toHaveLength(2);
+    expect(summary.turns[0].finish_reason).toBe('length');
+  });
+
+  test('records a recovery declined for want of watchdog budget', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, {
+      PLAN_RELAY_TEST_STREAM: 'length_slow_then_healthy',
+      PLAN_RELAY_TEST_NO_WATCHDOG: '1',
+      OPENCODE_TIMEOUT: '1',
+    });
+    expect(result.stderr).toContain('no watchdog budget remains');
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
+    const summary = summaryOf(fixture);
+    expect(summary.recovery).toBe('declined-no-budget');
+    expect(summary.turns_launched).toBe(1);
+  });
+
+  test('warns about a shared install only when a wave is declared', () => {
+    const shared = createFixture();
+    symlinkSync(shared.primary, join(shared.linked, 'node_modules'));
+    const quiet = run(shared);
+    expect(quiet.status, quiet.stderr).toBe(0);
+    expect(quiet.stderr).not.toContain('needs its own install');
+    expect(summaryOf(shared).node_modules_shared).toBe(true);
+
+    const wave = createFixture();
+    symlinkSync(wave.primary, join(wave.linked, 'node_modules'));
+    const loud = run(wave, wave.linked, { PLAN_RELAY_WAVE: 'w1' });
+    expect(loud.status, loud.stderr).toBe(0);
+    expect(loud.stderr).toContain('needs its own install');
+    expect(summaryOf(wave).node_modules_shared).toBe(true);
+  });
+
+  test('rejects a malformed wave id', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_WAVE: 'has spaces' });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('PLAN_RELAY_WAVE');
+  });
+
+  test('does not let a failing summary writer mask the run status', () => {
+    const fixture = createFixture();
+    const stub = join(dirname(fixture.plan), 'summary-stub.mjs');
+    writeFileSync(stub, 'process.exit(3);\n');
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_SUMMARY: stub });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('summary could not be written');
   });
 
   test('rejects a non-numeric OPENCODE_TIMEOUT', () => {
@@ -519,5 +674,189 @@ describe('Plan Relay runner', () => {
     const result = run(fixture, fixture.linked, { OPENCODE_TIMEOUT: 'soon' });
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('OPENCODE_TIMEOUT');
+  });
+});
+
+describe('Plan Relay summary', () => {
+  const DENIAL =
+    'The user has specified a rule which prevents you from using this specific tool call. ' +
+    'PERMISSION TABLE: bash {"*":"deny"} ...';
+  const RICH = stream(
+    { type: 'step_start', sessionID: 'ses_a', timestamp: 1000, part: {} },
+    {
+      type: 'tool_use',
+      sessionID: 'ses_a',
+      timestamp: 1100,
+      part: {
+        tool: 'edit',
+        state: {
+          status: 'completed',
+          metadata: { filediff: { file: '/w/src/a.ts', additions: 10, deletions: 2 } },
+        },
+      },
+    },
+    {
+      type: 'tool_use',
+      sessionID: 'ses_a',
+      timestamp: 1200,
+      part: {
+        tool: 'edit',
+        state: {
+          status: 'completed',
+          metadata: { filediff: { file: '/w/src/a.ts', additions: 5, deletions: 1 } },
+        },
+      },
+    },
+    {
+      type: 'tool_use',
+      sessionID: 'ses_a',
+      timestamp: 1300,
+      part: {
+        tool: 'bash',
+        state: { status: 'error', input: { command: 'npm run dev &' }, error: DENIAL },
+      },
+    },
+    { type: 'tool_use', sessionID: 'ses_a', timestamp: 1400, part: { tool: 'read', state: { status: 'completed' } } },
+    { type: 'text', sessionID: 'ses_a', timestamp: 1500, part: { text: 'All done.' } },
+    {
+      type: 'step_finish',
+      sessionID: 'ses_a',
+      timestamp: 1600,
+      part: {
+        reason: 'stop',
+        cost: 0.25,
+        tokens: { input: 10, output: 2, reasoning: 1, total: 13, cache: { read: 7, write: 3 } },
+      },
+    },
+  );
+
+  test('totals cost, tokens, tools and per-file line counts', () => {
+    const summary = summarizeEvents(RICH, { worktree: '/w' });
+    expect(summary.totals.cost_usd).toBe(0.25);
+    expect(summary.totals.tokens).toEqual({
+      input: 10,
+      output: 2,
+      reasoning: 1,
+      total: 13,
+      cache_read: 7,
+      cache_write: 3,
+    });
+    expect(summary.totals.span_ms).toBe(600);
+    expect(summary.totals.edits).toBe(2);
+    expect(summary.totals.tool_calls).toBe(4);
+    expect(summary.totals.tool_errors).toBe(1);
+    // Two edits to one file merge into one entry rather than two rows.
+    expect(summary.files).toEqual([{ path: 'src/a.ts', edits: 2, additions: 15, deletions: 3 }]);
+    expect(summary.tools).toEqual({
+      edit: { completed: 2 },
+      bash: { error: 1 },
+      read: { completed: 1 },
+    });
+    expect(summary.sessions).toEqual(['ses_a']);
+    expect(summary.final_text).toBe('All done.');
+  });
+
+  test('records a denied call by its command and never by its error blob', () => {
+    const summary = summarizeEvents(RICH, { worktree: '/w' });
+    expect(summary.denied).toEqual([{ turn: 1, tool: 'bash', command: 'npm run dev &' }]);
+    expect(JSON.stringify(summary)).not.toContain('PERMISSION TABLE');
+  });
+
+  test('leaves a path outside the worktree absolute', () => {
+    const summary = summarizeEvents(RICH, { worktree: '/elsewhere' });
+    expect(summary.files.map((file) => file.path)).toEqual(['/w/src/a.ts']);
+  });
+
+  const TWO_TURNS = stream(
+    { type: 'step_finish', sessionID: 'ses_a', timestamp: 1000, part: { reason: 'length', cost: 0.1 } },
+    {
+      type: 'tool_use',
+      sessionID: 'ses_a',
+      timestamp: 2000,
+      part: {
+        tool: 'edit',
+        state: { status: 'completed', metadata: { filediff: { file: 'src/b.ts', additions: 1, deletions: 0 } } },
+      },
+    },
+    { type: 'step_finish', sessionID: 'ses_a', timestamp: 3000, part: { reason: 'stop', cost: 0.2 } },
+  );
+
+  test('splits turns on the boundary the runner supplies', () => {
+    const summary = summarizeEvents(TWO_TURNS, { boundaries: [1] });
+    expect(summary.turn_boundaries).toBe('runner');
+    expect(summary.turns.map((turn) => turn.cost_usd)).toEqual([0.1, 0.2]);
+    expect(summary.turns[0].finish_reason).toBe('length');
+    expect(summary.gap_ms).toEqual([1000]);
+  });
+
+  test('infers the same split from a length marker when re-judging from disk', () => {
+    const supplied = summarizeEvents(TWO_TURNS, { boundaries: [1] });
+    const inferred = summarizeEvents(TWO_TURNS);
+    expect(inferred.turn_boundaries).toBe('inferred');
+    expect(inferred.turns.map((turn) => turn.cost_usd)).toEqual(
+      supplied.turns.map((turn) => turn.cost_usd),
+    );
+  });
+
+  test('reports absent provider numbers as null rather than a confident zero', () => {
+    const summary = summarizeEvents(stream({ type: 'step_finish', part: { reason: 'stop' } }));
+    expect(summary.totals.cost_usd).toBeNull();
+    expect(summary.totals.span_ms).toBeNull();
+    expect(summary.totals.tokens.input).toBeNull();
+    expect(summary.turns[0].model_ms).toBeUndefined();
+  });
+
+  test('counts a half-written final line instead of swallowing it', () => {
+    // What a watchdog kill leaves behind; a record that hid it would read as a
+    // clean short run.
+    const summary = summarizeEvents(`${RICH}\n{"type":"step_fin`);
+    expect(summary.totals.unparsable_lines).toBe(1);
+    expect(summary.totals.event_lines).toBe(7);
+  });
+
+  test('rejects an unknown or malformed option rather than dropping a field', () => {
+    expect(() => parseOptions(['--duration-s=4'])).toThrow(/unknown option/);
+    expect(() => parseOptions(['--gate'])).toThrow(/malformed option/);
+    expect(parseOptions(['--gate=pass', '--duration_s=4', '--node_modules_shared=true'])).toEqual({
+      gate: 'pass',
+      duration_s: 4,
+      node_modules_shared: true,
+    });
+  });
+});
+
+describe('Plan Relay version', () => {
+  test('lists the relay sources, excluding itself and every test', () => {
+    expect(Number.isInteger(PLAN_RELAY_VERSION) && PLAN_RELAY_VERSION > 0).toBe(true);
+    expect(SOURCE_FILES.length).toBeGreaterThan(0);
+    expect([...SOURCE_FILES].sort()).toEqual(SOURCE_FILES);
+    // A file cannot contain a digest of itself; completing this list later
+    // would make the gate unsatisfiable rather than merely stricter.
+    expect(SOURCE_FILES).not.toContain('scripts/planRelayVersion.mjs');
+    expect(SOURCE_FILES.filter((file) => file.includes('.test.'))).toEqual([]);
+    expect(SOURCE_FILES.filter((file) => !existsSync(join(scriptsDir, '..', file)))).toEqual([]);
+  });
+
+  test('digests paths as well as bytes', () => {
+    // Verified against a synthetic reader, because the drift test below imports
+    // the algorithm from the very file it is checking.
+    const bytes = Object.fromEntries(SOURCE_FILES.map((file, i) => [file, Buffer.from(`body-${i}`)]));
+    const base = computeDigest((file) => bytes[file]);
+    const swapped = {
+      ...bytes,
+      [SOURCE_FILES[0]]: bytes[SOURCE_FILES[1]],
+      [SOURCE_FILES[1]]: bytes[SOURCE_FILES[0]],
+    };
+    expect(computeDigest((file) => swapped[file])).not.toBe(base);
+    const appended = {
+      ...bytes,
+      [SOURCE_FILES[0]]: Buffer.concat([bytes[SOURCE_FILES[0]], Buffer.from('x')]),
+    };
+    expect(computeDigest((file) => appended[file])).not.toBe(base);
+  });
+
+  test('the relay sources still match the recorded version', () => {
+    const computed = digestFromDisk();
+    expect(computed, driftMessage(computed)).toBe(SOURCE_DIGEST);
   });
 });

@@ -95,6 +95,10 @@ Report three kinds of thing:
 - Comment and prose *style* — wording, tone, length. A comment that makes a
   false claim about code or a repository artifact is not this; report it as a
   **Stale claim** above.
+- The order or numbering of wave entries in `docs/plan-relay-log.md`. It is an
+  append-only journal, like the review-lesson counter: entries go at the end in
+  date order and are never reordered, however much a newest-first reading would
+  suit you.
 - Anything `npm run lint` or `npm run typecheck` already gates — missing imports,
   `any`, `@ts-ignore`, unused bindings, unchecked index reads. CI runs both on
   this same commit; duplicating them is noise.

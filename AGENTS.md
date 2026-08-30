@@ -55,6 +55,8 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` in
      `ci.yml` remain the only checks that can fail a PR.
 
+Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
+
 ### Plan Relay (planning agent → OpenCode executor)
 
 **Plan Relay** is the optional split-agent implementation path for a task whose
@@ -87,6 +89,13 @@ valid. When Plan Relay is chosen, its ownership boundary is strict:
    diff, rerun the plan's checks independently, and report deviations before
    the normal commit / draft-PR stages continue. Git publication remains the
    user's decision.
+5. **The planner logs** — append a wave entry to
+   [`docs/plan-relay-log.md`](docs/plan-relay-log.md), taking the numbers from
+   each run's `summary.json` and adding the verdict a machine cannot write.
+   Both versions belong in the entry, and they are different numbers: the
+   tooling version in `scripts/planRelayVersion.mjs`, pinned by a source digest
+   that fails `npm test` when the relay changes without a bump, and the plan
+   document's own `plan_relay_version`, which versions the handoff schema below.
 
 The handoff plan is a public interface between the two agents. It must be a
 non-empty Markdown file with exactly one version and baseline in YAML
@@ -110,13 +119,51 @@ baseline_commit: <40-character Git commit>
 `baseline_commit` is the clean worktree commit the plan was written against.
 The runner refuses a primary worktree, `main`, dirty state, malformed plan, or
 baseline mismatch. It copies the approved input and OpenCode JSONL events to an
-ignored `.plan-relay/<baseline>.<random>/` directory, whose path it prints.
-Those records are local evidence, not project documentation. OpenCode must
-treat both this file and the copied plan as binding; if repository truth
-contradicts the plan, it stops and reports the conflict instead of redesigning
-the task.
+ignored `.plan-relay/<baseline>.<random>/` directory, whose path it prints, and
+writes a `summary.json` beside them — cost, tokens, per-turn timing, files
+touched, denied tool calls, gate verdict — for **every** run, including the ones
+the watchdog killed, because those are the runs whose cost you cannot otherwise
+account for. That directory stays local evidence and is routinely pruned; the
+committed record is the planner's short wave entry in
+[`docs/plan-relay-log.md`](docs/plan-relay-log.md), which cites the run and adds
+what deviated, what the planner fixed afterwards, and whether the relay was
+worth using. OpenCode must treat both this file and the copied plan as binding;
+if repository truth contradicts the plan, it stops and reports the conflict
+instead of redesigning the task.
 
-Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
+### Plan Relay fan-out (one planner, several executors)
+
+**A wave is one planner fanning one baseline out to N executors, each in its own
+worktree.** The relay enforces none of this — it sees one plan and one worktree,
+and that isolation is the point — so the protocol is the planner's to keep, and
+every rule below exists because nothing will catch you breaking it:
+
+- **Disjoint ownership per plan.** Two plans in one wave may not edit the same
+  file, and may not both change one interface. Name the owned files in each
+  plan's `## Interfaces` section and treat an overlap as a planning blocker, not
+  a merge problem — two executors editing `core/state.ts` produce two clean,
+  individually-passing worktrees that conflict on merge, and by then both
+  transcripts are cold.
+- **One baseline per wave.** Every plan carries the same `baseline_commit`, so
+  the diffs compose and a failure is attributable to a plan rather than to drift
+  between them.
+- **Its own install.** A worktree in a wave needs a real `node_modules`, not a
+  `node_modules -> ../acsc-main/node_modules` symlink — that link is how
+  parallel worktrees usually share one install (see `.gitignore`), and it makes
+  concurrent `npm test` and `npm run build` runs share one `node_modules/.vite`
+  cache. Run `npm install` in the worktree first. With `PLAN_RELAY_WAVE` set the
+  runner warns when it sees the symlink; it does not refuse.
+- **A distinct dev-server port each**, via `CS_SMOKE_BASE`, for any plan whose
+  Test Plan runs the smoke test.
+- **Verify each worktree independently, before merging any.** A wave that passes
+  as a set but was never checked apart hides which plan broke what.
+
+Export `PLAN_RELAY_WAVE=<slug>` when launching each executor. The runner stamps
+it into every `summary.json`, and that stamp is the only thing tying the runs
+together: there is no cross-worktree lock, no shared state and no wave registry,
+and adding one would trade the relay's independent worktrees for exactly the
+shared mutable state this repository bans elsewhere. Unset, a run's wave id
+defaults to its own run directory, so a solo run never claims a fan-out.
 
 ## Commands
 
@@ -126,7 +173,7 @@ npm run build                  # production build -> dist/
 npm run lint                   # ESLint (flat config); no-undef for .js, type-aware rules for .ts,
                                # browser globals/imports banned in src/**/*.test.ts
 npm run typecheck              # tsc --noEmit; strict + noUncheckedIndexedAccess
-npm test                       # Vitest: unit tests + the doc gate (no browser, ~200 ms)
+npm test                       # Vitest: unit tests + the doc gates (no browser, ~200 ms)
 node scripts/smoke-test.mjs    # headless E2E check (requires dev server running)
 ```
 
@@ -136,7 +183,7 @@ Four static/sim layers, deliberately split:
 
 - **`npm run typecheck`** — the compiler as a gate: `strict`, and `noUncheckedIndexedAccess`, which makes every `WEAPONS[wpn.slot]`-style read prove what happens on a miss. This is now the primary missing-import catcher for `.ts` code (TS2304), which neither `npm run build` nor `npm test` can see.
 
-- **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit. When a browser-side module holds pure logic the suite cannot reach, split out a seam rather than mocking — `sim/recoil.ts:convertOnSwap()` is the worked example, and lesson 19 is what it cost to learn twice. The suite also carries one repo-hygiene check that is not simulation logic: `scripts/lessonNumbering.test.mjs`, which reads `docs/*-plan.md` off disk and fails if a review-lesson number moves out from under the comments citing it (see Roadmap).
+- **`npm test`** — pure simulation logic: state, accuracy, recoil, ballistics, damage, movement, world registration. Runs in plain Node, no browser, no dev server. Fast enough to run on every edit. When a browser-side module holds pure logic the suite cannot reach, split out a seam rather than mocking — `sim/recoil.ts:convertOnSwap()` is the worked example, and lesson 19 is what it cost to learn twice. The suite also carries two repo-hygiene checks that are not simulation logic: `scripts/lessonNumbering.test.mjs`, which reads `docs/*-plan.md` off disk and fails if a review-lesson number moves out from under the comments citing it (see Roadmap); and `scripts/planRelayLog.test.mjs`, which reads `docs/plan-relay-log.md` and fails if its version history does not reach `PLAN_RELAY_VERSION` — that is what turns a Plan Relay source change into a written explanation, since `planRelay.test.mjs` already fails the bump itself.
 - **`scripts/smoke-test.mjs`** — integration: real rendering, real input events, every map. This is the layer that catches wiring breakage. Drives the user's Brave browser via puppeteer-core; its executable path is machine-specific (Flatpak path) and may need adjusting on other machines. Point it at a non-default port with `CS_SMOKE_BASE=http://localhost:5177 node scripts/smoke-test.mjs`. Note Vitest resolves through its own bundled Vite (8.x), not the workspace Vite 5 — a resolution edge must work under both.
 
 A fifth layer reads rather than runs: the CI reviewer in

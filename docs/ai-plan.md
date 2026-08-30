@@ -37,7 +37,7 @@ height, navigation and senses work recorded below):
   `bots.ts` holds none.
 - **LOS is a thunk** (`BrainView.seeTarget`): the raycast is paid at most
   once per cooldown window, pinned by test.
-  *(In-flight 6a annotation: this was the pre-6a shot-gate design.
+  *(Annotation, PR #69: this was the pre-6a shot-gate design.
   `BrainView.seeTarget` is retired; every living bot now runs
   `acquireVisual()` before `decide()`, with cheap rejections spending no ray
   and an eligible look spending at most one ray per frame. The brain receives
@@ -49,7 +49,7 @@ height, navigation and senses work recorded below):
   OR CT); CTs target Ts. The player counts as CT-side. The player entry
   stays listed even while dead so `ctbots=0` behavior is bit-identical to
   pre-team days (chase continues, shooting gated by `targetAlive`).
-  *(In-flight 6a annotation: the team candidate sets survive, but nearest-
+  *(Annotation, PR #69: the team candidate sets survive, but nearest-
   position targeting and `targetAlive` do not. Perception probes the tracked
   identity first, otherwise fairly rotates through cheaply eligible opposing
   candidates. A dead player remains listed only as a cheap rejection; without
@@ -360,8 +360,8 @@ target beyond engage range — while the hue stays the mode's.
   production preview for smoke diagnostics; the cost is paid only while that
   flag is up. Revisit only if profiling ever shows it.
 
-*(In-flight 6a annotation: the record above describes the pre-6a diagnostic
-architecture and is no longer the live contract. Tranche 6a makes visual
+*(Annotation, PR #69: the record above describes the pre-6a diagnostic
+architecture and is no longer the live contract. Tranche 6a made visual
 acquisition gameplay: every living `Bot.update()` calls `acquireVisual()`
 regardless of `session.debugView`; cheap rejection may spend zero rays, and an
 eligible look spends at most one. `targetInRange`/`targetLOS` are derived every
@@ -370,8 +370,7 @@ overlay and HUD only consume them. Consequently live data cannot produce
 `r-`: `rs` is an agreeing current visual inside engage range, `-s` is one
 beyond it, and `--` covers blocked or unprobed looks plus hold, memory and
 search. `[debugView]` now asserts that its toggles leave the gameplay-
-perception census unchanged; the pre-6a probe-count assertions are retired.
-No merge claim is made here.)*
+perception census unchanged; the pre-6a probe-count assertions are retired.)*
 
 ### Flat routing (issue #44; PR #52)
 
@@ -472,7 +471,7 @@ but ignored and the bot commits. That was the point of bundling: neither half
 gets credit alone, since #43's per-frame flips would have cancelled any
 commitment #45 tried to make.
 
-*(In-flight 6a annotation: tranche 6a retires the `[cornerTrap]` smoke
+*(Annotation, PR #69: tranche 6a retired the `[cornerTrap]` smoke
 fixture. Its setup deliberately hands a bot an occluded opponent it has
 never seen and forces the pre-6a `sightBlocked`/juke machinery against it —
 under 6a's non-omniscient policy that target is intentionally unknowable
@@ -482,28 +481,18 @@ claim it carried is replaced by `[vision]`, and cross-wall navigation
 survives in `[flatRoute]` through observed, frozen memory. #43's contact-edge
 commitment remains pinned at the pure/unit layer; #45's `sightBlocked` branch
 is retired because blocked sight now yields no current visual for band
-steering to act on. No merge or PR number is claimed here.)*
+steering to act on.)*
 
-## Planned
+### Tranche 6a — vision, awareness and search (PR #69; follow-up PR #72)
 
-### Tranche 6 — senses
+Omniscience out, observations in. The specification as approved is kept below
+in full, followed by what was actually built and by the approved follow-up that
+shipped on top of it. Annotations elsewhere in this document naming PR #69 or
+#72 mark the earlier claims this tranche superseded — the pre-6a shot gate, the
+nearest-position targeting it replaced, #46's diagnostic probe and the
+`[cornerTrap]` fixture.
 
-The current executor chooses the best live opponent from exact world positions
-every frame. LOS gates the SHOT, but not the KNOWLEDGE: a bot tracks somebody
-through a building, faces them continuously and feeds their live position to
-the route graph before it has ever seen or heard them. Tranche 6 replaces that
-omniscience with observations, memory and bounded investigation without moving
-raycasts, collision or effects into the brain.
-
-Land this in two implementation PRs. **6a establishes sight, memory and search
-first; 6b feeds sound into that settled stimulus seam.** Combining them would
-make a failed pursuit ambiguous between vision, memory, hearing and routing at
-the exact point the tranche is trying to make those causes observable.
-
-**Status: 6a is implementation-in-flight in this PR (not merged); 6b remains
-planned and unstarted.**
-
-#### 6a — vision, awareness and search
+#### What 6a specified
 
 **Division of ownership.** Perception mechanics stay with the executor;
 perception POLICY belongs to the brain.
@@ -526,6 +515,10 @@ perception POLICY belongs to the brain.
 and **60 m visual range**. Vertical elevation does not narrow the cone; the
 planar yaw test decides whether to look, while the 3D range and world LOS decide
 whether the look succeeds.
+*(Annotation, PR #72: the range became **80 m** —
+`sim/perception.ts:PERCEPTION_RANGE_M`, and the boundary pins follow the
+constant. The FOV, the cheap-rejection order and the 45 m engage gate are
+unchanged. See the follow-up record below.)*
 
 - Each living bot may spend at most **one perception LOS raycast per frame**.
   If it has an identified opponent, try that opponent first; otherwise rotate
@@ -633,9 +626,9 @@ not tracked or shot; crossing into FOV + LOS acquires; breaking LOS routes to
 the frozen point; arrival scans then holds; and damaging a bot turns it toward
 the incoming bearing without granting immediate retaliation.
 
-#### 6a implementation record (in flight — not merged, no PR number)
+#### Implementation record (PR #69)
 
-What the in-flight implementation built against the spec above:
+What the implementation built against the spec above:
 
 - **Engine-free perception seam** — `sim/perception.ts`: stable perception
   identities (`'player'` / bot id), 120° horizontal FOV and 60 m range as
@@ -689,10 +682,10 @@ What the in-flight implementation built against the spec above:
   grading, endpoint) must be unchanged across the V toggles, replacing the
   pre-6a probe-count assertions.
 
-#### 6a follow-up — idle patrol and mobile damage search (in flight)
+#### Follow-up — idle patrol and mobile damage search (PR #72)
 
-The approved part 6a follow-up, landed on top of the record above. What it
-added, and what it deliberately did not:
+The approved 6a follow-up, landed on top of the record above. What it added,
+and what it deliberately did not:
 
 - **Perception range 60 m → 80 m** — `sim/perception.ts:PERCEPTION_RANGE_M`,
   the FOV/occlusion machinery untouched. The 45 m engagement gate is
@@ -717,6 +710,10 @@ added, and what it deliberately did not:
   along the next waypoint at eye height. Any visual acquisition or incoming
   damage interrupts immediately and clears the goal/path; respawn clears all
   of it.
+  *(Annotation, `4a154f5`, merged with PR #49: a patrol leg no longer re-runs
+  A\* on `ROUTE_INTERVAL`. That interval now refreshes only a MOVING pursuit
+  goal; a patrol node is immutable, so its valid path is followed to arrival or
+  abandonment. A recompute still fires when the path is empty or has drifted.)*
 - **Incoming fire advances before scanning** — a damage search keeps its
   direction-only semantics and its 8 s lifetime, but now ADVANCES at normal
   travel speed along the newest bearing for its first
@@ -742,6 +739,29 @@ added, and what it deliberately did not:
   the Elevation stair/ceiling stall diagnosis. The controlled `[botClimb]`
   scenario must continue to pass.
 
+## Planned
+
+### Tranche 6 — senses
+
+The pre-tranche executor chose the best live opponent from exact world
+positions every frame. LOS gated the SHOT, but not the KNOWLEDGE: a bot tracked
+somebody through a building, faced them continuously and fed their live
+position to the route graph before it had ever seen or heard them. Tranche 6
+replaces that omniscience with observations, memory and bounded investigation
+without moving raycasts, collision or effects into the brain. 6a did the
+replacing (PR #69, above); 6b adds the remaining sense.
+
+Land this in two implementation PRs. **6a establishes sight, memory and search
+first; 6b feeds sound into that settled stimulus seam.** Combining them would
+make a failed pursuit ambiguous between vision, memory, hearing and routing at
+the exact point the tranche is trying to make those causes observable.
+
+**Status: 6a merged as PR #69 on 2026-08-29, its approved follow-up as PR #72
+the same day, and one later fix (`4a154f5`) rode in on PR #49 — the record is
+under Merged above. 6b is planned and unstarted; what follows is its
+specification, refreshed against the code as it stands after PRs #49, #63 and
+the loadout tranche.**
+
 #### 6b — hearing and sound events
 
 Add an engine-free `sim/soundEvents.ts` with a fixed-capacity **256-entry ring
@@ -751,6 +771,12 @@ the repository's one home for shared mutable game state.
 
 Each immutable event carries a monotonic sequence, game-time timestamp, kind
 (`gunshot | footstep`), source identity/team, copied world position and radius.
+The identity is `sim/perception.ts:PerceptionId` — the same `'player'`/bot-id
+union 6a already tracks, not a second identity scheme — and `Team` arrives as a
+**type-only** import from `core/state.ts`, erased at build, so the one runtime
+edge between the two modules stays `core/state.ts` → `sim/`. `sim/melee.ts`
+imports `HitZone` the same way.
+
 The buffer exposes its latest sequence and non-destructive reads after a
 caller's cursor, optionally capped at a captured high-water sequence. If a
 cursor predates retained data after wraparound, reading resumes at the oldest
@@ -760,16 +786,30 @@ be able to hear the same occurrence.
 **Emitters and tuning.** Emission is gameplay data beside the existing audible
 WebAudio effect, not a replacement for `audio.ts`.
 
-- `weapons.ts`: every accepted PLAYER firearm trigger pull emits one **80 m**
-  gunshot from the shot origin. A shotgun's pellets are one event; dry fire and
-  melee emit none.
-- `bots.ts:shoot`: every bot trigger emits one **80 m** gunshot before the hit
-  die, so misses remain audible.
+- `weapons.ts:shoot`: every accepted PLAYER firearm trigger pull emits one
+  **80 m** gunshot from the shot origin, placed immediately after `weapon.mag--`
+  and BEFORE the pellet loop. That position does the gating for free: dry fire,
+  a blocked whole-mag reload and the knife's `swingMelee` have all returned
+  already, and a shotgun's eight pellets share the one trigger pull's event.
+- `bots.ts:shoot`: every bot trigger emits one **80 m** gunshot beside
+  `sfxEnemyShoot` and before `brain.rollHit`, so misses remain audible.
 - `player.ts`: at the existing grounded footstep cadence, emit **24 m** while
   running and **12 m** while walking or aim-walking. Gate the AI event on
   post-collision XZ displacement, not merely held movement keys, so pressing
-  into a wall does not reveal the player. Crouched and airborne movement is
-  silent.
+  into a wall does not reveal the player — `updateMovement` already measures
+  exactly that (`player.pos.x - preX` / `player.pos.z - preZ`, the input to
+  `measuredMoveLerp`), so the gate reads a value that exists rather than adding
+  a second notion of "moving". Leave the audible `sfxFootstep` and its
+  key-based flag alone. Crouched and airborne movement is silent, which also
+  covers `warehouse2`'s lift launches and every jump without a special case.
+
+**One radius for every firearm.** The loadout tranche landed six weapons
+(`smg | sniper | shotgun | pistol | revolver | knife`) between this spec and its
+implementation, and 80 m still applies to all five firearms — the same number as
+`PERCEPTION_RANGE_M`, so a shot a bot could have seen is a shot it can hear.
+Per-weapon loudness (a `WeaponDef.soundRadius`, sniper louder than pistol) is
+DEFERRED: it needs a `validateWeapons` rule and a default for bot fire, and it
+is a tuning question that wants a playtest of the uniform version first.
 
 Hearing is radius-only. Walls neither silence nor attenuate an event; adding
 sound occlusion would spend another geometry-probe budget and is not part of
@@ -787,7 +827,12 @@ bot's cursor resets to the latest sequence on respawn so it cannot replay six
 seconds of combat that occurred while it was absent.
 
 Heard positions enter the same route → arrival scan → forget → hold pipeline
-6a established. Visible combat ignores ordinary sound; direct damage remains a
+6a established, at the priority slot 6a left open for them —
+`sim/botBrains.ts`'s "Priority 4 — reserved for a future sound stimulus", which
+sits below memory and above patrol. A heard position carries NO focus id, so
+the executor's three-way shot agreement (intent focus, this frame's
+observation, range gate) already makes firing on sound impossible; no new gate
+is needed. Visible combat ignores ordinary sound; direct damage remains a
 separate bearing stimulus and overrides it all. The ring does not carry a
 special "shot-at" event — an actual damage call is the authoritative evidence.
 
@@ -808,11 +853,16 @@ already heard event.
   would reintroduce the wall pacing that navigation already measured and fixed.
 - **#43 (committed contact steering)** stops per-frame contact flips and still
   applies whenever a current visual drives band steering. #45's blocked-sight
-  juke suppression is intentionally retired by 6a: blocked sight supplies no
+  juke suppression was intentionally retired by 6a: blocked sight supplies no
   current target, while remembered and search travel use their own committed
   routing/slide machinery.
+- **6a itself (#69, #72)** is now the largest of them. It owns the stimulus
+  seam 6b plugs into — the copied-memory pursuit, the three-heading scan, the
+  `forgetTime` expiry and, above all, the shot agreement that makes a
+  focus-less stimulus structurally unable to fire. 6b adds a fourth stimulus
+  to that ladder and no new machinery for acting on one.
 
-6a therefore lands before 6b, and each receives its own feature PR, unit pins,
+6a therefore landed before 6b, and each receives its own feature PR, unit pins,
 smoke phase and playtest record. The document PR that records this plan changes
 no gameplay behavior.
 

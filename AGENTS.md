@@ -177,9 +177,12 @@ green, and every review finding either fixed or answered in writing. The planner
 is whichever agent the user is working in, as in Plan Relay above.
 
 Choosing Review Loop for a PR **is** the explicit instruction step 5 of the
-workflow above requires. For that one named PR it grants the planner three
-things and no others: pushing the branch, opening its draft PR, and toggling its
-`WIP: ` prefix. `tea pr merge` stays banned, the user still merges by hand in
+workflow above requires. For that one named PR it grants the planner four
+things and no others: pushing the branch, opening its draft PR, toggling its
+`WIP: ` prefix, and answering findings in the PR thread — the fourth because the
+loop's own stopping rule below tells it to answer some findings in writing, and
+a grant that omitted that would stall the cycle it exists to allow.
+`tea pr merge` stays banned, the user still merges by hand in
 the Gitea UI, and the grant does not carry to the next PR.
 
 1. **The planner and the user agree the PR** — its scope, the commits it should
@@ -243,7 +246,10 @@ and a planner waiting on it cannot tell the difference from the outside:
   leaves the `post` job's condition unsatisfied. No comment appears and none
   ever will. A watcher that greps only for the comment therefore hangs forever;
   watch the workflow run's terminal status alongside it, and give the wait a
-  deadline past the reviewer jobs' own `timeout-minutes: 25`.
+  deadline past the sum of the jobs it waits on. Those run in sequence and cap
+  at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
+  `timeout-minutes: 25` can fire during a healthy run and report a live review
+  as a dead one.
 - **Re-triggering costs no commit.** `edited` is in the workflow's trigger list,
   so re-adding `WIP: ` and stripping it again re-runs the reviewer against the
   same head commit. That is safe to do without checking first: `already-reviewed`
@@ -255,12 +261,20 @@ and a planner waiting on it cannot tell the difference from the outside:
   subscription of the user's — ask first, and never rotate routes unattended.
 - **Two failed rounds is a stop, not a third try.** Report which routes failed
   and hand the decision back; the third attempt is the user's to authorize.
-- **A cancelled run means someone pushed.** `cancel-in-progress` fired and
-  nothing is wrong. Re-arm from step 5 rather than investigating.
-- **Editing the PR body will not re-review.** `edited` fires on description
-  changes too, and the marker dedupe is exactly what stops that posting a second
-  review of identical code. The corollary is that editing the body cannot
-  unstick a stuck review either — only a new commit or a `WIP: ` toggle will.
+- **A cancelled run means a newer event landed, not necessarily a push.** The
+  concurrency group is keyed by PR number and does not care which event opened
+  the run, so an `edited` — a title toggle, or a description fix — cancels an
+  in-flight review exactly as a push does. Find out which happened before
+  re-arming from step 5; only the push case also changed what is being
+  reviewed.
+- **A body edit is inert only once a review has posted.** Then the marker
+  dedupe stops it posting a second review of identical code, which is what it is
+  for, and it equally cannot unstick a stuck review — only a new commit or a
+  `WIP: ` toggle will. **Before** a review has posted the dedupe returns false,
+  so the same edit cancels the in-flight run and starts the reviewer over on an
+  unchanged head. That is the concrete reason step 6 says to leave the PR alone
+  while the watcher runs: mid-flight, a typo fix in the description costs a
+  whole review.
 
 ## Commands
 

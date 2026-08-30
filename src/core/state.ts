@@ -12,6 +12,7 @@
 // than reaching across modules.
 import * as THREE from 'three';
 import { GameClock } from '../sim/gameClock';
+import { SoundRing } from '../sim/soundEvents';
 import type { BrainMode } from '../sim/botBrains';
 
 // ---------- Domain vocabulary ----------
@@ -218,6 +219,15 @@ export const bots: Bot[] = [];
 export const impacts: Impact[] = [];
 /** Persistent wall decals (see effects.ts); FIFO-capped, oldest recycled. */
 export const bulletHoles: THREE.Mesh[] = [];
+/**
+ * What has been audible lately, for BOTS to read — the gameplay half of a
+ * sound, beside audio.ts's WebAudio half for the player's ears. Emitters are
+ * weapons.ts (player trigger), bots.ts (bot trigger) and player.ts
+ * (footsteps); bots.ts is the only consumer, each bot holding its own cursor.
+ * Lives here rather than in sim/soundEvents.ts because a module-level instance
+ * there would be a second home for shared mutable state.
+ */
+export const soundEvents = new SoundRing();
 
 // ---------- Game time ----------
 /**

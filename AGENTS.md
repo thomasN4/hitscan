@@ -10,16 +10,23 @@ The canonical remote is a self-hosted Gitea instance on the LAN:
 `http://192.168.2.161:3000/thomasN4/another-cs-clone` (`origin`). GitHub is no
 longer the source of truth — `gh` is the wrong tool here; use `tea`.
 
-**Every `tea` command here needs `--repo thomasN4/another-cs-clone`**, and every
-command that acts on a PR needs that PR's index as a positional argument. Neither
-is inferred: `origin`'s SSH port (2222) does not match the login's `ssh_host`
-(`192.168.2.161:3000`), so repository auto-detection fails even from inside a
-worktree, with `remote repository required: specify id via --repo`. Omitting the
-index fails separately — `must specify at least one pull request index` for
-`tea pr edit`, `please specify issue / pr index` for `tea comments add`. Both are
-loud, but both are also *silent about the workflow*: an arming command that
-errors changes no title, fires no `edited` event, and leaves step 6 waiting on a
-run that was never created.
+**Every repository-scoped `tea` command here needs
+`--repo thomasN4/another-cs-clone`** — `tea pr`, `tea comments`, `tea issues`,
+`tea actions`. Auto-detection cannot supply it: `origin`'s SSH port (2222) does
+not match the login's `ssh_host` (`192.168.2.161:3000`), so it fails even from
+inside a worktree, with `remote repository required: specify id via --repo`. The
+flag is scoped to those commands and not global — `tea logins add` rejects it
+outright with `flag provided but not defined: -repo`.
+
+**Commands acting on an existing issue or PR additionally need its index**, as a
+positional argument: `tea pr edit <index>`, `tea comments add <index>`. Omitting
+it fails separately, with `must specify at least one pull request index` and
+`please specify issue / pr index` respectively. `tea pr create` takes no index —
+it is what mints one.
+
+Both failures are loud on the terminal and *silent about the workflow*, which is
+the part that catches you: an arming command that errors changes no title, fires
+no `edited` event, and leaves step 6 waiting on a run that was never created.
 
 There are **two** configured `tea` logins, and which one a command runs under is
 a deliberate choice, not a default:

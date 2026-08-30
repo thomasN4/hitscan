@@ -237,11 +237,15 @@ the Gitea UI, and the grant does not carry to the next PR.
    gates nothing by construction. What does block a merge is `ci.yml`, the
    `WIP: ` prefix, and a conflict with `main`, which the other two cannot see: a
    PR whose base moved under it stays green with every finding resolved and
-   still will not merge. Check the third before reporting ready:
+   still will not merge. Ask Git for that one rather than the PR — Gitea reports
+   `mergeable: false` for a `WIP: `-prefixed PR as well, so mid-loop it cannot
+   tell you which of the two it is answering:
 
    ```sh
-   tea pr list --repo thomasN4/another-cs-clone --fields index,title,mergeable
+   git fetch origin main && git merge-tree --write-tree origin/main HEAD
    ```
+
+   Exit 1 is a conflict, 0 is clean, and neither depends on the title.
 
 Every rule below exists because this machinery fails quietly rather than loudly,
 and a planner waiting on it cannot tell the difference from the outside:

@@ -171,7 +171,10 @@ defaults to its own run directory, so a solo run never claims a fan-out.
 ### Review Loop (planner drives one PR to ready)
 
 **Review Loop** is the named workflow for driving one PR from an approved plan
-to merge-ready without a human turn in each cycle. Its subject is exactly one
+to merge-ready, taking the arming, waiting, reading and disposition of the
+reviewer off the user. It does not remove the user from planning: under Plan
+Relay every remediation plan still needs approval, so those rounds keep a user
+turn by design. Its subject is exactly one
 PR, and its terminal state is that PR with the `WIP: ` prefix off, `ci.yml`
 green, and every review finding either fixed or answered in writing. The planner
 is whichever agent the user is working in, as in Plan Relay above.
@@ -188,8 +191,9 @@ the Gitea UI, and the grant does not carry to the next PR.
 1. **The planner and the user agree the PR** — its scope, the commits it should
    arrive in, and whether implementation runs under Plan Relay.
 2. **The planner plans** — one approved plan per commit-sized unit of work.
-   Under Plan Relay that is the handoff document above; otherwise it is the
-   ordinary step-1 agreement. An unresolved choice is a planning blocker here
+   Under Plan Relay that is the handoff document above, and its step 2 is
+   unchanged: the user approves each one, including the ones a review sends the
+   loop back for. Otherwise it is the ordinary step-1 agreement. An unresolved choice is a planning blocker here
    too.
 3. **The executors implement** — `scripts/plan-relay.sh <plan.md>` per plan, one
    worktree each, under the fan-out protocol above; or the planner implements
@@ -199,7 +203,8 @@ the Gitea UI, and the grant does not carry to the next PR.
    `tea pr create --draft` if it is not already open. **Push every commit of the
    round before step 5.** `review.yml`'s concurrency group is keyed by PR number
    with `cancel-in-progress`, so a push landing during an in-flight review kills
-   that review, and the only sign is a run that never posts.
+   that review. Nothing is posted, but the run itself records the cancellation
+   as its terminal status, which is the state step 6's watcher reads.
 5. **The planner arms the reviewer** — read `ENABLE_AI_REVIEW`, then strip the
    prefix. It is a repo Actions variable, not anything in the tree, and the
    Gitea SDK cannot list them, so read it by name — and pass `--repo`, because
@@ -226,8 +231,14 @@ the Gitea UI, and the grant does not carry to the next PR.
    `WIP: ` prefix first and returns to step 2. Stopping means reporting to the
    user: `ci.yml`'s result, and every finding marked fixed or declined with its
    reason. Report it that way rather than as "nothing is blocking" — the review
-   gates nothing by construction, and `ci.yml` plus the `WIP: ` prefix are the
-   only two things that can block a merge.
+   gates nothing by construction. What does block a merge is `ci.yml`, the
+   `WIP: ` prefix, and a conflict with `main`, which the other two cannot see: a
+   PR whose base moved under it stays green with every finding resolved and
+   still will not merge. Check the third before reporting ready:
+
+   ```sh
+   tea pr list --repo thomasN4/another-cs-clone --fields index,title,mergeable
+   ```
 
 Every rule below exists because this machinery fails quietly rather than loudly,
 and a planner waiting on it cannot tell the difference from the outside:
@@ -248,8 +259,11 @@ and a planner waiting on it cannot tell the difference from the outside:
   watch the workflow run's terminal status alongside it, and give the wait a
   deadline past the sum of the jobs it waits on. Those run in sequence and cap
   at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
-  `timeout-minutes: 25` can fire during a healthy run and report a live review
-  as a dead one.
+  `timeout-minutes: 25` can fire during a healthy run. `timeout-minutes` bounds
+  execution and not the wait for a free runner, and the Codex route queues for
+  the dedicated `ai-review` one, so no deadline is safe as a verdict. Treat its
+  expiry as the cue to go read the run's status, never as proof the reviewer
+  died.
 - **Re-triggering costs no commit.** `edited` is in the workflow's trigger list,
   so re-adding `WIP: ` and stripping it again re-runs the reviewer against the
   same head commit. That is safe to do without checking first: `already-reviewed`

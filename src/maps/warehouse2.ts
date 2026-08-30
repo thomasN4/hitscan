@@ -45,7 +45,7 @@
 import * as THREE from 'three';
 import { scene } from '../core/engine';
 import {
-  addSolidBox, addStairs, addOpenStairs, addLiftPad, registerSolid, registerGroupParts,
+  addSolidBox, addOpenStairs, addLiftPad, registerSolid, registerGroupParts,
   colliders, coplanarTopOverlaps,
 } from '../world';
 import { STEP_HEIGHT, HEAD_HEIGHT } from '../collision';
@@ -337,20 +337,23 @@ function railRun(
 }
 
 // ---------- D. Flights ----------
-// Two open flights in the void, mirrored by a 180-degree turn about the origin
-// rather than across an axis, so neither team's approach is the other's
-// reversed. Both climb from the floor to the ring's inner edge.
+// Three open flights, all built with world.ts:addOpenStairs: two mirrored in
+// the void by a 180-degree turn about the origin rather than across an axis,
+// so neither team's approach is the other's reversed, and the yard flight
+// against the +x wall. All climb from their ground to the ring.
 //
-// 17 x 0.75 = 12.75 m of run puts the far edge of the last tread exactly on
-// the ring's inner edge: 9.25 + 12.75 = 22 = VOID_X. That flush join is what
-// lets addOpenStairs' NavLink top land ON the deck rather than a half-tread
-// short of it (the notch maps/elevation.ts documents).
+// The void flights climb 17 x 0.75 = 12.75 m of run, putting the far edge of
+// the last tread exactly on the ring's inner edge: 9.25 + 12.75 = 22 = VOID_X.
+// That flush join is what lets addOpenStairs' NavLink top land ON the deck
+// rather than a half-tread short of it (the notch maps/elevation.ts
+// documents).
 //
-// The yard flight is the odd one out and deliberately so: it is the only way
-// up that never touches the interior, so a player can reach the ring without
-// entering the building at all, and it arrives through the +x wall's catwalk
-// port at z [-3, 3]. Solid, not open — it is against a wall in the yard, where
-// nothing is served by walking under it.
+// The yard flight is the only way up that never touches the interior, so a
+// player can reach the ring without entering the building at all, and it
+// arrives through the +x wall's catwalk port at z [-3, 3]. It is open like
+// the others — thin treads, and the yard side of the wall gains a walk-under
+// gap for free — and its treads hang from the same TREAD_T plate, so there is
+// one stair idiom on the map, not two.
 
 /** Centre z of the two void flights. The east one mirrors to -this. */
 const FLIGHT_Z = 8;
@@ -364,7 +367,7 @@ function buildFlights(): void {
   addOpenStairs( FLIGHT_MOUTH_X, 0,  FLIGHT_Z, FLIGHT_W, STEP_H, STEP_D, RISERS, TREAD_T, matStair, 'x+');
 
   // Yard flight: mouth at z = 15.75, topping out at z = 3 on its landing.
-  addStairs(YARD_FLIGHT_X, 0, 3 + RISERS * STEP_D, FLIGHT_W, STEP_H, STEP_D, RISERS, matStair, 'z-');
+  addOpenStairs(YARD_FLIGHT_X, 0, 3 + RISERS * STEP_D, FLIGHT_W, STEP_H, STEP_D, RISERS, TREAD_T, matStair, 'z-');
   // Landing, flush with the last tread at z = 3 and stopping at the wall's
   // OUTER face, so the port at z [-3, 3] is a step-free walk onto the deck:
   // landing, then a metre of wall top at the same height, then decking. Run
@@ -516,8 +519,9 @@ function fenceSide(
 
 // ---------- H. Roof ----------
 // The first roof in this codebase, and the reason core/state.ts:Ambience grew
-// light intensities: it blocks the directional sun over the whole interior, so
-// indoors is lit by the hemisphere alone.
+// light intensities: the opaque slabs shadow most of the interior, so indoors
+// leans on the hemisphere — while the two glazed strips admit the directional
+// sun in bands, which is what keeps the inside from rendering flat.
 //
 // Built as three slabs with two glazed strips between them rather than one
 // slab with glass laid over it, so nothing z-fights. The strips run the full

@@ -41,9 +41,10 @@ const STAIRS = {
   // warehouse2: the YARD flight, mouth at z = 15.75 on x = 32.5, ascending z-.
   // Deliberately the outdoor one, for the same reason as elevation's: it is
   // the flight a player uses without entering the building, so this phase
-  // stays independent of the interior — and it is the map's only SOLID flight,
-  // which keeps the shared climb/descend assertions honest against a normal
-  // addStairs staircase rather than the open ones in the void.
+  // stays independent of the interior. It is an open flight like the two in
+  // the void (world.ts:addOpenStairs) — the climb/descend assertions hold for
+  // thin treads exactly as for solid risers, since tread TOPS sit at the same
+  // heights either way.
   warehouse2: { start: [32.5, 1.7, 17], upYaw: 0, deckFeet: 5.1, downYaw: Math.PI, bottomZ: 16.25, bottomDir: 1 },
 };
 

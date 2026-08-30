@@ -8,10 +8,16 @@
 // each used to carry their own copy of this logic, and the range copy shipped
 // without the `colliders` push — the whole map was no-clip (`431ac6e`).
 //
-// Only `addSolidBox` touches the scene. Everything else is pure, so the two
+// Two more registries live here, both bot-facing and both populated only by
+// the builders below: `navLinks` (traversable level changes, read by
+// sim/navGrid.ts) and `liftPads` (launch triggers, read by sim/lift.ts).
+//
+// Only `addSolidBox` touches the scene — `addOpenStairs` composes it for the
+// treads and adds its stringer group directly, making it the one other scene
+// reader. Everything else is pure, so the two
 // invariants that have actually broken here — registering both registries,
 // and flushing a group's world matrix before measuring it — are unit-tested
-// in plain Node. `scene` is imported but read only inside `addSolidBox`, and
+// in plain Node. `scene` is never read at module scope, and
 // core/engine.ts has no module-scope side effects, so importing this file
 // outside a browser is safe.
 import * as THREE from 'three';
@@ -25,7 +31,7 @@ export const colliders: THREE.Box3[] = [];
 
 /**
  * A level change a walker can traverse but a grid of standable cells cannot
- * express cheaply — today, exactly one flight of stairs.
+ * express cheaply — today, a stair flight or a lift launch arc.
  *
  * The navigation grid (sim/navGrid.ts) samples at 1 m, and a 0.75 m tread
  * means one cell along a flight climbs more than STEP_HEIGHT; sampled that
@@ -53,7 +59,7 @@ export interface NavLink {
   oneWay?: boolean;
 }
 
-/** Traversable level changes, one per flight or lift. Populated by addStairs / addLiftPad. */
+/** Traversable level changes, one per flight or lift. Populated by the stair and lift builders. */
 export const navLinks: NavLink[] = [];
 
 /**

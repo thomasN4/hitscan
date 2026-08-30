@@ -264,6 +264,58 @@ describe('resolveVertical', () => {
   });
 });
 
+// Rising into a ceiling — the head is swept, not just the feet.
+//
+// Fixture is an open-tread plate: top 4.7, underside 4.4 (warehouse2's TREAD_T
+// shape). Before the ceiling sweep a rising body passed straight through it —
+// the head is above the support query's reach and the vertical stage ignored
+// velY > 0 entirely — so a jump under a flight put the head inside the tread.
+describe('resolveVertical ceiling sweep', () => {
+  /** Underside 4.4, top 4.7 — a thin open-tread plate. */
+  const tread = slab(0, 0, 4.4, 4.7, 5);
+
+  test('a rising body cannot cross a thin tread underside', () => {
+    // Feet 2.2 -> 3.2 this frame: the head sweeps 4.2 -> 5.2, straight
+    // through the underside at 4.4.
+    const r = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(r.onGround).toBe(false);
+  });
+
+  test('it is clamped below the underside with zero velocity', () => {
+    const r = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(r.feetY).toBe(4.4 - HEAD_HEIGHT);
+    expect(r.velY).toBe(0);
+  });
+
+  test('rises normally when no ceiling overlaps the footprint', () => {
+    // Same tread, but the body stands beside it: no XZ overlap, no clamp.
+    const r = resolveVertical(2.2, 20, 0.05, 5 + PLAYER_RADIUS, 0, PLAYER_RADIUS, [tread]);
+    expect(r.velY).toBe(20);
+    expect(r.feetY).toBeCloseTo(3.2);
+    // ...and a ceiling above the swept interval is not crossed, not clamped.
+    const highCover = slab(0, 0, 6, 9, 5);
+    const clear = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [highCover]);
+    expect(clear.feetY).toBeCloseTo(3.2);
+  });
+
+  test('a body whose head already overlaps the ceiling is not pulled down', () => {
+    // Inside geometry (unwedge territory): the underside is below the head
+    // already, so the sweep must leave it to the horizontal escape rule.
+    const r = resolveVertical(2.5, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(r.feetY).toBeCloseTo(3.5);
+    expect(r.velY).toBe(20);
+  });
+
+  test('an underside within float noise of the resting head still clamps', () => {
+    // An exact-height overhead slab's underside stores a hair LOW; the head
+    // at rest touches it. Rising must clamp at it, not slip past.
+    const noisy = slab(0, 0, 3.9999997615814209, 4.3, 5);
+    const r = resolveVertical(2.0, 8, 0.05, 0, 0, PLAYER_RADIUS, [noisy]);
+    expect(r.feetY).toBe(3.9999997615814209 - HEAD_HEIGHT);
+    expect(r.velY).toBe(0);
+  });
+});
+
 describe('slideMoveXZ', () => {
   test('an unobstructed move applies both axes', () => {
     const pos = at(0, 0);

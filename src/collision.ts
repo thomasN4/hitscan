@@ -7,7 +7,8 @@
 //   supportHeightAt  -> highest walkable surface under a point (stairs, floors)
 //   slideMoveXZ      -> axis-separated horizontal move with wall sliding
 //   resolveVertical  -> gravity integration vs support (rest, step-up,
-//                       landings, stair descent, edge-fall)
+//                       landings, stair descent, edge-fall) and vs ceilings
+//                       while rising
 //   findFreeSpawn    -> rejection sampling over `colliders` (spawn placement)
 //   hasLineOfSight   -> raycast against `solids` (used by bots before firing)
 //
@@ -222,10 +223,51 @@ export interface VerticalResolve {
 }
 
 /**
+ * Lowest collider underside the head crosses while rising from `lo` to `hi`,
+ * or Infinity when none does.
+ *
+ * A collider counts when its underside sits inside the swept head interval —
+ * the head started at or below it and ends above it — AND its XZ footprint
+ * strictly overlaps the body's, by the same convention supportHeightAt uses
+ * (mere edge contact is not overlap). COLLISION_EPSILON slack on both bounds:
+ * float32 stores undersides LOW and feet tops HIGH, so an underside designed
+ * exactly at the head measures a hair under it and must still clamp, while
+ * one a hair above the frame's end must not be slipped past.
+ *
+ * Undersides BELOW the interval are deliberately ignored: a head already past
+ * them means the body is inside geometry, and clamping there would pull it
+ * deeper down instead of letting the unwedge rule walk it out.
+ */
+function lowestCeiling(
+  x: number,
+  z: number,
+  radius: number,
+  lo: number,
+  hi: number,
+  colliders: THREE.Box3[],
+): number {
+  let best = Infinity;
+  for (const c of colliders) {
+    if (c.min.y < lo - COLLISION_EPSILON || c.min.y > hi + COLLISION_EPSILON) continue;
+    if (x + radius <= c.min.x || x - radius >= c.max.x) continue;
+    if (z + radius <= c.min.z || z - radius >= c.max.z) continue;
+    if (c.min.y < best) best = c.min.y;
+  }
+  return best;
+}
+
+/**
  * Integrate one step of vertical motion against level geometry.
  *
- * While rising (velY > 0) nothing is resolved — you own the air. While
- * falling or resting, support is queried with the ceiling `prevFeetY +
+ * While rising (velY > 0) the entity's head is swept from its old to its new
+ * position against collider UNDERSIDES (see lowestCeiling): the first one the
+ * head would cross stops the rise — feet clamp below it, velocity zeroes, and
+ * the entity stays airborne. Anything already well above the head, below the
+ * feet, or beside the footprint is ignored, so jumping on the flat, riding
+ * lift arcs through open air, and escaping geometry the unwedge rule allows
+ * all behave exactly as before.
+ *
+ * While falling or resting, support is queried with the ceiling `prevFeetY +
  * STEP_HEIGHT`: any surface top between the new feet position and one riser
  * above the previous feet catches the entity. That single rule produces
  * resting on floors, stepping UP onto risers, landing after falls (swept, so
@@ -259,7 +301,20 @@ export function resolveVertical(
   wasGrounded = false,
 ): VerticalResolve {
   const newFeetY = prevFeetY + velY * dt;
-  if (velY > 0) return { feetY: newFeetY, velY, onGround: false };
+  if (velY > 0) {
+    const ceiling = lowestCeiling(
+      x, z, radius,
+      prevFeetY + HEAD_HEIGHT, newFeetY + HEAD_HEIGHT,
+      colliders,
+    );
+    // Head meets a ceiling: stop under it, spent. The clamp is exact (not
+    // epsilon-slack) because the underside itself is the noise source — the
+    // body rests where the geometry actually measures.
+    if (ceiling !== Infinity) {
+      return { feetY: ceiling - HEAD_HEIGHT, velY: 0, onGround: false };
+    }
+    return { feetY: newFeetY, velY, onGround: false };
+  }
   const ground = supportHeightAt(x, z, radius, prevFeetY + STEP_HEIGHT, colliders);
   if (newFeetY <= ground) return { feetY: ground, velY: 0, onGround: true };
   // Descend-stick. COLLISION_EPSILON slack because float32-noisy treads can

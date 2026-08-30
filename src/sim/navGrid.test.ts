@@ -151,6 +151,42 @@ describe('nav links', () => {
   });
 });
 
+describe('one-way links', () => {
+  // twoLevels plus a landing partway up the link line, so the flight holds an
+  // INTERMEDIATE node the directed edges have to reach: a floor at y 1.5
+  // straddling the wall band (its cell centre at z 6.5 clears the band at
+  // 6..6.4). The sampled grid cannot connect it to either end — 1.5 m rises,
+  // 5x STEP_HEIGHT — so it is an island unless the link's directed edges
+  // join it, which is what makes these assertions non-vacuous.
+  const withMidStep = () => world(
+    [{ minX: 0, maxX: 10, minZ: 6, maxZ: 6.4 }],
+    [
+      { minX: 0, maxX: 10, minZ: 7, maxZ: 10, y: 3, bottom: 2.8 },
+      { minX: 0, maxX: 3, minZ: 6.3, maxZ: 7, y: 1.5, bottom: 1.2 },
+    ],
+  );
+  const oneWay = { bottom: at(1.5, 5.5), top: at(1.5, 7.5, 3), halfWidth: 1, oneWay: true };
+
+  test('routes upward from the bottom node and from an intermediate node', () => {
+    const grid = build(withMidStep(), [oneWay]);
+    expect(connected(grid, at(5, 1), at(8, 8, 3))).toBe(true);       // bottom → top
+    expect(connected(grid, at(5, 1), at(1.5, 6.5, 1.5))).toBe(true); // bottom → intermediate
+    expect(connected(grid, at(1.5, 6.5, 1.5), at(8, 8, 3))).toBe(true); // intermediate → top
+  });
+
+  test('no node on the link routes back downward', () => {
+    const grid = build(withMidStep(), [oneWay]);
+    expect(connected(grid, at(8, 8, 3), at(5, 1))).toBe(false);         // top → bottom
+    expect(connected(grid, at(1.5, 6.5, 1.5), at(5, 1))).toBe(false);   // intermediate → bottom
+  });
+
+  test('the assertion is not vacuous — bidirectionally the same link connects both ways', () => {
+    const grid = build(withMidStep(), [{ bottom: oneWay.bottom, top: oneWay.top, halfWidth: oneWay.halfWidth }]);
+    expect(connected(grid, at(8, 8, 3), at(5, 1))).toBe(true);
+    expect(connected(grid, at(1.5, 6.5, 1.5), at(5, 1))).toBe(true);
+  });
+});
+
 /** Dijkstra over the CSR arrays: the true optimum, with no heuristic involved. */
 function optimalCost(grid: NavGrid, from: THREE.Vector3, to: THREE.Vector3): number {
   const start = nearestNode(grid, from);

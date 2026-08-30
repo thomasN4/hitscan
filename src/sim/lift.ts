@@ -11,10 +11,10 @@
 // the map is built (world.ts:registerSolidBox) and never updated, so there is
 // no moving geometry in this engine at all; a platform that rose would carry
 // no collision with it. What DOES already exist is collision.ts:resolveVertical
-// leaving rising bodies entirely alone — "while rising you own the air" — so a
-// pad that sets an upward velocity reuses the whole vertical model unchanged,
-// and behaves identically for the player and for bots because both run that
-// same resolve.
+// integrating the whole ascent — the head swept against ceilings, support
+// taken on the way down — so a pad that sets an upward velocity reuses the
+// vertical model unchanged, and behaves identically for the player and for
+// bots because both run that same resolve.
 //
 // Pure and engine-free like everything in sim/: pads are plain numbers, so
 // this is testable without a scene or a collider registry. world.ts owns the

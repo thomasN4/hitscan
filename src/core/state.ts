@@ -210,8 +210,8 @@ export interface Impact {
 }
 
 // ---------- Shared collections ----------
-// Level geometry registries (`solids`, `colliders`) live in world.ts, which
-// owns the one path by which geometry is registered.
+// Level registries (`solids`, `colliders`, `navLinks`, `liftPads`) live in
+// world.ts, which owns their registration paths.
 /** All Bot instances (see bots.ts). */
 export const bots: Bot[] = [];
 /** Short-lived bullet impact puffs (see effects.ts). */
@@ -710,12 +710,13 @@ export interface Ambience {
    * Directional "sun" intensity.
    *
    * Here rather than hardcoded in initEngine for the same reason the colours
-   * are: maps/warehouse2.ts has a ROOF, so its interior gets no sun at all and
-   * has to be lit by the hemisphere alone. A map that changes what light
-   * reaches it has to be able to say so.
+   * are: maps/warehouse2.ts has a ROOF whose opaque slabs shadow most of the
+   * interior, so indoors leans on the hemisphere — its two skylight strips
+   * admit the sun only in bands. A map that changes what light reaches it
+   * has to be able to say so.
    */
   sunIntensity: number;
-  /** Hemisphere light intensity — the only light under a roof. */
+  /** Hemisphere light intensity — the main fill under a roof, where sun comes only through skylights. */
   hemiIntensity: number;
 }
 

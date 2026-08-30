@@ -22,9 +22,10 @@
 //     maps/elevation.ts's jump-only hops, used here for a mobility edge
 //     rather than as a proof.
 //
-// The footprint is the arena's exactly (120 x 120, walls at +-60), because
-// bots.ts spawns its waves in hardcoded bands — x +-45, |z| 20..55 — and a
-// different footprint would strand them outside or inside the geometry.
+// The footprint is the arena's exactly (120 x 120, walls at +-60) — a map
+// design choice, not a constraint. Bot spawns are configured per map
+// (core/state.ts:BOT_SPAWNS), so a different footprint would simply ship its
+// own spawn boxes alongside it.
 //
 // All geometry goes through world.ts, which registers each solid as both a
 // raycast target and a movement AABB. Do not add meshes to the scene

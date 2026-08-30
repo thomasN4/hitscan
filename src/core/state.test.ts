@@ -179,9 +179,10 @@ describe('AMBIENCE', () => {
   });
 
   test('warehouse2 pays for its roof with hemisphere light, not sun', () => {
-    // The roof blocks the directional sun over the whole interior, so the
-    // hemisphere is the only light indoors. Leave it at the outdoor 0.85 and
-    // the shell renders as a black box.
+    // The roof's opaque slabs shadow most of the interior (the skylight
+    // strips admit the sun only in bands), so the hemisphere carries the
+    // indoors. Leave it at the outdoor 0.85 and the shell renders as a black
+    // box.
     expect(AMBIENCE.warehouse2.hemiIntensity).toBeGreaterThan(DESERT_AMBIENCE.hemiIntensity);
   });
 

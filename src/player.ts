@@ -119,8 +119,8 @@ export function updateMovement(dt: number): void {
 
   // Cargo lift. AFTER the resolve, because it keys off the grounded state
   // this frame actually produced, and it overwrites that state rather than
-  // feeding into it — a launched body owns the air on the way up
-  // (sim/lift.ts).
+  // feeding into it. The launch begins after this frame's resolve; later
+  // rising frames still pass through resolveVertical's ceiling sweep.
   const lift = launchFrom(player.pos.x, player.pos.z, vert.feetY, player.onGround,
     player.radius, liftPads);
   if (lift !== null) {

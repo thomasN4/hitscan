@@ -13,7 +13,7 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
                LoadoutState,
-               MapName, WeaponSlot, WeaponId, LiveWeapon, PlayerState } from './core/state';
+               MapName, WeaponSlot, WeaponId, BotWeaponChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
 import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
@@ -73,8 +73,8 @@ BUILDERS[session.map]();
 // this runs once per session.
 buildNav();
 if (!RANGE) {
-  spawnBots(session.botsT, 'T');
-  if (session.botsCt > 0) spawnBots(session.botsCt, 'CT');
+  spawnBots(session.botsT, 'T', session.botWeaponT);
+  if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt);
 }
 respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
 initMenus({
@@ -291,6 +291,8 @@ const game: DebugGame = {
   get botsT() { return session.botsT; }, set botsT(v: number) { session.botsT = v; },
   get botsCt() { return session.botsCt; }, set botsCt(v: number) { session.botsCt = v; },
   get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
+  get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
+  get botWeaponCt() { return session.botWeaponCt; }, set botWeaponCt(v: BotWeaponChoice) { session.botWeaponCt = v; },
   get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
   get started() { return session.started; }, set started(v: boolean) { session.started = v; },
   get debugView() { return session.debugView; }, set debugView(v: boolean) { session.debugView = v; },

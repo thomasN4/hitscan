@@ -1,7 +1,8 @@
 // core/sessionConfig.ts — pure parse/serialize for the match-config query.
 //
 // The start menu commits settings by navigating to ONE query string
-// (?map=&tbots=&ctbots=&time=); main.ts parses it back once at startup and
+// (?map=&tbots=&ctbots=&time=&tweap=&ctweap=); main.ts parses it back once at
+// startup and
 // writes the result into `session`. Parsing lives here rather than in
 // main.ts so the clamp/fallback matrix is unit-testable in plain Node: the
 // input is a minimal `{ get(name) }` view (URLSearchParams satisfies it
@@ -17,7 +18,7 @@
 // menu.ts. asMapName is shared for the same reason: menu.ts used to open-code
 // its own `=== 'range' ? 'range' : 'arena'`, which silently drops any map
 // added after it was written.
-import type { MapName } from './state';
+import type { BotWeaponChoice, MapName } from './state';
 import { SESSION_DEFAULTS } from './state';
 
 /** Everything the menu configures about a match; mirrors session's config fields. */
@@ -29,6 +30,10 @@ export interface SessionConfig {
   botsCt: number;
   /** Round length in seconds. */
   roundSeconds: number;
+  /** Weapon every T-side bot carries; 'mixed' draws independently per bot. */
+  botWeaponT: BotWeaponChoice;
+  /** Same for the CT side. */
+  botWeaponCt: BotWeaponChoice;
 }
 
 // ---------- Accepted ranges ----------
@@ -108,6 +113,38 @@ export function asMapName(raw: string | null | undefined): MapName {
     : SESSION_DEFAULTS.map;
 }
 
+/**
+ * Narrow an untrusted string to a bot-weapon setting, falling back to
+ * `fallback` for anything unrecognized.
+ *
+ * Exhaustive Record and hasOwn for exactly asMapName's reasons — widening the
+ * weapon union must fail to compile HERE too, and a prototype key like
+ * 'toString' must not pass the guard and reach a Record lookup.
+ *
+ * Note what is NOT a key: 'knife'. BotWeaponChoice is built on BotWeaponId,
+ * which excludes it, so ?tweap=knife falls back rather than arming a bot with
+ * something it has no way to swing. The 7a/7b boundary is enforced by the
+ * parser and the type system rather than by a convention someone has to
+ * remember — and 7b widens it by widening BotWeaponId, which fails to compile
+ * here until this table says what to do with the new value.
+ *
+ * `fallback` is a parameter rather than SESSION_DEFAULTS, so the start menu
+ * can keep the currently-applied value on garbage input exactly as numOr
+ * does for the number fields.
+ */
+const IS_BOT_WEAPON: Record<BotWeaponChoice, true> = {
+  mixed: true, smg: true, sniper: true, shotgun: true, pistol: true, revolver: true,
+};
+
+export function asBotWeapon(
+  raw: string | null | undefined,
+  fallback: BotWeaponChoice,
+): BotWeaponChoice {
+  return typeof raw === 'string' && Object.hasOwn(IS_BOT_WEAPON, raw)
+    ? (raw as BotWeaponChoice)
+    : fallback;
+}
+
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
   return {
@@ -117,12 +154,14 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
     roundSeconds: Math.round(
       clampTo(numOr(src.get('time'), SESSION_DEFAULTS.roundSeconds), TIME_LIMITS_S),
     ),
+    botWeaponT: asBotWeapon(src.get('tweap'), SESSION_DEFAULTS.botWeaponT),
+    botWeaponCt: asBotWeapon(src.get('ctweap'), SESSION_DEFAULTS.botWeaponCt),
   };
 }
 
 /**
  * Serialize to the canonical committed query string (leading '?', every param
- * present). Always encoding all four keeps URLs canonical and makes "form
+ * present). Always encoding every field keeps URLs canonical and makes "form
  * differs from applied config" a plain field comparison in menu.ts.
  */
 export function configToQuery(cfg: SessionConfig): string {
@@ -131,6 +170,8 @@ export function configToQuery(cfg: SessionConfig): string {
   p.set('tbots', String(cfg.botsT));
   p.set('ctbots', String(cfg.botsCt));
   p.set('time', String(cfg.roundSeconds));
+  p.set('tweap', cfg.botWeaponT);
+  p.set('ctweap', cfg.botWeaponCt);
   return '?' + p.toString();
 }
 
@@ -140,6 +181,8 @@ export function configsEqual(a: SessionConfig, b: SessionConfig): boolean {
     a.map === b.map &&
     a.botsT === b.botsT &&
     a.botsCt === b.botsCt &&
-    a.roundSeconds === b.roundSeconds
+    a.roundSeconds === b.roundSeconds &&
+    a.botWeaponT === b.botWeaponT &&
+    a.botWeaponCt === b.botWeaponCt
   );
 }

@@ -915,11 +915,18 @@ export const SESSION_DEFAULTS: Readonly<{
   botsT: number;
   botsCt: number;
   roundSeconds: number;
+  botWeaponT: BotWeaponChoice;
+  botWeaponCt: BotWeaponChoice;
 }> = {
   map: 'arena',
   botsT: 6,
   botsCt: 0,
   roundSeconds: 120,
+  // A varied field by default: the whole point of the tranche is that the
+  // enemy's weapon is a fact about the enemy, not a constant. Pinning a
+  // single weapon is what smoke phases and playtests do deliberately.
+  botWeaponT: 'mixed',
+  botWeaponCt: 'mixed',
 };
 
 // ---------- Owner-scoped slices ----------
@@ -938,11 +945,12 @@ export const SESSION_DEFAULTS: Readonly<{
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
-  // query string (?map=&tbots=&ctbots=&time=) via a full page reload — map
+  // query string (?map=&tbots=&ctbots=&time=&tweap=&ctweap=) via a full page
+  // reload — map
   // switching is a reload and there is deliberately no hot-swapping of scenes
-  // at runtime. main.ts overwrites all four from core/sessionConfig.ts's parse
-  // of the URL at startup — reading `location` here would break this module's
-  // importability in Node.
+  // at runtime. main.ts overwrites all of them from core/sessionConfig.ts's
+  // parse of the URL at startup — reading `location` here would break this
+  // module's importability in Node.
   map: MapName;
   /** Enemy (T-side) bot count, clamped to 1..12 by the parser. */
   botsT: number;
@@ -950,6 +958,13 @@ export interface SessionState {
   botsCt: number;
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;
+  /**
+   * Weapon every bot on each side carries, or 'mixed' to draw one per bot.
+   * Read once by main.ts when it spawns the waves; a bot's weapon is fixed
+   * for the match, so nothing re-reads these.
+   */
+  botWeaponT: BotWeaponChoice;
+  botWeaponCt: BotWeaponChoice;
   /** Pointer lock active (Esc/menu releases it). */
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */

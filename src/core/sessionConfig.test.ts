@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BOTS_CT_LIMITS,
+  asBotWeapon,
   BOTS_T_LIMITS,
   TIME_LIMITS_S,
   clampTo,
@@ -31,9 +32,11 @@ const CFG: SessionConfig = {
   botsT: 10,
   botsCt: 3,
   roundSeconds: 90,
+  botWeaponT: 'sniper',
+  botWeaponCt: 'mixed',
 };
 
-const CFG_QUERY = '?map=range&tbots=10&ctbots=3&time=90';
+const CFG_QUERY = '?map=range&tbots=10&ctbots=3&time=90&tweap=sniper&ctweap=mixed';
 
 describe('parseSessionConfig', () => {
   it('empty source yields every default', () => {
@@ -114,7 +117,7 @@ describe('parseSessionConfig', () => {
 });
 
 describe('configToQuery', () => {
-  it('encodes all four params canonically', () => {
+  it('encodes every param canonically', () => {
     expect(configToQuery(CFG)).toBe(CFG_QUERY);
   });
 
@@ -130,6 +133,47 @@ describe('configsEqual', () => {
     expect(configsEqual(CFG, { ...CFG, map: 'arena' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botsCt: 0 })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, roundSeconds: 91 })).toBe(false);
+    expect(configsEqual(CFG, { ...CFG, botWeaponT: 'smg' })).toBe(false);
+    expect(configsEqual(CFG, { ...CFG, botWeaponCt: 'smg' })).toBe(false);
+  });
+});
+
+describe('asBotWeapon', () => {
+  it('accepts every catalog weapon a bot may carry, and mixed', () => {
+    for (const id of ['mixed', 'smg', 'sniper', 'shotgun', 'pistol', 'revolver'] as const) {
+      expect(asBotWeapon(id, 'smg')).toBe(id);
+    }
+  });
+
+  it('refuses the knife — a bot has no way to swing one until 7b', () => {
+    // The 7a boundary lives in the type (BotWeaponId excludes 'knife') and is
+    // enforced here rather than by a convention someone has to remember.
+    expect(asBotWeapon('knife', 'mixed')).toBe('mixed');
+  });
+
+  it('falls back for absent, empty and garbage values', () => {
+    expect(asBotWeapon(null, 'revolver')).toBe('revolver');
+    expect(asBotWeapon(undefined, 'revolver')).toBe('revolver');
+    expect(asBotWeapon('', 'revolver')).toBe('revolver');
+    expect(asBotWeapon('bazooka', 'revolver')).toBe('revolver');
+  });
+
+  it('does not let a prototype key pass the guard', () => {
+    // hasOwn rather than `in`, exactly as asMapName does: 'toString' would
+    // otherwise narrow to a weapon and reach a Record lookup that has no such
+    // entry.
+    expect(asBotWeapon('toString', 'smg')).toBe('smg');
+    expect(asBotWeapon('constructor', 'smg')).toBe('smg');
+  });
+
+  it('parses both sides independently, defaulting to a mixed field', () => {
+    expect(parseSessionConfig(src({ tweap: 'shotgun' }))).toMatchObject({
+      botWeaponT: 'shotgun', botWeaponCt: SESSION_DEFAULTS.botWeaponCt,
+    });
+    expect(parseSessionConfig(src({ ctweap: 'pistol' }))).toMatchObject({
+      botWeaponT: SESSION_DEFAULTS.botWeaponT, botWeaponCt: 'pistol',
+    });
+    expect(parseSessionConfig(src({ tweap: 'nope' })).botWeaponT).toBe(SESSION_DEFAULTS.botWeaponT);
   });
 });
 

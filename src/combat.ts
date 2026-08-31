@@ -6,7 +6,7 @@
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
 import type { Bot as BotShape, HitZone, MapName } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, WEAPONS } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
@@ -36,7 +36,7 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     score.playerDeaths++;
     const attacker = bots.find(b => b.name === attackerName);
     if (attacker) attacker.kills++;
-    addKillfeed(`${attackerName} killed You`);
+    addKillfeed(`${attackerName}${attacker ? ` [${WEAPONS[attacker.weapon].name}]` : ''} killed You`);
     updateScore();
     document.exitPointerLock();
     // Wall clock ON PURPOSE: pointer lock was just released, so game time is

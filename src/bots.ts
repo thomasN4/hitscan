@@ -891,7 +891,7 @@ export class Bot implements BotShape {
    */
   private shoot(dist: number, target: Target): void {
     const muzzle = this.muzzlePos();
-    sfxEnemyShoot(this.mesh.position);
+    sfxEnemyShoot(this.mesh.position, this.weapon);
     spawnImpact(muzzle); // cheap muzzle flash, from the barrel tip
     // Emitted BEFORE the hit die, so a miss is exactly as audible as a hit —
     // hearing reports that a trigger was pulled, not that it landed. At the
@@ -937,16 +937,21 @@ export class Bot implements BotShape {
     else score.scoreDeaths++;
     // Scoreboard attribution: the player's own kills get a personal counter;
     // a bot killer is resolved by display name (unique per team serial).
-    if (killerName === undefined) {
-      score.playerKills++;
-    } else {
-      const killer = bots.find(b => b.name === killerName);
-      if (killer) killer.kills++;
-    }
+    // Hoisted out of the counter branch because the killfeed needs it too:
+    // a bot killer names the weapon it did it with.
+    const killer = killerName === undefined
+      ? undefined
+      : bots.find(b => b.name === killerName);
+    if (killerName === undefined) score.playerKills++;
+    else if (killer) killer.kills++;
     updateScore();
+    // A bot-dealt kill can finally say 'headshot'. Before the hit zone was
+    // rolled, the executor passed a hardcoded 'torso' for every bot shot, so
+    // the wording existed but no bot could ever reach it.
     addKillfeed(killerName === undefined
       ? `You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`
-      : `${killerName} killed ${this.name}`);
+      : `${killerName}${killer ? ` [${WEAPONS[killer.weapon].name}]` : ''}` +
+        ` ${killerPart === 'head' ? '☠ headshot-killed' : 'killed'} ${this.name}`);
     debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();
     gameTime.schedule(6, () => {

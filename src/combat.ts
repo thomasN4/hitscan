@@ -127,6 +127,8 @@ export function respawn(): void {
   wpn.recoil = 0;    // else the view punch would spawn the camera mid-climb
   wpn.recoilYaw = 0; // and mid-wander, off to one side
   wpn.spray = 1;     // resting multiplier, NOT 0 — see core/state.ts
+  wpn.triggerLatch = false;
+  wpn.emptyReloadLatch = false;
   // Same class: the accuracy/pose blends are smoothed toward their target over
   // ~100-200 ms, so dying mid-air respawns you inside the full AIR_PENALTY
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.

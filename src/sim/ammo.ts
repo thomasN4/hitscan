@@ -84,7 +84,7 @@ export interface ReloadDecision {
   dropAim: boolean;
 }
 
-/** A request that starts reloading: partial mag, rounds available, live player. */
+/** Starts only for a live, non-sprinting player with a partial mag and reserve. */
 export function planReload(r: ReloadRequest): ReloadDecision {
   const start = r.started && r.alive && !r.reloading &&
     !r.sprinting && r.mag < r.magSize && r.reserve > 0;

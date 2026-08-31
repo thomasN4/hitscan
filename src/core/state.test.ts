@@ -7,7 +7,7 @@
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
          sanitizeLoadout, session, player, playerFeet, equippedId,
-         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS } from './state';
+         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld } from './state';
 
 describe('state module purity', () => {
   // main.ts overwrites session's config fields from the URL query at startup;
@@ -26,6 +26,16 @@ describe('state module purity', () => {
     const secondaries = Object.values(WEAPONS).filter(d => d.class === 'secondary');
     expect(primaries.length).toBeGreaterThanOrEqual(2);
     expect(secondaries.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('collapses unset and false keyboard slots at the state boundary', () => {
+    delete keys.KeyW;
+    expect(keyHeld('KeyW')).toBe(false);
+    keys.KeyW = false;
+    expect(keyHeld('KeyW')).toBe(false);
+    keys.KeyW = true;
+    expect(keyHeld('KeyW')).toBe(true);
+    delete keys.KeyW;
   });
 
   test('exactly one melee weapon, and it sits in neither picker column', () => {

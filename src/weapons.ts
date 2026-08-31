@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, input, aim, wpn, motion, player, keys, gameTime,
+import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTime,
          soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId,
@@ -53,10 +53,10 @@ export function currentSprintActive(): boolean {
     sprintHeld: input.running,
     aiming: input.aiming,
     crouching: input.crouching && player.onGround,
-    forward: keys.KeyW === true,
-    backward: keys.KeyS === true,
-    left: keys.KeyA === true,
-    right: keys.KeyD === true,
+    forward: keyHeld('KeyW'),
+    backward: keyHeld('KeyS'),
+    left: keyHeld('KeyA'),
+    right: keyHeld('KeyD'),
   });
 }
 
@@ -533,10 +533,10 @@ export function shoot(): void {
     cancelReload();
   }
   if (weapon.reloading || weapon.mag <= 0) {
-    if (weapon.mag <= 0 && !emptyReloadLatch) {
+    if (weapon.mag <= 0 && !wpn.emptyReloadLatch) {
       // A refused held-LMB request is ONE attempt, not a queue that should
       // spring open as soon as sprint ends. Release LMB before trying again.
-      if (currentSprintActive()) emptyReloadLatch = true;
+      if (currentSprintActive()) wpn.emptyReloadLatch = true;
       else tryReload(); // auto-reload on a fresh dry-fire attempt
     }
     return;
@@ -656,9 +656,6 @@ export function shoot(): void {
  * (whose blends feed the spread model) and BEFORE updateCamera /
  * updateViewmodel (which read the recoil this decays).
  */
-let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on release
-let emptyReloadLatch = false; // sprint-refused dry fire needs a fresh LMB press
-
 /** Blend rate for ADS position and FOV zoom (1/s); ~12 ≈ 80 ms to settle. */
 const ADS_RATE = 12;
 
@@ -768,13 +765,13 @@ export function updateWeapon(dt: number): void {
   // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire
   // once per press — the latch blocks repeats until the button is released.
   if (!input.shooting) {
-    triggerLatch = false;
-    emptyReloadLatch = false;
+    wpn.triggerLatch = false;
+    wpn.emptyReloadLatch = false;
   }
-  else if (!def.semiAuto || !triggerLatch) {
+  else if (!def.semiAuto || !wpn.triggerLatch) {
     if (gameTime.now() - weapon.lastShot >= weapon.fireRate) {
       shoot();
-      if (def.semiAuto) triggerLatch = true;
+      if (def.semiAuto) wpn.triggerLatch = true;
     }
   }
 

@@ -1013,6 +1013,10 @@ export interface WeaponDynamics {
   /** Scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
+  /** Semi-auto edge detector: armed by a shot, released with LMB. */
+  triggerLatch: boolean;
+  /** A sprint-refused dry fire requires a fresh LMB press before retrying. */
+  emptyReloadLatch: boolean;
 }
 
 /**
@@ -1082,6 +1086,8 @@ export const wpn: WeaponDynamics = {
   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                    // doesn't get twitchy at 12x (computed in weapons.ts)
+  triggerLatch: false,
+  emptyReloadLatch: false,
 };
 
 /**
@@ -1116,5 +1122,10 @@ export const score: ScoreState = {
   roundTime: SESSION_DEFAULTS.roundSeconds,
 };
 
-/** Raw keyboard state by `event.code`. Written in main.ts, read in player.ts. */
+/** Raw keyboard state by `event.code`. Written in main.ts, read through keyHeld. */
 export const keys: Record<string, boolean | undefined> = {};
+
+/** Collapse an unset keyboard slot to false at the keyboard slice boundary. */
+export function keyHeld(code: string): boolean {
+  return keys[code] === true;
+}

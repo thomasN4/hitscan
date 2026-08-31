@@ -107,7 +107,7 @@ addEventListener('resize', () => {
 
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'KeyR') tryReload();
+  if (e.code === 'KeyR' && !e.repeat) tryReload();
   // Keys 1/2/3 switch WEAPON POSITIONS (primary/secondary/knife), not specific
   // weapons — 0/1 resolve through the loadout slice; 2 is always the knife.
   if (e.code === 'Digit1') switchWeapon(0);
@@ -310,6 +310,8 @@ const game: DebugGame = {
   get lastSlot() { return wpn.lastSlot; }, set lastSlot(v: WeaponSlot) { wpn.lastSlot = v; },
   get zoomLevel() { return wpn.zoomLevel; }, set zoomLevel(v: number) { wpn.zoomLevel = v; },
   get zoomScale() { return wpn.zoomScale; }, set zoomScale(v: number) { wpn.zoomScale = v; },
+  get triggerLatch() { return wpn.triggerLatch; }, set triggerLatch(v: boolean) { wpn.triggerLatch = v; },
+  get emptyReloadLatch() { return wpn.emptyReloadLatch; }, set emptyReloadLatch(v: boolean) { wpn.emptyReloadLatch = v; },
   get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },
   get moveLerp() { return motion.moveLerp; }, set moveLerp(v: number) { motion.moveLerp = v; },
   get crouchLerp() { return motion.crouchLerp; }, set crouchLerp(v: number) { motion.crouchLerp = v; },

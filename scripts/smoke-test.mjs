@@ -323,7 +323,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const cs = window.__cs;
         const frame = () => new Promise(r => requestAnimationFrame(r));
         const tapR = () => {
-          window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+          window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', repeat: false }));
           window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
         };
 
@@ -333,15 +333,20 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         await frame();
-        tapR();
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', repeat: false }));
         await frame();
         const refused = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
         await new Promise(r => setTimeout(r, 250));
         const remainedRefused = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
 
-        // Shift alone is not a sprint. R may start; re-adding movement makes
-        // sprint active and cancels the whole-mag reload before it transfers.
+        // Ending sprint while R remains held must not let OS key-repeat queue
+        // a reload. A released and freshly pressed R may start; re-adding
+        // movement then cancels it before the whole-mag transfer.
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', repeat: true }));
+        await frame();
+        const heldRAfterStop = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
         tapR();
         await frame();
         const stationaryStart = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
@@ -372,10 +377,11 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         cs.weapon.mag = 30;
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
-        return { refused, remainedRefused, stationaryStart, sprintCancelled, drySprint, heldAfterStop, freshClick };
+        return { refused, remainedRefused, heldRAfterStop, stationaryStart, sprintCancelled, drySprint, heldAfterStop, freshClick };
       });
       if (sprintReload.refused.reloading || sprintReload.refused.mag !== 10) throw new Error(`R started a reload during sprint: ${JSON.stringify(sprintReload)}`);
       if (sprintReload.remainedRefused.reloading || sprintReload.remainedRefused.mag !== 10) throw new Error(`sprint-refused R queued a reload: ${JSON.stringify(sprintReload)}`);
+      if (sprintReload.heldRAfterStop.reloading || sprintReload.heldRAfterStop.mag !== 10) throw new Error(`held R repeat queued reload after sprint: ${JSON.stringify(sprintReload)}`);
       if (!sprintReload.stationaryStart.reloading) throw new Error(`stationary Shift blocked reload: ${JSON.stringify(sprintReload)}`);
       if (sprintReload.sprintCancelled.reloading || sprintReload.sprintCancelled.mag !== 10) throw new Error(`sprint did not cancel whole-mag reload cleanly: ${JSON.stringify(sprintReload)}`);
       if (sprintReload.drySprint.reloading) throw new Error(`empty held LMB started reload during sprint: ${JSON.stringify(sprintReload)}`);
@@ -476,10 +482,21 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
           [...document.querySelectorAll(`#col${col} .wcard`)].find(b => b.textContent.includes(name));
         card('Primary', 'SNIPER').click();
         card('Secondary', 'REVOLVER').click();
-        document.getElementById('deployBtn').click();
         const cs = window.__cs;
+        // Exercise Deploy's real dead-player respawn path with both weapon
+        // input latches dirty; a fresh life must not inherit either edge.
+        cs.game.triggerLatch = true;
+        cs.game.emptyReloadLatch = true;
+        cs.player.alive = false;
+        document.getElementById('deployBtn').click();
         // Capture the armed PRIMARY before stepping off it.
-        const armed = { name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize };
+        const armed = {
+          name: cs.weapon.name,
+          mag: cs.weapon.mag,
+          magSize: cs.weapon.magSize,
+          triggerLatch: cs.game.triggerLatch,
+          emptyReloadLatch: cs.game.emptyReloadLatch,
+        };
         // Step off the primary so the next phase's Digit1 is a real switch
         // rather than a same-position no-op.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
@@ -495,6 +512,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (picked.fail) throw new Error(picked.fail);
       if (picked.primary !== 'sniper' || picked.secondary !== 'revolver') throw new Error(`deploy did not commit the loadout: ${JSON.stringify(picked)}`);
       if (picked.armed.name !== 'SNIPER' || picked.armed.mag !== picked.armed.magSize) throw new Error(`deploy did not arm the primary: ${JSON.stringify(picked.armed)}`);
+      if (picked.armed.triggerLatch || picked.armed.emptyReloadLatch) throw new Error(`respawn preserved a weapon input latch: ${JSON.stringify(picked.armed)}`);
       if (picked.offPrimarySlot !== 1 || picked.offPrimaryName !== 'REVOLVER') throw new Error(`Digit2 did not take the secondary position: ${JSON.stringify(picked)}`);
       console.log(`[picker] OK`, JSON.stringify(picked));
 

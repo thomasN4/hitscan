@@ -19,7 +19,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, aim, wpn, motion, keys, gameTime, soundEvents, playerFeet } from './core/state';
+import { player, input, aim, wpn, motion, keyHeld, gameTime, soundEvents, playerFeet } from './core/state';
 import { slideMoveXZ, resolveVertical } from './collision';
 import { colliders, liftPads } from './world';
 import { sfxFootstep } from './audio';
@@ -63,15 +63,6 @@ const AIR_BLEND_RATE = 12;
 const GROUND_BLEND_RATE = 12;
 
 /**
- * Read one keyboard slot as a plain boolean. `keys` is
- * Record<string, boolean | undefined> — written from event handlers, so the
- * undefined case is real and this is where it collapses.
- */
-function key(code: string): boolean {
-  return keys[code] === true;
-}
-
-/**
  * Stage 1 — movement, stance, footsteps, camera position.
  *
  * Writes player.pos/vel and the blends the accuracy model reads
@@ -99,10 +90,10 @@ export function updateMovement(dt: number): void {
   const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
   const move = new THREE.Vector3();
-  if (key('KeyW')) move.add(forward);
-  if (key('KeyS')) move.sub(forward);
-  if (key('KeyD')) move.add(right);
-  if (key('KeyA')) move.sub(right);
+  if (keyHeld('KeyW')) move.add(forward);
+  if (keyHeld('KeyS')) move.sub(forward);
+  if (keyHeld('KeyD')) move.add(right);
+  if (keyHeld('KeyA')) move.sub(right);
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
 
   // Horizontal movement: the shared slide-along-walls gate (collision.ts),
@@ -128,7 +119,7 @@ export function updateMovement(dt: number): void {
   // feet, so its top catches them as the feet dip a hair below it). The
   // last-argument grounded flag lets descents stick to stairs instead of
   // free-falling each tread.
-  if (key('Space') && player.onGround) player.vel.y = JUMP_VEL;
+  if (keyHeld('Space') && player.onGround) player.vel.y = JUMP_VEL;
   player.vel.y -= GRAVITY * dt;
   const vert = resolveVertical(feetY, player.vel.y, dt, player.pos.x, player.pos.z,
     player.radius, colliders, player.onGround);

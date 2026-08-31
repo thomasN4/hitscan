@@ -717,7 +717,7 @@ async function runConfigCheck() {
   const mapErrors = [];
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=10&ctbots=3&time=90', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=10&ctbots=3&time=90&tweap=smg&ctweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
 
     const applied = await page.evaluate(() => ({
@@ -725,11 +725,15 @@ async function runConfigCheck() {
       botsCt: window.__cs.game.botsCt,
       roundSeconds: window.__cs.game.roundSeconds,
       botCount: window.__cs.bots.length,
+      botWeaponT: window.__cs.game.botWeaponT,
+      weapons: window.__cs.bots.map(b => b.weapon),
       form: {
         map: document.getElementById('cfgMap').value,
         botsT: document.getElementById('cfgBotsT').value,
         botsCt: document.getElementById('cfgBotsCt').value,
         timeMin: document.getElementById('cfgTimeMin').value,
+        weaponT: document.getElementById('cfgWeaponT').value,
+        weaponCt: document.getElementById('cfgWeaponCt').value,
       },
     }));
     if (applied.botsT !== 10 || applied.botsCt !== 3 || applied.roundSeconds !== 90) {
@@ -739,6 +743,15 @@ async function runConfigCheck() {
     if (applied.botCount !== 13) throw new Error(`expected 13 spawned bots, got ${applied.botCount}`);
     if (applied.form.map !== 'arena' || applied.form.botsT !== '10' || applied.form.botsCt !== '3' || applied.form.timeMin !== '1.5') {
       throw new Error(`menu form not initialized from config: ${JSON.stringify(applied.form)}`);
+    }
+    // The weapon setting reaches the session, the form AND every bot: a
+    // forced weapon must arm the whole field, since that is what every other
+    // bot phase now relies on to hold its fixture still.
+    if (applied.botWeaponT !== 'smg' || applied.form.weaponT !== 'smg' || applied.form.weaponCt !== 'smg') {
+      throw new Error(`bot weapon not applied: ${JSON.stringify(applied)}`);
+    }
+    if (!applied.weapons.every(w => w === 'smg')) {
+      throw new Error(`forced weapon did not arm every bot: ${JSON.stringify(applied.weapons)}`);
     }
 
     // Dirty-commit path: changing a form field and pressing Play must
@@ -750,7 +763,7 @@ async function runConfigCheck() {
       page.click('#playBtn'),
     ]);
     const url = page.url();
-    if (!/[?&]tbots=12&/.test(url) || !/[?&]time=90$/.test(url)) {
+    if (!/[?&]tbots=12&/.test(url) || !/[?&]time=90&/.test(url) || !/[?&]ctweap=smg$/.test(url)) {
       throw new Error(`Play with changed settings navigated wrong: ${url}`);
     }
     const recommitted = await page.evaluate(() => ({ botsT: window.__cs.game.botsT, botCount: window.__cs.bots.length }));
@@ -791,7 +804,7 @@ async function runAllyCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=4&ctbots=2', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=4&ctbots=2&tweap=smg&ctweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -888,7 +901,7 @@ async function runFlatRouteCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1036,7 +1049,7 @@ async function runVisionAwarenessCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1361,7 +1374,7 @@ async function runHearingCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=1&time=180', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=1&time=180&tweap=smg&ctweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1583,7 +1596,7 @@ async function runBotClimbCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1500));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1703,7 +1716,7 @@ async function runNavGraphCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1000));
     const result = await page.evaluate(() => {
       const cs = window.__cs;
@@ -1806,7 +1819,7 @@ async function runDebugViewCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -2014,7 +2027,7 @@ async function runKnifeCheck() {
   const mapErrors = [];
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1500));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -2168,7 +2181,7 @@ async function runMatchEndCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
     // ---- Elimination: CT wins outright when the wave is wiped ----
-    await page.goto(BASE + '/?map=arena&tbots=3&ctbots=0&time=30', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=3&ctbots=0&time=30&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     await page.evaluate(() => {
       window.__cs.game.started = true;
@@ -2219,7 +2232,7 @@ async function runMatchEndCheck() {
     if (!rematch.urlTime) throw new Error(`rematch lost the config query: ${location.search}`);
 
     // ---- Clock expiry: higher score wins, readout freezes at 0:00 ----
-    await page.goto(BASE + '/?map=arena&tbots=2&ctbots=0&time=30', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=2&ctbots=0&time=30&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     await page.evaluate(() => {
       const g = window.__cs.game;
@@ -2283,7 +2296,7 @@ async function runPatrolCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -2323,8 +2336,22 @@ async function runPatrolCheck() {
       bot.leg = 0;
       let firstMode = null, sawPatrol = false, patrolAt = null, patrolDrift = 0, gradesOk = true;
       let anchor = null;
+      // Budget, measured rather than guessed. A patrol candidate is drawn
+      // uniformly from the WHOLE nav graph, and on arena 3663 of 16155 nodes
+      // sit at y >= 3 — the tops of the walls and blocks (968 at y=8, 576 at
+      // y=10, 400 at y=12). A ground bot cannot route to those, so ~28% of
+      // candidates are rejected (300 sampled selections from this very spot:
+      // 27% on main, 31% here — the same population), and EACH rejection
+      // costs a fresh one-second patrolPause before the next draw.
+      //
+      // So "an idle bot patrols" is the invariant; "within one second" is a
+      // property of the selector's luck, and the old 5 s / 25 s budget was
+      // tight enough that a slow machine or an unlucky draw failed a phase
+      // with nothing wrong (which is the load-sensitive flake docs/ai-plan.md
+      // already recorded once and left alone). The wall clock is the give-up
+      // bound only — lesson 26.
       const tA = performance.now();
-      while (performance.now() - tA < 25000 && cs.gameTime.now() - simA0 < 5) {
+      while (performance.now() - tA < 60000 && cs.gameTime.now() - simA0 < 8) {
         await frame();
         if (firstMode === null) firstMode = bot.mode;
         if (bot.mode === 'patrol') {
@@ -2476,21 +2503,190 @@ async function runPatrolCheck() {
   await page.close();
 }
 
+
+// [botWeapons] — a bot's weapon is a real catalog weapon, end to end.
+//
+// Every claim here is the SAME fixture with a different weapon, so the weapon
+// is the only variable that can explain the difference. Fixture hygiene per
+// lesson 29: one bot on the field, its position re-pinned every frame, the
+// player's HP topped up so it cannot die mid-measurement and freeze the sim
+// by releasing pointer lock. Nothing else alive can produce these signals.
+//
+// What is asserted, and what is deliberately only RECORDED:
+//   - Trigger pulls are read from the MAGAZINE, not from damage. A pull is
+//     deterministic once the bot is in range; whether it lands is a die roll,
+//     and asserting a hit inside a budget would flake against a bot behaving
+//     correctly (lesson 28's shape — pin the invariant, not the luck).
+//   - Damage VALUES are asserted as set membership, which is exact: a landed
+//     smg round can only ever be 26 / 19.5 / 52 (torso / legs / head), and no
+//     revolver value can be in that set. So "damage comes from the catalog"
+//     is provable without requiring any particular number of hits.
+async function runBotWeaponsCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  const FIREARMS = ['smg', 'sniper', 'shotgun', 'pistol', 'revolver'];
+  // Zone damage each weapon can deal, from WEAPONS: torso, legs (x0.75), head
+  // (x headshotMult). A shotgun pull sums pellets, so it is excluded from the
+  // membership claim and gets the range claim instead.
+  const ZONES = {
+    smg: [26, 19.5, 52],
+    revolver: [55, 41.25, 220],
+  };
+  try {
+    // ---- A. 'mixed' arms a varied field, and never with a knife.
+    await page.goto(BASE + '/?map=arena&tbots=8&ctbots=0&time=120&tweap=mixed', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const mixed = await page.evaluate(() => {
+      const cs = window.__cs;
+      const before = cs.bots.map(b => b.weapon);
+      // A weapon is drawn once per MATCH, not per life: respawn must not
+      // re-roll it, or a killfeed line could name a weapon the bot no longer
+      // carries.
+      cs.bots.forEach(b => b.respawn());
+      return { before, after: cs.bots.map(b => b.weapon), mags: cs.bots.map(b => `${b.mag}/${b.magSize}`) };
+    });
+    const unknown = mixed.before.filter(w => !FIREARMS.includes(w));
+    if (unknown.length) throw new Error(`mixed drew a non-firearm: ${JSON.stringify(mixed.before)}`);
+    if (String(mixed.after) !== String(mixed.before)) {
+      throw new Error(`respawn re-rolled weapons: ${JSON.stringify(mixed)}`);
+    }
+    // Membership only, never "two different weapons appeared": a uniform draw
+    // legitimately returns eight of a kind (p ~ 1/78000) and the phase must
+    // not fail a correct outcome. The spread is recorded below as information.
+    const spread = [...new Set(mixed.before)].length;
+
+    // ---- Shared combat fixture: one bot, one player, a clear arena lane.
+    const combat = async (weapon, botZ, playerZ, simSeconds) => page.evaluate(
+      async (weapon, botZ, playerZ, simSeconds) => {
+        const cs = window.__cs;
+        const frame = () => new Promise(r => requestAnimationFrame(r));
+        const LANE_X = 12;
+        const blocked = (x, z) => cs.colliders.some(c =>
+          x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+        if (blocked(LANE_X, botZ)) return { fail: `bot spot (${LANE_X}, ${botZ}) is inside geometry` };
+        if (blocked(LANE_X, playerZ)) return { fail: `player spot (${LANE_X}, ${playerZ}) is inside geometry` };
+        cs.game.started = true;
+        cs.game.locked = true;
+        if (cs.bots.length !== 1) return { fail: `expected exactly one bot, got ${cs.bots.length}` };
+        const bot = cs.bots[0];
+        if (bot.weapon !== weapon) return { fail: `expected a ${weapon} bot, got ${bot.weapon}` };
+        cs.player.pos.set(LANE_X, cs.player.eyeHeight, playerZ);
+        cs.player.alive = true;
+        const magSize = bot.magSize;
+        let sawReload = false, refilled = false, minMag = magSize;
+        let seen = false, inRange = false, outOfRange = false;
+        const deltas = new Set();
+        const t0 = cs.gameTime.now();
+        const wall = performance.now();
+        while (performance.now() - wall < 90000 && cs.gameTime.now() - t0 < simSeconds) {
+          // Pin the bot: its bands would otherwise walk it out of the range
+          // the claim is about. Yaw at the player so it stays in the FOV cone.
+          bot.mesh.position.set(LANE_X, 0, botZ);
+          bot.vy = 0; bot.onGround = true;
+          bot.mesh.rotation.y = 0; // faces +z, toward the player down the lane
+          const hpBefore = cs.player.hp;
+          await frame();
+          const lost = +(hpBefore - cs.player.hp).toFixed(2);
+          if (lost > 0) deltas.add(lost);
+          cs.player.hp = 100000; // never dies: a death frees the pointer lock
+          if (bot.targetLOS === true) seen = true;
+          if (bot.targetInRange) inRange = true;
+          else if (bot.targetLOS === true) outOfRange = true;
+          if (bot.mag < minMag) minMag = bot.mag;
+          if (bot.reloading) sawReload = true;
+          if (sawReload && !bot.reloading && bot.mag > minMag) refilled = true;
+        }
+        return {
+          weapon, magSize, minMag, sawReload, refilled, seen, inRange, outOfRange,
+          deltas: [...deltas], mode: bot.mode,
+          simS: +(cs.gameTime.now() - t0).toFixed(1),
+        };
+      }, weapon, botZ, playerZ, simSeconds);
+
+    const load = async (weapon) => {
+      await page.goto(BASE + `/?map=arena&tbots=1&ctbots=0&time=600&tweap=${weapon}`, { waitUntil: 'networkidle0', timeout: 20000 });
+      await new Promise(r => setTimeout(r, 1200));
+    };
+
+    // ---- B. Reach: the same 60 m sight line, opposite outcomes.
+    // The sniper's engageRange is 80 m and the shotgun's is 12, so this is
+    // decided by the weapon alone and not by any die.
+    await load('sniper');
+    const sniper = await combat('sniper', -15, 45, 14);
+    if (sniper.fail) throw new Error(sniper.fail);
+    await load('shotgun');
+    const shotgun = await combat('shotgun', -15, 45, 14);
+    if (shotgun.fail) throw new Error(shotgun.fail);
+
+    if (!sniper.seen || !sniper.inRange) {
+      throw new Error(`sniper did not reach 60 m: ${JSON.stringify(sniper)}`);
+    }
+    if (sniper.minMag >= sniper.magSize) {
+      throw new Error(`sniper never pulled the trigger at 60 m: ${JSON.stringify(sniper)}`);
+    }
+    if (!shotgun.seen) throw new Error(`shotgun bot never saw the player: ${JSON.stringify(shotgun)}`);
+    if (shotgun.inRange) throw new Error(`shotgun claimed 60 m as in range: ${JSON.stringify(shotgun)}`);
+    if (shotgun.minMag !== shotgun.magSize || shotgun.deltas.length) {
+      throw new Error(`shotgun fired at 60 m: ${JSON.stringify(shotgun)}`);
+    }
+
+    // ---- C. The magazine is real, and the damage is the catalog's.
+    // Close enough that both weapons are inside their own engage range, so
+    // the only difference is what they are holding.
+    await load('smg');
+    const smg = await combat('smg', -15, -7, 26);
+    if (smg.fail) throw new Error(smg.fail);
+    await load('revolver');
+    const revolver = await combat('revolver', -15, -7, 26);
+    if (revolver.fail) throw new Error(revolver.fail);
+
+    for (const r of [smg, revolver]) {
+      if (r.minMag !== 0) throw new Error(`${r.weapon} never emptied its magazine: ${JSON.stringify(r)}`);
+      if (!r.sawReload) throw new Error(`${r.weapon} never reloaded: ${JSON.stringify(r)}`);
+      if (!r.refilled) throw new Error(`${r.weapon} never got rounds back: ${JSON.stringify(r)}`);
+      const bad = r.deltas.filter(d => !ZONES[r.weapon].includes(d));
+      if (bad.length) {
+        throw new Error(`${r.weapon} dealt damage no catalog zone can produce (${bad}): ${JSON.stringify(r)}`);
+      }
+    }
+    // The two damage sets are disjoint by construction, so a landed hit could
+    // only have come from the weapon the bot was actually carrying. Vacuous
+    // if neither landed anything, which is why the magazine claims above
+    // carry the weight.
+    const overlap = smg.deltas.filter(d => revolver.deltas.includes(d));
+    if (overlap.length) throw new Error(`weapons dealt identical damage (${overlap})`);
+
+    console.log('[botWeapons] OK', JSON.stringify({
+      mixed: { drawn: mixed.before, distinct: spread },
+      sniper, shotgun, smg, revolver,
+    }));
+  } catch (e) {
+    failures++;
+    console.log(`[botWeapons] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[botWeapons] ${e}`));
+  await page.close();
+}
+
 try {
-  await runMap('arena', '/', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
+  await runMap('arena', '/?tweap=smg&ctweap=smg', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
   await runFlatRouteCheck();
   await runVisionAwarenessCheck();
   await runPatrolCheck();
+  await runBotWeaponsCheck();
   await runHearingCheck();
-  await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
+  await runMap('elevation', '/?map=elevation&tweap=smg&ctweap=smg', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();
   await runWedgeCheck();
   await runDebugViewCheck();
-  await runMap('warehouse1', '/?map=warehouse1', { botCheck: true, stairsCheck: STAIRS.warehouse1 });
-  await runMap('warehouse2', '/?map=warehouse2', {
+  await runMap('warehouse1', '/?map=warehouse1&tweap=smg&ctweap=smg', { botCheck: true, stairsCheck: STAIRS.warehouse1 });
+  await runMap('warehouse2', '/?map=warehouse2&tweap=smg&ctweap=smg', {
     botCheck: true,
     stairsCheck: STAIRS.warehouse2,
     // Pad A at (8, -9), which serves the -z band; yaw 0 faces -z, so holding

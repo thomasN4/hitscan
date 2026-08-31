@@ -1,8 +1,36 @@
 import { describe, expect, test } from 'vitest';
-import { speedFor, measuredMoveLerp, WALK_SPEED, MAX_MOVE_LERP } from './movement';
+import { isSprintActive, speedFor, measuredMoveLerp, WALK_SPEED, MAX_MOVE_LERP } from './movement';
 import { approach, deadZone } from './smoothing';
 
 const still = { crouching: false, aiming: false, running: false, runLerp: 0 };
+
+describe('isSprintActive', () => {
+  const sprint = {
+    sprintHeld: true,
+    aiming: false,
+    crouching: false,
+    forward: true,
+    backward: false,
+    left: false,
+    right: false,
+  };
+
+  test('requires Shift plus a net movement direction', () => {
+    expect(isSprintActive(sprint)).toBe(true);
+    expect(isSprintActive({ ...sprint, sprintHeld: false })).toBe(false);
+    expect(isSprintActive({ ...sprint, forward: false })).toBe(false);
+  });
+
+  test('opposing movement keys cancel instead of creating sprint intent', () => {
+    expect(isSprintActive({ ...sprint, backward: true })).toBe(false);
+    expect(isSprintActive({ ...sprint, forward: false, left: true, right: true })).toBe(false);
+  });
+
+  test('aim and crouch take precedence over sprint', () => {
+    expect(isSprintActive({ ...sprint, aiming: true })).toBe(false);
+    expect(isSprintActive({ ...sprint, crouching: true })).toBe(false);
+  });
+});
 
 describe('speedFor', () => {
   test('walk is the baseline', () => {

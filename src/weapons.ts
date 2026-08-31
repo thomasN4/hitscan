@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, input, aim, wpn, motion, player, gameTime, WEAPONS, ammoStore,
+import { bots, weapon, session, input, aim, wpn, motion, player, keys, gameTime, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
@@ -24,6 +24,7 @@ import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward }
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
+import { isSprintActive } from './sim/movement';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -33,6 +34,19 @@ import { approach } from './sim/smoothing';
 // has a real miss case to decide about.
 function currentDef(): WeaponDef {
   return WEAPONS[equippedId(wpn.slot)];
+}
+
+/** Live sprint policy shared with player.ts, including stance precedence. */
+function currentSprintActive(): boolean {
+  return isSprintActive({
+    sprintHeld: input.running,
+    aiming: input.aiming,
+    crouching: input.crouching && player.onGround,
+    forward: keys.KeyW === true,
+    backward: keys.KeyS === true,
+    left: keys.KeyA === true,
+    right: keys.KeyD === true,
+  });
 }
 
 /** Zoom FOV target for the current zoom level, clamped into range. */
@@ -320,6 +334,7 @@ export function tryReload(): void {
     magSize: weapon.magSize,
     reserve: weapon.reserve,
     aiming: input.aiming,
+    sprinting: currentSprintActive(),
   });
   if (!d.start) return;
   if (d.dropAim) input.aiming = false; // one motion at a time; fresh RMB to re-raise
@@ -486,7 +501,12 @@ export function shoot(): void {
     weapon.nextRoundAt = 0;
   }
   if (weapon.reloading || weapon.mag <= 0) {
-    if (weapon.mag <= 0) tryReload(); // auto-reload on dry fire
+    if (weapon.mag <= 0 && !emptyReloadLatch) {
+      // A refused held-LMB request is ONE attempt, not a queue that should
+      // spring open as soon as sprint ends. Release LMB before trying again.
+      if (currentSprintActive()) emptyReloadLatch = true;
+      else tryReload(); // auto-reload on a fresh dry-fire attempt
+    }
     return;
   }
   weapon.mag--;
@@ -584,6 +604,7 @@ export function shoot(): void {
  * updateViewmodel (which read the recoil this decays).
  */
 let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on release
+let emptyReloadLatch = false; // sprint-refused dry fire needs a fresh LMB press
 
 /** Blend rate for ADS position and FOV zoom (1/s); ~12 ≈ 80 ms to settle. */
 const ADS_RATE = 12;
@@ -596,6 +617,16 @@ export function updateWeapon(dt: number): void {
   if (!player.alive) return;
 
   const def = currentDef();
+
+  // Sprint wins when it begins during a reload. Run this before animation or
+  // transfer/completion so the cancel frame cannot sneak in one last round.
+  // Rounds already moved by a per-round reload remain live; whole-mag reloads
+  // have not moved anything yet.
+  if (weapon.reloading && currentSprintActive()) {
+    weapon.reloading = false;
+    weapon.reloadEnd = 0;
+    weapon.nextRoundAt = 0;
+  }
 
   // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
   // the sniper settles slowly for bolt-action feel; see core/state.ts WEAPONS).
@@ -684,7 +715,10 @@ export function updateWeapon(dt: number): void {
 
   // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire
   // once per press — the latch blocks repeats until the button is released.
-  if (!input.shooting) triggerLatch = false;
+  if (!input.shooting) {
+    triggerLatch = false;
+    emptyReloadLatch = false;
+  }
   else if (!def.semiAuto || !triggerLatch) {
     if (gameTime.now() - weapon.lastShot >= weapon.fireRate) {
       shoot();

@@ -39,7 +39,10 @@ describe('isLowAmmo', () => {
 
 describe('planReload', () => {
   // A live SMG mid-mag: the everything-fine baseline every refusal flips.
-  const live = { started: true, alive: true, reloading: false, mag: 10, magSize: 30, reserve: 90, aiming: false };
+  const live = {
+    started: true, alive: true, reloading: false, mag: 10, magSize: 30,
+    reserve: 90, aiming: false, sprinting: false,
+  };
 
   test('a partial mag with reserve starts reloading', () => {
     expect(planReload(live)).toEqual({ start: true, dropAim: false });
@@ -58,6 +61,11 @@ describe('planReload', () => {
 
   test('starting a reload while the sights are up DROPS them', () => {
     expect(planReload({ ...live, aiming: true })).toEqual({ start: true, dropAim: true });
+  });
+
+  test('sprinting refuses the reload without touching aim', () => {
+    expect(planReload({ ...live, aiming: true, sprinting: true }))
+      .toEqual({ start: false, dropAim: false });
   });
 
   test('the drop rides the START decision, not the button', () => {

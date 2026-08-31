@@ -68,6 +68,8 @@ export interface ReloadRequest {
   reserve: number;
   /** RMB held: iron sights / scope raised right now. */
   aiming: boolean;
+  /** Shift sprint is active with a net movement direction. */
+  sprinting: boolean;
 }
 
 /** What a keypress of R amounts to. */
@@ -85,6 +87,6 @@ export interface ReloadDecision {
 /** A request that starts reloading: partial mag, rounds available, live player. */
 export function planReload(r: ReloadRequest): ReloadDecision {
   const start = r.started && r.alive && !r.reloading &&
-    r.mag < r.magSize && r.reserve > 0;
+    !r.sprinting && r.mag < r.magSize && r.reserve > 0;
   return { start, dropAim: start && r.aiming };
 }

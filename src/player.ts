@@ -25,7 +25,7 @@ import { colliders, liftPads } from './world';
 import { sfxFootstep } from './audio';
 import { gunGroup, currentAimPitch, currentAimYaw, viewmodelAimOffset } from './weapons';
 import { crosshair } from './hud';
-import { speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
+import { isSprintActive, speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { approach, deadZone } from './sim/smoothing';
 
@@ -75,8 +75,16 @@ export function updateMovement(dt: number): void {
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
   const crouching = input.crouching && player.onGround;
-  const running = input.running && !crouching && !input.aiming;
-  const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: motion.runLerp });
+  const sprinting = isSprintActive({
+    sprintHeld: input.running,
+    aiming: input.aiming,
+    crouching,
+    forward: key('KeyW'),
+    backward: key('KeyS'),
+    left: key('KeyA'),
+    right: key('KeyD'),
+  });
+  const speed = speedFor({ crouching, aiming: input.aiming, running: sprinting, runLerp: motion.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(aim.yaw), 0, -Math.cos(aim.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)
@@ -138,7 +146,7 @@ export function updateMovement(dt: number): void {
   // through the arc (~0.73 s airtime drains runLerp ~97% otherwise), not
   // land at walk pace and rebuild the ramp from zero.
   motion.runLerp = deadZone(
-    approach(motion.runLerp, running && pressingMove ? 1 : 0, dt, 1 / SPRINT_RAMP));
+    approach(motion.runLerp, sprinting && pressingMove ? 1 : 0, dt, 1 / SPRINT_RAMP));
 
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.

@@ -210,6 +210,8 @@ export interface FireController {
   readonly weapon: BotWeaponId;
   /** Rounds chambered. Display only. */
   readonly mag: number;
+  /** Magazine capacity, straight from the catalog def. Display only. */
+  readonly magSize: number;
   /** Rounds held in reserve. Display only. */
   readonly reserve: number;
   /** A reload is running. Display only. */
@@ -308,6 +310,7 @@ export class WeaponFireController implements FireController {
   }
 
   get mag(): number { return this.rounds; }
+  get magSize(): number { return this.def.magSize; }
   get reserve(): number { return this.held; }
   get reloading(): boolean { return this.inReload; }
 

@@ -11,11 +11,10 @@
 // whose geometry matches what the executor's acquisition would produce.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import type { FireController, ShotOutcome } from './botWeapons';
 import {
   DEFAULT_BRAIN_PARAMS,
   DefaultBrain,
-  botDamageRoll,
-  botHitChance,
   pickHeardLead,
   type BrainParams,
   type BrainView,
@@ -42,6 +41,69 @@ function queueRng(values: number[]): () => number {
 
 /** Never-juking, never-firing rng: every draw lands on the passive side. */
 const calmRng = () => 0.9;
+
+/**
+ * A stand-in weapon. It spends draws exactly where a real one does — one in
+ * arm() for the spawn stagger, one per pull() for a burst-of-one's pause — so
+ * every scripted sequence below still reads [strafeDir, stagger, F1 juke, …]
+ * and the brain's draw contract is pinned by the same tests it always was.
+ *
+ * What it does NOT do is decide anything: `readyNow` is set by the test. That
+ * is the point of testing the brain against a stub — cadence, magazine and
+ * reload moved to sim/botWeapons.ts and are pinned there against the real
+ * catalog, so asserting them through the brain would be testing a mechanism
+ * the brain no longer owns (lesson 28, at the unit layer).
+ */
+class StubFire implements FireController {
+  readonly weapon = 'smg';
+  readonly magSize = 30;
+  mag = 30;
+  reserve = 90;
+  reloading = false;
+  /** Whether ready() answers true — the test's lever on the trigger. */
+  readyNow = false;
+  arms = 0;
+  pulls = 0;
+  resolves: number[] = [];
+  /** Every tick this brain took, in order: the once-per-frame contract. */
+  ticks: { dt: number; engaged: boolean }[] = [];
+
+  constructor(private readonly rng: () => number = calmRng) {}
+
+  arm(): void { this.arms++; this.rng(); }
+  tick(dt: number, engaged: boolean): void { this.ticks.push({ dt, engaged }); }
+  ready(): boolean { return this.readyNow; }
+  pull(): void { this.pulls++; this.rng(); }
+  resolve(dist: number): ShotOutcome {
+    this.resolves.push(dist);
+    return { damage: 0, zone: null, rays: 1, hits: 0 };
+  }
+  hitChance(): number { return 0; }
+}
+
+/**
+ * A brain whose weapon is permanently willing to fire. The strongest form of
+ * every "must not shoot on this stimulus" claim: if the trigger is refused
+ * here, nothing about cadence, magazine or reload is doing the refusing.
+ */
+function eagerBrain(params: BrainParams = DEFAULT_BRAIN_PARAMS): DefaultBrain {
+  const fire = new StubFire();
+  fire.readyNow = true;
+  return brainOf(params, calmRng, fire);
+}
+
+/**
+ * Build a brain on a stub weapon sharing its rng. Every construction site
+ * below goes through this rather than `new DefaultBrain`, so the weapon and
+ * the brain cannot accidentally end up on different rng streams.
+ */
+function brainOf(
+  params: BrainParams,
+  rng: () => number,
+  fire: FireController = new StubFire(rng),
+): DefaultBrain {
+  return new DefaultBrain(params, rng, fire);
+}
 
 /** Movement-only params: engageRange 0 keeps the trigger branch (and its reroll draw) out of the way. */
 function moveParams(): BrainParams {
@@ -108,9 +170,9 @@ function view(o: ViewOpts = {}): BrainView {
   };
 }
 
-/** Fresh brain strafing +x-perpendicular: constructor draws [dir, cooldown] = [0.9, 0.9]. */
+/** Fresh brain strafing +x-perpendicular: constructor draws [dir, stagger] = [0.9, 0.9]. */
 function calmBrain(params: BrainParams = moveParams()): DefaultBrain {
-  return new DefaultBrain(params, calmRng);
+  return brainOf(params, calmRng);
 }
 
 describe('DefaultBrain movement blend', () => {
@@ -184,9 +246,9 @@ describe('DefaultBrain movement blend', () => {
   });
 
   it('initial strafe direction follows the constructor draw', () => {
-    const plus = new DefaultBrain(moveParams(), queueRng([0.9, 0.9]));
+    const plus = brainOf(moveParams(), queueRng([0.9, 0.9]));
     expect(plus.decide(view(), DT).step.z).toBeCloseTo(4 * DT, 12);
-    const minus = new DefaultBrain(moveParams(), queueRng([0.1, 0.9]));
+    const minus = brainOf(moveParams(), queueRng([0.1, 0.9]));
     expect(minus.decide(view(), DT).step.z).toBeCloseTo(-4 * DT, 12);
   });
 });
@@ -221,7 +283,7 @@ describe('DefaultBrain strafe steering', () => {
 
   it('jukes at jukeRate·dt probability, affecting movement from the NEXT frame', () => {
     // Draws: [dir+, cooldown]; F1 juke 0.4 < 0.5·1 → flip AFTER F1's step.
-    const brain = new DefaultBrain(
+    const brain = brainOf(
       moveParams(),
       queueRng([0.9, 0.9, /* F1 */ 0.4, /* F2 */ 0.9]),
     );
@@ -231,7 +293,7 @@ describe('DefaultBrain strafe steering', () => {
   });
 
   it('does not juke when the draw clears the threshold', () => {
-    const brain = new DefaultBrain(moveParams(), queueRng([0.9, 0.9, 0.5, 0.9]));
+    const brain = brainOf(moveParams(), queueRng([0.9, 0.9, 0.5, 0.9]));
     const dt = 1;
     expect(brain.decide(view(), dt).step.z).toBeCloseTo(4 * dt, 12);
     expect(brain.decide(view(), dt).step.z).toBeCloseTo(4 * dt, 12);
@@ -253,7 +315,7 @@ describe('DefaultBrain hold without a visual', () => {
 
   it('never requests a shot, even with an expired cooldown', () => {
     // Constructor draw 0: the staggered first shot is already due.
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
     for (let f = 1; f <= 5; f++) {
       expect(brain.decide(held, DT).wantShoot, `frame ${f}`).toBe(false);
     }
@@ -577,50 +639,76 @@ describe('DefaultBrain trigger', () => {
   /** dt 0.25 makes the hand-computed frame arithmetic exact quarters. */
   const CADENCE_DT = 0.25;
 
-  it('fires the first shot exactly when the staggered delay expires', () => {
-    // Full script pins the draw contract: one juke per frame, one reroll on
-    // fire (the juke precedes the reroll within a frame). cd hits 0 at F4.
-    const brain = new DefaultBrain(
-      DEFAULT_BRAIN_PARAMS,
-      queueRng([
-        0.9, 0,                                  // dir+, stagger 1 s
-        /* F1 */ 0.9, /* F2 */ 0.9, /* F3 */ 0.9,
-        /* F4 */ 0.9, 0.5,                       // juke, reroll → cd 1.3
-      ]),
-    );
+  it('asks the weapon every frame and fires exactly when it says it may', () => {
+    // The brain's whole remaining trigger responsibility: forward. WHEN the
+    // weapon is ready — stagger, cadence, burst, magazine, reload — is
+    // sim/botWeapons.ts's, pinned there against the real catalog.
+    const rng = queueRng([0.9, 0.9]); // dir+, stagger
+    const fire = new StubFire(rng);
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, rng, fire);
     const v = view({ dist: 10 });
-    expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(false); // cd 0.75
-    expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(false); // cd 0.50
-    expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(false); // cd 0.25
-    expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(true);  // cd 0 → fire
+
+    expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(false);
+    expect(fire.pulls).toBe(0);
+
+    fire.readyNow = true;
+    expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(true);
+    expect(fire.pulls).toBe(1);
+
+    fire.readyNow = false;
+    expect(brain.decide(v, CADENCE_DT).wantShoot).toBe(false);
+    expect(fire.pulls).toBe(1);
   });
 
-  it('re-fires once the drawn post-shot cooldown expires', () => {
-    // First shot F4 (cd 1.3); next due 6 frames later, F10.
-    const brain = new DefaultBrain(
-      DEFAULT_BRAIN_PARAMS,
-      queueRng([
-        0.9, 0,                                  // dir+, stagger
-        /* F1 */ 0.9, /* F2 */ 0.9, /* F3 */ 0.9,
-        /* F4 */ 0.9, 0.5,                       // juke, reroll → 1.3
-        /* F5 */ 0.9, /* F6 */ 0.9, /* F7 */ 0.9,
-        /* F8 */ 0.9, /* F9 */ 0.9,
-        /* F10 */ 0.9, 0.5,                      // juke, reroll
-      ]),
-    );
-    const v = view({ dist: 10 });
-    const shots: number[] = [];
-    for (let f = 1; f <= 10; f++) {
-      if (brain.decide(v, CADENCE_DT).wantShoot) shots.push(f);
-    }
-    expect(shots).toEqual([4, 10]);
+  it('ticks the weapon exactly once per frame, in every mode', () => {
+    // The magazine and the reload clock belong to the bot, not to the mode it
+    // is in: a bot that breaks contact and routes away must arrive loaded.
+    const fire = new StubFire();
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    brain.decide(view({ dist: 10 }), DT);                       // engage
+    brain.decide(view({ visual: null }), DT);                   // hold/patrol
+    brain.decide(view({ visual: null, nextPatrolWaypoint: () => new THREE.Vector3(9, 0, 0) }), DT);
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    brain.decide(view({ visual: null }), DT);                   // damage search
+    expect(fire.ticks).toHaveLength(4);
+    for (const t of fire.ticks) expect(t.dt).toBe(DT);
+  });
+
+  it('reports a firefight only while a shootable visual owns the frame', () => {
+    // `engaged` gates the opportunistic top-up, so it must mean "fighting
+    // right now" and nothing looser.
+    const fire = new StubFire();
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    brain.decide(view({ dist: 10 }), DT);
+    expect(fire.ticks.at(-1)?.engaged).toBe(true);
+    brain.decide(view({ dist: 2, dist3: 50, rise: 50 }), DT);   // seen, out of range
+    expect(fire.ticks.at(-1)?.engaged).toBe(false);
+    brain.decide(view({ visual: null }), DT);                   // nothing seen
+    expect(fire.ticks.at(-1)?.engaged).toBe(false);
+  });
+
+  it('a damage bearing is not a firefight, even over a same-frame visual', () => {
+    // Priority 1 discards the look, so the frame cannot fire — and must not
+    // claim to be engaged either, or a bot pinned by fire it cannot see would
+    // refuse to top up its magazine.
+    const fire = new StubFire();
+    fire.readyNow = true;
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const intent = brain.decide(view({ dist: 10 }), DT);
+    expect(intent.wantShoot).toBe(false);
+    expect(intent.mode).toBe('search');
+    expect(fire.pulls).toBe(0);
+    expect(fire.ticks.at(-1)?.engaged).toBe(false);
   });
 
   it('holds fire on a visual beyond engage range, but still moves on it', () => {
     // The gate reads dist3, so a planar-close target high above is out of
-    // range too — and agrees with the die rollHit rolls on. Movement is NOT
-    // gated: the bot approaches what it sees whatever the range.
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0]));
+    // range too — and agrees with the die resolveShot rolls on. Movement is
+    // NOT gated: the bot approaches what it sees whatever the range.
+    const fire = new StubFire();
+    fire.readyNow = true;
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
     const far = view({ dist: 2, dist3: 50, rise: 50 });
     for (let f = 1; f <= 8; f++) {
       const intent = brain.decide(far, CADENCE_DT);
@@ -628,90 +716,63 @@ describe('DefaultBrain trigger', () => {
       expect(intent.mode).toBe('engage');
       expect(intent.step.x).toBeGreaterThan(0);
     }
+    expect(fire.pulls).toBe(0);
   });
 
-  it('spends no shot while the staggered first-shot delay runs', () => {
-    const fresh = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([0.9, 0.99])); // cd ≈ 2.98 s
-    for (let f = 1; f <= 4; f++) expect(fresh.decide(view(), CADENCE_DT).wantShoot).toBe(false);
-  });
-
-  it('re-arms the staggered first shot on respawn', () => {
-    // Brains outlive their bodies. Without onRespawn a revived bot keeps
-    // counting down whatever cooldown its corpse carried — here 1.3 s from
-    // the shot it just took — instead of starting a fresh stagger.
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([
-      0.9, 0,                                  // dir+, stagger = firstDelayMin = 1.0 s
-      /* F1 */ 0.9, /* F2 */ 0.9, /* F3 */ 0.9,
-      /* F4 */ 0.9, 0.5,                       // juke, post-shot reroll -> cd 1.3
-      /* respawn */ 0,                         // fresh stagger -> 1.0 s again
-    ]));
-    const v = view({ dist: 10 });
-    const first: number[] = [];
-    for (let f = 1; f <= 4; f++) {
-      if (brain.decide(v, CADENCE_DT).wantShoot) first.push(f);
+  it('never shoots on memory, search, hearing or patrol however ready the weapon', () => {
+    // The structural claim tranche 6 rests on: only a CURRENT visual can
+    // authorize a shot. A weapon that always says yes must change nothing.
+    const fire = new StubFire();
+    fire.readyNow = true;
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    brain.decide(view({ dist: 10 }), DT);          // acquire, so memory exists
+    const blind = { visual: null } as const;
+    for (let f = 1; f <= 30; f++) {
+      expect(brain.decide(view(blind), DT).wantShoot, `frame ${f}`).toBe(false);
     }
-    expect(first).toEqual([4]); // 1.0 s at 0.25 s frames
+    expect(fire.pulls).toBe(1); // the one engage frame, and nothing since
+  });
 
+  it('arms the weapon at construction and again on respawn', () => {
+    // Brains outlive their bodies: without this a revived bot inherits the
+    // corpse's magazine and whatever cadence it was mid-way through.
+    const fire = new StubFire();
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    expect(fire.arms).toBe(1);
     brain.onRespawn();
-    const second: number[] = [];
-    for (let f = 1; f <= 6; f++) {
-      if (brain.decide(v, CADENCE_DT).wantShoot) second.push(f);
-    }
-    // Re-armed to 1.0 s, so the fourth frame again. The 1.3 s the corpse was
-    // carrying would have held fire until the sixth.
-    expect(second).toEqual([4]);
+    expect(fire.arms).toBe(2);
+  });
+
+  it('takes the construction draws in the documented order', () => {
+    // [strafeDir, stagger] — the stagger is the weapon's draw, taken from the
+    // brain's stream inside the constructor. A controller that drew when it
+    // was BUILT would reverse these and shift every script in this file.
+    const seen: number[] = [];
+    const rng = (): number => { const v = [0.1, 0.42][seen.length] ?? 0.9; seen.push(v); return v; };
+    const fire = new StubFire(rng);
+    const brain = brainOf(moveParams(), rng, fire);
+    expect(seen).toEqual([0.1, 0.42]);
+    expect(fire.arms).toBe(1);
+    // 0.1 < 0.5 selected the -1 strafe direction, so the drift runs -z.
+    expect(brain.decide(view(), DT).step.z).toBeCloseTo(-4 * DT, 12);
+  });
+
+  it('resolveShot and hitChance read the weapon, not the brain', () => {
+    const fire = new StubFire();
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    expect(brain.resolveShot(12.5)).toEqual({ damage: 0, zone: null, rays: 1, hits: 0 });
+    expect(fire.resolves).toEqual([12.5]);
+    expect(brain.weapon).toBe('smg');
+    expect(brain.magSize).toBe(30);
   });
 
   it('inRange mirrors the trigger\'s exclusive engageRange comparison', () => {
     // The executor requires this predicate to pass before realizing a shot,
     // so it must agree with decide() exactly — same bound, same exclusivity.
-    const brain = new DefaultBrain({ ...DEFAULT_BRAIN_PARAMS, engageRange: 45 }, calmRng);
+    const brain = brainOf({ ...DEFAULT_BRAIN_PARAMS, engageRange: 45 }, calmRng);
     expect(brain.inRange(44.9)).toBe(true);
     expect(brain.inRange(45)).toBe(false);
     expect(brain.inRange(80)).toBe(false);
-  });
-});
-
-describe('ballistic rolls', () => {
-  it('hit chance falls off linearly and clamps to its floor (default params)', () => {
-    const p = DEFAULT_BRAIN_PARAMS;
-    expect(botHitChance(0, p)).toBeCloseTo(p.hitChanceNear, 12);
-    expect(botHitChance(40, p)).toBeCloseTo(0.15, 12); // 0.65 − 40/80
-    expect(botHitChance(80, p)).toBeCloseTo(p.hitChanceMin, 12);
-    expect(botHitChance(800, p)).toBeCloseTo(p.hitChanceMin, 12);
-    let prev = Infinity;
-    for (let d = 0; d <= 100; d += 5) {
-      const c = botHitChance(d, p);
-      expect(c).toBeLessThanOrEqual(prev);
-      prev = c;
-    }
-  });
-
-  it('damage roll spans [damageMin, damageMin + damageSpan] (default params)', () => {
-    const p = DEFAULT_BRAIN_PARAMS;
-    expect(botDamageRoll(() => 0, p)).toBeCloseTo(p.damageMin, 12);
-    expect(botDamageRoll(() => 0.5, p)).toBeCloseTo(15, 12);
-    expect(botDamageRoll(() => 1, p)).toBeCloseTo(p.damageMin + p.damageSpan, 12);
-  });
-
-  it('brain delegates consume the same rng stream and read the same params', () => {
-    const brain = new DefaultBrain(DEFAULT_BRAIN_PARAMS, queueRng([/* dir */ 0.9, /* cd */ 0.9, /* dmg */ 0.25]));
-    expect(brain.hitChance(0)).toBe(DEFAULT_BRAIN_PARAMS.hitChanceNear);
-    expect(brain.rollDamage()).toBeCloseTo(DEFAULT_BRAIN_PARAMS.damageMin + 0.25 * DEFAULT_BRAIN_PARAMS.damageSpan, 12);
-  });
-
-  it('rollHit draws from the brain rng and thresholds against hitChance', () => {
-    // hitChance(0) = hitChanceNear = 0.65: a draw below lands, at/above misses.
-    const p = DEFAULT_BRAIN_PARAMS;
-    const brain = new DefaultBrain(p, queueRng([/* dir */ 0.9, /* cd */ 0.9, /* hit */ 0.649, /* hit */ 0.65, /* hit */ 0.9]));
-    expect(brain.rollHit(0)).toBe(true);
-    expect(brain.rollHit(0)).toBe(false);
-    expect(brain.rollHit(0)).toBe(false);
-    // hitChance never wins a draw the floor can't: at extreme range the same
-    // low draw that would land near still lands iff below hitChanceMin.
-    const far = new DefaultBrain(p, queueRng([0.9, 0.9, p.hitChanceMin - 0.001, p.hitChanceMin]));
-    expect(far.rollHit(800)).toBe(true);
-    expect(far.rollHit(800)).toBe(false);
   });
 });
 
@@ -766,11 +827,8 @@ describe('DefaultBrain memory pursuit', () => {
     expect(second.lookAt!.y).toBeCloseTo(1.9, 12);
   });
 
-  it('never orders a shot from memory, even with the cooldown long expired', () => {
-    const brain = new DefaultBrain(
-      { ...DEFAULT_BRAIN_PARAMS, cooldownMin: -5, cooldownSpan: 0 },
-      calmRng,
-    );
+  it('never orders a shot from memory, however willing the weapon', () => {
+    const brain = eagerBrain();
     brain.decide(view({ visual: visualAt(10) }), DT); // reroll parks cd at −5
     for (let f = 1; f <= 5; f++) {
       const intent = brain.decide(
@@ -938,16 +996,6 @@ describe('DefaultBrain scan search', () => {
 });
 
 describe('DefaultBrain incoming fire', () => {
-  /** Params that keep every cooldown pinned at/below zero except the spawn stagger. */
-  function hotParams(): BrainParams {
-    return {
-      ...DEFAULT_BRAIN_PARAMS,
-      firstDelayMin: 0,
-      firstDelaySpan: 0,
-      cooldownMin: -5,
-      cooldownSpan: 0,
-    };
-  }
 
   it('copies and normalizes the bearing and never retains the caller’s vector', () => {
     const brain = calmBrain();
@@ -968,7 +1016,7 @@ describe('DefaultBrain incoming fire', () => {
   });
 
   it('outranks a simultaneous visual: search, focus cleared, no shot', () => {
-    const brain = new DefaultBrain(hotParams(), calmRng);
+    const brain = eagerBrain();
     brain.decide(view({ visual: visualAt(10) }), DT); // would fire: cd ≤ 0
     brain.onIncomingFire(new THREE.Vector3(3, 0, 4));
 
@@ -984,7 +1032,7 @@ describe('DefaultBrain incoming fire', () => {
   });
 
   it('never shoots during the damage search and a later visual reacquires normally', () => {
-    const brain = new DefaultBrain(hotParams(), calmRng);
+    const brain = eagerBrain();
     brain.decide(view({ visual: visualAt(10) }), DT); // fires; reroll parks cd at −5
     brain.onIncomingFire(new THREE.Vector3(3, 0, 4));
 
@@ -1116,8 +1164,8 @@ describe('DefaultBrain hearing', () => {
     expect(intent.lookAt!.y).toBeCloseTo(1.9, 12);
   });
 
-  it('never orders a shot from a heard position, cooldown long expired', () => {
-    const brain = new DefaultBrain({ ...DEFAULT_BRAIN_PARAMS, cooldownMin: -5, cooldownSpan: 0 }, calmRng);
+  it('never orders a shot from a heard position, however willing the weapon', () => {
+    const brain = eagerBrain();
     for (let f = 1; f <= 5; f++) {
       const intent = brain.decide(view({
         visual: null,
@@ -1394,16 +1442,6 @@ describe('DefaultBrain patrol', () => {
 describe('DefaultBrain damage advance', () => {
   const HALF_DT = 0.5; // whole-half frames: the 3 s boundary is exact
 
-  /** Params that keep every cooldown pinned at/below zero except the spawn stagger. */
-  function hotParams(): BrainParams {
-    return {
-      ...DEFAULT_BRAIN_PARAMS,
-      firstDelayMin: 0,
-      firstDelaySpan: 0,
-      cooldownMin: -5,
-      cooldownSpan: 0,
-    };
-  }
 
   /** Enter a damage search whose base bearing is due +x. */
   function advanceBrain(): { brain: DefaultBrain; entry: ReturnType<DefaultBrain['decide']> } {
@@ -1534,7 +1572,7 @@ describe('DefaultBrain damage advance', () => {
   });
 
   it('never fires during the advance without visual acquisition', () => {
-    const brain = new DefaultBrain(hotParams(), calmRng); // every cooldown due
+    const brain = eagerBrain(); // the weapon is always willing
     brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
     for (let f = 0; f < 5; f++) {
       expect(brain.decide(view({ visual: null }), 0.5).wantShoot, `frame ${f}`).toBe(false);

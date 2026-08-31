@@ -178,6 +178,23 @@ export interface Bot {
   moveBlocked: boolean;
   /** What the bot's brain is doing, for the DEV readout. Display only. */
   mode: BrainMode;
+  /**
+   * The catalog weapon this bot carries for the match, drawn once at
+   * construction. Drives its accuracy curve, engagement bands, cadence,
+   * magazine, silhouette and report — and names it in the killfeed and the
+   * DEV readout. Read-only outside bots.ts: a bot's weapon does not change
+   * within a life or between lives.
+   */
+  readonly weapon: BotWeaponId;
+  /**
+   * Rounds chambered, magazine capacity, and whether a reload is running.
+   * Display only — a reload you cannot see is a mechanism you cannot debug,
+   * which is why these are on the shape at all rather than private to the
+   * fire controller that owns them.
+   */
+  readonly mag: number;
+  readonly magSize: number;
+  readonly reloading: boolean;
   /** Waypoints of the route the bot is walking, nav-graph order; empty when it is steering directly. Display only. */
   readonly navPath: readonly THREE.Vector3[];
   /** How far along `navPath` the bot has got — waypoints before this are consumed. Display only. */

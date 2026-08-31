@@ -27,6 +27,25 @@ export type WeaponClass = 'primary' | 'secondary' | 'melee';
 export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'knife';
 
 /**
+ * Weapons a BOT may carry. Derived with Exclude rather than written out as a
+ * second literal list, so widening WeaponId re-derives here and every Record
+ * over it (sim/botWeapons.ts's tuning, bots.ts's models, audio.ts's tones)
+ * fails to compile until the new weapon says how a bot uses it.
+ *
+ * The knife is excluded because a melee bot needs a swing through
+ * sim/melee.ts rather than a hit die, which is tranche 7b's work. Keeping
+ * that boundary in the TYPE means nothing — not the URL parser, not the
+ * menu, not a future caller — can hand a bot a blade it has no way to use.
+ */
+export type BotWeaponId = Exclude<WeaponId, 'knife'>;
+
+/**
+ * A menu/URL bot-weapon setting: one weapon for the whole team, or an
+ * independent draw per bot (sim/botWeapons.ts:resolveBotWeapon).
+ */
+export type BotWeaponChoice = BotWeaponId | 'mixed';
+
+/**
  * Static stats for one weapon, shaped like the WEAPONS entries below.
  *
  * The optional fields are per-weapon extras — the sniper's scope gate /

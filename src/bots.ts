@@ -11,8 +11,13 @@
 // (slideMoveXZ + resolveVertical, so bots climb stairs and land off edges),
 // report rejection back as moveBlocked, face the intent's facing, aim the
 // barrel at its lookAt, and loose a shot only when the frame's observation
-// agrees with the intent's focus. All tuning of behavior lives in
-// BrainParams / brain classes; this file holds no policy numbers.
+// agrees with the intent's focus. Behavior tuning lives in two places, and
+// neither is here: BrainParams / brain classes for policy, and
+// sim/botWeapons.ts:BOT_WEAPON_TUNING for everything a WEAPON decides — its
+// accuracy curve, cadence, burst discipline and the chase bands it wants to
+// fight at. This file holds no policy numbers; the per-weapon geometry below
+// is presentation, and the muzzle offset it carries is a model dimension
+// rather than a tunable.
 //
 // Shot gating contract (realized by the default brain): fire only when a
 // cooldown expires AND the bot currently SEES its focus — the observation is
@@ -686,7 +691,7 @@ export class Bot implements BotShape {
       // candidate. Keep this executor-owned lookup rather than returning a
       // live Target from perception: observations cross that seam as copies
       // plus stable identity, never entity references. The die rolls from the
-      // ACTUAL post-move distance (see botBrains.ts:botHitChance).
+      // ACTUAL post-move distance (see sim/botWeapons.ts:botHitChance).
       const target = enemies.find(e => e.id === obs.id);
       if (target) this.shoot(this.eyePos().distanceTo(obs.eye), target);
     }
@@ -882,12 +887,17 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Realize a shot the brain ordered. Hits are probabilistic (no
-   * projectile): chance falls off linearly with the eye-to-eye distance to
-   * the target so distant bots are mostly noise; a hit routes damage by
-   * target kind — the player through damagePlayer, a bot through damageBot
-   * as a flat torso hit. Both dice (hit and damage) come from the brain's
-   * rng stream.
+   * Realize a shot the brain ordered. Hits stay probabilistic (no
+   * projectile): each of the weapon's rays rolls against a chance that falls
+   * off linearly with the eye-to-eye distance, so distant bots are mostly
+   * noise. What a landed ray is WORTH comes from the catalog — a rolled hit
+   * zone through sim/damage.ts:damageForPart — so a bot victim can take a
+   * head-multiplied 220 from a revolver as readily as a 26 from an smg, and
+   * 'flat torso' damage no longer exists on this path.
+   *
+   * One damage call per trigger pull whatever the ray count, attributed to
+   * the best zone any ray struck; see the summing comment below. Every die
+   * (per-ray hit, per-landed-ray zone) comes from the brain's rng stream.
    */
   private shoot(dist: number, target: Target): void {
     const muzzle = this.muzzlePos();

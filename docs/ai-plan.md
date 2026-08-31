@@ -739,9 +739,7 @@ and what it deliberately did not:
   the Elevation stair/ceiling stall diagnosis. The controlled `[botClimb]`
   scenario must continue to pass.
 
-## Planned
-
-### Tranche 6 — senses
+### Tranche 6b — hearing and sound events (PR #85)
 
 The pre-tranche executor chose the best live opponent from exact world
 positions every frame. LOS gated the SHOT, but not the KNOWLEDGE: a bot tracked
@@ -751,18 +749,20 @@ replaces that omniscience with observations, memory and bounded investigation
 without moving raycasts, collision or effects into the brain. 6a did the
 replacing (PR #69, above); 6b adds the remaining sense.
 
-Land this in two implementation PRs. **6a establishes sight, memory and search
-first; 6b feeds sound into that settled stimulus seam.** Combining them would
-make a failed pursuit ambiguous between vision, memory, hearing and routing at
-the exact point the tranche is trying to make those causes observable.
+It landed in two implementation PRs. **6a established sight, memory and search
+first; 6b fed sound into that settled stimulus seam.** Combining them would
+have made a failed pursuit ambiguous between vision, memory, hearing and
+routing at the exact point the tranche existed to make those causes
+observable.
 
-**Status: 6a merged as PR #69 on 2026-08-29, its approved follow-up as PR #72
-the same day, and one later fix (`4a154f5`) rode in on PR #49 — the record is
-under Merged above. 6b is planned and unstarted; what follows is its
-specification, refreshed against the code as it stands after PRs #49, #63 and
-the loadout tranche.**
+**Status: the tranche is closed. 6a merged as PR #69 on 2026-08-29 with its
+follow-up as PR #72 (and one later fix, `4a154f5`, on PR #49); 6b merged as
+PR #85 on 2026-08-30. The specification below is the one 6b was built to,
+refreshed in PR #81 against the code as it stood after PRs #49, #63 and the
+loadout tranche; the departures the implementation made from it are named in
+the record that follows. The follow-up its playtest raised is under Planned.**
 
-#### 6b — hearing and sound events
+#### What 6b specified
 
 Add an engine-free `sim/soundEvents.ts` with a fixed-capacity **256-entry ring
 buffer**. The module defines the data structure but holds no shared module
@@ -852,7 +852,7 @@ hostile gunshot investigation through a wall, run-full/walk-half boundaries,
 crouch silence, allied-sound rejection and damage-bearing precedence over an
 already heard event.
 
-#### 6b implementation record (in flight — not merged, no PR number)
+#### Implementation record (PR #85)
 
 What the implementation built, and where it departed from the spec above:
 
@@ -919,7 +919,18 @@ footstep cadence, and nothing shoots, so `heard` is empty on every frame.
 Two later full-suite runs passed it. Load-sensitive, pre-existing, and left
 alone.
 
-#### Why the preceding work is prerequisite
+#### Playtest (hearing live)
+
+Playtesters confirm the mechanics feel right. Bots converging on gunfire reads
+as intent rather than as swarming, and the run/walk/crouch radii give the
+stances something real to trade against each other — the 80 / 24 / 12 metre
+numbers need no retuning, and per-weapon loudness stays deferred.
+
+The session raised one refinement rather than a complaint, recorded under
+Planned below: bots should prefer the NEAREST gunshot, and should not be pulled
+off a pursuit they are already committed to.
+
+#### Why the preceding work was prerequisite
 
 - **#46 (shot-gate grading)** made range and LOS separately visible. Tranche 6
   adds a third distinction — perceived versus merely remembered — and would be
@@ -938,9 +949,46 @@ alone.
   focus-less stimulus structurally unable to fire. 6b adds a fourth stimulus
   to that ladder and no new machinery for acting on one.
 
-6a therefore landed before 6b, and each receives its own feature PR, unit pins,
-smoke phase and playtest record. The document PR that records this plan changes
-no gameplay behavior.
+6a therefore landed before 6b, and each received its own feature PR, unit pins,
+smoke phase and playtest record.
+
+## Planned
+
+### Tranche 6b follow-up — nearest gunshot, and who may be interrupted
+
+Raised by 6b's playtest and deliberately kept out of PR #85: bots should
+investigate the NEAREST gunshot, and only when they are not already fighting or
+already travelling toward a target.
+
+Both halves change decisions 6b made on purpose, so the work starts from what
+those were rather than from a blank page.
+
+- **Nearest, not merely newest.** `pickHeardLead` ignores position today —
+  gunshot over footstep, newest within a kind, nothing else — and its comment
+  gives the reason: preferring the nearer of two audible gunshots would
+  "quietly reintroduce ranking by position", which is what 6a removed. That
+  argument is strong for IDENTIFYING a target and weak for choosing which of
+  several noises to walk to, where nearest is simply the better lead. So the
+  change is sound, but it must rewrite that comment to say why the two cases
+  differ rather than silently contradict it. Note the shape cost: a distance
+  test needs the listener's position, which the pure picker does not take.
+- **Who may be interrupted — a REVERSAL, not an addition.** 6b put hearing
+  ABOVE memory and search, following this tranche's ladder
+  (`gunshot > footstep > remembered position`) and against the placeholder slot
+  6a had left below memory; the contradiction and its resolution are annotated
+  beside the ladder above. "Not already fighting or moving toward a target"
+  reverses that: a committed pursuit would outrank a fresh noise. Visible
+  combat already wins, so the live question is narrower than it sounds — it is
+  only about memory pursuit and an active search. The playtest is the evidence
+  that should settle it. What must not happen is settling it twice in opposite
+  directions without noticing, which is why this is written down rather than
+  left as a preference.
+
+Still deferred, and not part of this follow-up unless a playtest asks for them:
+per-weapon `soundRadius`, sound occlusion (walls neither silence nor attenuate
+today, and adding that spends another geometry-probe budget per bot per event),
+and bot footsteps — only the player emits them, so bots cannot hear each other
+walk.
 
 ## Deferred
 

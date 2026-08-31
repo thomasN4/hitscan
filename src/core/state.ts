@@ -964,6 +964,11 @@ export const input: InputState = {
   crouching: false,
 };
 
+/** Effective crouch stance: the toggle only takes effect on the ground. */
+export function effectiveCrouching(): boolean {
+  return input.crouching && player.onGround;
+}
+
 /**
  * Look angles, in radians. Written by main.ts's mousemove handler (pitch
  * clamped there) and combat.ts's respawn; read by player.ts's movement
@@ -987,10 +992,11 @@ export const aim: AimState = {
 
 /**
  * Weapon DYNAMICS — the live accuracy/recoil/ADS state driven by firing and
- * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, updateWeapon)
- * plus one main.ts write — its wheel handler steps zoomLevel while scoped;
- * combat.ts's respawn() resets it to round-start values; main.ts and hud.ts
- * read it (sensitivity scaling and scope gate, zoom label).
+ * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, tryReload,
+ * updateWeapon) plus one main.ts write — its wheel handler steps zoomLevel
+ * while scoped; combat.ts's death/respawn paths cancel pending reload audio,
+ * and respawn resets the slice to round-start values. main.ts and hud.ts read
+ * it (sensitivity scaling and scope gate, zoom label).
  *
  * Lerp values (`adsLerp`) are smoothed 0..1 blends updated every frame;
  * never set them directly from input.

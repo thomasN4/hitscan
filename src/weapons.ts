@@ -11,7 +11,7 @@ import { solids } from './world';
 import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTime,
          soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
-         equippedId, cancelPendingReloadSfx,
+         equippedId, cancelPendingReloadSfx, effectiveCrouching,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
 import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxShell, sfxSwitch } from './audio';
@@ -47,11 +47,11 @@ function currentDef(): WeaponDef {
 }
 
 /** Live sprint policy shared with player.ts, including stance precedence. */
-export function currentSprintActive(): boolean {
+export function currentSprintActive(crouching: boolean): boolean {
   return isSprintActive({
     sprintHeld: input.running,
     aiming: input.aiming,
-    crouching: input.crouching && player.onGround,
+    crouching,
     forward: keyHeld('KeyW'),
     backward: keyHeld('KeyS'),
     left: keyHeld('KeyA'),
@@ -362,7 +362,7 @@ export function tryReload(): void {
     magSize: weapon.magSize,
     reserve: weapon.reserve,
     aiming: input.aiming,
-    sprinting: currentSprintActive(),
+    sprinting: currentSprintActive(effectiveCrouching()),
   });
   if (!d.start) return;
   if (d.dropAim) input.aiming = false; // one motion at a time; fresh RMB to re-raise
@@ -532,7 +532,7 @@ export function shoot(): void {
     if (weapon.mag <= 0 && !wpn.emptyReloadLatch) {
       // A refused held-LMB request is ONE attempt, not a queue that should
       // spring open as soon as sprint ends. Release LMB before trying again.
-      if (currentSprintActive()) wpn.emptyReloadLatch = true;
+      if (currentSprintActive(effectiveCrouching())) wpn.emptyReloadLatch = true;
       else tryReload(); // auto-reload on a fresh dry-fire attempt
     }
     return;
@@ -668,7 +668,7 @@ export function updateWeapon(dt: number): void {
   // transfer/completion so the cancel frame cannot sneak in one last round.
   // Rounds already moved by a per-round reload remain live; whole-mag reloads
   // have not moved anything yet.
-  if (weapon.reloading && currentSprintActive()) {
+  if (weapon.reloading && currentSprintActive(effectiveCrouching())) {
     cancelReload();
   }
 

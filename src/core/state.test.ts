@@ -7,7 +7,8 @@
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
          sanitizeLoadout, session, player, playerFeet, equippedId,
-         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld, wpn,
+         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld, input,
+         effectiveCrouching, wpn,
          cancelPendingReloadSfx } from './state';
 
 describe('state module purity', () => {
@@ -37,6 +38,19 @@ describe('state module purity', () => {
     keys.KeyW = true;
     expect(keyHeld('KeyW')).toBe(true);
     delete keys.KeyW;
+  });
+
+  test('makes crouch effective only while grounded', () => {
+    const before = { toggled: input.crouching, grounded: player.onGround };
+    input.crouching = true;
+    player.onGround = false;
+    expect(effectiveCrouching()).toBe(false);
+    player.onGround = true;
+    expect(effectiveCrouching()).toBe(true);
+    input.crouching = false;
+    expect(effectiveCrouching()).toBe(false);
+    input.crouching = before.toggled;
+    player.onGround = before.grounded;
   });
 
   test('cancels and clears pending reload audio through the state owner', () => {

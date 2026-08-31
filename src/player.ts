@@ -19,7 +19,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, aim, wpn, motion, keyHeld, gameTime, soundEvents, playerFeet } from './core/state';
+import { player, input, aim, wpn, motion, keyHeld, effectiveCrouching, gameTime, soundEvents, playerFeet } from './core/state';
 import { slideMoveXZ, resolveVertical } from './collision';
 import { colliders, liftPads } from './world';
 import { sfxFootstep } from './audio';
@@ -81,8 +81,8 @@ export function updateMovement(dt: number): void {
   // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
-  const crouching = input.crouching && player.onGround;
-  const sprinting = currentSprintActive();
+  const crouching = effectiveCrouching();
+  const sprinting = currentSprintActive(crouching);
   const speed = speedFor({ crouching, aiming: input.aiming, running: sprinting, runLerp: motion.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(aim.yaw), 0, -Math.cos(aim.yaw));

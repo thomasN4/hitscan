@@ -11,6 +11,7 @@
 import type * as THREE from 'three';
 import { camera } from './core/engine';
 import { gameTime } from './core/state';
+import type { ScheduledHandle } from './sim/gameClock';
 
 let audioCtx: AudioContext | undefined;
 function ac() {
@@ -103,10 +104,13 @@ export function sfxEnemyShoot(pos: THREE.Vector3): void {
  * sounds stay in sync with the animation instead of playing over a
  * suspended one.
  */
-export function sfxReload(): void {
+export function sfxReload(): ScheduledHandle {
   playGunshot(0.12, 500, 0.06);   // click 1: immediately
-  gameTime.schedule(0.25, () => playGunshot(0.12, 800, 0.06));    // click 2
-  gameTime.schedule(1.1, () => playGunshot(0.15, 1000, 0.08));  // final clack (~halfway through 2.2s reload)
+  const pending = [
+    gameTime.schedule(0.25, () => playGunshot(0.12, 800, 0.06)),
+    gameTime.schedule(1.1, () => playGunshot(0.15, 1000, 0.08)),
+  ];
+  return { cancel: () => pending.forEach(handle => handle.cancel()) };
 }
 
 /** One shell/chamber seating home — the per-round reload's transfer click. */

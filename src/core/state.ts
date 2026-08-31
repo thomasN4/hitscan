@@ -11,7 +11,7 @@
 // state between systems (player, bots, weapons, HUD...), add it here rather
 // than reaching across modules.
 import * as THREE from 'three';
-import { GameClock } from '../sim/gameClock';
+import { GameClock, type ScheduledHandle } from '../sim/gameClock';
 import { SoundRing } from '../sim/soundEvents';
 import type { BrainMode } from '../sim/botBrains';
 
@@ -964,6 +964,11 @@ export const input: InputState = {
   crouching: false,
 };
 
+/** Effective crouch stance: the toggle only takes effect on the ground. */
+export function effectiveCrouching(): boolean {
+  return input.crouching && player.onGround;
+}
+
 /**
  * Look angles, in radians. Written by main.ts's mousemove handler (pitch
  * clamped there) and combat.ts's respawn; read by player.ts's movement
@@ -987,10 +992,11 @@ export const aim: AimState = {
 
 /**
  * Weapon DYNAMICS — the live accuracy/recoil/ADS state driven by firing and
- * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, updateWeapon)
- * plus one main.ts write — its wheel handler steps zoomLevel while scoped;
- * combat.ts's respawn() resets it to round-start values; main.ts and hud.ts
- * read it (sensitivity scaling and scope gate, zoom label).
+ * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, tryReload,
+ * updateWeapon) plus one main.ts write — its wheel handler steps zoomLevel
+ * while scoped; combat.ts's death/respawn paths cancel pending reload audio,
+ * and respawn resets the slice to round-start values. main.ts and hud.ts read
+ * it (sensitivity scaling and scope gate, zoom label).
  *
  * Lerp values (`adsLerp`) are smoothed 0..1 blends updated every frame;
  * never set them directly from input.
@@ -1013,6 +1019,12 @@ export interface WeaponDynamics {
   /** Scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
+  /** Semi-auto edge detector: armed by a shot, released with LMB. */
+  triggerLatch: boolean;
+  /** A sprint-refused dry fire requires a fresh LMB press before retrying. */
+  emptyReloadLatch: boolean;
+  /** Delayed whole-mag reload clicks; cancelled by every reload teardown. */
+  reloadSfxHandle: ScheduledHandle | undefined;
 }
 
 /**
@@ -1082,7 +1094,16 @@ export const wpn: WeaponDynamics = {
   zoomLevel: 0,    // scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs
   zoomScale: 1,    // mouse-sensitivity multiplier; <1 while zoomed so aiming
                    // doesn't get twitchy at 12x (computed in weapons.ts)
+  triggerLatch: false,
+  emptyReloadLatch: false,
+  reloadSfxHandle: undefined,
 };
+
+/** Cancel delayed whole-mag reload clicks through their shared state owner. */
+export function cancelPendingReloadSfx(): void {
+  wpn.reloadSfxHandle?.cancel();
+  wpn.reloadSfxHandle = undefined;
+}
 
 /**
  * Match bookkeeping. Team counters have three writers: bots.ts increments
@@ -1116,5 +1137,10 @@ export const score: ScoreState = {
   roundTime: SESSION_DEFAULTS.roundSeconds,
 };
 
-/** Raw keyboard state by `event.code`. Written in main.ts, read in player.ts. */
+/** Raw keyboard state by `event.code`. Written in main.ts, read through keyHeld. */
 export const keys: Record<string, boolean | undefined> = {};
+
+/** Collapse an unset keyboard slot to false at the keyboard slice boundary. */
+export function keyHeld(code: string): boolean {
+  return keys[code] === true;
+}

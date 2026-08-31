@@ -8,9 +8,10 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, input, aim, wpn, motion, player, gameTime, soundEvents, playerFeet, WEAPONS, ammoStore,
+import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTime,
+         soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
-         equippedId,
+         equippedId, cancelPendingReloadSfx, effectiveCrouching,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
 import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxShell, sfxSwitch } from './audio';
@@ -33,6 +34,7 @@ import {
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
+import { isSprintActive } from './sim/movement';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -42,6 +44,19 @@ import { approach } from './sim/smoothing';
 // has a real miss case to decide about.
 function currentDef(): WeaponDef {
   return WEAPONS[equippedId(wpn.slot)];
+}
+
+/** Live sprint policy shared with player.ts, including stance precedence. */
+export function currentSprintActive(crouching: boolean): boolean {
+  return isSprintActive({
+    sprintHeld: input.running,
+    aiming: input.aiming,
+    crouching,
+    forward: keyHeld('KeyW'),
+    backward: keyHeld('KeyS'),
+    left: keyHeld('KeyA'),
+    right: keyHeld('KeyD'),
+  });
 }
 
 /** Zoom FOV target for the current zoom level, clamped into range. */
@@ -308,10 +323,19 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
   mag.position.y = magBaseY(mag) - MAG_TRAVEL * drop * (1 - seat);
 }
 
+/** Cancel reload state and any whole-mag completion clicks still pending. */
+function cancelReload(): void {
+  cancelPendingReloadSfx();
+  weapon.reloading = false;
+  weapon.reloadEnd = 0;
+  weapon.nextRoundAt = 0;
+}
+
 /**
  * Start reloading if possible. Bound to R and to firing an empty mag (the
  * dry-fire auto-reload — which is why a reload STARTS while aiming rather
- * than being blocked: an aimed empty gun must not click and do nothing).
+ * than being blocked. Sprint is the deliberate exception: an empty trigger
+ * pull is refused and latched until LMB is released.
  *
  * The whole gate lives in sim/ammo.ts:planReload so the Node suite can pin
  * it; this binding only applies the decision. Starting a reload while the
@@ -338,16 +362,18 @@ export function tryReload(): void {
     magSize: weapon.magSize,
     reserve: weapon.reserve,
     aiming: input.aiming,
+    sprinting: currentSprintActive(effectiveCrouching()),
   });
   if (!d.start) return;
   if (d.dropAim) input.aiming = false; // one motion at a time; fresh RMB to re-raise
+  cancelPendingReloadSfx();
   weapon.reloading = true;
   if (currentDef().perRound) {
     weapon.nextRoundAt = gameTime.now() + roundInterval(weapon.reloadTime, weapon.magSize);
     sfxShell(); // tactile feedback on the keypress; each transfer clicks too
   } else {
     weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
-    sfxReload();
+    wpn.reloadSfxHandle = sfxReload();
   }
 }
 
@@ -369,7 +395,7 @@ export function switchWeapon(slot: WeaponSlot): void {
   // blanket block guarded: a reloading flag riding across the swap would run
   // that completion check against the INCOMING weapon's stats with the stale
   // reloadEnd — an instant free reload.
-  weapon.reloading = false;
+  cancelReload();
   const saved = ammoStore[wpn.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;
@@ -500,11 +526,15 @@ export function shoot(): void {
   // Whole-mag weapons keep the hard block — no rounds exist until the timer
   // completes, so there is nothing to fire out of.
   if (weapon.reloading && def.perRound && weapon.mag > 0) {
-    weapon.reloading = false;
-    weapon.nextRoundAt = 0;
+    cancelReload();
   }
   if (weapon.reloading || weapon.mag <= 0) {
-    if (weapon.mag <= 0) tryReload(); // auto-reload on dry fire
+    if (weapon.mag <= 0 && !wpn.emptyReloadLatch) {
+      // A refused held-LMB request is ONE attempt, not a queue that should
+      // spring open as soon as sprint ends. Release LMB before trying again.
+      if (currentSprintActive(effectiveCrouching())) wpn.emptyReloadLatch = true;
+      else tryReload(); // auto-reload on a fresh dry-fire attempt
+    }
     return;
   }
   weapon.mag--;
@@ -622,8 +652,6 @@ export function shoot(): void {
  * (whose blends feed the spread model) and BEFORE updateCamera /
  * updateViewmodel (which read the recoil this decays).
  */
-let triggerLatch = false; // semi-auto edge detector: set on fire, cleared on release
-
 /** Blend rate for ADS position and FOV zoom (1/s); ~12 ≈ 80 ms to settle. */
 const ADS_RATE = 12;
 
@@ -635,6 +663,14 @@ export function updateWeapon(dt: number): void {
   if (!player.alive) return;
 
   const def = currentDef();
+
+  // Sprint wins when it begins during a reload. Run this before animation or
+  // transfer/completion so the cancel frame cannot sneak in one last round.
+  // Rounds already moved by a per-round reload remain live; whole-mag reloads
+  // have not moved anything yet.
+  if (weapon.reloading && currentSprintActive(effectiveCrouching())) {
+    cancelReload();
+  }
 
   // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
   // the sniper settles slowly for bolt-action feel; see core/state.ts WEAPONS).
@@ -719,15 +755,19 @@ export function updateWeapon(dt: number): void {
     weapon.mag += take;
     if (session.map !== 'range') weapon.reserve -= take;
     weapon.reloading = false;
+    wpn.reloadSfxHandle = undefined;
   }
 
   // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire
   // once per press — the latch blocks repeats until the button is released.
-  if (!input.shooting) triggerLatch = false;
-  else if (!def.semiAuto || !triggerLatch) {
+  if (!input.shooting) {
+    wpn.triggerLatch = false;
+    wpn.emptyReloadLatch = false;
+  }
+  else if (!def.semiAuto || !wpn.triggerLatch) {
     if (gameTime.now() - weapon.lastShot >= weapon.fireRate) {
       shoot();
-      if (def.semiAuto) triggerLatch = true;
+      if (def.semiAuto) wpn.triggerLatch = true;
     }
   }
 

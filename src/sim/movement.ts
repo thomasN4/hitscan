@@ -19,6 +19,31 @@ export const SPRINT_BONUS = 3.25;
 /** moveLerp ceiling — sprint is 1.5× walk. */
 export const MAX_MOVE_LERP = 1.5;
 
+/** Raw stance/buttons needed to decide whether the sprint action is active. */
+export interface SprintInput {
+  /** Shift held (the input slice calls this `running`). */
+  sprintHeld: boolean;
+  aiming: boolean;
+  /** Effective crouch, after the caller applies the grounded-only rule. */
+  crouching: boolean;
+  forward: boolean;
+  backward: boolean;
+  left: boolean;
+  right: boolean;
+}
+
+/**
+ * Whether the player is actively sprinting: Shift plus a net movement
+ * direction, unless aim or crouch takes precedence. Opposing keys cancel,
+ * matching the movement vector rather than counting any WASD key blindly.
+ */
+export function isSprintActive({
+  sprintHeld, aiming, crouching, forward, backward, left, right,
+}: SprintInput): boolean {
+  const pressingMove = forward !== backward || left !== right;
+  return sprintHeld && pressingMove && !aiming && !crouching;
+}
+
 /** Inputs to speedFor — the stance flags the caller resolves plus the sprint blend. */
 export interface SpeedInput {
   crouching: boolean;

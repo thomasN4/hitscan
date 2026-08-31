@@ -7,7 +7,9 @@
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
          sanitizeLoadout, session, player, playerFeet, equippedId,
-         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS } from './state';
+         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld, input,
+         effectiveCrouching, wpn,
+         cancelPendingReloadSfx } from './state';
 
 describe('state module purity', () => {
   // main.ts overwrites session's config fields from the URL query at startup;
@@ -26,6 +28,39 @@ describe('state module purity', () => {
     const secondaries = Object.values(WEAPONS).filter(d => d.class === 'secondary');
     expect(primaries.length).toBeGreaterThanOrEqual(2);
     expect(secondaries.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('collapses unset and false keyboard slots at the state boundary', () => {
+    delete keys.KeyW;
+    expect(keyHeld('KeyW')).toBe(false);
+    keys.KeyW = false;
+    expect(keyHeld('KeyW')).toBe(false);
+    keys.KeyW = true;
+    expect(keyHeld('KeyW')).toBe(true);
+    delete keys.KeyW;
+  });
+
+  test('makes crouch effective only while grounded', () => {
+    const before = { toggled: input.crouching, grounded: player.onGround };
+    input.crouching = true;
+    player.onGround = false;
+    expect(effectiveCrouching()).toBe(false);
+    player.onGround = true;
+    expect(effectiveCrouching()).toBe(true);
+    input.crouching = false;
+    expect(effectiveCrouching()).toBe(false);
+    input.crouching = before.toggled;
+    player.onGround = before.grounded;
+  });
+
+  test('cancels and clears pending reload audio through the state owner', () => {
+    let cancelled = 0;
+    wpn.reloadSfxHandle = { cancel: () => { cancelled++; } };
+    cancelPendingReloadSfx();
+    expect(cancelled).toBe(1);
+    expect(wpn.reloadSfxHandle).toBeUndefined();
+    cancelPendingReloadSfx();
+    expect(cancelled).toBe(1);
   });
 
   test('exactly one melee weapon, and it sits in neither picker column', () => {

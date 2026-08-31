@@ -38,9 +38,9 @@ import { validateWeapons } from './sim/validateWeapons';
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
 // core/state.ts stays free of browser globals, so the committed match-config
-// query (?map=&tbots=&ctbots=&time=) is parsed here and written into the
-// shared state before anything reads session — initMenus initializes the
-// form from it.
+// query (?map=&tbots=&ctbots=&time=&tweap=&ctweap=) is parsed here and written
+// into the shared state before anything reads session — initMenus initializes
+// the form from it.
 Object.assign(session, parseSessionConfig(new URLSearchParams(location.search)));
 // Restore the last-deployed loadout (sessionStorage, validated by
 // sanitizeLoadout) so this session starts where the previous one deployed.

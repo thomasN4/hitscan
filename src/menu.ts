@@ -8,7 +8,8 @@
 // main.ts (after the session config has been parsed into core/state), and a
 // missing id is a named startup error via hud.ts:requireEl.
 //
-// Commit model: match settings ride ONE query string (?map=&tbots=&ctbots=&time=).
+// Commit model: match settings ride ONE query string
+// (?map=&tbots=&ctbots=&time=&tweap=&ctweap=).
 // Play compares the form against the applied session config — equal means the
 // page already matches, so it opens the loadout picker; different means
 // navigate-and-reload (map switching is a full reload, and pointer lock needs

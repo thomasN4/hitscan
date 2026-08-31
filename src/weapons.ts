@@ -35,6 +35,7 @@ import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
 import { isSprintActive } from './sim/movement';
+import type { ScheduledHandle } from './sim/gameClock';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -47,7 +48,7 @@ function currentDef(): WeaponDef {
 }
 
 /** Live sprint policy shared with player.ts, including stance precedence. */
-function currentSprintActive(): boolean {
+export function currentSprintActive(): boolean {
   return isSprintActive({
     sprintHeld: input.running,
     aiming: input.aiming,
@@ -323,6 +324,17 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
   mag.position.y = magBaseY(mag) - MAG_TRAVEL * drop * (1 - seat);
 }
 
+let reloadSfxHandle: ScheduledHandle | undefined;
+
+/** Cancel reload state and any whole-mag completion clicks still pending. */
+function cancelReload(): void {
+  reloadSfxHandle?.cancel();
+  reloadSfxHandle = undefined;
+  weapon.reloading = false;
+  weapon.reloadEnd = 0;
+  weapon.nextRoundAt = 0;
+}
+
 /**
  * Start reloading if possible. Bound to R and to firing an empty mag (the
  * dry-fire auto-reload — which is why a reload STARTS while aiming rather
@@ -357,13 +369,15 @@ export function tryReload(): void {
   });
   if (!d.start) return;
   if (d.dropAim) input.aiming = false; // one motion at a time; fresh RMB to re-raise
+  reloadSfxHandle?.cancel();
+  reloadSfxHandle = undefined;
   weapon.reloading = true;
   if (currentDef().perRound) {
     weapon.nextRoundAt = gameTime.now() + roundInterval(weapon.reloadTime, weapon.magSize);
     sfxShell(); // tactile feedback on the keypress; each transfer clicks too
   } else {
     weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
-    sfxReload();
+    reloadSfxHandle = sfxReload();
   }
 }
 
@@ -385,7 +399,7 @@ export function switchWeapon(slot: WeaponSlot): void {
   // blanket block guarded: a reloading flag riding across the swap would run
   // that completion check against the INCOMING weapon's stats with the stale
   // reloadEnd — an instant free reload.
-  weapon.reloading = false;
+  cancelReload();
   const saved = ammoStore[wpn.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;
@@ -516,8 +530,7 @@ export function shoot(): void {
   // Whole-mag weapons keep the hard block — no rounds exist until the timer
   // completes, so there is nothing to fire out of.
   if (weapon.reloading && def.perRound && weapon.mag > 0) {
-    weapon.reloading = false;
-    weapon.nextRoundAt = 0;
+    cancelReload();
   }
   if (weapon.reloading || weapon.mag <= 0) {
     if (weapon.mag <= 0 && !emptyReloadLatch) {
@@ -663,9 +676,7 @@ export function updateWeapon(dt: number): void {
   // Rounds already moved by a per-round reload remain live; whole-mag reloads
   // have not moved anything yet.
   if (weapon.reloading && currentSprintActive()) {
-    weapon.reloading = false;
-    weapon.reloadEnd = 0;
-    weapon.nextRoundAt = 0;
+    cancelReload();
   }
 
   // Recoil kick decay — rate is per-weapon (the smg resets fast for full-auto,
@@ -751,6 +762,7 @@ export function updateWeapon(dt: number): void {
     weapon.mag += take;
     if (session.map !== 'range') weapon.reserve -= take;
     weapon.reloading = false;
+    reloadSfxHandle = undefined;
   }
 
   // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire

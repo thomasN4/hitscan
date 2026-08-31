@@ -2002,6 +2002,12 @@ async function runShotgunCheck() {
     await new Promise(r => setTimeout(r, 1500));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const waitForShell = async fromMag => {
+        const deadline = performance.now() + 8000;
+        while (cs.weapon.reloading && cs.weapon.mag === fromMag
+               && performance.now() < deadline) await frame();
+      };
       // Real UI path: Play opens the picker, cards select, Deploy commits.
       document.getElementById('playBtn').click();
       const screen = document.getElementById('loadoutScreen');
@@ -2013,7 +2019,7 @@ async function runShotgunCheck() {
       // Enter "playing" state headlessly, aim into the floor, fire ONE pull.
       cs.game.started = true;
       cs.game.locked = true;
-      await new Promise(r => requestAnimationFrame(r));
+      await frame();
       cs.game.pitch = -1.4;
       cs.weapon.lastShot = -9; // the fire-rate gate must not eat the fresh deploy's first shell
       const holesBefore = cs.bulletHoles.length;
@@ -2023,13 +2029,13 @@ async function runShotgunCheck() {
       window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
       const magAfterFirstShot = cs.weapon.mag;
       const holesAfterFirstShot = cs.bulletHoles.length;
-      // Per-round reload: start R two shells down, let ~2 intervals elapse,
+      // Per-round reload: start R two shells down, poll until a shell lands,
       // then fire mid-reload — the shot must cancel the rest and go out.
       cs.weapon.mag = 2;
       const reserveBefore = cs.weapon.reserve;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
-      await new Promise(r => setTimeout(r, 1500)); // shotgun interval = 3.2s / 7 ≈ 0.46s
+      await waitForShell(2);
       const mid = {
         mag: cs.weapon.mag,
         reserve: cs.weapon.reserve,
@@ -2046,11 +2052,11 @@ async function runShotgunCheck() {
       cs.weapon.mag = 2;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
-      await new Promise(r => setTimeout(r, 1500));
+      await waitForShell(2);
       const beforeSprintCancel = { mag: cs.weapon.mag, reloading: cs.weapon.reloading };
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
-      await new Promise(r => requestAnimationFrame(r));
+      await frame();
       const afterSprintCancel = { mag: cs.weapon.mag, reloading: cs.weapon.reloading };
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));

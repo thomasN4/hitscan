@@ -27,11 +27,12 @@ import {
   gunGroup,
   currentAimPitch,
   currentAimYaw,
+  currentSprintActive,
   currentViewmodelRecoil,
   viewmodelAimOffset,
 } from './weapons';
 import { crosshair } from './hud';
-import { isSprintActive, speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
+import { speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { approach, deadZone } from './sim/smoothing';
 import { FOOTSTEP_RUN_RADIUS_M, FOOTSTEP_WALK_RADIUS_M } from './sim/soundEvents';
@@ -90,15 +91,7 @@ export function updateMovement(dt: number): void {
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
   const crouching = input.crouching && player.onGround;
-  const sprinting = isSprintActive({
-    sprintHeld: input.running,
-    aiming: input.aiming,
-    crouching,
-    forward: key('KeyW'),
-    backward: key('KeyS'),
-    left: key('KeyA'),
-    right: key('KeyD'),
-  });
+  const sprinting = currentSprintActive();
   const speed = speedFor({ crouching, aiming: input.aiming, running: sprinting, runLerp: motion.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(aim.yaw), 0, -Math.cos(aim.yaw));
@@ -164,7 +157,7 @@ export function updateMovement(dt: number): void {
   // through the arc (~0.73 s airtime drains runLerp ~97% otherwise), not
   // land at walk pace and rebuild the ramp from zero.
   motion.runLerp = deadZone(
-    approach(motion.runLerp, sprinting && pressingMove ? 1 : 0, dt, 1 / SPRINT_RAMP));
+    approach(motion.runLerp, sprinting ? 1 : 0, dt, 1 / SPRINT_RAMP));
 
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
@@ -205,7 +198,7 @@ export function updateMovement(dt: number): void {
           sourceId: 'player',
           team: 'CT',
           pos: playerFeet(player),
-          radius: running ? FOOTSTEP_RUN_RADIUS_M : FOOTSTEP_WALK_RADIUS_M,
+          radius: sprinting ? FOOTSTEP_RUN_RADIUS_M : FOOTSTEP_WALK_RADIUS_M,
           t: gameTime.now(),
         });
       }

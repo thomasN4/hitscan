@@ -11,7 +11,7 @@ import { solids } from './world';
 import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTime,
          soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
-         equippedId,
+         equippedId, cancelPendingReloadSfx,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
 import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxShell, sfxSwitch } from './audio';
@@ -35,7 +35,6 @@ import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
 import { isSprintActive } from './sim/movement';
-import type { ScheduledHandle } from './sim/gameClock';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -324,12 +323,9 @@ function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
   mag.position.y = magBaseY(mag) - MAG_TRAVEL * drop * (1 - seat);
 }
 
-let reloadSfxHandle: ScheduledHandle | undefined;
-
 /** Cancel reload state and any whole-mag completion clicks still pending. */
 function cancelReload(): void {
-  reloadSfxHandle?.cancel();
-  reloadSfxHandle = undefined;
+  cancelPendingReloadSfx();
   weapon.reloading = false;
   weapon.reloadEnd = 0;
   weapon.nextRoundAt = 0;
@@ -338,7 +334,8 @@ function cancelReload(): void {
 /**
  * Start reloading if possible. Bound to R and to firing an empty mag (the
  * dry-fire auto-reload — which is why a reload STARTS while aiming rather
- * than being blocked: an aimed empty gun must not click and do nothing).
+ * than being blocked. Sprint is the deliberate exception: an empty trigger
+ * pull is refused and latched until LMB is released.
  *
  * The whole gate lives in sim/ammo.ts:planReload so the Node suite can pin
  * it; this binding only applies the decision. Starting a reload while the
@@ -369,15 +366,14 @@ export function tryReload(): void {
   });
   if (!d.start) return;
   if (d.dropAim) input.aiming = false; // one motion at a time; fresh RMB to re-raise
-  reloadSfxHandle?.cancel();
-  reloadSfxHandle = undefined;
+  cancelPendingReloadSfx();
   weapon.reloading = true;
   if (currentDef().perRound) {
     weapon.nextRoundAt = gameTime.now() + roundInterval(weapon.reloadTime, weapon.magSize);
     sfxShell(); // tactile feedback on the keypress; each transfer clicks too
   } else {
     weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
-    reloadSfxHandle = sfxReload();
+    wpn.reloadSfxHandle = sfxReload();
   }
 }
 
@@ -759,7 +755,7 @@ export function updateWeapon(dt: number): void {
     weapon.mag += take;
     if (session.map !== 'range') weapon.reserve -= take;
     weapon.reloading = false;
-    reloadSfxHandle = undefined;
+    wpn.reloadSfxHandle = undefined;
   }
 
   // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire

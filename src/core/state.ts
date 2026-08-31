@@ -11,7 +11,7 @@
 // state between systems (player, bots, weapons, HUD...), add it here rather
 // than reaching across modules.
 import * as THREE from 'three';
-import { GameClock } from '../sim/gameClock';
+import { GameClock, type ScheduledHandle } from '../sim/gameClock';
 import { SoundRing } from '../sim/soundEvents';
 import type { BrainMode } from '../sim/botBrains';
 
@@ -1017,6 +1017,8 @@ export interface WeaponDynamics {
   triggerLatch: boolean;
   /** A sprint-refused dry fire requires a fresh LMB press before retrying. */
   emptyReloadLatch: boolean;
+  /** Delayed whole-mag reload clicks; cancelled by every reload teardown. */
+  reloadSfxHandle: ScheduledHandle | undefined;
 }
 
 /**
@@ -1088,7 +1090,14 @@ export const wpn: WeaponDynamics = {
                    // doesn't get twitchy at 12x (computed in weapons.ts)
   triggerLatch: false,
   emptyReloadLatch: false,
+  reloadSfxHandle: undefined,
 };
+
+/** Cancel delayed whole-mag reload clicks through their shared state owner. */
+export function cancelPendingReloadSfx(): void {
+  wpn.reloadSfxHandle?.cancel();
+  wpn.reloadSfxHandle = undefined;
+}
 
 /**
  * Match bookkeeping. Team counters have three writers: bots.ts increments

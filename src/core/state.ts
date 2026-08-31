@@ -12,6 +12,7 @@
 // than reaching across modules.
 import * as THREE from 'three';
 import { GameClock } from '../sim/gameClock';
+import { SoundRing } from '../sim/soundEvents';
 import type { BrainMode } from '../sim/botBrains';
 
 // ---------- Domain vocabulary ----------
@@ -218,6 +219,15 @@ export const bots: Bot[] = [];
 export const impacts: Impact[] = [];
 /** Persistent wall decals (see effects.ts); FIFO-capped, oldest recycled. */
 export const bulletHoles: THREE.Mesh[] = [];
+/**
+ * What has been audible lately, for BOTS to read — the gameplay half of a
+ * sound, beside audio.ts's WebAudio half for the player's ears. Emitters are
+ * weapons.ts (player trigger), bots.ts (bot trigger) and player.ts
+ * (footsteps); bots.ts is the only consumer, each bot holding its own cursor.
+ * Lives here rather than in sim/soundEvents.ts because a module-level instance
+ * there would be a second home for shared mutable state.
+ */
+export const soundEvents = new SoundRing();
 
 // ---------- Game time ----------
 /**
@@ -1055,7 +1065,8 @@ export const wpn: WeaponDynamics = {
                    // +sprayKick per shot up to the weapon's sprayCap, decaying
                    // back toward 1 at sprayRecover/s. Scales only the
                    // situational terms; `inherent` is unaffected by it.
-  recoil: 0,       // drives viewmodel kick; decays at weapon.recoilRecover/s.
+  recoil: 0,       // raw aim recoil; player.ts reshapes it only for viewmodel kick.
+                   // Decays at weapon.recoilRecover/s.
                    // While above the live weapon's scopeGate, a new RMB press
                    // can't enter the scope (main.ts)
   recoilYaw: 0,    // SIGNED horizontal recoil, same units as `recoil`. Each shot

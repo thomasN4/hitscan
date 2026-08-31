@@ -1402,6 +1402,247 @@ async function runVisionAwarenessCheck() {
 // navigation graph — a bot with a target a level up follows waypoints to the
 // flight and up it, which is the thing no band around the target could
 // express. So this phase now demands the deck rather than reporting a height.
+// Hearing — the wiring 6b adds, end to end on arena.
+//
+// Arena's west mid wall (x [-52.5, 2.5], z [-1, 1]) is the fixture: a bot at
+// z = -10 and the player at z = +2 are 12 m apart with solid geometry between
+// them, so NOTHING the bot does about the player can have come from sight.
+// That is what makes each claim below about hearing specifically:
+//
+//   1. a hostile gunshot through the wall is investigated, and graded
+//      non-shootable the whole time;
+//   2. a CT bot 35 m from the same shot ignores it, because the player is its
+//      ALLY — the team filter, which no unit test can reach through the
+//      executor;
+//   3. the player's own footsteps are heard the same way (a separate emitter,
+//      in player.ts, on a separate radius);
+//   4. crouch-walking the identical path is silent — asserted alongside proof
+//      that the player really moved, so the phase cannot pass by the player
+//      standing still.
+//
+// Assertions are on the INVARIANT — "it is heading at the noise, and it cannot
+// shoot" — never on which of route/search produced it (lesson 28).
+async function runHearingCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=1&time=180', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const blocked = (x, z) => cs.colliders.some(c =>
+        x > c.min.x - 0.7 && x < c.max.x + 0.7 && z > c.min.z - 0.7 && z < c.max.z + 0.7);
+      const planar = (a, x, z) => Math.hypot(a.x - x, a.z - z);
+
+      const BOT = [-40, -10];   // south of the mid wall
+      const SHOOTER = [-40, 2]; // north of it, 12 m away, no line of sight
+      const ALLY = [-10, 20];   // 35 m from the shot, wall between it and the T
+      // Far enough east that 2.5 s of sprinting west (~24 m) still ends
+      // inside the mid wall's span (x >= -52.5): the runner must stay HIDDEN
+      // for the whole window, or the bot could be reacting to sight.
+      const WALKER = [-25, 2];
+      // The crouch fixture stands closer, and deliberately so: the walking
+      // radius is HALF the running one, so a crouch test run at the footstep
+      // distances would be silent for the trivial reason that a walk could
+      // not have been heard from there either. 6 m apart, still with the wall
+      // between, keeps the whole 3 s well inside the 12 m a walk carries.
+      const CREEP_BOT = [-40, -4], CREEPER = [-40, 2];
+      for (const [label, [x, z]] of [['bot', BOT], ['shooter', SHOOTER], ['ally', ALLY], ['walker', WALKER],
+                                     ['creep bot', CREEP_BOT], ['creeper', CREEPER]]) {
+        if (blocked(x, z)) return { fail: `${label} spot (${x}, ${z}) is inside geometry` };
+      }
+
+      const t = cs.bots.find(b => b.team === 'T');
+      const ct = cs.bots.find(b => b.team === 'CT');
+      if (!t || !ct || cs.bots.length !== 2) return { fail: `expected one T and one CT, got ${cs.bots.length}` };
+
+      /** Park a bot at a spot with every per-life field freshly reset. */
+      const place = (bot, [x, z]) => {
+        bot.respawn();               // also jumps its sound cursor to the present
+        bot.mesh.position.set(x, 0, z);
+        bot.vy = 0;
+        bot.onGround = true;
+        bot.path = [];
+        bot.leg = 0;
+      };
+
+      cs.player.hp = 100000;
+      cs.player.alive = true;
+      cs.game.started = true;
+      cs.game.locked = true;
+      cs.game.pitch = 0;
+
+      // ---- 1 + 2) a hostile gunshot through the wall ----------------------
+      place(t, BOT);
+      place(ct, ALLY);
+      cs.player.pos.set(SHOOTER[0], 1.7, SHOOTER[1]);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = Math.PI;   // forward +z: fire AWAY from the wall and both bots
+      cs.weapon.mag = 30;
+      cs.weapon.lastShot = -9;
+
+      const magBefore = cs.weapon.mag;
+      cs.game.shooting = true;
+      const gFire = cs.gameTime.now();
+      const wFire = performance.now();
+      while (performance.now() - wFire < 3000 && cs.gameTime.now() - gFire < 0.4) await frame();
+      cs.game.shooting = false;
+      const rounds = magBefore - cs.weapon.mag;
+      if (rounds === 0) return { fail: 'the player never fired: no gunshot to hear' };
+      const shotAt = { x: cs.player.pos.x, z: cs.player.pos.z };
+
+      // 2.5 s is deliberately short of the ~8 s it would take the T to round
+      // the wall's west end, so "never graded shootable" is a claim about
+      // hearing rather than about the bot not having arrived yet — and the
+      // player stays ALIVE and a candidate throughout, so a leak in the wall
+      // would show up as sight rather than passing quietly.
+      let sawGoal = false, goalAfterS = null, graded = false;
+      const startDist = planar(t.mesh.position, shotAt.x, shotAt.z);
+      let bestDist = startDist;
+      const allyModes = {}; let allyNearGoal = false;
+      const gObs = cs.gameTime.now();
+      const wObs = performance.now();
+      while (performance.now() - wObs < 20000 && cs.gameTime.now() - gObs < 2.5) {
+        await frame();
+        if (t.targetInRange || t.targetLOS === true) graded = true;
+        if (t.targetEye && (t.mode === 'route' || t.mode === 'search')
+            && planar(t.targetEye, shotAt.x, shotAt.z) < 1.5) {
+          if (!sawGoal) { sawGoal = true; goalAfterS = cs.gameTime.now() - gObs; }
+        }
+        bestDist = Math.min(bestDist, planar(t.mesh.position, shotAt.x, shotAt.z));
+        // The ally is PINNED: a patrolling CT wanders, and a CT that wanders
+        // into the T's line of sight turns this phase into a fight between
+        // the two bots. Its claim needs it to hear the shot, not to walk.
+        ct.mesh.position.set(ALLY[0], 0, ALLY[1]);
+        ct.vy = 0;
+        allyModes[ct.mode] = (allyModes[ct.mode] ?? 0) + 1;
+        if (ct.targetEye && planar(ct.targetEye, shotAt.x, shotAt.z) < 6) allyNearGoal = true;
+        if (cs.game.matchOver) return { fail: 'match ended during the gunshot phase' };
+      }
+      const closed = +(startDist - bestDist).toFixed(2);
+      const shot = {
+        rounds, sawGoal, graded, closed,
+        goalAfterS: goalAfterS === null ? null : +goalAfterS.toFixed(2),
+        mode: t.mode,
+        inRange: t.targetInRange,
+        los: t.targetLOS,
+        playerHpLost: 100000 - cs.player.hp,
+        allyModes, allyNearGoal,
+      };
+      if (!shot.sawGoal) return { fail: 'the T never pointed its intent at the gunshot it heard', shot };
+      if (shot.graded) return { fail: 'a heard gunshot graded a shootable target', shot };
+      if (shot.playerHpLost !== 0) return { fail: 'the bot fired on a position it had only heard', shot };
+      if (shot.closed < 1) return { fail: 'the T never moved toward the noise', shot };
+      if (shot.allyNearGoal) return { fail: 'the CT investigated an ALLIED gunshot', shot };
+      if (Object.keys(allyModes).some(m => m !== 'hold' && m !== 'patrol')) {
+        return { fail: 'the CT left hold/patrol over an allied gunshot', shot };
+      }
+
+      // ---- 3) footsteps ----------------------------------------------------
+      // The ally has made its point and is now only a distraction: a live CT
+      // is an ENEMY of the T under test, and one seen across the map would
+      // put it in engage for reasons that have nothing to do with hearing.
+      // Retired directly rather than through die(), which would schedule a
+      // respawn six seconds later — inside the windows below.
+      ct.alive = false;
+      ct.mesh.visible = false;
+      place(t, BOT);
+      cs.player.pos.set(WALKER[0], 1.7, WALKER[1]);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = Math.PI / 2;  // forward = -x: west, parallel to the wall
+      cs.game.running = true;
+      cs.game.crouching = false;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      const runFrom = { x: cs.player.pos.x, z: cs.player.pos.z };
+      let stepSaw = false, stepGraded = false;
+      const gRun = cs.gameTime.now();
+      const wRun = performance.now();
+      while (performance.now() - wRun < 20000 && cs.gameTime.now() - gRun < 2.5) {
+        await frame();
+        // With the CT retired and the player behind the wall, the T has no
+      // candidate it can see at all: any grading here would be a leak.
+      if (t.targetInRange || t.targetLOS === true) stepGraded = true;
+        if (t.targetEye && (t.mode === 'route' || t.mode === 'search')
+            && planar(t.targetEye, cs.player.pos.x, cs.player.pos.z) < 5) stepSaw = true;
+        if (cs.game.matchOver) return { fail: 'match ended during the footstep phase' };
+      }
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      cs.game.running = false;
+      const ran = {
+        moved: +planar(cs.player.pos, runFrom.x, runFrom.z).toFixed(2),
+        heard: stepSaw,
+        graded: stepGraded,
+        mode: t.mode,
+        dist: +planar(t.mesh.position, cs.player.pos.x, cs.player.pos.z).toFixed(1),
+      };
+      // Non-vacuity first: a player who never moved emits nothing, and every
+      // claim below would pass for the wrong reason.
+      if (ran.moved < 5) return { fail: 'the running player barely moved: no footsteps to hear', ran };
+      if (ran.dist > 24) return { fail: 'the run left the 24 m running radius; the setup, not the bot, failed', ran };
+      if (!ran.heard) return { fail: 'running footsteps through the wall were never investigated', ran };
+      if (ran.graded) return { fail: 'a heard footstep graded a shootable target', ran };
+
+      // ---- 4) the same path, crouched, is silent ---------------------------
+      place(t, CREEP_BOT);
+      cs.player.pos.set(CREEPER[0], 1.7, CREEPER[1]);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.crouching = true;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      const creepFrom = { x: cs.player.pos.x, z: cs.player.pos.z };
+      let creepLos = false;
+      const creepModes = {};
+      const gCreep = cs.gameTime.now();
+      const wCreep = performance.now();
+      while (performance.now() - wCreep < 25000 && cs.gameTime.now() - gCreep < 3) {
+        await frame();
+        // Pinned every frame, because an UNPINNED bot patrols: a patrol leg
+        // that happens to round the wall's west end acquires the player by
+        // SIGHT, and the run then measures the fixture rather than the
+        // silence. Holding it still costs the phase nothing — its claim is
+        // about what the bot learns, not where it walks.
+        t.mesh.position.set(CREEP_BOT[0], 0, CREEP_BOT[1]);
+        t.vy = 0;
+        creepModes[t.mode] = (creepModes[t.mode] ?? 0) + 1;
+        if (t.targetLOS === true) creepLos = true;
+        if (cs.game.matchOver) return { fail: 'match ended during the crouch phase' };
+      }
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      cs.game.crouching = false;
+      const crept = {
+        moved: +planar(cs.player.pos, creepFrom.x, creepFrom.z).toFixed(2),
+        modes: creepModes,
+        sawPlayer: creepLos,
+        dist: +planar(t.mesh.position, cs.player.pos.x, cs.player.pos.z).toFixed(1),
+      };
+      // Two non-vacuity guards before the claim: a player who never moved
+      // emits nothing, and one outside the WALKING radius would have been
+      // inaudible even at a walk.
+      if (crept.moved < 3) return { fail: 'the crouching player barely moved: silence proves nothing', crept };
+      if (crept.dist > 12) return { fail: 'the crouch walk left the 12 m walking radius; silence proves nothing', crept };
+      if (crept.sawPlayer) return { fail: 'the crouch fixture leaked line of sight', crept };
+      // With no visual, no damage and a freshly respawned brain, route and
+      // search are reachable ONLY from a heard position — patrol and its
+      // one-second pause report `patrol`/`hold` and nothing else. So the mode
+      // set alone carries the claim, with no endpoint arithmetic to argue with.
+      const heardCrouch = Object.keys(crept.modes).filter(m => m !== 'hold' && m !== 'patrol');
+      if (heardCrouch.length > 0) return { fail: `a crouched player was heard (modes ${heardCrouch.join(',')})`, crept };
+
+      return { shot, ran, crept };
+    });
+    if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
+    console.log('[hearing] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[hearing] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[hearing] ${e}`));
+  await page.close();
+}
+
 async function runBotClimbCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -2331,6 +2572,7 @@ try {
   await runFlatRouteCheck();
   await runVisionAwarenessCheck();
   await runPatrolCheck();
+  await runHearingCheck();
   await runMap('elevation', '/?map=elevation', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
   await runNavGraphCheck();

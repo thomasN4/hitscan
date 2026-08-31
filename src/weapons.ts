@@ -8,7 +8,8 @@
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
-import { bots, weapon, session, input, aim, wpn, motion, player, keys, gameTime, WEAPONS, ammoStore,
+import { bots, weapon, session, input, aim, wpn, motion, player, keys, gameTime,
+         soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
@@ -17,10 +18,19 @@ import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxK
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
+import { GUNSHOT_RADIUS_M } from './sim/soundEvents';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
 import { roundInterval, roundTransfer, planReload } from './sim/ammo';
-import { aimPitch, aimYaw, convertOnSwap, decayRecoil, decaySpray, decayToward } from './sim/recoil';
+import {
+  aimPitch,
+  aimYaw,
+  convertOnSwap,
+  decayRecoil,
+  decaySpray,
+  decayToward,
+  viewmodelRecoil,
+} from './sim/recoil';
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
@@ -223,6 +233,15 @@ const VIEWMODELS: Record<WeaponId, ViewModel> = {
  */
 export function viewmodelAimOffset(): { x: number; y: number } {
   return VIEWMODELS[equippedId(wpn.slot)].aimOffset;
+}
+
+/**
+ * Bounded recoil signal for player.ts:updateViewmodel. This is deliberately a
+ * separate binding from currentAimPitch(): only the cosmetic weapon transform
+ * is reshaped; the camera and shot direction keep using raw recoil.
+ */
+export function currentViewmodelRecoil(): number {
+  return viewmodelRecoil(wpn.recoil, currentDef().recoilKick);
 }
 
 // Per-weapon shot sound; keyed by WeaponId so no weapon can miss.
@@ -526,6 +545,27 @@ export function shoot(): void {
   if (def.unscopeOnShot) input.aiming = false;
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
+  // The gameplay half of the noise: ONE event per trigger pull, whatever the
+  // weapon. Everything that must stay silent has already returned above — a
+  // melee swing, a dry trigger, a blocked whole-mag reload — and a shotgun's
+  // pellets are one pull, so this sits before the pellet loop rather than
+  // inside it. Bots read it through core/state.ts:soundEvents; the audible
+  // SHOT_SFX above is untouched and unrelated.
+  //
+  // FEET, not the eye `origin` the rays leave from. A heard position is a
+  // place to walk to, and navGrid.ts:nearestNode weights a metre of height
+  // like four of ground — so an eye-height goal snaps to the deck ABOVE the
+  // shooter wherever one exists. 1.7 m makes no difference to an 80 m radius
+  // and all the difference to the route.
+  soundEvents.emit({
+    kind: 'gunshot',
+    sourceId: 'player',
+    team: 'CT',       // the player fights on the CT side (combat.ts, bots.ts)
+    pos: playerFeet(player),
+    radius: GUNSHOT_RADIUS_M,
+    t: gameTime.now(),
+  });
+
   // Gather every solid (walls, crates, ground) plus live bot parts once for
   // the whole trigger pull — every pellet tests the same target set.
   const targets: THREE.Object3D[] = [...solids];

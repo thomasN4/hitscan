@@ -34,6 +34,26 @@ export function aimYaw(yaw: number, recoilYaw: number, punchRad: number): number
 }
 
 /**
+ * Recoil signal used only by the first-person weapon model.
+ *
+ * A weapon's first kick stays linear so semi-automatic shots and the knife
+ * lunge keep their existing feel. Accumulated recoil beyond that kick eases
+ * toward twice the one-shot value instead of letting a sustained burst carry
+ * the model progressively farther from the crosshair. The value still falls
+ * for every decrease in raw recoil, so releasing fire starts the visual return
+ * immediately rather than holding at a hard cap.
+ *
+ * Gameplay aim deliberately does NOT use this mapping: aimPitch/aimYaw keep
+ * consuming raw recoil so the camera, bullets and screen-centre crosshair stay
+ * aligned with the existing recoil model.
+ */
+export function viewmodelRecoil(recoil: number, recoilKick: number): number {
+  if (recoil <= recoilKick) return recoil;
+  const excess = recoil - recoilKick;
+  return recoilKick + recoilKick * (1 - Math.exp(-excess / recoilKick));
+}
+
+/**
  * Decay accumulated recoil toward 0 at `rate` units/second.
  *
  * `rate` MUST stay below the weapon's sustained-fire input

@@ -19,15 +19,30 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, aim, wpn, motion, keys, gameTime } from './core/state';
+import { player, input, aim, wpn, motion, keys, gameTime, soundEvents, playerFeet } from './core/state';
 import { slideMoveXZ, resolveVertical } from './collision';
 import { colliders, liftPads } from './world';
 import { sfxFootstep } from './audio';
-import { gunGroup, currentAimPitch, currentAimYaw, viewmodelAimOffset } from './weapons';
+import {
+  gunGroup,
+  currentAimPitch,
+  currentAimYaw,
+  currentViewmodelRecoil,
+  viewmodelAimOffset,
+} from './weapons';
 import { crosshair } from './hud';
 import { isSprintActive, speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { approach, deadZone } from './sim/smoothing';
+import { FOOTSTEP_RUN_RADIUS_M, FOOTSTEP_WALK_RADIUS_M } from './sim/soundEvents';
+
+/**
+ * Least per-frame XZ displacement (m) that counts as a step for HEARING.
+ * 5 mm/frame is 0.3 m/s at 60 Hz — comfortably below a walk (~5 m/s, ~83 mm
+ * a frame) and comfortably above a player pressed flat into a wall, which is
+ * the case this exists to keep silent.
+ */
+const MIN_AUDIBLE_STEP = 0.005;
 
 const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex
 
@@ -109,6 +124,9 @@ export function updateMovement(dt: number): void {
   // wall doesn't count as moving. Smoothed ~100 ms for gradual crosshair
   // transitions.
   const target = measuredMoveLerp(player.pos.x - preX, player.pos.z - preZ, dt);
+  // The same measured delta, kept for the footstep emitter below: what the
+  // collision gate actually granted this frame, not what the keys asked for.
+  const movedXZ = Math.hypot(player.pos.x - preX, player.pos.z - preZ);
   motion.moveLerp = deadZone(approach(motion.moveLerp, target, dt, BLEND_RATE));
 
   // Jump / gravity / support. resolveVertical owns onGround: rising frames
@@ -173,7 +191,26 @@ export function updateMovement(dt: number): void {
   // pause comes quickly but not instantly.
   if (moving && !crouching) {
     motion.stepTimer -= dt;
-    if (motion.stepTimer <= 0) { sfxFootstep(); motion.stepTimer = speed > 8 ? 0.3 : speed > 5 ? 0.38 : 0.55; }
+    if (motion.stepTimer <= 0) {
+      sfxFootstep();
+      // The AI half of the same step, gated on MEASURED displacement rather
+      // than on the held keys: walking into a wall still makes noise for the
+      // player's ears (sfxFootstep above is unchanged) but must not hand bots
+      // a position they could not otherwise have. Crouched and airborne
+      // movement never reaches here at all, which covers jumps and
+      // warehouse2's lift launches with no special case.
+      if (movedXZ > MIN_AUDIBLE_STEP) {
+        soundEvents.emit({
+          kind: 'footstep',
+          sourceId: 'player',
+          team: 'CT',
+          pos: playerFeet(player),
+          radius: running ? FOOTSTEP_RUN_RADIUS_M : FOOTSTEP_WALK_RADIUS_M,
+          t: gameTime.now(),
+        });
+      }
+      motion.stepTimer = speed > 8 ? 0.3 : speed > 5 ? 0.38 : 0.55;
+    }
   } else {
     motion.stepTimer = Math.min(motion.stepTimer, 0.2);
   }
@@ -220,9 +257,11 @@ export function updateViewmodel(): void {
   // Bob phase runs on game time so a pause doesn't snap the weapon to an
   // arbitrary point of the cycle on resume.
   gunGroup.position.y = aimOffset.y * wpn.adsLerp + Math.sin(gameTime.now() * 10) * motion.bobAmt;
-  gunGroup.position.z = wpn.recoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
-  gunGroup.rotation.x = wpn.recoil * 0.015; // small: recoil accumulates to RECOIL_CAP,
-                                             // so a full climb must stay a nudge, not a tilt
+  // Accumulated recoil is reshaped only for this cosmetic transform. Raw
+  // recoil still drives the camera and bullets through currentAimPitch().
+  const visualRecoil = currentViewmodelRecoil();
+  gunGroup.position.z = visualRecoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
+  gunGroup.rotation.x = visualRecoil * 0.015;
   gunGroup.rotation.y = -wpn.recoilYaw * 0.01; // subtle sideways pull matching the walk
 
   // Crosshair tightens/fades when aiming (sight picture takes over);

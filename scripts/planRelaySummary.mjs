@@ -34,8 +34,8 @@ const FINAL_TEXT_LIMIT = 2000;
 // The pins live here rather than in bash so a record cannot outlive the values
 // that produced it.
 const OPENCODE_VERSION = '1.18.25';
-const MODEL = 'openrouter/z-ai/glm-5.3-flash';
-const VARIANT = 'high';
+const MODEL = 'openrouter/meta/muse-spark-1.3-contributor';
+const VARIANT = 'xhigh';
 
 /** Sum a provider-reported field, staying null when NO step carried it. */
 function makeSum() {

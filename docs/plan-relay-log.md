@@ -76,3 +76,67 @@ re-summarized under v2 — the one number in this table that its own
 commands chaining with `;` (`ls -ld node_modules && env | rg ...`); the
 allowlist takes one command per call, and a plan that invites a chain wastes a
 step. Next wave: say so in the Test Plan, as this plan already did for pipes.
+
+### 2026-09-04 — wave `37e8eb6a8e4d.0sGfqJ` — 1 executor
+
+Relay v4, plan schema v1. Baseline `37e8eb6a8e4d`. A wave of one; wall clock
+1s against 0s of executor event time.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/hearing-followup` | `37e8eb6a8e4d.0sGfqJ` | 1 | 0s | n/a | 0 (+0/-0) | fail — provider guardrail |
+
+Verdict: merged nothing and changed no files. OpenRouter rejected Muse before
+its first step because the account's paid-model-training privacy setting
+excluded the only endpoint. The relay preserved the failure with exit 1 and a
+skipped liveness gate; there were 0 tool calls, 0 denied calls and no reported
+token or cost usage. The user enabled the required setting before the retry.
+This attempt was not useful as implementation, but it did verify that the
+provider privacy guardrail fails closed and remains visible in the run record.
+
+### 2026-09-04 — wave `37e8eb6a8e4d.X8IV7S` — 1 executor
+
+Relay v4, plan schema v1. Baseline `37e8eb6a8e4d`. A wave of one; wall clock
+11m 15s against 11m 12s of executor event time.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/hearing-followup` | `37e8eb6a8e4d.X8IV7S` | 1 | 11m 12s | $0.0427 | 3 (+184/-58) | pass |
+
+Verdict: Muse Spark 1.3 Contributor at `xhigh` implemented the approved 6b
+follow-up in the three owned files, with 37 steps, 41 tool calls, 13 edits and
+0 denied calls. It reported 3,418,723 total tokens, including 3,092,580 cache
+reads, and independently passed 682 tests, lint, typecheck and build. Its first
+test rewrite accidentally made the intended 3D and newest-on-tie expectations
+contradict their fixtures; the targeted test run caught both, and the executor
+corrected them without planner intervention. One reconnaissance call chained
+three read-only Git commands with `&&` despite the plan's separate-command
+instruction. The planner then corrected two stale priority comments, clarified
+the implementation status and historical rationale in the plan, and made the
+selector's first-candidate branch readable; behavior did not change. The
+planner independently reran all 682 tests, lint, typecheck and build, then
+passed the full browser smoke suite on an isolated server with no console or
+page errors. The relay was worth using: the implementation stayed inside its
+file boundary, exercised its own test-first correction loop and reached a
+passing liveness gate.
+
+### 2026-09-04 — wave `3a9f79281cab.RgqTjB` — 1 executor
+
+Relay v4, plan schema v1. Baseline `3a9f79281cab`. A wave of one for review
+round two; wall clock 1m 56s against 1m 54s of executor event time.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/hearing-followup` | `3a9f79281cab.RgqTjB` | 1 | 1m 54s | $0.0000 | 1 (+11/-5) | pass |
+
+Verdict: Muse Spark 1.3 Contributor at `xhigh` resolved both stale-policy
+findings from review round one without changing behavior or leaving its single
+owned file. The run used 16 steps, 17 tool calls and 2 edits with 0 denied calls;
+it reported 397,358 total tokens, including 313,759 cache reads. The executor
+passed 682 tests, lint, typecheck, build and diff hygiene, and the planner
+independently reran the same gates successfully. As in the preceding run, the
+initial read-only baseline check chained Git commands with `&&` despite the
+plan's separate-command instruction; it did not obscure a failure, but the
+repetition shows that prose alone is not reliably enforcing this convention.
+The relay was still worth using: it produced a minimal correction for both
+review findings and passed its liveness gate in under two minutes.

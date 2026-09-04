@@ -1075,34 +1075,54 @@ describe('DefaultBrain incoming fire', () => {
 });
 
 describe('pickHeardLead', () => {
-  const g = (seq: number, x = 0): HeardSound =>
-    ({ seq, t: seq / 60, kind: 'gunshot', pos: new THREE.Vector3(x, 0, 0) });
+  const ear = new THREE.Vector3(0, 0, 0);
+  const g = (seq: number, x = 0, y = 0, z = 0): HeardSound =>
+    ({ seq, t: seq / 60, kind: 'gunshot', pos: new THREE.Vector3(x, y, z) });
   const f = (seq: number, x = 0): HeardSound =>
     ({ seq, t: seq / 60, kind: 'footstep', pos: new THREE.Vector3(x, 0, 0) });
 
   it('returns null for silence', () => {
-    expect(pickHeardLead([])).toBeNull();
+    expect(pickHeardLead([], ear)).toBeNull();
   });
 
   it('prefers a gunshot over a footstep, whichever arrived first', () => {
-    expect(pickHeardLead([f(1), g(2)])!.kind).toBe('gunshot');
-    expect(pickHeardLead([g(1), f(2)])!.kind).toBe('gunshot');
+    expect(pickHeardLead([f(1), g(2)], ear)!.kind).toBe('gunshot');
+    expect(pickHeardLead([g(1), f(2)], ear)!.kind).toBe('gunshot');
   });
 
-  it('takes the NEWEST within one kind', () => {
-    expect(pickHeardLead([g(4), g(9), g(7)])!.seq).toBe(9);
-    expect(pickHeardLead([f(4), f(9), f(7)])!.seq).toBe(9);
+  it('takes the NEAREST gunshot despite recency and batch order', () => {
+    expect(pickHeardLead([g(9, 60), g(4, 1)], ear)!.seq).toBe(4);
+    expect(pickHeardLead([g(4, 1), g(9, 60)], ear)!.seq).toBe(4);
+  });
+
+  it('measures nearness in 3D from the event position to the listener feet', () => {
+    // Planar-near loses: (1, 40, 0) is 1 m away on the ground plane but ~40 m
+    // in 3D, so the 10 m level event is the nearer lead.
+    expect(pickHeardLead([g(4, 10), g(9, 1, 40)], ear)!.seq).toBe(4);
+  });
+
+  it('breaks an exact distance tie by newest sequence', () => {
+    expect(pickHeardLead([g(4, 5), g(9, -5)], ear)!.seq).toBe(9);
   });
 
   it('takes the newest GUNSHOT even when a later footstep followed it', () => {
     // Ordering by kind first is the point: a footstep at seq 12 does not
-    // outrank a gunshot at seq 11.
-    expect(pickHeardLead([g(10), g(11), f(12)])!.seq).toBe(11);
+    // outrank a gunshot at seq 11. Both gunshots sit at the same distance so
+    // the tie falls to recency.
+    expect(pickHeardLead([g(10, 3), g(11, 3), f(12)], ear)!.seq).toBe(11);
   });
 
-  it('ignores position entirely: the emitter\'s radius already decided audibility', () => {
-    // The nearer gunshot is the older one; freshness still wins.
-    expect(pickHeardLead([g(5, 1), g(6, 60)])!.pos.x).toBe(60);
+  it('takes the newest footstep when no gunshot exists', () => {
+    expect(pickHeardLead([f(4), f(9), f(7)], ear)!.seq).toBe(9);
+  });
+
+  it('never mutates an event or its position', () => {
+    const a = g(4, 1);
+    const b = g(9, 60);
+    pickHeardLead([a, b], ear);
+    expect(a.seq).toBe(4);
+    expect(a.pos.x).toBe(1);
+    expect(b.pos.x).toBe(60);
   });
 });
 
@@ -1137,6 +1157,22 @@ describe('DefaultBrain hearing', () => {
     // against an observation id, so nothing heard can authorize fire.
     expect(intent.focusId).toBeNull();
     expect(intent.wantShoot).toBe(false);
+  });
+
+  it('investigates the NEAREST gunshot, not the newest', () => {
+    const brain = calmBrain();
+    const goals: THREE.Vector3[] = [];
+    const intent = brain.decide(view({
+      visual: null,
+      heard: [gunshot(2, 60, 0), gunshot(1, 5, 0)],
+      nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)),
+    }), DT);
+
+    // The older event is 55 m closer to the listener at the origin, so it is
+    // the adopted lead despite arriving first and sitting first in the batch.
+    expect(intent.mode).toBe('route');
+    expect(goals).toHaveLength(1);
+    expect(goals[0]!.x).toBeCloseTo(5, 12);
   });
 
   it('copies the heard position: mutating the source cannot drift the goal', () => {
@@ -1209,7 +1245,7 @@ describe('DefaultBrain hearing', () => {
     expect(intent.focusId).toBeNull();
   });
 
-  it('a fresh noise replaces an older visual memory', () => {
+  it('a fresh noise does NOT replace an older visual memory', () => {
     const brain = calmBrain();
     brain.decide(view({ visual: visualAt(10) }), DT); // memory at (10,0,0)
 
@@ -1217,17 +1253,41 @@ describe('DefaultBrain hearing', () => {
     brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
     expect(goals[0]!.x).toBeCloseTo(10, 12);
 
-    brain.decide(view({
+    const intent = brain.decide(view({
       visual: null,
       heard: [gunshot(1, -20, 0)],
       nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)),
     }), DT);
-    // Freshness wins: the ladder puts a newly heard event above a remembered
-    // position, and the older focus goes with it.
-    expect(goals[1]!.x).toBeCloseTo(-20, 12);
+    // Commitment wins: the visual-memory pursuit outranks the fresh noise,
+    // which is discarded with the executor's cursor rather than queued.
+    expect(goals[1]!.x).toBeCloseTo(10, 12);
+    expect(intent.focusId).toBe('player');
+    expect(intent.mode).toBe('route');
   });
 
-  it('a fresh noise interrupts an in-progress scan and restarts the clock', () => {
+  it('a fresh noise does NOT replace a previously heard pursuit', () => {
+    const brain = calmBrain();
+    const goals: THREE.Vector3[] = [];
+    brain.decide(view({
+      visual: null,
+      heard: [gunshot(1, 20, 0)],
+      nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)),
+    }), DT);
+    expect(goals[0]!.x).toBeCloseTo(20, 12);
+
+    const intent = brain.decide(view({
+      visual: null,
+      heard: [gunshot(2, -20, 0)],
+      nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)),
+    }), DT);
+    // Already travelling toward a heard goal: the later sound is ignored,
+    // not queued behind it.
+    expect(goals[1]!.x).toBeCloseTo(20, 12);
+    expect(intent.focusId).toBeNull();
+    expect(intent.mode).toBe('route');
+  });
+
+  it('a fresh noise does NOT interrupt an in-progress scan', () => {
     const brain = calmBrain();
     brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
     brain.decide(view({ visual: null }), DT); // search entered
@@ -1236,11 +1296,15 @@ describe('DefaultBrain hearing', () => {
     const intent = brain.decide(view({
       visual: null,
       heard: [footstep(1, 0, 9)],
-      nextWaypoint: routeSpy(goals, new THREE.Vector3(0, 0, 0.5)),
+      nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)),
     }), DT);
 
-    expect(intent.mode).toBe('route');
-    expect(goals[0]!.z).toBeCloseTo(9, 12);
+    // The active search owns the bot: the noise is discarded, the graph is
+    // never asked for the heard point, and the scan heading holds.
+    expect(intent.mode).toBe('search');
+    expect(goals).toHaveLength(0);
+    expect(intent.facing.x).toBeCloseTo(1, 12);
+    expect(intent.facing.z).toBeCloseTo(0, 12);
   });
 
   it('arrives, scans, then forgets to hold — the same pipeline memory uses', () => {

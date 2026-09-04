@@ -830,8 +830,11 @@ Each executor owns a sound cursor. `updateBots` captures the buffer's high-water
 sequence before iterating bots, and every bot reads only through that snapshot;
 therefore a shot emitted by an early bot is heard by ALL bots on the next frame
 instead of only by later entries in registry order. The executor filters new
-events by team and radius and passes the bounded heard set to the brain. Policy
-chooses gunshots before footsteps and the newest event within one kind. A dead
+events by team and radius and passes the bounded heard set to the brain. In the
+original 6b implementation the policy chose gunshots before footsteps and the
+newest event within one kind; the follow-up now prefers the nearest gunshot,
+newest footstep only when no gunshot is heard (see the 6b follow-up record
+under Planned). A dead
 bot's cursor resets to the latest sequence on respawn so it cannot replay six
 seconds of combat that occurred while it was absent.
 
@@ -844,9 +847,12 @@ refresh, took the placeholder comment's POSITION as the design. It contradicts
 this tranche's own ladder above, which reads
 `… > newly heard gunshot > newly heard footstep > remembered position >`. The
 ladder won — freshness is the whole argument for hearing, and a noise from this
-second is better evidence than a memory from ten seconds ago. Hearing is
-therefore checked between the visual and the scan/memory branches, and the
-placeholder's slot number moved with it.)*
+second is better evidence than a memory from ten seconds ago. That was the
+original 6b decision: hearing was checked between the visual and the
+scan/memory branches, and the placeholder's slot number moved with it. The 6b
+follow-up (see under Planned) later reversed this — hearing now applies only
+with no memory/search commitment, so fresh sound no longer outranks
+memory/search.)*
 A heard position carries NO focus id, so
 the executor's three-way shot agreement (intent focus, this frame's
 observation, range gate) already makes firing on sound impossible; no new gate
@@ -880,7 +886,11 @@ What the implementation built, and where it departed from the spec above:
 - **The policy** — `pickHeardLead` (gunshot over footstep, newest within a
   kind, position never consulted: the emitter's radius already decided what is
   audible) plus `adoptHeard`, which clears the focus and installs the heard
-  point as the investigation goal. `DefaultBrain.memory` gained a NULLABLE
+  point as the investigation goal.
+  *(Annotation, 2026-09-04 follow-up: superseded on both halves — the picker
+  now takes the listener feet and prefers the NEAREST gunshot, and hearing
+  applies only with no memory/search commitment. See the 6b follow-up record
+  under Planned.)* `DefaultBrain.memory` gained a NULLABLE
   `eye`, because a noise leaves a spot on the ground and no pair of eyes;
   `goalLookAt` supplies eye height above the point instead, the same
   convention a scan bearing uses.
@@ -1141,14 +1151,44 @@ much shorter life expectancy) and visible in the DEV readout as `0`, but real.
 
 ### Tranche 6b follow-up — nearest gunshot, and who may be interrupted
 
+**Implementation completed 2026-09-04.** The planned refinement is implemented in
+`src/sim/botBrains.ts` and pinned in `src/sim/botBrains.test.ts`; no tuning,
+emitter, ring, occlusion or patrol change.
+
+- **Nearest, not merely newest.** `pickHeardLead` now takes the listener feet
+  and chooses the NEAREST gunshot by 3D squared distance (the same
+  point-distance metric `withinEarshot` gates audibility on), with the newest
+  sequence as the deterministic tiebreaker on an exact distance tie.
+  Gunshot-over-footstep stands; with no gunshot the newest footstep still
+  wins. Neither an event nor its position is mutated. The comment was
+  rewritten to say why nearest-as-a-lead differs from nearest-as-an-identity:
+  6a's ban on ranking by position is about identifying a target, not about
+  picking which of several already-audible noises to walk to.
+- **Who may be interrupted — the documented REVERSAL.** Hearing now applies
+  only when the bot holds no investigation commitment: `memory` is null and
+  `searching` is false. A visual-memory pursuit, a previously heard goal and
+  any active scan/search therefore outrank a fresh noise (pending
+  incoming-fire and current-visual precedence is unchanged), while hold and
+  patrol remain interruptible. Ignored sounds are discarded, not queued —
+  the executor cursor has already consumed them. The `adoptHeard` comment and
+  the Priority 3 ladder note were rewritten so the code states the reversal
+  rather than repeating the 6b claim that freshness wins over memory/search.
+- **Coverage.** Selector pins for silence, gunshot-over-footstep,
+  nearest-despite-recency/order, 3D (not planar) distance, exact-tie
+  newest-wins, newest-footstep-without-gunshot and no-mutation; brain pins
+  that hearing still interrupts hold/patrol, routes to the nearest of two
+  gunshots, and does NOT replace a visual-memory pursuit, a previous heard
+  pursuit or an active search. Visible and incoming-fire precedence and the
+  no-shot invariant are retained unmodified.
+
 Raised by 6b's playtest and deliberately kept out of PR #85: bots should
 investigate the NEAREST gunshot, and only when they are not already fighting or
 already travelling toward a target.
 
-Both halves change decisions 6b made on purpose, so the work starts from what
-those were rather than from a blank page.
+The original decision record follows. Both halves changed decisions 6b made on
+purpose, so the work started from what those were rather than from a blank page.
 
-- **Nearest, not merely newest.** `pickHeardLead` ignores position today —
+- **Nearest, not merely newest.** Before this follow-up, `pickHeardLead` ignored position —
   gunshot over footstep, newest within a kind, nothing else — and its comment
   gives the reason: preferring the nearer of two audible gunshots would
   "quietly reintroduce ranking by position", which is what 6a removed. That
@@ -1157,7 +1197,7 @@ those were rather than from a blank page.
   change is sound, but it must rewrite that comment to say why the two cases
   differ rather than silently contradict it. Note the shape cost: a distance
   test needs the listener's position, which the pure picker does not take.
-- **Who may be interrupted — a REVERSAL, not an addition.** 6b put hearing
+- **Who may be interrupted — a REVERSAL, not an addition.** 6b originally put hearing
   ABOVE memory and search, following this tranche's ladder
   (`gunshot > footstep > remembered position`) and against the placeholder slot
   6a had left below memory; the contradiction and its resolution are annotated

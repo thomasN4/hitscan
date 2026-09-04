@@ -315,6 +315,80 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (sprint.dist < 5) throw new Error(`barely moved during sprint: ${sprint.dist.toFixed(2)} m`);
     }
 
+    // 3b) Sprint/reload exclusion (#83). Active sprint refuses both R and
+    // held-LMB dry-fire reloads; stationary Shift is allowed, and movement
+    // beginning after that accepted R cancels the reload before ammo moves.
+    if (sprintCheck) {
+      const sprintReload = await page.evaluate(async () => {
+        const cs = window.__cs;
+        const frame = () => new Promise(r => requestAnimationFrame(r));
+        const tapR = () => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', repeat: false }));
+          window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
+        };
+
+        cs.weapon.mag = 10;
+        cs.weapon.reserve = 90;
+        cs.weapon.reloading = false;
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        await frame();
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', repeat: false }));
+        await frame();
+        const refused = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        await new Promise(r => setTimeout(r, 250));
+        const remainedRefused = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+
+        // Ending sprint while R remains held must not let OS key-repeat queue
+        // a reload. A released and freshly pressed R may start; re-adding
+        // movement then cancels it before the whole-mag transfer.
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', repeat: true }));
+        await frame();
+        const heldRAfterStop = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
+        tapR();
+        await frame();
+        const stationaryStart = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+        await frame();
+        const sprintCancelled = { reloading: cs.weapon.reloading, mag: cs.weapon.mag };
+
+        // The empty full-auto path retries every frame while held unless the
+        // refusal is latched. Ending sprint must not turn that held LMB into a
+        // queued reload; release and press again to make a new attempt.
+        cs.weapon.mag = 0;
+        cs.weapon.reloading = false;
+        cs.game.shooting = true;
+        await frame();
+        const drySprint = { reloading: cs.weapon.reloading };
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        await frame();
+        await frame();
+        const heldAfterStop = { reloading: cs.weapon.reloading };
+        cs.game.shooting = false;
+        await frame();
+        cs.game.shooting = true;
+        await frame();
+        const freshClick = { reloading: cs.weapon.reloading };
+
+        cs.game.shooting = false;
+        cs.weapon.reloading = false;
+        cs.weapon.mag = 30;
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
+        return { refused, remainedRefused, heldRAfterStop, stationaryStart, sprintCancelled, drySprint, heldAfterStop, freshClick };
+      });
+      if (sprintReload.refused.reloading || sprintReload.refused.mag !== 10) throw new Error(`R started a reload during sprint: ${JSON.stringify(sprintReload)}`);
+      if (sprintReload.remainedRefused.reloading || sprintReload.remainedRefused.mag !== 10) throw new Error(`sprint-refused R queued a reload: ${JSON.stringify(sprintReload)}`);
+      if (sprintReload.heldRAfterStop.reloading || sprintReload.heldRAfterStop.mag !== 10) throw new Error(`held R repeat queued reload after sprint: ${JSON.stringify(sprintReload)}`);
+      if (!sprintReload.stationaryStart.reloading) throw new Error(`stationary Shift blocked reload: ${JSON.stringify(sprintReload)}`);
+      if (sprintReload.sprintCancelled.reloading || sprintReload.sprintCancelled.mag !== 10) throw new Error(`sprint did not cancel whole-mag reload cleanly: ${JSON.stringify(sprintReload)}`);
+      if (sprintReload.drySprint.reloading) throw new Error(`empty held LMB started reload during sprint: ${JSON.stringify(sprintReload)}`);
+      if (sprintReload.heldAfterStop.reloading) throw new Error(`held LMB queued reload after sprint: ${JSON.stringify(sprintReload)}`);
+      if (!sprintReload.freshClick.reloading) throw new Error(`fresh LMB did not start dry-fire reload: ${JSON.stringify(sprintReload)}`);
+    }
+
     // 4) Accuracy model: spread must reflect stance and movement
     if (sprintCheck) {
       const spreads = await page.evaluate(async () => {
@@ -408,10 +482,21 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
           [...document.querySelectorAll(`#col${col} .wcard`)].find(b => b.textContent.includes(name));
         card('Primary', 'SNIPER').click();
         card('Secondary', 'REVOLVER').click();
-        document.getElementById('deployBtn').click();
         const cs = window.__cs;
+        // Exercise Deploy's real dead-player respawn path with both weapon
+        // input latches dirty; a fresh life must not inherit either edge.
+        cs.game.triggerLatch = true;
+        cs.game.emptyReloadLatch = true;
+        cs.player.alive = false;
+        document.getElementById('deployBtn').click();
         // Capture the armed PRIMARY before stepping off it.
-        const armed = { name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize };
+        const armed = {
+          name: cs.weapon.name,
+          mag: cs.weapon.mag,
+          magSize: cs.weapon.magSize,
+          triggerLatch: cs.game.triggerLatch,
+          emptyReloadLatch: cs.game.emptyReloadLatch,
+        };
         // Step off the primary so the next phase's Digit1 is a real switch
         // rather than a same-position no-op.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
@@ -427,6 +512,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (picked.fail) throw new Error(picked.fail);
       if (picked.primary !== 'sniper' || picked.secondary !== 'revolver') throw new Error(`deploy did not commit the loadout: ${JSON.stringify(picked)}`);
       if (picked.armed.name !== 'SNIPER' || picked.armed.mag !== picked.armed.magSize) throw new Error(`deploy did not arm the primary: ${JSON.stringify(picked.armed)}`);
+      if (picked.armed.triggerLatch || picked.armed.emptyReloadLatch) throw new Error(`respawn preserved a weapon input latch: ${JSON.stringify(picked.armed)}`);
       if (picked.offPrimarySlot !== 1 || picked.offPrimaryName !== 'REVOLVER') throw new Error(`Digit2 did not take the secondary position: ${JSON.stringify(picked)}`);
       console.log(`[picker] OK`, JSON.stringify(picked));
 
@@ -1947,6 +2033,12 @@ async function runShotgunCheck() {
     await new Promise(r => setTimeout(r, 1500));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const waitForShell = async fromMag => {
+        const deadline = performance.now() + 8000;
+        while (cs.weapon.reloading && cs.weapon.mag === fromMag
+               && performance.now() < deadline) await frame();
+      };
       // Real UI path: Play opens the picker, cards select, Deploy commits.
       document.getElementById('playBtn').click();
       const screen = document.getElementById('loadoutScreen');
@@ -1958,7 +2050,7 @@ async function runShotgunCheck() {
       // Enter "playing" state headlessly, aim into the floor, fire ONE pull.
       cs.game.started = true;
       cs.game.locked = true;
-      await new Promise(r => requestAnimationFrame(r));
+      await frame();
       cs.game.pitch = -1.4;
       cs.weapon.lastShot = -9; // the fire-rate gate must not eat the fresh deploy's first shell
       const holesBefore = cs.bulletHoles.length;
@@ -1968,12 +2060,13 @@ async function runShotgunCheck() {
       window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
       const magAfterFirstShot = cs.weapon.mag;
       const holesAfterFirstShot = cs.bulletHoles.length;
-      // Per-round reload: start R two shells down, let ~2 intervals elapse,
+      // Per-round reload: start R two shells down, poll until a shell lands,
       // then fire mid-reload — the shot must cancel the rest and go out.
       cs.weapon.mag = 2;
       const reserveBefore = cs.weapon.reserve;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
-      await new Promise(r => setTimeout(r, 1500)); // shotgun interval = 3.2s / 7 ≈ 0.46s
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
+      await waitForShell(2);
       const mid = {
         mag: cs.weapon.mag,
         reserve: cs.weapon.reserve,
@@ -1982,6 +2075,22 @@ async function runShotgunCheck() {
       window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
       await new Promise(r => setTimeout(r, 300));
       window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+      const shotMag = cs.weapon.mag;
+      const shotCancelledReload = !cs.weapon.reloading;
+
+      // Start another per-round reload, allow shells to transfer, then begin
+      // sprinting. The reload must stop and keep every landed shell.
+      cs.weapon.mag = 2;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
+      await waitForShell(2);
+      const beforeSprintCancel = { mag: cs.weapon.mag, reloading: cs.weapon.reloading };
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      await frame();
+      const afterSprintCancel = { mag: cs.weapon.mag, reloading: cs.weapon.reloading };
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
       return {
         primary: cs.game.primary,
         secondary: cs.game.secondary,
@@ -1991,8 +2100,10 @@ async function runShotgunCheck() {
         reloadMid: mid,
         loaded: mid.mag - 2,
         reserveUntouched: mid.reserve === reserveBefore, // range mode never drains the reserve
-        shotMag: cs.weapon.mag,
-        shotCancelledReload: !cs.weapon.reloading,
+        shotMag,
+        shotCancelledReload,
+        beforeSprintCancel,
+        afterSprintCancel,
       };
     });
     if (result.fail) throw new Error(result.fail);
@@ -2004,6 +2115,8 @@ async function runShotgunCheck() {
     if (result.loaded < 1 || result.loaded > 4) throw new Error(`expected 1-4 shells loaded mid-reload, got ${result.loaded}: ${JSON.stringify(result.reloadMid)}`);
     if (!result.reserveUntouched) throw new Error(`range-mode reload drained the reserve: ${JSON.stringify(result.reloadMid)}`);
     if (result.shotMag !== result.reloadMid.mag - 1 || !result.shotCancelledReload) throw new Error(`firing must cancel the per-round reload and consume the chambered shell: ${JSON.stringify(result)}`);
+    if (!result.beforeSprintCancel.reloading || result.beforeSprintCancel.mag <= 2) throw new Error(`per-round control did not load shells before sprint: ${JSON.stringify(result)}`);
+    if (result.afterSprintCancel.reloading || result.afterSprintCancel.mag !== result.beforeSprintCancel.mag) throw new Error(`sprint did not preserve landed shells while cancelling reload: ${JSON.stringify(result)}`);
     console.log('[shotgun] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

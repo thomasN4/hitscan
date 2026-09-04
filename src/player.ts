@@ -19,7 +19,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, aim, wpn, motion, keys, gameTime, soundEvents, playerFeet } from './core/state';
+import { player, input, aim, wpn, motion, keyHeld, effectiveCrouching, gameTime, soundEvents, playerFeet } from './core/state';
 import { slideMoveXZ, resolveVertical } from './collision';
 import { colliders, liftPads } from './world';
 import { sfxFootstep } from './audio';
@@ -27,6 +27,7 @@ import {
   gunGroup,
   currentAimPitch,
   currentAimYaw,
+  currentSprintActive,
   currentViewmodelRecoil,
   viewmodelAimOffset,
 } from './weapons';
@@ -62,15 +63,6 @@ const AIR_BLEND_RATE = 12;
 const GROUND_BLEND_RATE = 12;
 
 /**
- * Read one keyboard slot as a plain boolean. `keys` is
- * Record<string, boolean | undefined> — written from event handlers, so the
- * undefined case is real and this is where it collapses.
- */
-function key(code: string): boolean {
-  return keys[code] === true;
-}
-
-/**
  * Stage 1 — movement, stance, footsteps, camera position.
  *
  * Writes player.pos/vel and the blends the accuracy model reads
@@ -89,19 +81,19 @@ export function updateMovement(dt: number): void {
   // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
   // can't crouch mid-air to shrink the camera.
-  const crouching = input.crouching && player.onGround;
-  const running = input.running && !crouching && !input.aiming;
-  const speed = speedFor({ crouching, aiming: input.aiming, running, runLerp: motion.runLerp });
+  const crouching = effectiveCrouching();
+  const sprinting = currentSprintActive(crouching);
+  const speed = speedFor({ crouching, aiming: input.aiming, running: sprinting, runLerp: motion.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(aim.yaw), 0, -Math.cos(aim.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)
   const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
   const move = new THREE.Vector3();
-  if (key('KeyW')) move.add(forward);
-  if (key('KeyS')) move.sub(forward);
-  if (key('KeyD')) move.add(right);
-  if (key('KeyA')) move.sub(right);
+  if (keyHeld('KeyW')) move.add(forward);
+  if (keyHeld('KeyS')) move.sub(forward);
+  if (keyHeld('KeyD')) move.add(right);
+  if (keyHeld('KeyA')) move.sub(right);
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
 
   // Horizontal movement: the shared slide-along-walls gate (collision.ts),
@@ -127,7 +119,7 @@ export function updateMovement(dt: number): void {
   // feet, so its top catches them as the feet dip a hair below it). The
   // last-argument grounded flag lets descents stick to stairs instead of
   // free-falling each tread.
-  if (key('Space') && player.onGround) player.vel.y = JUMP_VEL;
+  if (keyHeld('Space') && player.onGround) player.vel.y = JUMP_VEL;
   player.vel.y -= GRAVITY * dt;
   const vert = resolveVertical(feetY, player.vel.y, dt, player.pos.x, player.pos.z,
     player.radius, colliders, player.onGround);
@@ -156,7 +148,7 @@ export function updateMovement(dt: number): void {
   // through the arc (~0.73 s airtime drains runLerp ~97% otherwise), not
   // land at walk pace and rebuild the ramp from zero.
   motion.runLerp = deadZone(
-    approach(motion.runLerp, running && pressingMove ? 1 : 0, dt, 1 / SPRINT_RAMP));
+    approach(motion.runLerp, sprinting ? 1 : 0, dt, 1 / SPRINT_RAMP));
 
   // Crouch camera offset (smooth): lerp toward the target so crouching
   // eases down/up over ~0.2s rather than snapping.
@@ -197,7 +189,7 @@ export function updateMovement(dt: number): void {
           sourceId: 'player',
           team: 'CT',
           pos: playerFeet(player),
-          radius: running ? FOOTSTEP_RUN_RADIUS_M : FOOTSTEP_WALK_RADIUS_M,
+          radius: sprinting ? FOOTSTEP_RUN_RADIUS_M : FOOTSTEP_WALK_RADIUS_M,
           t: gameTime.now(),
         });
       }

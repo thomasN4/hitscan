@@ -6,7 +6,7 @@
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
 import type { Bot as BotShape, HitZone, MapName } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
@@ -32,6 +32,7 @@ export function damagePlayer(dmg: number, attackerName: string): void {
   updateHUD();
   if (player.hp <= 0) {
     player.alive = false;
+    cancelPendingReloadSfx();
     score.scoreDeaths++;
     score.playerDeaths++;
     const attacker = bots.find(b => b.name === attackerName);
@@ -118,6 +119,7 @@ const SPAWN_Z: Record<MapName, number> = {
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
 export function respawn(): void {
+  cancelPendingReloadSfx();
   player.pos.set(0, player.eyeHeight, SPAWN_Z[session.map]);
   player.vel.set(0, 0, 0);
   player.hp = 100;
@@ -127,6 +129,8 @@ export function respawn(): void {
   wpn.recoil = 0;    // else the view punch would spawn the camera mid-climb
   wpn.recoilYaw = 0; // and mid-wander, off to one side
   wpn.spray = 1;     // resting multiplier, NOT 0 — see core/state.ts
+  wpn.triggerLatch = false;
+  wpn.emptyReloadLatch = false;
   // Same class: the accuracy/pose blends are smoothed toward their target over
   // ~100-200 ms, so dying mid-air respawns you inside the full AIR_PENALTY
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.

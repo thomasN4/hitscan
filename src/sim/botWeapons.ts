@@ -398,12 +398,12 @@ export class WeaponFireController implements FireController {
     const wants = this.rounds <= 0 || (!engaged && isLowAmmo(this.rounds, this.def.magSize));
     if (!wants) return;
     // A bot is only ticked while alive and in a live match, and it never aims
-    // down sights — the two flags planReload weighs for the player carry no
-    // information here, and the gate that matters (partial magazine, rounds
-    // available) is shared.
+    // down sights or sprints — those player-state gates are constants here.
+    // The gate that matters (partial magazine, rounds available) is shared.
     const { start } = planReload({
       started: true, alive: true, reloading: this.inReload,
-      mag: this.rounds, magSize: this.def.magSize, reserve: this.held, aiming: false,
+      mag: this.rounds, magSize: this.def.magSize, reserve: this.held,
+      aiming: false, sprinting: false,
     });
     if (!start) return;
     this.inReload = true;

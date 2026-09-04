@@ -10,7 +10,7 @@
 // declaration detail of the types package. Erased under verbatimModuleSyntax.
 import type * as THREE from 'three';
 import { camera } from './core/engine';
-import { gameTime } from './core/state';
+import { gameTime, type BotWeaponId } from './core/state';
 import type { ScheduledHandle } from './sim/gameClock';
 
 let audioCtx: AudioContext | undefined;
@@ -92,10 +92,49 @@ export const sfxSwitch = (): void => playGunshot(0.1, 1800, 0.04);
 /** Scope zoom step: even softer tick. */
 export const sfxZoom = (): void => playGunshot(0.08, 2400, 0.03);
 
-/** Enemy gunshot: quieter, attenuated with distance from the camera. */
-export function sfxEnemyShoot(pos: THREE.Vector3): void {
+/**
+ * A weapon's report as heard from ELSEWHERE in the world, plus how fast it
+ * fades with distance.
+ *
+ * Deliberately a second table rather than a shared one with the player's
+ * sfx* consts above. Those are the near-field sound of a gun at your own
+ * shoulder; these are the far-field sound of one across a map, and the two
+ * genuinely want different volumes and tails — sharing one set of numbers
+ * would make one of the two situations wrong. Both are Records over the id
+ * union, so a new weapon fails to compile until it has an entry in each.
+ *
+ * `falloff` is PRESENTATION loudness: how far a shot carries to the PLAYER'S
+ * ear. It is emphatically NOT soundEvents.ts:GUNSHOT_RADIUS_M, which is how
+ * far a shot carries to a BOT's, is one number for every firearm, and is
+ * deferred by docs/ai-plan.md until it has a validateWeapons rule behind it.
+ * Changing one of these does not change the other, and it must not: a sniper
+ * that sounds louder than a pistol is a cue, while a sniper that is HEARD
+ * further than a pistol is a balance change to 6b's investigation geometry.
+ */
+interface EnemyShotTone {
+  /** Volume at zero distance, before attenuation. */
+  vol: number;
+  /** Metres of separation that bleed one unit of `vol`. */
+  falloff: number;
+  freqBase: number;
+  dur: number;
+}
+
+const ENEMY_SHOT_TONE: Record<BotWeaponId, EnemyShotTone> = {
+  smg:      { vol: 0.30, falloff: 150, freqBase: 800, dur: 0.09 },
+  pistol:   { vol: 0.26, falloff: 130, freqBase: 950, dur: 0.08 },
+  revolver: { vol: 0.36, falloff: 190, freqBase: 640, dur: 0.16 },
+  // Deepest and longest-tailed, and it carries furthest — the report is how
+  // you learn there is a sniper before you find out the hard way.
+  sniper:   { vol: 0.40, falloff: 260, freqBase: 430, dur: 0.26 },
+  shotgun:  { vol: 0.42, falloff: 170, freqBase: 330, dur: 0.24 },
+};
+
+/** Enemy gunshot: attenuated with distance from the camera, timbre by weapon. */
+export function sfxEnemyShoot(pos: THREE.Vector3, weapon: BotWeaponId): void {
+  const tone = ENEMY_SHOT_TONE[weapon];
   const d = camera.position.distanceTo(pos);
-  playGunshot(Math.max(0.05, 0.3 - d / 150), 700, 0.1);
+  playGunshot(Math.max(0.05, tone.vol - d / tone.falloff), tone.freqBase, tone.dur);
 }
 
 /**

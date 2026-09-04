@@ -11,8 +11,13 @@
 // (slideMoveXZ + resolveVertical, so bots climb stairs and land off edges),
 // report rejection back as moveBlocked, face the intent's facing, aim the
 // barrel at its lookAt, and loose a shot only when the frame's observation
-// agrees with the intent's focus. All tuning of behavior lives in
-// BrainParams / brain classes; this file holds no policy numbers.
+// agrees with the intent's focus. Behavior tuning lives in two places, and
+// neither is here: BrainParams / brain classes for policy, and
+// sim/botWeapons.ts:BOT_WEAPON_TUNING for everything a WEAPON decides — its
+// accuracy curve, cadence, burst discipline and the chase bands it wants to
+// fight at. This file holds no policy numbers; the per-weapon geometry below
+// is presentation, and the muzzle offset it carries is a model dimension
+// rather than a tunable.
 //
 // Shot gating contract (realized by the default brain): fire only when a
 // cooldown expires AND the bot currently SEES its focus — the observation is
@@ -26,7 +31,7 @@
 // multiplies damage by zone.
 import * as THREE from 'three';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, type Bot as BotShape, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -34,8 +39,11 @@ import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
-import { addKillfeed, updateScore } from './hud';
-import { DefaultBrain, type BrainMode } from './sim/botBrains';
+import { addKillfeed, botKillTag, updateScore } from './hud';
+import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode } from './sim/botBrains';
+import {
+  BOT_WEAPON_TUNING, WeaponFireController, botBrainParams, resolveBotWeapon,
+} from './sim/botWeapons';
 import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, route, navGrid } from './nav';
@@ -49,8 +57,32 @@ import { nearestNode, navNode, pickPatrolNode } from './sim/navGrid';
  */
 const BOT_RADIUS = NAV_RADIUS;
 
-/** Length of the aim barrel (m); the muzzle sits at half this along its +z. */
-const BARREL_LEN = 0.6;
+/**
+ * One bot weapon's silhouette, in the aim hinge's local space.
+ *
+ * Only LENGTH and BULK vary between weapons, because those are the two cues
+ * that survive at combat distance — a bot is a stack of untextured boxes seen
+ * at 20 m, and anything finer than a silhouette is invisible there (lesson
+ * 25: a cosmetic cue that cannot read is not a cue).
+ *
+ * Built here rather than cloned from weapons.ts's viewmodels, for four
+ * separate reasons any one of which is decisive: those meshes are positioned
+ * in CAMERA space with baked first-person offsets; there is one instance of
+ * each and an Object3D has exactly one parent; weapons.ts already imports
+ * this module (botFor), so importing back would be the module cycle the
+ * architecture rules ban outright; and their parts carry reload-pose userData
+ * a bot has no use for.
+ */
+interface BotWeaponModel {
+  /** Parts to hang on the aim hinge: shared geometry, local offset, material. */
+  readonly parts: readonly {
+    geo: THREE.BufferGeometry;
+    pos: readonly [number, number, number];
+    mat: THREE.Material;
+  }[];
+  /** Local +z of the barrel tip — where muzzlePos() puts the flash. */
+  readonly muzzle: number;
+}
 
 /**
  * Ceiling on how far a bot's aim tips to track a target (rad, ~69°).
@@ -117,10 +149,81 @@ const botGeo = {
   torso:  new THREE.BoxGeometry(0.7, 0.9, 0.4),
   head:   new THREE.BoxGeometry(0.34, 0.34, 0.34),
   legs:   new THREE.BoxGeometry(0.6, 0.9, 0.35),
-  barrel: new THREE.BoxGeometry(0.08, 0.08, BARREL_LEN),
 };
 /** Gunmetal, shared by both teams — a weapon reads as a weapon, not as a side. */
 const matBarrel = new THREE.MeshLambertMaterial({ color: 0x23262b });
+/** Walnut, for the shotgun's furniture — the one weapon that isn't all steel. */
+const matStock = new THREE.MeshLambertMaterial({ color: 0x4a331f });
+
+/** Shared weapon geometry: one allocation per shape, for every bot carrying it. */
+const wpnGeo = {
+  smgBody:   new THREE.BoxGeometry(0.08, 0.08, 0.60),
+  smgMag:    new THREE.BoxGeometry(0.05, 0.16, 0.07),
+  sniperBody: new THREE.BoxGeometry(0.06, 0.06, 1.05),
+  sniperScope: new THREE.CylinderGeometry(0.05, 0.05, 0.26, 10),
+  shotgunBody: new THREE.BoxGeometry(0.12, 0.12, 0.70),
+  shotgunTube: new THREE.BoxGeometry(0.07, 0.07, 0.52),
+  shotgunStock: new THREE.BoxGeometry(0.09, 0.13, 0.26),
+  pistolBody: new THREE.BoxGeometry(0.07, 0.07, 0.28),
+  pistolGrip: new THREE.BoxGeometry(0.06, 0.14, 0.07),
+  revolverBody: new THREE.BoxGeometry(0.07, 0.07, 0.34),
+  revolverCylinder: new THREE.CylinderGeometry(0.06, 0.06, 0.11, 8),
+};
+// The scope and the cylinder are lathe shapes lying ALONG the barrel, so both
+// need the x-quarter-turn weapons.ts gives its viewmodel scope. Baking it into
+// the geometry keeps the model table a flat list of positions.
+wpnGeo.sniperScope.rotateX(Math.PI / 2);
+wpnGeo.revolverCylinder.rotateX(Math.PI / 2);
+
+/**
+ * What each weapon looks like on a bot. A full Record over BotWeaponId, like
+ * every other per-weapon table in the repo: widening the union fails to
+ * compile here until the new weapon has a silhouette.
+ */
+const BOT_WEAPON_MODELS: Record<BotWeaponId, BotWeaponModel> = {
+  // The shipped bot barrel, unchanged — this is the shape every existing
+  // playtest impression was formed against.
+  smg: {
+    parts: [
+      { geo: wpnGeo.smgBody, pos: [0, 0, 0.30], mat: matBarrel },
+      { geo: wpnGeo.smgMag, pos: [0, -0.10, 0.18], mat: matBarrel },
+    ],
+    muzzle: 0.60,
+  },
+  // Nearly twice the smg's length plus a scope: the one that has to read as
+  // "that thing outranges me" from across the map.
+  sniper: {
+    parts: [
+      { geo: wpnGeo.sniperBody, pos: [0, 0, 0.53], mat: matBarrel },
+      { geo: wpnGeo.sniperScope, pos: [0, 0.08, 0.30], mat: matBarrel },
+    ],
+    muzzle: 1.05,
+  },
+  // Short and THICK, with wood: bulk is the cue here, not length.
+  shotgun: {
+    parts: [
+      { geo: wpnGeo.shotgunBody, pos: [0, 0, 0.35], mat: matBarrel },
+      { geo: wpnGeo.shotgunTube, pos: [0, -0.09, 0.28], mat: matBarrel },
+      { geo: wpnGeo.shotgunStock, pos: [0, -0.02, -0.13], mat: matStock },
+    ],
+    muzzle: 0.70,
+  },
+  // Visibly the smallest thing on the field.
+  pistol: {
+    parts: [
+      { geo: wpnGeo.pistolBody, pos: [0, 0, 0.14], mat: matBarrel },
+      { geo: wpnGeo.pistolGrip, pos: [0, -0.10, 0.02], mat: matBarrel },
+    ],
+    muzzle: 0.28,
+  },
+  revolver: {
+    parts: [
+      { geo: wpnGeo.revolverBody, pos: [0, 0, 0.17], mat: matBarrel },
+      { geo: wpnGeo.revolverCylinder, pos: [0, -0.01, 0.04], mat: matBarrel },
+    ],
+    muzzle: 0.34,
+  },
+};
 const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
   T: {
     body: new THREE.MeshLambertMaterial({ color: 0x8a6b2e }),
@@ -181,8 +284,25 @@ export class Bot implements BotShape {
   /** Varied per bot so they spread out. */
   speed = 3.2 + Math.random() * 1.4;
   respawnPoint = new THREE.Vector3();
-  /** This bot's policy; instances own per-bot state (strafe dir, cooldown). */
-  private readonly brain = new DefaultBrain();
+  /**
+   * The catalog weapon this bot carries for the whole match. Drawn once at
+   * construction and never re-drawn — a stable "T-3 is the sniper" is what
+   * lets a playtest attribute a behavior to a weapon rather than guess at it.
+   */
+  readonly weapon: BotWeaponId;
+  /**
+   * This bot's policy and the weapon it fights with. Both are per-bot state;
+   * the brain's whole stimulus ladder is weapon-independent, and everything
+   * that differs between an smg bot and a sniper bot is either a BrainParams
+   * number or something the composed FireController owns.
+   */
+  private readonly brain: DefaultBrain;
+  /**
+   * Barrel-tip offset along the aim hinge's local +z. Per weapon, so a
+   * sniper's muzzle flash leaves the end of its longer barrel rather than
+   * hanging in the middle of it.
+   */
+  private readonly muzzleZ: number;
   /**
    * Fair-rotation cursor for the per-frame visual acquisition: the index the
    * next scan starts from when the brain's tracked identity is not cheaply
@@ -269,12 +389,21 @@ export class Bot implements BotShape {
    */
   private patrolGoal: THREE.Vector3 | null = null;
 
-  constructor(team: Team = 'T') {
-    // Plain assignments, not a parameter property: the `name` derivation must
+  constructor(team: Team = 'T', weapon: BotWeaponId = 'smg') {
+    // Plain assignments, not parameter properties: the `name` derivation must
     // see the team, and field initializers run before constructor-body
-    // parameter-property writes would.
+    // parameter-property writes would. The brain is the same case for a
+    // sharper reason — it needs the weapon, which a field initializer cannot
+    // see at all.
     this.team = team;
     this.name = `${team}-${++teamSerials[team]}`;
+    this.weapon = weapon;
+    const tuning = BOT_WEAPON_TUNING[weapon];
+    this.brain = new DefaultBrain(
+      botBrainParams(tuning, DEFAULT_BRAIN_PARAMS),
+      Math.random,
+      new WeaponFireController(weapon, WEAPONS[weapon], tuning, Math.random),
+    );
 
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
     // raycasts can distinguish hit zones. All parts share this group's transform.
@@ -303,10 +432,14 @@ export class Bot implements BotShape {
     // reached that list would silently become a torso hit rather than error.
     // Bot LOS rays against `solids` only, so it never blocks sight either.
     this.aim.position.set(0.16, 1.5, 0);
-    const barrel = new THREE.Mesh(botGeo.barrel, matBarrel);
-    barrel.position.z = BARREL_LEN / 2;
-    barrel.castShadow = true;
-    this.aim.add(barrel);
+    const model = BOT_WEAPON_MODELS[weapon];
+    this.muzzleZ = model.muzzle;
+    for (const part of model.parts) {
+      const mesh = new THREE.Mesh(part.geo, part.mat);
+      mesh.position.set(part.pos[0], part.pos[1], part.pos[2]);
+      mesh.castShadow = true;
+      this.aim.add(mesh);
+    }
     this.mesh.add(this.aim);
 
     this.spawnAtRandom();
@@ -558,7 +691,7 @@ export class Bot implements BotShape {
       // candidate. Keep this executor-owned lookup rather than returning a
       // live Target from perception: observations cross that seam as copies
       // plus stable identity, never entity references. The die rolls from the
-      // ACTUAL post-move distance (see botBrains.ts:botHitChance).
+      // ACTUAL post-move distance (see sim/botWeapons.ts:botHitChance).
       const target = enemies.find(e => e.id === obs.id);
       if (target) this.shoot(this.eyePos().distanceTo(obs.eye), target);
     }
@@ -725,6 +858,16 @@ export class Bot implements BotShape {
   get navPath(): readonly THREE.Vector3[] { return this.path; }
   get navLeg(): number { return this.leg; }
 
+  /**
+   * Magazine state for the DEV readout, delegated to the brain's weapon.
+   * Getters for the same reason as the route views above: the fire controller
+   * owns these numbers, and mirroring them into fields would be a second copy
+   * to keep in sync every frame.
+   */
+  get mag(): number { return this.brain.mag; }
+  get magSize(): number { return this.brain.magSize; }
+  get reloading(): boolean { return this.brain.reloading; }
+
   /** World-space eye position used for LOS checks (~head height). */
   eyePos(): THREE.Vector3 {
     return new THREE.Vector3(this.mesh.position.x, this.mesh.position.y + 1.9, this.mesh.position.z);
@@ -740,20 +883,25 @@ export class Bot implements BotShape {
    */
   private muzzlePos(): THREE.Vector3 {
     this.mesh.updateMatrixWorld(true);
-    return this.aim.localToWorld(new THREE.Vector3(0, 0, BARREL_LEN));
+    return this.aim.localToWorld(new THREE.Vector3(0, 0, this.muzzleZ));
   }
 
   /**
-   * Realize a shot the brain ordered. Hits are probabilistic (no
-   * projectile): chance falls off linearly with the eye-to-eye distance to
-   * the target so distant bots are mostly noise; a hit routes damage by
-   * target kind — the player through damagePlayer, a bot through damageBot
-   * as a flat torso hit. Both dice (hit and damage) come from the brain's
-   * rng stream.
+   * Realize a shot the brain ordered. Hits stay probabilistic (no
+   * projectile): each of the weapon's rays rolls against a chance that falls
+   * off linearly with the eye-to-eye distance, so distant bots are mostly
+   * noise. What a landed ray is WORTH comes from the catalog — a rolled hit
+   * zone through sim/damage.ts:damageForPart — so a bot victim can take a
+   * head-multiplied 220 from a revolver as readily as a 26 from an smg, and
+   * 'flat torso' damage no longer exists on this path.
+   *
+   * One damage call per trigger pull whatever the ray count, attributed to
+   * the best zone any ray struck; see the summing comment below. Every die
+   * (per-ray hit, per-landed-ray zone) comes from the brain's rng stream.
    */
   private shoot(dist: number, target: Target): void {
     const muzzle = this.muzzlePos();
-    sfxEnemyShoot(this.mesh.position);
+    sfxEnemyShoot(this.mesh.position, this.weapon);
     spawnImpact(muzzle); // cheap muzzle flash, from the barrel tip
     // Emitted BEFORE the hit die, so a miss is exactly as audible as a hit —
     // hearing reports that a trigger was pulled, not that it landed. At the
@@ -769,10 +917,16 @@ export class Bot implements BotShape {
       t: gameTime.now(),
     });
 
-    if (!this.brain.rollHit(dist)) return;
-    const dmg = this.brain.rollDamage();
-    if (target.kind === 'player') damagePlayer(dmg, this.name);
-    else damageBot(target.bot, dmg, 'torso', this.name);
+    // One resolution per trigger pull, and ONE damage call from it however
+    // many rays landed. A shotgun's eight pellets are one event to the
+    // victim: damagePlayer flashes the vignette and plays sfxHurt per CALL,
+    // so routing them separately would be eight grunts in a single frame.
+    // The zone is the best any ray struck, the same rule weapons.ts uses when
+    // it reddens one hitmarker for a whole pattern.
+    const shot = this.brain.resolveShot(dist);
+    if (shot.zone === null) return;
+    if (target.kind === 'player') damagePlayer(shot.damage, this.name);
+    else damageBot(target.bot, shot.damage, shot.zone, this.name);
   }
 
   /**
@@ -793,16 +947,21 @@ export class Bot implements BotShape {
     else score.scoreDeaths++;
     // Scoreboard attribution: the player's own kills get a personal counter;
     // a bot killer is resolved by display name (unique per team serial).
-    if (killerName === undefined) {
-      score.playerKills++;
-    } else {
-      const killer = bots.find(b => b.name === killerName);
-      if (killer) killer.kills++;
-    }
+    // Hoisted out of the counter branch because the killfeed needs it too:
+    // a bot killer names the weapon it did it with.
+    const killer = killerName === undefined
+      ? undefined
+      : bots.find(b => b.name === killerName);
+    if (killerName === undefined) score.playerKills++;
+    else if (killer) killer.kills++;
     updateScore();
+    // A bot-dealt kill can finally say 'headshot'. Before the hit zone was
+    // rolled, the executor passed a hardcoded 'torso' for every bot shot, so
+    // the wording existed but no bot could ever reach it.
     addKillfeed(killerName === undefined
       ? `You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`
-      : `${killerName} killed ${this.name}`);
+      : `${killerName}${botKillTag(killer)}` +
+        ` ${killerPart === 'head' ? '☠ headshot-killed' : 'killed'} ${this.name}`);
     debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();
     gameTime.schedule(6, () => {
@@ -816,9 +975,19 @@ export class Bot implements BotShape {
   }
 }
 
-/** Create a starting wave of one team. Called from main.ts with the menu-configured counts (parser clamps Ts to >= 1, CTs to >= 0). */
-export function spawnBots(count: number, team: Team): void {
-  for (let i = 0; i < count; i++) bots.push(new Bot(team));
+/**
+ * Create a starting wave of one team. Called from main.ts with the
+ * menu-configured counts (the parser clamps Ts to >= 1, CTs to >= 0) and that
+ * team's weapon setting.
+ *
+ * `choice` is resolved PER BOT, so 'mixed' gives a varied wave while a named
+ * weapon arms every bot on the side identically — which is what lets a smoke
+ * phase or a playtest hold the weapon still and vary something else.
+ */
+export function spawnBots(count: number, team: Team, choice: BotWeaponChoice = 'smg'): void {
+  for (let i = 0; i < count; i++) {
+    bots.push(new Bot(team, resolveBotWeapon(choice, Math.random)));
+  }
 }
 
 /** Advance all bot AI. Called once per frame from the main loop. */

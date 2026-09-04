@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
 import { isLowAmmo } from './sim/ammo';
 
 /**
@@ -86,6 +86,11 @@ export function flashDamageVignette(dmg: number): void {
 
 export function clearVignette(): void {
   vignette.style.boxShadow = 'none';
+}
+
+/** Format the weapon suffix shared by every bot-authored killfeed line. */
+export function botKillTag(bot: BotShape | undefined): string {
+  return bot === undefined ? '' : ` [${WEAPONS[bot.weapon].name}]`;
 }
 
 /** Prepend an entry to the kill feed; auto-fades after 3.5s. */
@@ -217,6 +222,12 @@ export function updateHUD(): void {
 // reachable: the readout shows shootable `rs` or non-shootable `--` (`-s`
 // when a seen target sits beyond engageRange).
 //
+// The weapon column names what the bot is carrying and how much of it is
+// left: NAME(8, the widest is REVOLVER), then mag/magSize, then `R` while a
+// reload runs. A reload is a window in which a bot cannot shoot at all, so a
+// bot that stops firing mid-engagement is either reloading or dry — and
+// without this column those two look identical to "the AI broke".
+//
 // lastBotDebug doubles as shown-state: it is non-empty exactly when the text
 // was last written AND revealed, so the inactive path can hide with one check.
 let lastBotDebug = '';
@@ -235,6 +246,9 @@ function updateBotDebug(): void {
               `${b.onGround ? '  G' : '  -'}${b.moveBlocked ? ' blk' : '    '}` +
               ` ${b.targetInRange ? 'r' : '-'}${b.targetLOS === true ? 's' : '-'}` +
               ` ${b.mode.padEnd(6)}` +
+              ` ${WEAPONS[b.weapon].name.padEnd(8)}` +
+              ` ${String(b.mag).padStart(2)}/${String(b.magSize).padStart(2)}` +
+              `${b.reloading ? ' R' : '  '}` +
               `${b.alive ? '' : ' dead'}`)
     .join('\n');
   if (text === lastBotDebug) return;

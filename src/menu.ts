@@ -8,7 +8,8 @@
 // main.ts (after the session config has been parsed into core/state), and a
 // missing id is a named startup error via hud.ts:requireEl.
 //
-// Commit model: match settings ride ONE query string (?map=&tbots=&ctbots=&time=).
+// Commit model: match settings ride ONE query string
+// (?map=&tbots=&ctbots=&time=&tweap=&ctweap=).
 // Play compares the form against the applied session config — equal means the
 // page already matches, so it opens the loadout picker; different means
 // navigate-and-reload (map switching is a full reload, and pointer lock needs
@@ -25,6 +26,7 @@ import {
   TIME_LIMITS_S,
   asMapName,
   clampTo,
+  asBotWeapon,
   configsEqual,
   configToQuery,
   numOr,
@@ -66,7 +68,8 @@ let startMenu: HTMLElement, pauseMenu: HTMLElement, loadoutScreen: HTMLElement, 
   colPrimary: HTMLElement, colSecondary: HTMLElement,
   endTitle: HTMLElement, endScoreCT: HTMLElement, endScoreT: HTMLElement, scoreboardBody: HTMLElement;
 let deployBtn: HTMLButtonElement;
-let mapSel: HTMLSelectElement, botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
+let mapSel: HTMLSelectElement, weaponTSel: HTMLSelectElement, weaponCtSel: HTMLSelectElement,
+  botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
   timeMinIn: HTMLInputElement;
 
 // ---------- Loadout picker state ----------
@@ -234,8 +237,12 @@ export function initMenus(handlers: MenuHandlers): void {
   botsTIn = requireEl('cfgBotsT') as HTMLInputElement;
   botsCtIn = requireEl('cfgBotsCt') as HTMLInputElement;
   timeMinIn = requireEl('cfgTimeMin') as HTMLInputElement;
+  weaponTSel = requireEl('cfgWeaponT') as HTMLSelectElement;
+  weaponCtSel = requireEl('cfgWeaponCt') as HTMLSelectElement;
 
   mapSel.value = session.map;
+  weaponTSel.value = session.botWeaponT;
+  weaponCtSel.value = session.botWeaponCt;
   botsTIn.value = String(session.botsT);
   botsCtIn.value = String(session.botsCt);
   timeMinIn.value = secondsToMinutesLabel(session.roundSeconds);
@@ -287,11 +294,18 @@ function applyMapUi(): void {
   botsTIn.disabled = isRange;
   botsCtIn.disabled = isRange;
   timeMinIn.disabled = isRange;
+  // No bots on the range, so nothing to arm.
+  weaponTSel.disabled = isRange;
+  weaponCtSel.disabled = isRange;
 }
 
 /** Field-by-field view of what the page was loaded with. */
 function appliedConfig(): SessionConfig {
-  return { map: session.map, botsT: session.botsT, botsCt: session.botsCt, roundSeconds: session.roundSeconds };
+  return {
+    map: session.map, botsT: session.botsT, botsCt: session.botsCt,
+    roundSeconds: session.roundSeconds,
+    botWeaponT: session.botWeaponT, botWeaponCt: session.botWeaponCt,
+  };
 }
 
 /** Form contents as a SessionConfig, clamped exactly like the URL parser. */
@@ -305,6 +319,11 @@ function candidateConfig(): SessionConfig {
     roundSeconds: Math.round(
       clampTo(numOr(timeMinIn.value, session.roundSeconds / 60) * 60, TIME_LIMITS_S),
     ),
+    // Same shared narrower the URL parser uses, for the same reason asMapName
+    // is shared: a second literal comparison here is how the form and the
+    // parser drift apart the next time the weapon catalog widens.
+    botWeaponT: asBotWeapon(weaponTSel.value, session.botWeaponT),
+    botWeaponCt: asBotWeapon(weaponCtSel.value, session.botWeaponCt),
   };
 }
 

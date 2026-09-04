@@ -45,6 +45,15 @@ height, navigation and senses work recorded below):
 - **Ballistics are brain params.** Hit-chance curve and damage spread live
   in `BrainParams`, so future profiles vary accuracy without touching the
   executor.
+  *(Annotation, tranche 7a: superseded. Ballistics are the WEAPON's, not the
+  policy's. `BrainParams` lost `hitChanceNear/Divisor/Min`, `damageMin/Span`,
+  `cooldownMin/Span` and `firstDelayMin/Span`; what stayed is movement. The
+  decision was right that a brain must not read executor constants, and wrong
+  that the numbers were policy at all — they were an abstract weapon hidden
+  inside the policy object, which is exactly why every bot on the field was
+  identical. A `FireController` composed into the brain owns them now, and
+  landed damage comes from `sim/damage.ts:damageForPart` on the real catalog
+  def.)*
 - **Full two-sided combat.** Ts target the nearest opposing entity (player
   OR CT); CTs target Ts. The player counts as CT-side. The player entry
   stays listed even while dead so `ctbots=0` behavior is bit-identical to
@@ -952,7 +961,183 @@ off a pursuit they are already committed to.
 6a therefore landed before 6b, and each received its own feature PR, unit pins,
 smoke phase and playtest record.
 
+### Tranche 7a — bots carry a real catalog weapon
+
+**Status: implemented on `feat/bot-weapons`; the PR is open and not yet
+merged.** 7b (loadouts, the dry swap, the knife) is under Planned.
+
+Bots had no weapon. They had an *abstraction* of one, baked into
+`BrainParams`: a Bernoulli curve (0.65 at point blank, /80 falloff, 0.12
+floor), a uniform 8–22 damage roll, one hardcoded `'torso'` zone, a ~1.15 s
+random cooldown and a decorative 0.6 m box on a shoulder hinge. Every bot on
+the field was identical, and what they carried was pistol-shaped by accident.
+Meanwhile the loadout tranche had shipped a six-weapon catalog with real fire
+rates, magazines, reload models, damage and pellet counts that nothing on the
+AI side could reach.
+
+#### The division
+
+**A brain decides WHETHER to shoot; a `FireController` owns WHAT is being
+shot.** `sim/botWeapons.ts` is engine-free like the rest of `sim/`, and takes
+the catalog def as a PARAMETER rather than importing `core/state.ts` at
+runtime. That is stricter than `sim/validateWeapons.ts`: it also receives the
+real table through a parameter, but separately runtime-imports the shared
+`RECOIL_CAP` and `BASE_FOV` bounds from state.
+
+- The controller owns cadence, burst discipline, the magazine and its reload
+  (`sim/ammo.ts` reused verbatim, `perRound` weapons included), the per-ray
+  hit die and the hit zone. `DefaultBrain` COMPOSES one. It does not subclass
+  for a weapon, and the ~1000-line stimulus ladder — vision, memory, search,
+  hearing, patrol, the damage bearing — was not reopened.
+- The brain asks `ready()` and calls `pull()`; the executor calls
+  `resolveShot(dist)` with the post-move distance and routes the damage. That
+  keeps the three-way shot agreement 6a established exactly as it was.
+- **`BotWeaponId = Exclude<WeaponId, 'knife'>`** puts the 7a/7b boundary in
+  the type system. A knife needs a swing, not a hit die, and nothing — not the
+  URL parser, not the menu, not a future caller — can hand a bot one.
+- One damage call per trigger pull, however many rays land, with the zone the
+  best any ray struck. `damagePlayer` flashes the vignette and plays `sfxHurt`
+  per CALL, so eight pellets routed separately would be eight grunts in a
+  frame. Same rule `weapons.ts` uses to redden one hitmarker for a pattern.
+
+**What this buys immediately:** a bot-dealt kill can finally say 'headshot'.
+The wording existed since tranche 3 and no bot could ever reach it, because
+the executor passed a hardcoded `'torso'` for every shot it realized.
+
+#### The draw-order contract, and why it survived
+
+`botBrains.test.ts` scripts the rng positionally across ~1500 lines. The
+documented construction order is `[strafeDir, stagger]`, and the stagger is
+now the controller's draw — so `arm()` is called from the BRAIN's constructor
+after the strafe draw, never from the controller's own. A controller that drew
+when it was built would have to be built first, silently shifting every
+scripted sequence by one. The test stub honours the same contract, which is
+why not one existing script needed editing and all 101 ladder tests pass
+unmodified. That is also the evidence that awareness did not move.
+
+The trigger tests stopped asserting cadence THROUGH the brain: cadence,
+magazine and reload are pinned in `botWeapons.test.ts` against the real
+catalog, and what remains at the brain layer is its actual residual
+responsibility — asks `ready()`, calls `pull()`, ticks the weapon once per
+frame in every mode so a bot that breaks contact arrives loaded. Lesson 28 at
+the unit layer.
+
+#### Tuning, and the gate that governs it
+
+Each weapon's curve was chosen against a stated budget: expected damage per
+second at its own preferred range stays near the pre-weapon bot's 6.1, so the
+tranche changes bot CHARACTER rather than difficulty. Character comes from the
+SHAPE — the sniper's near-flat falloff and 80 m engage range (equal to
+`PERCEPTION_RANGE_M`, so anything it can see it can shoot), the shotgun's
+curve reaching actual zero inside 11 m, the smg's three-round bursts.
+
+`botWeapons.test.ts` computes that dps analytically from the real catalog and
+asserts a deliberately WIDE band. It is not a pin on the tuning — a retune
+inside the band must not cost a test edit — and it earned its place before
+shipping by catching the shotgun at 57 dps point blank, four times any other
+weapon. See lesson 30.
+
+The smg's row is deliberately untuned: its bands, engage range and drift are
+the shipped `DEFAULT_BRAIN_PARAMS` values, because smg is what every existing
+bot smoke phase is re-pinned to and those phases must run against the bot they
+were written for.
+
+#### Selection, and presentation
+
+`?tweap=`/`?ctweap=` on the committed query and two selects in the start menu,
+parsed by the pure `sessionConfig.ts`. `asBotWeapon` mirrors `asMapName`
+exactly — exhaustive Record, `hasOwn` rather than `in`, shared with the form so
+a second literal comparison cannot drift from the parser. Both sides default to
+`mixed`; a bot's weapon is drawn once per MATCH and survives respawn, so a
+killfeed line cannot name a weapon the bot no longer carries.
+
+Three presentation channels, because one cannot attribute a behaviour to a
+weapon during play:
+
+- **Silhouette.** Per-weapon barrels varying only in length and bulk, since
+  those are the cues that survive at 20 m (lesson 25). Built from shared
+  geometry rather than cloned from `weapons.ts`'s viewmodels — those are
+  positioned in CAMERA space, exist one instance each, and live in a module
+  that already imports `bots.ts`, so importing back would be the module cycle
+  the architecture rules ban. The barrel stays untagged and out of every
+  raycast allowlist for the original reason: `partForMesh` falls through to
+  `'torso'` for a mesh it does not recognize.
+- **Report.** A second per-weapon audio table, deliberately not shared with the
+  player's `sfx*` numbers: those are a gun at your own shoulder, these are one
+  across a map, and one set would have to be wrong for one of the two. Its
+  `falloff` is PRESENTATION loudness — how far a shot carries to the PLAYER'S
+  ear — and emphatically not `soundEvents.ts:GUNSHOT_RADIUS_M`, which is how
+  far it carries to a BOT's, is one number for every firearm, and stays
+  deferred. A sniper that SOUNDS louder is a cue; a sniper that is HEARD
+  further is a balance change to 6b's investigation geometry.
+- **Readout and killfeed.** `#botDebug` gains the weapon and `mag/magSize`
+  with an `R` while reloading — a reload is a window in which a bot cannot
+  shoot at all, and without the column that is indistinguishable from the AI
+  breaking. The killfeed names the weapon and the zone.
+
+#### Coverage
+
+670 pure tests. `botWeapons.test.ts` pins the curve shapes, the per-ray and
+per-zone draw counts, summed damage against `damageForPart` on the real def,
+the head-then-torso-then-legs attribution, burst discipline, the reload policy
+(dry forces, low-and-not-engaged tops up, low-and-engaged does not), the
+`perRound` mid-reload shootability and its cancel, reserve depletion, and the
+`mixed` selector's bounds. `sessionConfig.test.ts` pins the parser including
+its refusal of `knife`.
+
+Browser: every existing bot phase names `smg` explicitly, and the new
+`[botWeapons]` phase runs one 60 m sight line twice — the sniper reaches it,
+fires seven rounds and lands 60 damage; the shotgun sees the same player,
+grades out of range, and ends with a full magazine and the player untouched.
+Trigger pulls are read from the MAGAZINE rather than from damage, because a
+pull is deterministic once in range while a hit is a die roll; damage is
+asserted as set membership instead, which is exact — a landed smg round can
+only be 26 / 19.5 / 52, no revolver value is in that set, and the run observed
+all three smg zones.
+
+`[patrol]`'s budget was widened, with a measurement rather than a shrug — see
+lesson 31.
+
+#### Deferred by 7a, deliberately
+
+Per-weapon `soundRadius` (unchanged from 6b's reasoning), bot spread/crouch/ADS
+state (the hit model is probabilistic by decision — there is no cone), and
+**revisiting "bot bullets ignore intervening bodies."** That decision says to
+revisit *"if bot accuracy profiles ever get sniper-grade"*, and this tranche
+does exactly that. Held anyway: the sniper's reach comes from a flat falloff
+curve, not from per-shot precision, and an entity raycast per bot shot spends a
+budget tranche 5 measured carefully. Flagged for the playtest — if snipers
+shooting allies through allies reads wrong, that is the evidence to reopen it.
+
 ## Planned
+
+### Tranche 7b — loadouts, the dry swap and the knife
+
+7a gives a bot ONE weapon. 7b gives it the player's shape: a primary and a
+secondary, reserve ammunition that runs out, a swap when the primary is dry,
+and the knife as a real melee option.
+
+The seams 7a left for it, and the two places to be careful:
+
+- **`FireController` is already per-weapon and per-bot**, so "hold two and
+  switch which one the brain asks" is the whole swap. What is NOT ready is
+  `BotBrain.weapon` becoming mutable — every consumer (the bot's barrel model,
+  the audio table, the readout, the killfeed) currently reads it as a
+  match-long constant, and the barrel model in particular is built once in the
+  constructor.
+- **`BotWeaponId = Exclude<WeaponId, 'knife'>` is the boundary**, enforced by
+  the type system and by `sessionConfig.ts:asBotWeapon`'s exhaustive Record.
+  7b widens it by widening that alias, which fails to compile at every per-
+  weapon table until each says what to do with a blade. A knife bot needs a
+  swing through `sim/melee.ts` rather than a hit die, and `meleeSwing` is
+  already generic over its payload — but `weapons.ts:swingMelee` hardcodes a
+  `team === 'CT'` skip and routes only through `damageBot`, so a bot knifing
+  the PLAYER has no path today.
+
+7a also leaves one interim behaviour that 7b is the answer to: a bot that
+empties both its magazine and its reserve keeps maneuvering and stops
+shooting. Rare (an smg bot carries ~48 s of continuous engagement against a
+much shorter life expectancy) and visible in the DEV readout as `0`, but real.
 
 ### Tranche 6b follow-up — nearest gunshot, and who may be interrupted
 
@@ -994,6 +1179,12 @@ walk.
 
 - **Behavioral variance** (aggressive/cautious profiles): now config-only —
   construct brains with different `BrainParams` per bot or team.
+  *(Annotation, tranche 7a: half-delivered, and by a route this bullet did not
+  anticipate. Per-bot `BrainParams` is now real and wired —
+  `sim/botWeapons.ts:botBrainParams` builds one per weapon and `bots.ts`
+  hands it to the brain — but the axis it varies is the WEAPON, not
+  temperament. An aggressive/cautious profile on top of that is a second
+  multiplier on the same fields and still deferred.)*
 - **T-side score naming**: `scoreDeaths` doubles as the T score (it now
   counts all T-side kills, not just player deaths — review finding, fixed
   in-tranche); renaming the field pair to team-named counters is HUD/state
@@ -1105,3 +1296,47 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
     scenario can produce the signal being measured, the ones not under test
     must be pinned or removed, or the phase reports on whichever happened to
     move.
+30. **A per-unit constant is not a per-EVENT consequence.**
+    Giving bots real weapons meant giving each a chance a landed ray hits the
+    head, and 12% looked obviously reasonable next to a 68% torso — it is
+    roughly where real hits land, and it was the same number for every weapon.
+    For five of the six it was fine. For the shotgun it put the weapon at 57
+    damage per second at point blank, four times any other, because a trigger
+    pull is EIGHT rays and each was rolling independently against a x4
+    headshot multiplier. The compounding is invisible in the constant and
+    obvious in the consequence.
+    What caught it was a test that computes the consequence — expected damage
+    per second, analytically, from the real catalog table — rather than
+    asserting the constants. Its bounds are deliberately wide, because a gate
+    that has to be edited every time someone retunes will be widened rather
+    than thought about, and then it is not a gate. The fix was not to lower
+    the number blindly but to say what a choke does: a pattern lands on a
+    body, so pellets do not each get an aimed round's chance at the skull.
+    Generalizes past ballistics — whenever a per-unit probability meets a
+    multiplier and a count, pin the product, not the factors.
+31. **A rate is not a regression until you have measured the population.**
+    The `[patrol]` phase failed on the weapons branch, and the branch looked
+    guilty: 8 of 14 runs took longer than one second to start patrolling
+    against main's 2 of 14, which is a gap too large to shrug at (p ~ 0.02).
+    It was not the branch. A patrol candidate is drawn uniformly from the
+    WHOLE nav graph, and on arena 3663 of 16155 nodes sit at y >= 3 — the tops
+    of the walls (968 at y=8, 576 at y=10, 400 at y=12). A ground bot cannot
+    route to those, so a candidate is rejected roughly a quarter of the time
+    and each rejection costs a fresh one-second pause.
+    Measuring that directly settled it in one run per branch instead of
+    another dozen: 300 sampled selections from the phase's exact spot failed
+    27% of the time on main and 31% here, and the two grids are identical node
+    for node. The run-level difference was load — the phase's loop also has a
+    WALL-clock cap, and two dev servers were up.
+    The lesson is not "flakes happen". It is that comparing OUTCOME rates
+    across branches needs a sample nobody has the patience for, while
+    measuring the underlying population is cheap and conclusive — and the
+    cheap measurement was available the whole time. Lesson 24's family: an
+    explanation that fits the evidence ("my change did this") is not the same
+    as the mechanism, and only the mechanism tells you what to fix. Here it
+    said: not the product, and not the phase's claim either — its budget,
+    which was a bet on a selector's luck.
+    It also surfaced a real finding nobody was looking for: about a quarter of
+    every idle bot's patrol picks are rooftop nodes it silently discards. That
+    is a candidate follow-up (bias the selector toward reachable nodes), not a
+    7a fix.

@@ -11,7 +11,7 @@ import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
 import { sfxHurt } from './audio';
-import { flashDamageVignette, clearVignette, addKillfeed, updateScore, updateHUD } from './hud';
+import { flashDamageVignette, clearVignette, botKillTag, addKillfeed, updateScore, updateHUD } from './hud';
 import { showLoadoutPicker, showEndScreen } from './menu';
 
 /**
@@ -37,7 +37,7 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     score.playerDeaths++;
     const attacker = bots.find(b => b.name === attackerName);
     if (attacker) attacker.kills++;
-    addKillfeed(`${attackerName} killed You`);
+    addKillfeed(`${attackerName}${botKillTag(attacker)} killed You`);
     updateScore();
     document.exitPointerLock();
     // Wall clock ON PURPOSE: pointer lock was just released, so game time is

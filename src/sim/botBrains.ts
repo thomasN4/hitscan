@@ -32,6 +32,8 @@
 import * as THREE from 'three';
 import type { PerceptionId, VisualObservation } from './perception';
 import type { HeardSound } from './soundEvents';
+import type { FireController, ShotOutcome } from './botWeapons';
+import type { BotWeaponId } from '../core/state';
 
 /** Shared +Y axis for the scan rotation (Three.js positive-Y convention). */
 const UP_Y = new THREE.Vector3(0, 1, 0);
@@ -56,14 +58,6 @@ export interface BrainParams {
   jukeRate: number;
   /** Never shoot beyond this 3D range. */
   engageRange: number;
-  /** Post-shot cooldown lower bound. */
-  cooldownMin: number;
-  /** Post-shot cooldown random span added to cooldownMin. */
-  cooldownSpan: number;
-  /** Spawn stagger lower bound (first-shot delay). */
-  firstDelayMin: number;
-  /** Spawn stagger random span added to firstDelayMin. */
-  firstDelaySpan: number;
   /**
    * Rise (m) above which a target counts as on ANOTHER LEVEL rather than
    * merely up a kerb — above what the executor's feet-aware step-up
@@ -107,16 +101,6 @@ export interface BrainParams {
    * though nothing is blocked.
    */
   fleeReset: number;
-  /** Hit chance at point-blank. */
-  hitChanceNear: number;
-  /** Hit-chance falloff divisor: chance = near − dist / this. */
-  hitChanceDivisor: number;
-  /** Hit-chance floor — distant bots stay mostly noise, never harmless. */
-  hitChanceMin: number;
-  /** Damage of a landed bullet: lower bound… */
-  damageMin: number;
-  /** …plus rng()·span. */
-  damageSpan: number;
   /**
    * Planar distance (m) at which a memory pursuit counts as ARRIVED: the
    * search begins here without asking the graph again. Inclusive boundary.
@@ -148,10 +132,6 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   strafeFactor: 0.7,
   jukeRate: 0.5,
   engageRange: 45,
-  cooldownMin: 0.7,
-  cooldownSpan: 1.2,
-  firstDelayMin: 1,
-  firstDelaySpan: 2,
   climbThreshold: 1.5, // ≈ 5 risers; well clear of STEP_HEIGHT's 0.3
   climbExit: 0.45,     // just over one riser — keep routing to the last step
   stuckTime: 0.25,
@@ -159,30 +139,12 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   noProgressTime: 1.5,   // ~2 juke swings would be 4 s; 1.5 s is already patient
   noProgressEpsilon: 0.25, // ≈ 4 frames of full-speed closure
   fleeReset: 2,          // a target 2 m farther than the best seen is running, not stalling
-  hitChanceNear: 0.65,
-  hitChanceDivisor: 80,
-  hitChanceMin: 0.12,
-  damageMin: 8,
-  damageSpan: 14,
   memoryArrivalRadius: 1, // planar; reached the remembered spot → scan here
   scanPhase: 0.75,        // per heading; the full sweep repeats every 2.25 s
   forgetTime: 8,          // drop the memory 8 s after the search began
   patrolPause: 1,         // stand down one second between patrol legs
   damageAdvance: 3,       // advance toward the shot for 3 s, then scan in place
 };
-
-/**
- * Hit chance of a bot bullet at eye-to-eye 3D `dist`: linear falloff from
- * close range clamped to a floor, so distant bots are mostly noise.
- */
-export function botHitChance(dist: number, params: BrainParams): number {
-  return Math.max(params.hitChanceMin, params.hitChanceNear - dist / params.hitChanceDivisor);
-}
-
-/** Damage of a landed bot bullet, drawn via `rng` over [damageMin, damageMin + damageSpan]. */
-export function botDamageRoll(rng: () => number, params: BrainParams): number {
-  return params.damageMin + rng() * params.damageSpan;
-}
 
 /** What a brain may know about the world this frame — all executor-supplied. */
 export interface BrainView {
@@ -330,14 +292,27 @@ export interface BotBrain {
    * probed first.
    */
   readonly focusId: PerceptionId | null;
-  /** Hit probability for a shot at eye-to-eye 3D `dist` under this brain's accuracy. */
+  /**
+   * The catalog weapon this brain fires. Display, audio and mesh selection;
+   * the executor never uses it to compute damage — see resolveShot.
+   */
+  readonly weapon: BotWeaponId;
+  /** Rounds chambered, magazine capacity and reload state. Display only. */
+  readonly mag: number;
+  readonly magSize: number;
+  readonly reloading: boolean;
+  /** Hit probability for ONE ray at eye-to-eye 3D `dist` under this weapon. */
   hitChance(dist: number): number;
-  /** Draw one hit/miss outcome for a shot at eye-to-eye 3D `dist` from this
-   *  brain's rng stream — ALL of a bot's dice come from the brain, never a
-   *  global. */
-  rollHit(dist: number): boolean;
-  /** Draw one landed-shot damage from this brain's ballistic params. */
-  rollDamage(): number;
+  /**
+   * Resolve the trigger pull the executor is realizing, at post-move
+   * eye-to-eye `dist`: every ray's hit die and every landed ray's hit zone,
+   * summed into one damage figure and one attribution zone.
+   *
+   * ALL of a bot's dice come from the brain's own rng stream — never a
+   * global — which is why this is the brain's to draw and not the
+   * executor's, even though the executor is what asked for the shot.
+   */
+  resolveShot(dist: number): ShotOutcome;
   /**
    * Whether a target at eye-to-eye 3D `dist` passes this brain's engage
    * gate — the same exclusive comparison decide()'s trigger applies before
@@ -377,7 +352,6 @@ export function pickHeardLead(heard: readonly HeardSound[]): HeardSound | null {
 /** The shipped bot policy, parameterized for future variants. */
 export class DefaultBrain implements BotBrain {
   private strafeDir: 1 | -1;
-  private cooldown: number;
   /** True while following the executor's route rather than steering at the target. */
   private routing = false;
   /** Seconds of CONSECUTIVE refused steps while routing; any frame that moves resets it. */
@@ -465,13 +439,24 @@ export class DefaultBrain implements BotBrain {
    */
   private advanceRequested = false;
 
+  /**
+   * @param fire this brain's weapon. Required rather than defaulted: bots.ts
+   *   is the only production construction site, and a defaulted controller
+   *   would let a wiring failure ship silently as a bot that never shoots.
+   */
   constructor(
-    private readonly params: BrainParams = DEFAULT_BRAIN_PARAMS,
-    private rng: () => number = Math.random,
+    private readonly params: BrainParams,
+    private rng: () => number,
+    private readonly fire: FireController,
   ) {
     this.strafeDir = this.rng() < 0.5 ? -1 : 1;
-    // Staggered first shot so a fresh wave doesn't volley in unison.
-    this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
+    // arm() takes the staggered-first-shot draw, so a fresh wave doesn't
+    // volley in unison. It is called HERE, after the strafe draw, rather than
+    // in the controller's own constructor: the documented construction draw
+    // order is [strafeDir, stagger], and a controller that drew when it was
+    // built would have to be built first, silently shifting every scripted
+    // rng sequence in the suite by one.
+    this.fire.arm();
     // Spawn counts as a pause: the first patrol request waits one second.
     this.patrolPause = this.params.patrolPause;
   }
@@ -487,7 +472,11 @@ export class DefaultBrain implements BotBrain {
    * the tests script against is untouched.
    */
   onRespawn(): void {
-    this.cooldown = this.params.firstDelayMin + this.rng() * this.params.firstDelaySpan;
+    // Re-arms the stagger from this brain's rng, refills the magazine and
+    // cancels any reload the corpse was running — one draw, taken outside
+    // decide() so the per-frame sequence the tests script against is
+    // untouched.
+    this.fire.arm();
     this.routing = false;
     this.blockedFor = 0;
     this.commitLeft = 0;
@@ -625,16 +614,17 @@ export class DefaultBrain implements BotBrain {
     };
   }
 
+  get weapon(): BotWeaponId { return this.fire.weapon; }
+  get mag(): number { return this.fire.mag; }
+  get magSize(): number { return this.fire.magSize; }
+  get reloading(): boolean { return this.fire.reloading; }
+
   hitChance(dist: number): number {
-    return botHitChance(dist, this.params);
+    return this.fire.hitChance(dist);
   }
 
-  rollHit(dist: number): boolean {
-    return this.rng() < botHitChance(dist, this.params);
-  }
-
-  rollDamage(): number {
-    return botDamageRoll(this.rng, this.params);
+  resolveShot(dist: number): ShotOutcome {
+    return this.fire.resolve(dist);
   }
 
   inRange(dist: number): boolean {
@@ -680,11 +670,23 @@ export class DefaultBrain implements BotBrain {
   }
 
   decide(view: BrainView, dt: number): BrainIntent {
-    // One juke draw per frame and one reroll on fire, whatever the mode —
-    // the draw contract the tests script against. (Drawn up front so every
-    // path below consumes it.)
+    // One juke draw per frame, whatever the mode — the draw contract the
+    // tests script against. (Drawn up front so every path below consumes it.)
     const jukeDraw = this.rng();
-    this.cooldown -= dt;
+
+    // Advance the weapon on EVERY path, not just the shooting one: the
+    // magazine and the reload clock belong to the bot, not to the mode it
+    // happens to be in, so a bot that breaks contact and routes away must
+    // arrive loaded. Takes no draws.
+    //
+    // "Engaged" is this frame's own evidence of a firefight — a shootable
+    // visual that no incoming-fire bearing outranks — and it gates only the
+    // opportunistic top-up: a dry magazine reloads regardless of it.
+    const shootable = view.visual;
+    this.fire.tick(
+      dt,
+      this.pendingBearing === null && shootable !== null && this.inRange(shootable.dist3),
+    );
 
     // Priority 1: a pending incoming-fire bearing — even over a same-frame
     // visual. The shot's direction is ALL that is known: no identity, no
@@ -969,14 +971,16 @@ export class DefaultBrain implements BotBrain {
       this.strafeDir = this.strafeDir === 1 ? -1 : 1;
     }
 
-    // Trigger: cooldown-gated, range-gated. There is NO LOS probe here — the
+    // Trigger: weapon-gated, range-gated. There is NO LOS probe here — the
     // observation IS this frame's successful look (acquisition spent the
     // frame's one ray), so a visible target inside engage range fires when
     // the cooldown expires, and the old blocked-sight retry path is gone: a
     // target that stops being seen stops being engaged (hold), not re-probed.
+    // Cadence, magazine and reload are the FireController's; the brain only
+    // decides that this is a frame worth spending a round on.
     let wantShoot = false;
-    if (dist3 < this.params.engageRange && this.cooldown <= 0) {
-      this.cooldown = this.params.cooldownMin + this.rng() * this.params.cooldownSpan;
+    if (dist3 < this.params.engageRange && this.fire.ready()) {
+      this.fire.pull();
       wantShoot = true;
     }
 

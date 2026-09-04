@@ -39,7 +39,7 @@ import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyShoot } from './audio';
 import { spawnImpact } from './effects';
-import { addKillfeed, updateScore } from './hud';
+import { addKillfeed, botKillTag, updateScore } from './hud';
 import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode } from './sim/botBrains';
 import {
   BOT_WEAPON_TUNING, WeaponFireController, botBrainParams, resolveBotWeapon,
@@ -960,7 +960,7 @@ export class Bot implements BotShape {
     // the wording existed but no bot could ever reach it.
     addKillfeed(killerName === undefined
       ? `You ${killerPart === 'head' ? '☠ headshot' : 'killed'} ${this.name}`
-      : `${killerName}${killer ? ` [${WEAPONS[killer.weapon].name}]` : ''}` +
+      : `${killerName}${botKillTag(killer)}` +
         ` ${killerPart === 'head' ? '☠ headshot-killed' : 'killed'} ${this.name}`);
     debugLog(`${this.name} died (${killerPart}) t=${gameTime.now().toFixed(1)}s`);
     checkRoundEnd();

@@ -2,10 +2,10 @@
 //
 // Pure and engine-free, like the rest of sim/. The weapon's mechanical stats
 // arrive as a WeaponDef PARAMETER rather than through a runtime import of
-// core/state.ts — the same seam sim/validateWeapons.ts uses to gate the real
-// catalog without depending on it, and the reason the one runtime edge stays
-// core/state.ts -> sim/. BotWeaponId, WeaponDef and HitZone come in type-only,
-// as Team does in soundEvents.ts and HitZone does in melee.ts.
+// core/state.ts. sim/validateWeapons.ts also receives the catalog through that
+// seam, but separately imports its shared numeric caps from state at runtime;
+// this module's dependency is stricter. BotWeaponId, WeaponDef and HitZone come
+// in type-only, as Team does in soundEvents.ts and HitZone does in melee.ts.
 //
 // The division this file owns: a BotBrain decides WHETHER to shoot; a
 // FireController owns everything about WHAT is being shot — cadence, burst

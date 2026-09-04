@@ -980,8 +980,9 @@ AI side could reach.
 **A brain decides WHETHER to shoot; a `FireController` owns WHAT is being
 shot.** `sim/botWeapons.ts` is engine-free like the rest of `sim/`, and takes
 the catalog def as a PARAMETER rather than importing `core/state.ts` at
-runtime — the seam `sim/validateWeapons.ts` already uses to gate the real
-table without depending on it.
+runtime. That is stricter than `sim/validateWeapons.ts`: it also receives the
+real table through a parameter, but separately runtime-imports the shared
+`RECOIL_CAP` and `BASE_FOV` bounds from state.
 
 - The controller owns cadence, burst discipline, the magazine and its reload
   (`sim/ammo.ts` reused verbatim, `perRound` weapons included), the per-ray

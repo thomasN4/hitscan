@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
 import { isLowAmmo } from './sim/ammo';
 
 /**
@@ -86,6 +86,11 @@ export function flashDamageVignette(dmg: number): void {
 
 export function clearVignette(): void {
   vignette.style.boxShadow = 'none';
+}
+
+/** Format the weapon suffix shared by every bot-authored killfeed line. */
+export function botKillTag(bot: BotShape | undefined): string {
+  return bot === undefined ? '' : ` [${WEAPONS[bot.weapon].name}]`;
 }
 
 /** Prepend an entry to the kill feed; auto-fades after 3.5s. */

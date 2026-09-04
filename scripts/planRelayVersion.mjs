@@ -35,7 +35,7 @@ export const SOURCE_FILES = [
 
 export const DIGEST_LENGTH = 16;
 
-export const SOURCE_DIGEST = '6fda813e2c9e8a15';
+export const SOURCE_DIGEST = '7acff3388f25e170';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 

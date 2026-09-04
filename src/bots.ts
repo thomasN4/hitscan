@@ -37,13 +37,15 @@ import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './c
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
-import { sfxEnemyShoot } from './audio';
+import { sfxEnemyAttack } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, botKillTag, updateScore } from './hud';
 import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode } from './sim/botBrains';
 import {
-  BOT_WEAPON_TUNING, WeaponFireController, botBrainParams, resolveBotWeapon,
+  BOT_WEAPON_TUNING, botBrainParams, makeFireController, resolveBotWeapon,
 } from './sim/botWeapons';
+import { meleeSwing, isBackstab, type MeleeCandidate } from './sim/melee';
+import { damageForPart } from './sim/damage';
 import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, route, navGrid } from './nav';
@@ -109,6 +111,17 @@ const ROUTE_INTERVAL = 1;
 const ROUTE_ABANDON = 6;
 
 /**
+ * Zone fractions of the eye height for a target with no part meshes: the
+ * player's eye IS their head (1.0), and torso/legs mirror the bot mesh's own
+ * 2.0 / 1.35 / 0.45 offsets over its 1.9 m eye.
+ */
+const PLAYER_ZONE_FRACTION: Record<HitZone, number> = {
+  head: 1.0,
+  torso: 0.71,
+  legs: 0.24,
+};
+
+/**
  * At most one A* per frame across ALL bots.
  *
  * A route costs ~4 ms on the elevation map's 17k-node graph, so a dozen bots
@@ -168,6 +181,8 @@ const wpnGeo = {
   pistolGrip: new THREE.BoxGeometry(0.06, 0.14, 0.07),
   revolverBody: new THREE.BoxGeometry(0.07, 0.07, 0.34),
   revolverCylinder: new THREE.CylinderGeometry(0.06, 0.06, 0.11, 8),
+  knifeBlade: new THREE.BoxGeometry(0.025, 0.05, 0.22),
+  knifeGrip: new THREE.BoxGeometry(0.04, 0.06, 0.12),
 };
 // The scope and the cylinder are lathe shapes lying ALONG the barrel, so both
 // need the x-quarter-turn weapons.ts gives its viewmodel scope. Baking it into
@@ -222,6 +237,15 @@ const BOT_WEAPON_MODELS: Record<BotWeaponId, BotWeaponModel> = {
       { geo: wpnGeo.revolverCylinder, pos: [0, -0.01, 0.04], mat: matBarrel },
     ],
     muzzle: 0.34,
+  },
+  // A blade, not a gun: markedly shorter and thinner than every barrel above,
+  // because length and bulk are the two cues that read at 20 m (lesson 25).
+  knife: {
+    parts: [
+      { geo: wpnGeo.knifeBlade, pos: [0, 0, 0.17], mat: matBarrel },
+      { geo: wpnGeo.knifeGrip, pos: [0, -0.01, 0.0], mat: matStock },
+    ],
+    muzzle: 0.28,
   },
 };
 const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
@@ -402,7 +426,7 @@ export class Bot implements BotShape {
     this.brain = new DefaultBrain(
       botBrainParams(tuning, DEFAULT_BRAIN_PARAMS),
       Math.random,
-      new WeaponFireController(weapon, WEAPONS[weapon], tuning, Math.random),
+      makeFireController(weapon, WEAPONS[weapon], tuning, Math.random),
     );
 
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
@@ -866,6 +890,7 @@ export class Bot implements BotShape {
    */
   get mag(): number { return this.brain.mag; }
   get magSize(): number { return this.brain.magSize; }
+  get reserve(): number { return this.brain.reserve; }
   get reloading(): boolean { return this.brain.reloading; }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -900,14 +925,24 @@ export class Bot implements BotShape {
    * (per-ray hit, per-landed-ray zone) comes from the brain's rng stream.
    */
   private shoot(dist: number, target: Target): void {
+    // Audible either way — a swing that misses is exactly as loud as one that
+    // lands, like every other attack on this path.
+    sfxEnemyAttack(this.mesh.position, this.weapon);
+    if (this.brain.resolution === 'melee') {
+      this.swing(target);
+      return;
+    }
     const muzzle = this.muzzlePos();
-    sfxEnemyShoot(this.mesh.position, this.weapon);
     spawnImpact(muzzle); // cheap muzzle flash, from the barrel tip
     // Emitted BEFORE the hit die, so a miss is exactly as audible as a hit —
     // hearing reports that a trigger was pulled, not that it landed. At the
     // FEET rather than the muzzle, for the reason weapons.ts states: a heard
     // position is a routing goal, and nearestNode's height weighting would
     // send a listener to the deck overhead.
+    //
+    // A blade stays BELOW this emit: it is SILENT to 6b's hearing, so a knife
+    // bot cannot summon investigators by attacking. That mirrors the player's
+    // own melee path, which returns from weapons.ts:shoot before its emit.
     soundEvents.emit({
       kind: 'gunshot',
       sourceId: this.id,
@@ -927,6 +962,74 @@ export class Bot implements BotShape {
     if (shot.zone === null) return;
     if (target.kind === 'player') damagePlayer(shot.damage, this.name);
     else damageBot(target.bot, shot.damage, shot.zone, this.name);
+  }
+
+  /**
+   * Realize a melee swing the brain ordered.
+   *
+   * Unlike a bot's gunfire, this is not probabilistic: sim/melee.ts tests the
+   * blade's real reach and arc against the target's own zone points, the nearest
+   * part wins, and a strike from behind multiplies by the catalog's backstab
+   * bonus. The brain already chose WHO; this decides whether the swing connects
+   * and where — so a bot that has not finished turning genuinely whiffs.
+   */
+  private swing(target: Target): void {
+    // The bot's ACTUAL aim pose: flush with the same updateMatrixWorld the
+    // muzzle path pays, for the same reason — the frame's yaw and pitch are
+    // written but not composed. The aim group's world +Z is the barrel axis.
+    // The eye→target vector is NOT used: it is always perfectly aligned and
+    // would make the arc test meaningless.
+    this.mesh.updateMatrixWorld(true);
+    const dir = this.aim.getWorldDirection(new THREE.Vector3());
+    const origin = this.eyePos();
+    const def = WEAPONS[this.weapon];
+    // Documented pairing (validateWeapons): range/arcRad exist exactly when melee.
+    const range = def.range ?? 0;
+    const arcRad = def.arcRad ?? 0;
+    // Candidates are the ONE focused target's three zone points, not the
+    // field. For a bot: the world positions of its own part meshes. For the
+    // player, who has no part meshes: synthesized from the target's own feet
+    // and eye at fractions of the eye height.
+    const candidates: MeleeCandidate<Target>[] = [];
+    if (target.kind === 'bot') {
+      const b = target.bot;
+      candidates.push(
+        { payload: target, zone: 'head', at: b.head.getWorldPosition(new THREE.Vector3()) },
+        { payload: target, zone: 'torso', at: b.torso.getWorldPosition(new THREE.Vector3()) },
+        { payload: target, zone: 'legs', at: b.legs.getWorldPosition(new THREE.Vector3()) },
+      );
+    } else {
+      const eyeH = target.eye.y - target.feet.y;
+      for (const zone of ['head', 'torso', 'legs'] as const) {
+        candidates.push({
+          payload: target,
+          zone,
+          at: new THREE.Vector3(
+            target.feet.x, target.feet.y + eyeH * PLAYER_ZONE_FRACTION[zone], target.feet.z),
+        });
+      }
+    }
+    const hit = meleeSwing(origin, dir, range, arcRad, candidates);
+    if (!hit) return;
+    // Backstab is classified only AFTER the range/arc winner is chosen — it
+    // scales that hit, it never steers selection (the same ordering
+    // weapons.ts:swingMelee documents).
+    //
+    // The two victims report their facing differently and neither may be
+    // open-coded: a bot's is its group's local +Z (Bot.update maintains that
+    // invariant), and the player's is the camera's −Z view direction, which is
+    // the convention every shot is built from in sim/ballistics.ts:directed.
+    // Rebuilding the player's from aim.yaw by hand is how the sign gets
+    // inverted and backstabs land on the wrong side.
+    const victimPos = target.kind === 'bot' ? target.bot.mesh.position : target.feet;
+    const victimForward = target.kind === 'bot'
+      ? target.bot.mesh.getWorldDirection(new THREE.Vector3())
+      : camera.getWorldDirection(new THREE.Vector3());
+    let dmg = damageForPart(def, hit.part);
+    if (isBackstab(origin, victimPos, victimForward)) dmg *= def.backstabMult ?? 1;
+    // ONE damage call per swing, routed exactly as the ranged path does.
+    if (target.kind === 'player') damagePlayer(dmg, this.name);
+    else damageBot(target.bot, dmg, hit.part, this.name);
   }
 
   /**

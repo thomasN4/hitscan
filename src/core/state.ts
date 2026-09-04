@@ -27,21 +27,22 @@ export type WeaponClass = 'primary' | 'secondary' | 'melee';
 export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'knife';
 
 /**
- * Weapons a BOT may carry. Derived with Exclude rather than written out as a
- * second literal list, so widening WeaponId re-derives here and every Record
- * over it (sim/botWeapons.ts's tuning, bots.ts's models, audio.ts's tones)
- * fails to compile until the new weapon says how a bot uses it.
+ * Weapons a BOT may hold. Since tranche 7b that is the WHOLE catalog, the
+ * blade included: a knife bot closes to contact and swings through
+ * sim/melee.ts (bots.ts:swing) instead of rolling the per-ray hit die, so the
+ * 7a exclusion that kept blades away from a die it had no meaning for is gone.
  *
- * The knife is excluded because a melee bot needs a swing through
- * sim/melee.ts rather than a hit die, which is tranche 7b's work. Keeping
- * that boundary in the TYPE means nothing — not the URL parser, not the
- * menu, not a future caller — can hand a bot a blade it has no way to use.
+ * The alias survives the widening because its job survives it: every Record
+ * over it — sim/botWeapons.ts's tuning, bots.ts's silhouettes, audio.ts's
+ * attack tones — still fails to compile until a new weapon says how a bot uses
+ * it. What changed is the answer a blade gives, not whether one is demanded.
  */
-export type BotWeaponId = Exclude<WeaponId, 'knife'>;
+export type BotWeaponId = WeaponId;
 
 /**
  * A menu/URL bot-weapon setting: one weapon for the whole team, or an
- * independent draw per bot (sim/botWeapons.ts:resolveBotWeapon).
+ * independent draw per bot (sim/botWeapons.ts:resolveBotWeapon). 'knife' is a
+ * legal setting (a blade-only bot) and is in the 'mixed' pool.
  */
 export type BotWeaponChoice = BotWeaponId | 'mixed';
 
@@ -195,6 +196,8 @@ export interface Bot {
   readonly mag: number;
   readonly magSize: number;
   readonly reloading: boolean;
+  /** Rounds held in reserve. Display only, like the three above. */
+  readonly reserve: number;
   /** Waypoints of the route the bot is walking, nav-graph order; empty when it is steering directly. Display only. */
   readonly navPath: readonly THREE.Vector3[];
   /** How far along `navPath` the bot has got — waypoints before this are consumed. Display only. */

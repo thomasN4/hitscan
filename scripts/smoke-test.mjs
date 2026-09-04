@@ -2640,7 +2640,7 @@ async function runBotWeaponsCheck() {
   const mapErrors = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
-  const FIREARMS = ['smg', 'sniper', 'shotgun', 'pistol', 'revolver'];
+  const CATALOG = ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife'];
   // Zone damage each weapon can deal, from WEAPONS: torso, legs (x0.75), head
   // (x headshotMult). A shotgun pull sums pellets, so it is excluded from the
   // membership claim and gets the range claim instead.
@@ -2649,7 +2649,7 @@ async function runBotWeaponsCheck() {
     revolver: [55, 41.25, 220],
   };
   try {
-    // ---- A. 'mixed' arms a varied field, and never with a knife.
+    // ---- A. 'mixed' arms a varied field, and may include a blade bot.
     await page.goto(BASE + '/?map=arena&tbots=8&ctbots=0&time=120&tweap=mixed', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const mixed = await page.evaluate(() => {
@@ -2661,8 +2661,10 @@ async function runBotWeaponsCheck() {
       cs.bots.forEach(b => b.respawn());
       return { before, after: cs.bots.map(b => b.weapon), mags: cs.bots.map(b => `${b.mag}/${b.magSize}`) };
     });
-    const unknown = mixed.before.filter(w => !FIREARMS.includes(w));
-    if (unknown.length) throw new Error(`mixed drew a non-firearm: ${JSON.stringify(mixed.before)}`);
+    // A mixed wave may contain a blade bot (tranche 7b): membership is over
+    // the whole catalog, not the firearms alone.
+    const unknown = mixed.before.filter(w => !CATALOG.includes(w));
+    if (unknown.length) throw new Error(`mixed drew an unknown weapon: ${JSON.stringify(mixed.before)}`);
     if (String(mixed.after) !== String(mixed.before)) {
       throw new Error(`respawn re-rolled weapons: ${JSON.stringify(mixed)}`);
     }
@@ -2784,6 +2786,125 @@ async function runBotWeaponsCheck() {
   await page.close();
 }
 
+// [botKnife] — a bot's blade is GEOMETRY, and it holds no rounds.
+//
+// The knife is the one bot weapon whose hit is not a die roll: sim/melee.ts
+// tests the blade's real reach and arc against the target's zone points, so
+// the two claims here are decided by geometry alone and neither can flake on
+// an unlucky draw.
+//
+//   - Reach. engageRange is 1.8 m, so at 60 m a knife bot SEES the player,
+//     grades out of range and never touches them. Same fixture the sniper
+//     clears at the same distance.
+//   - Contact. Left unpinned, a knife bot's bands walk it ONTO the player and
+//     the player bleeds. Every damage value it can deal comes from the
+//     catalog knife (55 / 41.25 anywhere on the body, x3 for a backstab), and
+//     it deals them while holding a weapon with NO magazine and NO reserve —
+//     which is the claim that separates the melee path from every ranged one,
+//     since a firearm bot dealing damage always has rounds to spend.
+async function runBotKnifeCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  // Knife zone damage from WEAPONS.knife: 55 anywhere on the body (its
+  // headshotMult is 1 — a blade cuts the same at any height), legs x0.75, and
+  // each x3 from within 60 degrees of directly behind (sim/melee.ts:isBackstab).
+  const KNIFE_ZONES = [55, 41.25, 165, 123.75];
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=600&tweap=knife', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+
+    // ---- A. Reach: 60 m of clear sight line, and nothing happens.
+    const far = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const LANE_X = 12;
+      cs.game.started = true;
+      cs.game.locked = true;
+      if (cs.bots.length !== 1) return { fail: `expected exactly one bot, got ${cs.bots.length}` };
+      const bot = cs.bots[0];
+      if (bot.weapon !== 'knife') return { fail: `expected a knife bot, got ${bot.weapon}` };
+      cs.player.pos.set(LANE_X, cs.player.eyeHeight, 45);
+      cs.player.alive = true;
+      let seen = false, inRange = false, hurt = 0;
+      const t0 = cs.gameTime.now();
+      const wall = performance.now();
+      while (performance.now() - wall < 60000 && cs.gameTime.now() - t0 < 12) {
+        // Pinned, exactly as the sniper/shotgun reach claim pins its bot: the
+        // bands would otherwise close the very distance the claim is about.
+        bot.mesh.position.set(LANE_X, 0, -15);
+        bot.vy = 0; bot.onGround = true;
+        const hpBefore = cs.player.hp;
+        await frame();
+        hurt += hpBefore - cs.player.hp;
+        cs.player.hp = 100000;
+        if (bot.targetLOS === true) seen = true;
+        if (bot.targetInRange) inRange = true;
+      }
+      return { seen, inRange, hurt: +hurt.toFixed(2), magSize: bot.magSize, reserve: bot.reserve };
+    });
+    if (far.fail) throw new Error(far.fail);
+    if (!far.seen) throw new Error(`knife bot never saw the player at 60 m: ${JSON.stringify(far)}`);
+    if (far.inRange) throw new Error(`knife bot claimed 60 m as in range: ${JSON.stringify(far)}`);
+    if (far.hurt !== 0) throw new Error(`knife bot reached 60 m: ${JSON.stringify(far)}`);
+    if (far.magSize !== 0 || far.reserve !== 0) {
+      throw new Error(`a blade reported rounds: ${JSON.stringify(far)}`);
+    }
+
+    // ---- B. Contact: unpinned, it closes and cuts.
+    const near = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const LANE_X = 12;
+      const bot = cs.bots[0];
+      cs.player.pos.set(LANE_X, cs.player.eyeHeight, -4);
+      cs.player.alive = true;
+      // Placed once, then left alone: closing the distance is the behaviour
+      // under test, not something the fixture may do for it.
+      bot.mesh.position.set(LANE_X, 0, -12);
+      bot.vy = 0; bot.onGround = true;
+      let minDist = Infinity, sawReload = false;
+      const deltas = new Set();
+      const t0 = cs.gameTime.now();
+      const wall = performance.now();
+      while (performance.now() - wall < 90000 && cs.gameTime.now() - t0 < 20) {
+        const hpBefore = cs.player.hp;
+        await frame();
+        const lost = +(hpBefore - cs.player.hp).toFixed(2);
+        if (lost > 0) deltas.add(lost);
+        cs.player.hp = 100000; // never dies: a death frees the pointer lock
+        if (bot.reloading) sawReload = true;
+        const d = Math.hypot(
+          bot.mesh.position.x - cs.player.pos.x, bot.mesh.position.z - cs.player.pos.z);
+        if (d < minDist) minDist = d;
+      }
+      return {
+        minDist: +minDist.toFixed(2), sawReload, deltas: [...deltas], mode: bot.mode,
+        mag: bot.mag, magSize: bot.magSize, reserve: bot.reserve,
+        simS: +(cs.gameTime.now() - t0).toFixed(1),
+      };
+    });
+    if (near.minDist > 2.2) throw new Error(`knife bot never closed to contact: ${JSON.stringify(near)}`);
+    if (!near.deltas.length) throw new Error(`knife bot reached the player and did nothing: ${JSON.stringify(near)}`);
+    const bad = near.deltas.filter(d => !KNIFE_ZONES.includes(d));
+    if (bad.length) {
+      throw new Error(`blade dealt damage no knife zone can produce (${bad}): ${JSON.stringify(near)}`);
+    }
+    if (near.mag !== 0 || near.magSize !== 0 || near.reserve !== 0 || near.sawReload) {
+      throw new Error(`a blade spent or held rounds: ${JSON.stringify(near)}`);
+    }
+
+    console.log('[botKnife] OK', JSON.stringify({ far, near }));
+  } catch (e) {
+    failures++;
+    console.log(`[botKnife] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[botKnife] ${e}`));
+  await page.close();
+}
+
 try {
   await runMap('arena', '/?tweap=smg&ctweap=smg', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
@@ -2792,6 +2913,7 @@ try {
   await runVisionAwarenessCheck();
   await runPatrolCheck();
   await runBotWeaponsCheck();
+  await runBotKnifeCheck();
   await runHearingCheck();
   await runMap('elevation', '/?map=elevation&tweap=smg&ctweap=smg', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();

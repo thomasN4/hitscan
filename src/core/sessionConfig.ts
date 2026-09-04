@@ -121,19 +121,19 @@ export function asMapName(raw: string | null | undefined): MapName {
  * weapon union must fail to compile HERE too, and a prototype key like
  * 'toString' must not pass the guard and reach a Record lookup.
  *
- * Note what is NOT a key: 'knife'. BotWeaponChoice is built on BotWeaponId,
- * which excludes it, so ?tweap=knife falls back rather than arming a bot with
- * something it has no way to swing. The 7a/7b boundary is enforced by the
- * parser and the type system rather than by a convention someone has to
- * remember — and 7b widens it by widening BotWeaponId, which fails to compile
- * here until this table says what to do with the new value.
+ * 'knife' IS a key since tranche 7b widened the boundary: a knife bot is a
+ * legal and deliberate setting (a blade-only bot, and in the 'mixed' pool),
+ * where 7a's BotWeaponId exclusion kept blades away from a hit die they had
+ * no meaning for. The exhaustive Record is still what forces a new weapon to
+ * be considered here — what changed is the answer a blade gives, not whether
+ * one is demanded.
  *
  * `fallback` is a parameter rather than SESSION_DEFAULTS, so the start menu
  * can keep the currently-applied value on garbage input exactly as numOr
  * does for the number fields.
  */
 const IS_BOT_WEAPON: Record<BotWeaponChoice, true> = {
-  mixed: true, smg: true, sniper: true, shotgun: true, pistol: true, revolver: true,
+  mixed: true, smg: true, sniper: true, shotgun: true, pistol: true, revolver: true, knife: true,
 };
 
 export function asBotWeapon(

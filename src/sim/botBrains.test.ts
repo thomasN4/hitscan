@@ -56,6 +56,7 @@ const calmRng = () => 0.9;
  */
 class StubFire implements FireController {
   readonly weapon = 'smg';
+  readonly resolution = 'ranged' as const;
   readonly magSize = 30;
   mag = 30;
   reserve = 90;

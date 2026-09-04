@@ -139,16 +139,17 @@ describe('configsEqual', () => {
 });
 
 describe('asBotWeapon', () => {
-  it('accepts every catalog weapon a bot may carry, and mixed', () => {
-    for (const id of ['mixed', 'smg', 'sniper', 'shotgun', 'pistol', 'revolver'] as const) {
+  it('accepts every catalog weapon a bot may carry, knife included, and mixed', () => {
+    for (const id of ['mixed', 'smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife'] as const) {
       expect(asBotWeapon(id, 'smg')).toBe(id);
     }
   });
 
-  it('refuses the knife — a bot has no way to swing one until 7b', () => {
-    // The 7a boundary lives in the type (BotWeaponId excludes 'knife') and is
-    // enforced here rather than by a convention someone has to remember.
-    expect(asBotWeapon('knife', 'mixed')).toBe('mixed');
+  it('parses ?tweap=knife to a blade-only bot — the 7b widening', () => {
+    // The 7a boundary refused the knife (a bot had no way to swing one); 7b
+    // widened BotWeaponId to the whole catalog, so a blade is now a legal and
+    // deliberate setting.
+    expect(asBotWeapon('knife', 'mixed')).toBe('knife');
   });
 
   it('falls back for absent, empty and garbage values', () => {
@@ -174,6 +175,10 @@ describe('asBotWeapon', () => {
       botWeaponT: SESSION_DEFAULTS.botWeaponT, botWeaponCt: 'pistol',
     });
     expect(parseSessionConfig(src({ tweap: 'nope' })).botWeaponT).toBe(SESSION_DEFAULTS.botWeaponT);
+  });
+
+  it('still falls back for genuine garbage', () => {
+    expect(parseSessionConfig(src({ tweap: 'rocket' })).botWeaponT).toBe(SESSION_DEFAULTS.botWeaponT);
   });
 });
 

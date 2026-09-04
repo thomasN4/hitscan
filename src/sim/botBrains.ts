@@ -297,10 +297,17 @@ export interface BotBrain {
    * the executor never uses it to compute damage — see resolveShot.
    */
   readonly weapon: BotWeaponId;
-  /** Rounds chambered, magazine capacity and reload state. Display only. */
+  /** Rounds chambered, magazine capacity, reserve and reload state. Display only. */
   readonly mag: number;
   readonly magSize: number;
+  readonly reserve: number;
   readonly reloading: boolean;
+  /**
+   * How the executor must realize a pull: 'ranged' resolves through
+   * resolveShot below; 'melee' means the executor swings instead — a melee
+   * brain never reaches resolveShot.
+   */
+  readonly resolution: 'ranged' | 'melee';
   /** Hit probability for ONE ray at eye-to-eye 3D `dist` under this weapon. */
   hitChance(dist: number): number;
   /**
@@ -310,7 +317,8 @@ export interface BotBrain {
    *
    * ALL of a bot's dice come from the brain's own rng stream — never a
    * global — which is why this is the brain's to draw and not the
-   * executor's, even though the executor is what asked for the shot.
+   * executor's, even though the executor is what asked for the shot. A melee
+   * brain never reaches this; the executor swings instead.
    */
   resolveShot(dist: number): ShotOutcome;
   /**
@@ -638,7 +646,9 @@ export class DefaultBrain implements BotBrain {
   get weapon(): BotWeaponId { return this.fire.weapon; }
   get mag(): number { return this.fire.mag; }
   get magSize(): number { return this.fire.magSize; }
+  get reserve(): number { return this.fire.reserve; }
   get reloading(): boolean { return this.fire.reloading; }
+  get resolution(): 'ranged' | 'melee' { return this.fire.resolution; }
 
   hitChance(dist: number): number {
     return this.fire.hitChance(dist);

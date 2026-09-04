@@ -31,32 +31,9 @@ export const FIRST_SHOT_DELAY_MIN = 1;
 export const FIRST_SHOT_DELAY_SPAN = 2;
 
 /**
- * Bot-only tuning for one catalog weapon: how a BOT shoots and positions with
- * it. Everything mechanical — fireRate, magSize, reserveMax, reloadTime,
- * perRound, damage, headshotMult, pellets — comes from the WeaponDef beside
- * it and is NOT restated here. Two sources for one number is the thing this
- * split exists to avoid.
+ * What every bot weapon has, blade or firearm: how a bot MOVES and PACES with it.
  */
-export interface BotWeaponTuning {
-  /** Per-RAY hit chance at point blank. */
-  hitChanceNear: number;
-  /** Per-ray falloff divisor: chance = near - dist / this. */
-  hitChanceDivisor: number;
-  /**
-   * Per-ray floor. Zero is legal and load-bearing: it is what gives the
-   * shotgun a hard cliff instead of a long tail of lucky pellets, and it is
-   * the only way a weapon can be genuinely harmless at range.
-   */
-  hitChanceMin: number;
-  /** Probability a landed ray strikes the head. */
-  headChance: number;
-  /** Probability a landed ray strikes the legs; the remainder is torso. */
-  legChance: number;
-  /**
-   * Rounds committed to one trigger commitment before the pause. 1 means every
-   * shot is its own decision — every semi-auto, and the shotgun.
-   */
-  burst: number;
+export interface BotWeaponPosture {
   /**
    * Seconds from a burst's LAST shot to the next pull: min + rng()*span.
    * Within a burst the interval is the def's own fireRate exactly and takes no
@@ -77,6 +54,48 @@ export interface BotWeaponTuning {
 }
 
 /**
+ * Bot-only tuning for one catalog FIREARM: how a BOT shoots and positions
+ * with it. Everything mechanical — fireRate, magSize, reserveMax, reloadTime,
+ * perRound, damage, headshotMult, pellets — comes from the WeaponDef beside
+ * it and is NOT restated here. Two sources for one number is the thing this
+ * split exists to avoid.
+ */
+export interface BotRangedTuning extends BotWeaponPosture {
+  kind: 'ranged';
+  /** Per-RAY hit chance at point blank. */
+  hitChanceNear: number;
+  /** Per-ray falloff divisor: chance = near - dist / this. */
+  hitChanceDivisor: number;
+  /**
+   * Per-ray floor. Zero is legal and load-bearing: it is what gives the
+   * shotgun a hard cliff instead of a long tail of lucky pellets, and it is
+   * the only way a weapon can be genuinely harmless at range.
+   */
+  hitChanceMin: number;
+  /** Probability a landed ray strikes the head. */
+  headChance: number;
+  /** Probability a landed ray strikes the legs; the remainder is torso. */
+  legChance: number;
+  /**
+   * Rounds committed to one trigger commitment before the pause. 1 means every
+   * shot is its own decision — every semi-auto, and the shotgun.
+   */
+  burst: number;
+}
+
+/**
+ * Bot-only tuning for the catalog BLADE. A knife bot closes to contact and
+ * swings through sim/melee.ts instead of rolling the per-ray hit die, so it
+ * has no per-ray chance, no falloff divisor and no zone weights — only the
+ * shared posture: how it moves and how it paces its swings.
+ */
+export interface BotMeleeTuning extends BotWeaponPosture {
+  kind: 'melee';
+}
+
+export type BotWeaponTuning = BotRangedTuning | BotMeleeTuning;
+
+/**
  * How each catalog weapon is fought with.
  *
  * The tuning rule these numbers were chosen against: expected damage per
@@ -88,14 +107,14 @@ export interface BotWeaponTuning {
  *
  * A full Record keyed by BotWeaponId, like every other per-weapon table in the
  * repo (VIEWMODELS, SHOT_SFX, AMBIENCE): widening WeaponId fails to compile
- * here until the new weapon says how a bot uses it. The knife is absent
- * because BotWeaponId excludes it — 7a bots carry firearms, and a melee bot
- * needs a swing through sim/melee.ts rather than a hit die, which is 7b's
- * work. That exclusion is a TYPE rather than a comment, so nothing can
- * accidentally hand a bot a blade it has no way to use.
+ * here until the new weapon says how a bot uses it. The knife row is a melee
+ * posture — no hit die, only how the blade closes and paces — because a melee
+ * bot swings through sim/melee.ts (bots.ts:swing) rather than rolling
+ * resolve() below.
  */
 export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
   smg: {
+    kind: 'ranged',
     // Sprays and closes: three-round bursts, a mediocre per-ray chance, and a
     // falloff that still leaves it useful across an arena.
     hitChanceNear: 0.30, hitChanceDivisor: 70, hitChanceMin: 0.05,
@@ -109,6 +128,7 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     nearBand: 7, farBand: 14, engageRange: 45, strafeFactor: 0.7,
   },
   sniper: {
+    kind: 'ranged',
     // Reaches: the divisor is nearly 3x anything else's, so its curve is close
     // to flat and it is the only weapon that threatens across the whole map.
     // engageRange matches perception.ts's PERCEPTION_RANGE_M on purpose —
@@ -125,6 +145,7 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     nearBand: 25, farBand: 45, engageRange: 80, strafeFactor: 0.25,
   },
   shotgun: {
+    kind: 'ranged',
     // A cliff, not a curve: hitChanceMin 0 with a divisor of 24 means the
     // curve genuinely REACHES zero at 10.1 m, which is what makes a shotgun
     // bot safe to walk away from rather than merely unlikely to hit. It is
@@ -142,6 +163,7 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     nearBand: 2, farBand: 7, engageRange: 12, strafeFactor: 0.9,
   },
   pistol: {
+    kind: 'ranged',
     // Taps and closes. The player's 0.1 s fire rate is a click ceiling, not a
     // pace anything should sustain; a bot taps at roughly two-thirds of a
     // second, which is what keeps 34-damage torso hits fair.
@@ -151,6 +173,7 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     nearBand: 5, farBand: 12, engageRange: 30, strafeFactor: 0.7,
   },
   revolver: {
+    kind: 'ranged',
     // Slow and heavy: the lowest hit chance in the table paired with the
     // second-highest damage, so it lands rarely and hurts when it does — and
     // its headshotMult 4 on 55 one-taps.
@@ -159,6 +182,20 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     burst: 1, burstPauseMin: 0.8, burstPauseSpan: 0.4,
     nearBand: 6, farBand: 14, engageRange: 35, strafeFactor: 0.7,
   },
+  knife: {
+    // Closes and STAYS closed: nearBand 0 means no band ever pushes a knife
+    // bot back off a target, and farBand keeps it approaching until it is
+    // inside its own reach.
+    //
+    // engageRange sits INSIDE WEAPONS.knife.range (2.0 m) on purpose. The
+    // brain's gate measures eye-to-eye 3D distance while the swing measures
+    // eye to a PART, and a torso point sits ~0.55 m off that line — so a gate
+    // set at the reach itself would order swings that sim/melee.ts then has to
+    // refuse. 1.8 m is the reach minus that slack.
+    kind: 'melee',
+    burstPauseMin: 0.45, burstPauseSpan: 0.25,
+    nearBand: 0, farBand: 1.2, engageRange: 1.8, strafeFactor: 0.5,
+  },
 };
 
 /**
@@ -166,10 +203,12 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
  * derived from BOT_WEAPON_TUNING's keys because Object.keys erases the union
  * back to string[]; botWeapons.test.ts asserts the two agree, so a weapon
  * added to the table but not here fails the suite rather than quietly
- * dropping out of the mixed draw.
+ * dropping out of the mixed draw. The mixed draw includes the blade by
+ * deliberate product decision (tranche 7b): roughly one bot in six of a mixed
+ * wave carries a knife.
  */
 export const BOT_WEAPON_IDS: readonly BotWeaponId[] =
-  ['smg', 'sniper', 'shotgun', 'pistol', 'revolver'];
+  ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife'];
 
 /**
  * Turn a menu/URL bot-weapon setting into the weapon ONE bot carries.
@@ -217,6 +256,12 @@ export interface FireController {
   /** A reload is running. Display only. */
   readonly reloading: boolean;
   /**
+   * How the executor must realize a pull. 'ranged' resolves through resolve()
+   * below; 'melee' means the hit is GEOMETRY — bots.ts swings through
+   * sim/melee.ts and never asks this controller for damage.
+   */
+  readonly resolution: 'ranged' | 'melee';
+  /**
    * Per-life reset: full magazine and reserve, no reload in flight, a fresh
    * burst, and ONE draw for the spawn stagger.
    *
@@ -260,7 +305,7 @@ export interface FireController {
  * hitChanceNear, floored. Pure and exported for its own pins — the shape is
  * the whole difference between a sniper and a shotgun.
  */
-export function botHitChance(dist: number, tuning: BotWeaponTuning): number {
+export function botHitChance(dist: number, tuning: BotRangedTuning): number {
   return Math.max(tuning.hitChanceMin, tuning.hitChanceNear - dist / tuning.hitChanceDivisor);
 }
 
@@ -271,7 +316,7 @@ export function botHitChance(dist: number, tuning: BotWeaponTuning): number {
  * advance — is weapon-independent and stays exactly as DEFAULT_BRAIN_PARAMS
  * has it.
  */
-export function botBrainParams(tuning: BotWeaponTuning, base: BrainParams): BrainParams {
+export function botBrainParams(tuning: BotWeaponPosture, base: BrainParams): BrainParams {
   return {
     ...base,
     nearBand: tuning.nearBand,
@@ -281,7 +326,7 @@ export function botBrainParams(tuning: BotWeaponTuning, base: BrainParams): Brai
   };
 }
 
-/** The shipped FireController: one catalog weapon, fought by the table above. */
+/** The shipped FireController: one catalog firearm, fought by the table above. */
 export class WeaponFireController implements FireController {
   readonly weapon: BotWeaponId;
   private rounds: number;
@@ -299,7 +344,7 @@ export class WeaponFireController implements FireController {
   constructor(
     weapon: BotWeaponId,
     private readonly def: WeaponDef,
-    private readonly tuning: BotWeaponTuning,
+    private readonly tuning: BotRangedTuning,
     private readonly rng: () => number,
   ) {
     this.weapon = weapon;
@@ -313,6 +358,7 @@ export class WeaponFireController implements FireController {
   get magSize(): number { return this.def.magSize; }
   get reserve(): number { return this.held; }
   get reloading(): boolean { return this.inReload; }
+  readonly resolution = 'ranged' as const;
 
   arm(): void {
     this.rounds = this.def.magSize;
@@ -434,4 +480,85 @@ export class WeaponFireController implements FireController {
     this.held -= take;
     this.inReload = false;
   }
+}
+
+/**
+ * The blade half of a bot: cadence for one catalog knife, fought by the
+ * posture of its tuning row. A blade holds no rounds, so there is no
+ * magazine, no reserve and no reload — mag, magSize and reserve are 0 and
+ * reloading is false, mirroring WEAPONS.knife's own zeroed ammo fields.
+ *
+ * Draw discipline matches a burst-of-one firearm exactly — one draw in arm()
+ * for the spawn stagger, one draw per pull() for the pause — so the brain's
+ * per-frame draw contract is identical for a blade bot and no scripted rng
+ * sequence in botBrains.test.ts moves.
+ */
+export class MeleeFireController implements FireController {
+  readonly weapon: BotWeaponId;
+  /** Seconds until the next swing is allowed. */
+  private cooldown = 0;
+
+  constructor(
+    weapon: BotWeaponId,
+    private readonly tuning: BotMeleeTuning,
+    private readonly rng: () => number,
+  ) {
+    this.weapon = weapon;
+    // No draws here: arm() owns them, and the brain calls it. See arm().
+  }
+
+  get mag(): number { return 0; }
+  get magSize(): number { return 0; }
+  get reserve(): number { return 0; }
+  get reloading(): boolean { return false; }
+  readonly resolution = 'melee' as const;
+
+  arm(): void {
+    this.cooldown = FIRST_SHOT_DELAY_MIN + this.rng() * FIRST_SHOT_DELAY_SPAN;
+  }
+
+  /** `engaged` is not taken at all: there is no reload for it to gate. */
+  tick(dt: number): void {
+    this.cooldown = Math.max(0, this.cooldown - dt);
+  }
+
+  ready(): boolean {
+    // Nothing else: there is no magazine to be empty and no reload to be in
+    // the way.
+    return this.cooldown <= 0;
+  }
+
+  pull(): void {
+    this.cooldown = this.tuning.burstPauseMin + this.rng() * this.tuning.burstPauseSpan;
+  }
+
+  /**
+   * A blade fires no rays, so rays: 0 is an honest record rather than a
+   * fabricated miss — and the safe no-op for a caller that failed to branch on
+   * resolution first. `dist` is not taken: nothing here depends on it.
+   */
+  resolve(): ShotOutcome {
+    return { damage: 0, zone: null, rays: 0, hits: 0 };
+  }
+
+  /** A blade has no per-ray chance, at any distance. */
+  hitChance(): number {
+    return 0;
+  }
+}
+
+/**
+ * Build the controller one catalog weapon needs: the tuning row's own kind
+ * decides, so a weapon that changes shape changes it in ONE place. Takes no
+ * draws — arm() owns them, for the construction-order reason it documents.
+ */
+export function makeFireController(
+  weapon: BotWeaponId,
+  def: WeaponDef,
+  tuning: BotWeaponTuning,
+  rng: () => number,
+): FireController {
+  return tuning.kind === 'melee'
+    ? new MeleeFireController(weapon, tuning, rng)
+    : new WeaponFireController(weapon, def, tuning, rng);
 }

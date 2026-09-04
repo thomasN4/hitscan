@@ -4,11 +4,13 @@ import {
   BOT_WEAPON_TUNING,
   FIRST_SHOT_DELAY_MIN,
   FIRST_SHOT_DELAY_SPAN,
+  MeleeFireController,
   WeaponFireController,
   botBrainParams,
   botHitChance,
+  makeFireController,
   resolveBotWeapon,
-  type BotWeaponTuning,
+  type BotRangedTuning,
   type FireController,
 } from './botWeapons';
 import { DEFAULT_BRAIN_PARAMS } from './botBrains';
@@ -34,16 +36,22 @@ function queueRng(values: number[]): () => number {
 }
 
 /** A controller over the REAL catalog def, so the tests bind to shipped stats. */
+function rangedTuning(id: BotWeaponId): BotRangedTuning {
+  const t = BOT_WEAPON_TUNING[id];
+  if (t.kind !== 'ranged') throw new Error(`${id} is not a ranged weapon`);
+  return t;
+}
+
 function controller(
   id: BotWeaponId,
   rng: () => number,
-  tuning: BotWeaponTuning = BOT_WEAPON_TUNING[id],
+  tuning: BotRangedTuning = rangedTuning(id),
 ): FireController {
   return new WeaponFireController(id, WEAPONS[id], tuning, rng);
 }
 
 /** Armed and past the spawn stagger, so a test can get straight to the trigger. */
-function armed(id: BotWeaponId, rng: () => number, tuning?: BotWeaponTuning): FireController {
+function armed(id: BotWeaponId, rng: () => number, tuning?: BotRangedTuning): FireController {
   const fire = controller(id, rng, tuning);
   fire.arm();
   // The stagger is at most FIRST_SHOT_DELAY_MIN + SPAN; one tick past it
@@ -69,29 +77,46 @@ describe('BOT_WEAPON_TUNING', () => {
     expect([...BOT_WEAPON_IDS].sort()).toEqual(Object.keys(BOT_WEAPON_TUNING).sort());
   });
 
-  test('no bot weapon is the knife', () => {
-    expect(BOT_WEAPON_IDS).not.toContain('knife');
+  test('no bot weapon is missing from the draw, knife included', () => {
+    expect(BOT_WEAPON_IDS).toContain('knife');
   });
 
   test('a burst pause is never shorter than the weapon it paces', () => {
     // A pause below the def's own fireRate would let a bot cycle its weapon
-    // faster than the catalog says it can.
+    // faster than the catalog says it can — the knife row included, where the
+    // pause must keep pace with WEAPONS.knife.fireRate.
     for (const id of BOT_WEAPON_IDS) {
       expect(BOT_WEAPON_TUNING[id].burstPauseMin).toBeGreaterThanOrEqual(WEAPONS[id].fireRate);
     }
   });
 
+  test('the knife row sits inside its own reach', () => {
+    // engageRange must be at most WEAPONS.knife.range: the brain's gate
+    // measures eye-to-eye 3D distance while the swing measures eye to a part,
+    // so a gate set at the reach itself would order swings sim/melee.ts then
+    // refuses.
+    const knife = BOT_WEAPON_TUNING.knife;
+    expect(knife.kind).toBe('melee');
+    expect(knife.engageRange).toBeLessThanOrEqual(WEAPONS.knife.range ?? 0);
+    // Same band ordering every other row holds.
+    expect(knife.nearBand).toBeLessThanOrEqual(knife.farBand);
+    expect(knife.farBand).toBeLessThanOrEqual(knife.engageRange);
+  });
+
   test('an intra-burst interval is at least one frame', () => {
     // The executor realizes at most one shot per bot per frame, so a burst
-    // whose interval undercut a frame would silently drop rounds.
+    // whose interval undercut a frame would silently drop rounds. Ranged rows
+    // only — a blade fires no bursts.
     for (const id of BOT_WEAPON_IDS) {
-      if (BOT_WEAPON_TUNING[id].burst > 1) expect(WEAPONS[id].fireRate).toBeGreaterThanOrEqual(1 / 60);
+      const t = BOT_WEAPON_TUNING[id];
+      if (t.kind === 'ranged' && t.burst > 1) expect(WEAPONS[id].fireRate).toBeGreaterThanOrEqual(1 / 60);
     }
   });
 
   test('zone weights are a probability split', () => {
     for (const id of BOT_WEAPON_IDS) {
       const t = BOT_WEAPON_TUNING[id];
+      if (t.kind !== 'ranged') continue;
       expect(t.headChance).toBeGreaterThanOrEqual(0);
       expect(t.legChance).toBeGreaterThanOrEqual(0);
       expect(t.headChance + t.legChance).toBeLessThan(1);
@@ -128,7 +153,7 @@ describe('expected damage per second', () => {
    */
   function dps(id: BotWeaponId, dist: number): number {
     const def = WEAPONS[id];
-    const t = BOT_WEAPON_TUNING[id];
+    const t = rangedTuning(id);
     const cycle = (t.burst - 1) * def.fireRate + t.burstPauseMin + t.burstPauseSpan / 2;
     const meanZone =
       t.headChance * def.headshotMult + t.legChance * 0.75 + (1 - t.headChance - t.legChance);
@@ -148,8 +173,12 @@ describe('expected damage per second', () => {
     // else, and nothing else in the suite would have said so. It is not a
     // pin on the tuning — retuning inside these bounds must not cost a test
     // edit, or the next tuner will widen the test instead of thinking.
+    // Melee rows are skipped explicitly: a blade has no dps to band — its
+    // damage is geometry, and at contact it is deliberately lethal.
     for (const id of BOT_WEAPON_IDS) {
-      const band = (BOT_WEAPON_TUNING[id].nearBand + BOT_WEAPON_TUNING[id].farBand) / 2;
+      const t = BOT_WEAPON_TUNING[id];
+      if (t.kind !== 'ranged') continue;
+      const band = (t.nearBand + t.farBand) / 2;
       expect(dps(id, band)).toBeGreaterThan(3);
       expect(dps(id, band)).toBeLessThan(20);
       expect(dps(id, 0)).toBeLessThan(40);
@@ -159,37 +188,42 @@ describe('expected damage per second', () => {
   test('mid-band lethality stays in reach of the pre-weapon bot', () => {
     // Tranche 6's bot sat at 6.1 dps at 10 m. Every weapon except the
     // shotgun stays within roughly twice that at its own preferred range —
-    // this tranche is about character, not difficulty.
+    // this tranche is about character, not difficulty. Melee rows skipped as
+    // above: a blade has no dps to band.
     for (const id of BOT_WEAPON_IDS) {
-      if (id === 'shotgun') continue; // see the cliff test below
-      const band = (BOT_WEAPON_TUNING[id].nearBand + BOT_WEAPON_TUNING[id].farBand) / 2;
+      if (id === 'shotgun' || id === 'knife') continue; // see the cliff test below
+      const t = BOT_WEAPON_TUNING[id];
+      if (t.kind !== 'ranged') continue;
+      const band = (t.nearBand + t.farBand) / 2;
       expect(dps(id, band)).toBeLessThan(13);
     }
   });
 
   test('the shotgun trades every metre of reach for contact damage', () => {
     // The one deliberate outlier, and the trade is what justifies it: it is
-    // the ONLY weapon whose curve reaches actual zero, and it gets there
+    // the ONLY firearm whose curve reaches actual zero, and it gets there
     // inside 11 m. Stated as shape rather than as absolute numbers so a
     // retune inside the band above does not have to edit this.
     expect(dps('shotgun', 1)).toBeGreaterThan(2 * dps('shotgun', 6));
     expect(dps('shotgun', 11)).toBe(0);
     expect(dps('shotgun', 0)).toBeGreaterThan(dps('smg', 0));
     for (const id of BOT_WEAPON_IDS) {
-      if (id !== 'shotgun') expect(dps(id, 11)).toBeGreaterThan(0);
+      if (id === 'shotgun' || id === 'knife') continue;
+      expect(dps(id, 11)).toBeGreaterThan(0);
     }
   });
 
   test('the sniper is the only weapon that still bites at 50 m', () => {
     expect(dps('sniper', 50)).toBeGreaterThan(3);
     for (const id of BOT_WEAPON_IDS) {
-      if (id !== 'sniper') expect(dps(id, 50)).toBeLessThan(dps('sniper', 50));
+      if (id === 'sniper' || id === 'knife') continue;
+      expect(dps(id, 50)).toBeLessThan(dps('sniper', 50));
     }
   });
 });
 
 describe('botHitChance', () => {
-  const t = BOT_WEAPON_TUNING.smg;
+  const t = rangedTuning('smg');
 
   test('point blank is the near value', () => {
     expect(botHitChance(0, t)).toBeCloseTo(t.hitChanceNear, 10);
@@ -204,14 +238,16 @@ describe('botHitChance', () => {
   });
 
   test('a zero floor really reaches zero', () => {
-    expect(botHitChance(20, BOT_WEAPON_TUNING.shotgun)).toBe(0);
+    expect(botHitChance(20, rangedTuning('shotgun'))).toBe(0);
   });
 
   test('never increases with distance', () => {
     for (const id of BOT_WEAPON_IDS) {
+      const tuning = BOT_WEAPON_TUNING[id];
+      if (tuning.kind !== 'ranged') continue;
       let prev = Infinity;
       for (let d = 0; d <= 100; d += 5) {
-        const c = botHitChance(d, BOT_WEAPON_TUNING[id]);
+        const c = botHitChance(d, tuning);
         expect(c).toBeLessThanOrEqual(prev);
         prev = c;
       }
@@ -254,6 +290,15 @@ describe('resolveBotWeapon', () => {
       expect(c.taken()).toBe(1);
     }
     expect([...seen].sort()).toEqual([...BOT_WEAPON_IDS].sort());
+  });
+
+  test('mixed can draw the knife', () => {
+    // The blade is in the pool by deliberate product decision (7b): drive the
+    // draw at the knife's own index.
+    const i = BOT_WEAPON_IDS.indexOf('knife');
+    const c = counting([(i + 0.5) / BOT_WEAPON_IDS.length]);
+    expect(resolveBotWeapon('mixed', c.rng)).toBe('knife');
+    expect(c.taken()).toBe(1);
   });
 
   test('a draw of exactly 1 stays in range', () => {
@@ -356,7 +401,7 @@ describe('WeaponFireController cadence', () => {
     // The draw count per pull must depend on the burst position alone.
     const c = counting([0, 0.5, 0.5]);
     const fire = new WeaponFireController('smg', { ...WEAPONS.smg, magSize: 2 },
-      BOT_WEAPON_TUNING.smg, c.rng);
+      rangedTuning('smg'), c.rng);
     fire.arm();
     fire.tick(1.1, false);
     const before = c.taken();
@@ -448,7 +493,7 @@ describe('WeaponFireController reloading', () => {
 
   test('a dry reserve leaves the bot empty rather than conjuring rounds', () => {
     const def = { ...WEAPONS.smg, magSize: 2, reserveMax: 2 };
-    const fire = new WeaponFireController('smg', def, BOT_WEAPON_TUNING.smg,
+    const fire = new WeaponFireController('smg', def, rangedTuning('smg'),
       queueRng(repeat(64, 0)));
     fire.arm();
     fire.tick(4, false);
@@ -468,12 +513,12 @@ describe('WeaponFireController reloading', () => {
 describe('WeaponFireController resolve', () => {
   test('one ray, one hit draw, and a zone draw only when it lands', () => {
     const miss = counting([0.99]);
-    const fireA = new WeaponFireController('pistol', WEAPONS.pistol, BOT_WEAPON_TUNING.pistol, miss.rng);
+    const fireA = new WeaponFireController('pistol', WEAPONS.pistol, rangedTuning('pistol'), miss.rng);
     expect(fireA.resolve(0)).toEqual({ damage: 0, zone: null, rays: 1, hits: 0 });
     expect(miss.taken()).toBe(1);
 
     const hit = counting([0.01, 0.9]); // lands, then a torso zone
-    const fireB = new WeaponFireController('pistol', WEAPONS.pistol, BOT_WEAPON_TUNING.pistol, hit.rng);
+    const fireB = new WeaponFireController('pistol', WEAPONS.pistol, rangedTuning('pistol'), hit.rng);
     expect(fireB.resolve(0)).toEqual({
       damage: WEAPONS.pistol.damage, zone: 'torso', rays: 1, hits: 1,
     });
@@ -481,20 +526,21 @@ describe('WeaponFireController resolve', () => {
   });
 
   test('zones come from the catalog multipliers, not from the brain', () => {
-    const head = new WeaponFireController('sniper', WEAPONS.sniper, BOT_WEAPON_TUNING.sniper,
+    const sniperTuning = rangedTuning('sniper');
+    const head = new WeaponFireController('sniper', WEAPONS.sniper, sniperTuning,
       queueRng([0.01, 0]));
     expect(head.resolve(0)).toMatchObject({
       damage: damageForPart(WEAPONS.sniper, 'head'), zone: 'head',
     });
-    const legs = new WeaponFireController('sniper', WEAPONS.sniper, BOT_WEAPON_TUNING.sniper,
-      queueRng([0.01, BOT_WEAPON_TUNING.sniper.headChance + 0.001]));
+    const legs = new WeaponFireController('sniper', WEAPONS.sniper, sniperTuning,
+      queueRng([0.01, sniperTuning.headChance + 0.001]));
     expect(legs.resolve(0)).toMatchObject({
       damage: damageForPart(WEAPONS.sniper, 'legs'), zone: 'legs',
     });
   });
 
   test('the zone split boundaries are exact', () => {
-    const t = BOT_WEAPON_TUNING.smg;
+    const t = rangedTuning('smg');
     const at = (draw: number): string | null =>
       new WeaponFireController('smg', WEAPONS.smg, t, queueRng([0.01, draw])).resolve(0).zone;
     expect(at(0)).toBe('head');
@@ -512,7 +558,7 @@ describe('WeaponFireController resolve', () => {
       else script.push(0.99);             // miss: no zone draw
     }
     const c = counting(script);
-    const fire = new WeaponFireController('shotgun', WEAPONS.shotgun, BOT_WEAPON_TUNING.shotgun, c.rng);
+    const fire = new WeaponFireController('shotgun', WEAPONS.shotgun, rangedTuning('shotgun'), c.rng);
     const out = fire.resolve(0);
     expect(out).toEqual({
       damage: WEAPONS.shotgun.damage * 4, zone: 'torso', rays: 8, hits: 4,
@@ -524,7 +570,7 @@ describe('WeaponFireController resolve', () => {
     // Same rule weapons.ts applies to the player's hitmarker: the killfeed
     // reports the trigger pull, not an individual pellet.
     const script = [0.01, 0.9, 0.01, 0, ...repeat(6, 0.99)];
-    const fire = new WeaponFireController('shotgun', WEAPONS.shotgun, BOT_WEAPON_TUNING.shotgun,
+    const fire = new WeaponFireController('shotgun', WEAPONS.shotgun, rangedTuning('shotgun'),
       queueRng(script));
     const out = fire.resolve(0);
     expect(out.zone).toBe('head');
@@ -534,20 +580,114 @@ describe('WeaponFireController resolve', () => {
   });
 
   test('legs only when nothing better landed', () => {
-    const legDraw = BOT_WEAPON_TUNING.shotgun.headChance + 0.001;
+    const legDraw = rangedTuning('shotgun').headChance + 0.001;
     const script = [0.01, legDraw, ...repeat(7, 0.99)];
-    const fire = new WeaponFireController('shotgun', WEAPONS.shotgun, BOT_WEAPON_TUNING.shotgun,
+    const fire = new WeaponFireController('shotgun', WEAPONS.shotgun, rangedTuning('shotgun'),
       queueRng(script));
     expect(fire.resolve(0).zone).toBe('legs');
   });
 
   test('distance is the only thing that changes the odds', () => {
     // The same draw lands point blank and misses far away.
-    const near = new WeaponFireController('smg', WEAPONS.smg, BOT_WEAPON_TUNING.smg,
+    const near = new WeaponFireController('smg', WEAPONS.smg, rangedTuning('smg'),
       queueRng([0.25, 0.9]));
     expect(near.resolve(0).hits).toBe(1);
-    const far = new WeaponFireController('smg', WEAPONS.smg, BOT_WEAPON_TUNING.smg,
+    const far = new WeaponFireController('smg', WEAPONS.smg, rangedTuning('smg'),
       queueRng([0.25, 0.9]));
     expect(far.resolve(40).hits).toBe(0);
+  });
+});
+
+describe('MeleeFireController', () => {
+  // Typed as the INTERFACE, not the class: a blade's tick/resolve/hitChance
+  // take fewer parameters than the contract they satisfy, and the tests should
+  // exercise the surface the brain and the executor actually hold.
+  function melee(rng: () => number): FireController {
+    const t = BOT_WEAPON_TUNING.knife;
+    if (t.kind !== 'melee') throw new Error('knife tuning must stay melee');
+    return new MeleeFireController('knife', t, rng);
+  }
+
+  test('arm() spends exactly one draw', () => {
+    const c = counting([0.5]);
+    const fire = melee(c.rng);
+    expect(c.taken()).toBe(0);
+    fire.arm();
+    expect(c.taken()).toBe(1);
+    expect(fire.resolution).toBe('melee');
+  });
+
+  test('ready() is false until the stagger elapses and true after', () => {
+    const fire = melee(queueRng([0])); // draw 0 → the minimum stagger
+    fire.arm();
+    fire.tick(0.99, false);
+    expect(fire.ready()).toBe(false);
+    fire.tick(0.02, false);
+    expect(fire.ready()).toBe(true);
+  });
+
+  test('pull() spends exactly one draw and blocks the next ready() for the pause', () => {
+    const c = counting([0, 0.5]); // stagger, then the pause
+    const fire = melee(c.rng);
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 1, false);
+    expect(c.taken()).toBe(1);
+    fire.pull();
+    expect(c.taken()).toBe(2);
+    expect(fire.ready()).toBe(false);
+    // 0.45 + 0.5 * 0.25 = 0.575: just short is still blocked, the tail clears.
+    fire.tick(BOT_WEAPON_TUNING.knife.burstPauseMin - 0.01, false);
+    expect(fire.ready()).toBe(false);
+    fire.tick(0.5, false);
+    expect(fire.ready()).toBe(true);
+  });
+
+  test('a blade holds no rounds across arbitrary ticks', () => {
+    const fire = melee(queueRng([0]));
+    fire.arm();
+    expect(fire.mag).toBe(0);
+    expect(fire.magSize).toBe(0);
+    expect(fire.reserve).toBe(0);
+    expect(fire.reloading).toBe(false);
+    for (let i = 0; i < 200; i++) fire.tick(DT, i % 2 === 0);
+    expect(fire.mag).toBe(0);
+    expect(fire.magSize).toBe(0);
+    expect(fire.reserve).toBe(0);
+    expect(fire.reloading).toBe(false);
+  });
+
+  test('resolve() reports zero rays and no zone', () => {
+    const fire = melee(queueRng([0]));
+    fire.arm();
+    expect(fire.resolve(1)).toEqual({ damage: 0, zone: null, rays: 0, hits: 0 });
+    expect(fire.hitChance(1)).toBe(0);
+  });
+
+  test('arm() re-arms the stagger for a new life', () => {
+    const fire = melee(queueRng([0, 0.5]));
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 1, false);
+    fire.pull();
+    expect(fire.ready()).toBe(false);
+    fire.arm();
+    expect(fire.ready()).toBe(false); // the fresh stagger is running
+  });
+});
+
+describe('makeFireController', () => {
+  test('returns a melee controller for the knife and ranged for every firearm', () => {
+    const knifeTuning = BOT_WEAPON_TUNING.knife;
+    if (knifeTuning.kind !== 'melee') throw new Error('knife tuning must stay melee');
+    const knife = makeFireController('knife', WEAPONS.knife, knifeTuning, queueRng([0]));
+    expect(knife.resolution).toBe('melee');
+    expect(knife).toBeInstanceOf(MeleeFireController);
+    for (const id of BOT_WEAPON_IDS) {
+      if (id === 'knife') continue;
+      const tuning = BOT_WEAPON_TUNING[id];
+      if (tuning.kind !== 'ranged') continue;
+      const fire = makeFireController(id, WEAPONS[id], tuning, queueRng([0]));
+      expect(fire.resolution).toBe('ranged');
+      expect(fire).toBeInstanceOf(WeaponFireController);
+    }
   });
 });

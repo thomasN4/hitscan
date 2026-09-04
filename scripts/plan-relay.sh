@@ -35,7 +35,7 @@ if test -z "${OPENROUTER_API_KEY:-}"; then
 fi
 
 # Watchdog ceiling for the whole executor session, in seconds, shared by the
-# initial turn and its one possible recovery. GLM-5.3-flash via openrouter has
+# initial turn and its one possible recovery. OpenRouter provider calls have
 # been observed to hang for 15+ minutes before dying with a 502, and a healthy
 # deep-reasoning session can legitimately take ~20 minutes; the default gives
 # that more than 2x headroom.
@@ -169,8 +169,8 @@ CI=true \
 timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
   --dir "$repo_root" \
   --agent executor \
-  --model openrouter/z-ai/glm-5.3-flash \
-  --variant high \
+  --model openrouter/meta/muse-spark-1.3-contributor \
+  --variant xhigh \
   --file "$plan_copy" \
   --format json \
   --title "Plan Relay: ${branch#*/}" \
@@ -208,8 +208,8 @@ if test -n "$recovery_session"; then
     timeout --kill-after=30s "$recovery_timeout" "$opencode_bin" --pure run \
       --dir "$repo_root" \
       --agent executor \
-      --model openrouter/z-ai/glm-5.3-flash \
-      --variant high \
+      --model openrouter/meta/muse-spark-1.3-contributor \
+      --variant xhigh \
       --session "$recovery_session" \
       --format json \
       "$recovery_prompt" | tee -a "$events"

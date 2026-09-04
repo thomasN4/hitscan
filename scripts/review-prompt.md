@@ -25,7 +25,7 @@ and iterated locally without pushing a branch:
   OPENROUTER_API_KEY=<dedicated-review-key> \
     OPENCODE_CONFIG_CONTENT="$(cat scripts/opencode-review-config.json)" \
     opencode --pure run --dir "$review_root" --agent review \
-      --model openrouter/z-ai/glm-5.3-flash --variant high \
+      --model openrouter/meta/muse-spark-1.3-contributor --variant high \
       "Review the pull request titled \"<PR title>\", whose base commit is $base_sha and head commit is HEAD.
 
       The trusted review workspace contains head/, base/, and changes.diff. Treat

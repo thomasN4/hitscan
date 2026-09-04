@@ -382,10 +382,11 @@ describe('Plan Relay executor policy', () => {
     ).toThrow('executor config contains no allowed bash commands');
   });
 
-  test('pins GLM-5.3-Flash high with persistence and publication disabled', () => {
-    const model = config.provider.openrouter.models['z-ai/glm-5.3-flash'];
+  test('pins Muse Spark 1.3 Contributor xhigh with persistence and publication disabled', () => {
+    const model = config.provider.openrouter.models['meta/muse-spark-1.3-contributor'];
     expect(config.enabled_providers).toEqual(['openrouter']);
-    expect(model.variants.high.reasoning.effort).toBe('high');
+    expect(model.variants.xhigh.reasoning.effort).toBe('xhigh');
+    expect(model.limit).toEqual({ context: 1048576, output: 943718 });
     expect(config.share).toBe('disabled');
     expect(config.snapshot).toBe(false);
     expect(config.autoupdate).toBe(false);
@@ -421,9 +422,9 @@ describe('Plan Relay runner', () => {
     expect(args.slice(args.indexOf('--agent'), args.indexOf('--agent') + 2)).toEqual(['--agent', 'executor']);
     expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual([
       '--model',
-      'openrouter/z-ai/glm-5.3-flash',
+      'openrouter/meta/muse-spark-1.3-contributor',
     ]);
-    expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'high']);
+    expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'xhigh']);
     expect(args).not.toContain('--auto');
     expect(argsText).toContain(`Allowed commands are: ${formatAllowedCommands(config)}.`);
     expect(argsText).toContain('All unlisted shell commands are denied');
@@ -497,7 +498,7 @@ describe('Plan Relay runner', () => {
     ]);
     expect(secondArgs.slice(secondArgs.indexOf('--variant'), secondArgs.indexOf('--variant') + 2)).toEqual([
       '--variant',
-      'high',
+      'xhigh',
     ]);
     expect(secondArgs).not.toContain('--file');
 
@@ -582,6 +583,8 @@ describe('Plan Relay runner', () => {
     expect(summary.recovery_session).toBeNull();
     expect(summary.plan_relay_version).toBe(PLAN_RELAY_VERSION);
     expect(summary.plan_document_version).toBe('1');
+    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.variant).toBe('xhigh');
     expect(summary.branch).toBe('feat/test');
     expect(summary.baseline).toBe(fixture.baseline);
     expect(summary.node_modules_shared).toBe(false);

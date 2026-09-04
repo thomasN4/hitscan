@@ -10,9 +10,10 @@ const config = JSON.parse(readFileSync(join(scriptsDir, 'opencode-review-config.
 
 describe('OpenCode review policy', () => {
   test('pins the OpenRouter model, high reasoning and non-persistent runtime', () => {
-    const model = config.provider.openrouter.models['z-ai/glm-5.3-flash'];
+    const model = config.provider.openrouter.models['meta/muse-spark-1.3-contributor'];
     expect(config.enabled_providers).toEqual(['openrouter']);
     expect(model.variants.high.reasoning.effort).toBe('high');
+    expect(model.limit).toEqual({ context: 1048576, output: 943718 });
     expect(config.share).toBe('disabled');
     expect(config.snapshot).toBe(false);
     expect(config.autoupdate).toBe(false);

@@ -830,8 +830,11 @@ Each executor owns a sound cursor. `updateBots` captures the buffer's high-water
 sequence before iterating bots, and every bot reads only through that snapshot;
 therefore a shot emitted by an early bot is heard by ALL bots on the next frame
 instead of only by later entries in registry order. The executor filters new
-events by team and radius and passes the bounded heard set to the brain. Policy
-chooses gunshots before footsteps and the newest event within one kind. A dead
+events by team and radius and passes the bounded heard set to the brain. In the
+original 6b implementation the policy chose gunshots before footsteps and the
+newest event within one kind; the follow-up now prefers the nearest gunshot,
+newest footstep only when no gunshot is heard (see the 6b follow-up record
+under Planned). A dead
 bot's cursor resets to the latest sequence on respawn so it cannot replay six
 seconds of combat that occurred while it was absent.
 
@@ -844,9 +847,12 @@ refresh, took the placeholder comment's POSITION as the design. It contradicts
 this tranche's own ladder above, which reads
 `… > newly heard gunshot > newly heard footstep > remembered position >`. The
 ladder won — freshness is the whole argument for hearing, and a noise from this
-second is better evidence than a memory from ten seconds ago. Hearing is
-therefore checked between the visual and the scan/memory branches, and the
-placeholder's slot number moved with it.)*
+second is better evidence than a memory from ten seconds ago. That was the
+original 6b decision: hearing was checked between the visual and the
+scan/memory branches, and the placeholder's slot number moved with it. The 6b
+follow-up (see under Planned) later reversed this — hearing now applies only
+with no memory/search commitment, so fresh sound no longer outranks
+memory/search.)*
 A heard position carries NO focus id, so
 the executor's three-way shot agreement (intent focus, this frame's
 observation, range gate) already makes firing on sound impossible; no new gate

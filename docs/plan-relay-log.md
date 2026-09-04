@@ -119,3 +119,24 @@ passed the full browser smoke suite on an isolated server with no console or
 page errors. The relay was worth using: the implementation stayed inside its
 file boundary, exercised its own test-first correction loop and reached a
 passing liveness gate.
+
+### 2026-09-04 — wave `3a9f79281cab.RgqTjB` — 1 executor
+
+Relay v4, plan schema v1. Baseline `3a9f79281cab`. A wave of one for review
+round two; wall clock 1m 56s against 1m 54s of executor event time.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/hearing-followup` | `3a9f79281cab.RgqTjB` | 1 | 1m 54s | $0.0000 | 1 (+11/-5) | pass |
+
+Verdict: Muse Spark 1.3 Contributor at `xhigh` resolved both stale-policy
+findings from review round one without changing behavior or leaving its single
+owned file. The run used 16 steps, 17 tool calls and 2 edits with 0 denied calls;
+it reported 397,358 total tokens, including 313,759 cache reads. The executor
+passed 682 tests, lint, typecheck, build and diff hygiene, and the planner
+independently reran the same gates successfully. As in the preceding run, the
+initial read-only baseline check chained Git commands with `&&` despite the
+plan's separate-command instruction; it did not obscure a failure, but the
+repetition shows that prose alone is not reliably enforcing this convention.
+The relay was still worth using: it produced a minimal correction for both
+review findings and passed its liveness gate in under two minutes.

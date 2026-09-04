@@ -325,25 +325,47 @@ export interface BotBrain {
 
 /**
  * Which of this frame's noises to investigate: a gunshot over any footstep,
- * and the NEWEST within one kind.
+ * the NEAREST gunshot among gunshots, and the newest footstep when no
+ * gunshot exists.
  *
- * Gunshots win because they mean a fight rather than a walk, and newest wins
- * because a sound is evidence about a moment — an older event in the same
- * frame's batch is already superseded. Distance does not enter: the emitter's
- * radius has already decided what is audible, and preferring the nearer of
- * two audible gunshots would quietly reintroduce ranking by position.
+ * Gunshots win because they mean a fight rather than a walk. Among gunshots
+ * NEAREST wins because a sound chosen as a place to walk to is a lead, not
+ * an identity — 6a's ban on ranking by position is about identifying a
+ * target, where nearest would reintroduce omniscience by another name, and
+ * does not apply to picking which of several already-audible noises to
+ * approach. Distance is the 3D squared distance from the event's copied
+ * position to the listener's feet, the same point-distance ordering
+ * `withinEarshot` gates audibility on, squared to skip the root; an exact
+ * distance tie falls back to the newest sequence so the choice stays
+ * deterministic. Footsteps keep newest-wins: with no fight to locate,
+ * freshness is the only ordering left. Neither an event nor its position is
+ * ever mutated.
  *
  * Exported for its own unit pins; it is policy, so it lives with the brain
  * rather than with the ring.
  */
-export function pickHeardLead(heard: readonly HeardSound[]): HeardSound | null {
+export function pickHeardLead(heard: readonly HeardSound[], listenerFeet: THREE.Vector3): HeardSound | null {
   let best: HeardSound | null = null;
+  let bestDistSq = Infinity;
   for (const h of heard) {
-    if (best === null) { best = h; continue; }
-    if (h.kind === best.kind) {
-      if (h.seq > best.seq) best = h;
-    } else if (h.kind === 'gunshot') {
+    if (best === null) {
       best = h;
+      bestDistSq = h.kind === 'gunshot' ? h.pos.distanceToSquared(listenerFeet) : Infinity;
+      continue;
+    }
+    if (h.kind !== best.kind) {
+      if (h.kind === 'gunshot') {
+        best = h;
+        bestDistSq = h.pos.distanceToSquared(listenerFeet);
+      }
+    } else if (h.kind === 'footstep') {
+      if (h.seq > best.seq) best = h;
+    } else {
+      const dSq = h.pos.distanceToSquared(listenerFeet);
+      if (dSq < bestDistSq || (dSq === bestDistSq && h.seq > best.seq)) {
+        best = h;
+        bestDistSq = dSq;
+      }
     }
   }
   return best;
@@ -540,14 +562,13 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Adopt a heard noise as the investigation goal, dropping whatever was
-   * being investigated before.
+   * Adopt a heard noise as the investigation goal.
    *
-   * Freshness wins: the tranche's priority ladder puts a newly heard hostile
-   * event above a remembered position, so a new noise replaces an older lead
-   * rather than queueing behind it. The focus goes to NULL — a noise
-   * identifies nobody — and that is what makes the resulting pursuit
-   * unshootable, through the same executor agreement memory already relies on.
+   * Called only for a bot with NO existing commitment — no remembered visual
+   * position and no active search — so there is nothing older to weigh
+   * against. The focus goes to NULL — a noise identifies nobody — and that
+   * is what makes the resulting pursuit unshootable, through the same
+   * executor agreement memory already relies on.
    */
   private adoptHeard(h: HeardSound): void {
     this.focus = null;
@@ -715,21 +736,33 @@ export class DefaultBrain implements BotBrain {
       return this.visualIntent(view, vis, dt, jukeDraw);
     }
 
-    // Priority 3: a newly heard hostile noise. It outranks BOTH a remembered
-    // position and an in-progress scan, because it is evidence from this
-    // moment and those are evidence from an older one — the tranche's ladder
-    // reads `gunshot > footstep > remembered position`. Adopting sets the
-    // goal and falls through to the pursuit below, so hearing reuses the
+    // Priority 3: a newly heard hostile noise — only when nothing is already
+    // committed. A pending bearing and a current visual (the two returns
+    // above) both keep their existing precedence; here a visual-memory
+    // pursuit, a previously heard goal, and any active scan/search outrank a
+    // fresh sound, because a bot already travelling toward a target or
+    // scanning a position holds better evidence than a new place to look.
+    // Hold and patrol carry no such commitment, so hearing may still
+    // interrupt them. This priority is the tranche 6b follow-up REVERSAL of
+    // 6b's original ladder (fresh noise above memory/search); see the 6b
+    // follow-up record in docs/ai-plan.md. Adopting sets the goal and falls
+    // through to the pursuit below, so hearing reuses the
     // route → arrival → scan → forget pipeline rather than growing a second.
     //
     // Note what the damage branch above therefore does: a bearing frame
     // returns before this line, so that frame's noises are dropped with the
     // cursor already past them. That is what keeps "damage reveals a
     // DIRECTION, not a position" true even though the attacker's own gunshot
-    // is sitting in the ring — while a SECOND shot, heard on an ordinary
-    // frame, legitimately upgrades the bearing to a place.
-    const lead = pickHeardLead(view.heard);
-    if (lead !== null) this.adoptHeard(lead);
+    // is sitting in the ring. Later sounds during that scan are discarded as
+    // well; only a sound arriving after the search commitment has cleared can
+    // establish a new place to investigate.
+    //
+    // Ignored sounds are NOT queued: the executor cursor has already consumed
+    // them, so a noise that arrives mid-pursuit is simply discarded.
+    if (this.memory === null && !this.searching) {
+      const lead = pickHeardLead(view.heard, view.selfFeet);
+      if (lead !== null) this.adoptHeard(lead);
+    }
 
     // Priority 4: an active scan continues — never shoot, age the forget
     // timer (which started only at search ENTRY, so route walks and deferred
@@ -786,9 +819,9 @@ export class DefaultBrain implements BotBrain {
    * normal speed (mode `patrol`, never shoot, null focus, looking one metre
    * along the next waypoint at eye height); `undefined` means the route
    * computation was deferred — wait without moving, still `patrol`; `null`
-   * means no usable route or goal — restart the pause and hold. Any visual or
-   * damage stimulus outranks all of this and interrupts from the branches
-   * above.
+   * means no usable route or goal — restart the pause and hold. Any visual,
+   * damage or newly heard stimulus outranks all of this and interrupts from
+   * the branches above.
    */
   private patrolIntent(view: BrainView, dt: number, jukeDraw: number): BrainIntent {
     if (this.patrolPause > 0) {

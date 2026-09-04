@@ -6,6 +6,7 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
+import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
 import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTime,
@@ -86,7 +87,7 @@ export const gunGroup = new THREE.Group();
 const smgGroup = new THREE.Group();
 let smgMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 {
-  const dark = new THREE.MeshLambertMaterial({ color: 0x2b2b2b });
+  const dark = createCelMaterial({ color: 0x2b2b2b });
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.5), dark);
   body.position.set(0.25, -0.22, -0.45); // lower-right of the view
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
@@ -100,7 +101,7 @@ let smgMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 const sniperGroup = new THREE.Group();
 let sniperMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 {
-  const dark = new THREE.MeshLambertMaterial({ color: 0x24301f }); // green gunmetal
+  const dark = createCelMaterial({ color: 0x24301f }); // green gunmetal
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.62), dark);
   body.position.set(0.26, -0.21, -0.55);
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.72), dark);
@@ -108,7 +109,7 @@ let sniperMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.13, 0.22), dark);
   stock.position.set(0.26, -0.24, -0.14);
   // Scope: cylinder laid along the barrel (default axis is y -> rotate x)
-  const scopeMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const scopeMat = createCelMaterial({ color: 0x111111 });
   const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.26, 12), scopeMat);
   scope.rotation.x = Math.PI / 2;
   scope.position.set(0.26, -0.12, -0.6);
@@ -122,7 +123,7 @@ let sniperMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 const pistolGroup = new THREE.Group();
 let pistolMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 {
-  const dark = new THREE.MeshLambertMaterial({ color: 0x33322f });
+  const dark = createCelMaterial({ color: 0x33322f });
   const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.30), dark);
   slide.position.set(0.24, -0.20, -0.38);
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.15, 0.09), dark);
@@ -137,8 +138,8 @@ let pistolMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 const shotgunGroup = new THREE.Group();
 let shotgunMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 {
-  const wood = new THREE.MeshLambertMaterial({ color: 0x4a331f }); // oiled walnut
-  const steel = new THREE.MeshLambertMaterial({ color: 0x26262a });
+  const wood = createCelMaterial({ color: 0x4a331f }); // oiled walnut
+  const steel = createCelMaterial({ color: 0x26262a });
   const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.34), steel);
   receiver.position.set(0.25, -0.22, -0.5);
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.62), steel);
@@ -159,7 +160,7 @@ let shotgunMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
 const revolverGroup = new THREE.Group();
 let revolverMag: THREE.Mesh; // kept for the reload animation (cylinder drop/reseat)
 {
-  const dark = new THREE.MeshLambertMaterial({ color: 0x2e2e33 });
+  const dark = createCelMaterial({ color: 0x2e2e33 });
   const frame = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.075, 0.34), dark);
   frame.position.set(0.24, -0.2, -0.4);
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.22), dark);
@@ -171,7 +172,7 @@ let revolverMag: THREE.Mesh; // kept for the reload animation (cylinder drop/res
   cylinder.rotation.x = Math.PI / 2;
   cylinder.position.set(0.24, -0.2, -0.44);
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.08),
-    new THREE.MeshLambertMaterial({ color: 0x4a331f })); // wood grips
+    createCelMaterial({ color: 0x4a331f })); // wood grips
   grip.position.set(0.24, -0.3, -0.28);
   const mag = cylinder; // the reload pose drops/swings the cylinder itself
   mag.userData.baseY = -0.2;
@@ -183,8 +184,8 @@ const knifeGroup = new THREE.Group();
 let knifeBlade: THREE.Mesh; // poseReload's target slot — never reloads, but keeps
                             // the pose-reset path uniform with every viewmodel
 {
-  const steel = new THREE.MeshLambertMaterial({ color: 0xb9bdc6 }); // honed edge
-  const dark = new THREE.MeshLambertMaterial({ color: 0x1f1f22 });
+  const steel = createCelMaterial({ color: 0xb9bdc6 }); // honed edge
+  const dark = createCelMaterial({ color: 0x1f1f22 });
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.16), dark);
   grip.position.set(0.24, -0.24, -0.32);
   const guard = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.03), dark);

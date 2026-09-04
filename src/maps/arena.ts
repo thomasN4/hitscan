@@ -4,13 +4,14 @@
 // raycast target and a movement AABB. Do not add meshes to the scene
 // directly: that is how you get walk-through / shoot-through bugs.
 import * as THREE from 'three';
+import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
 import { addSolidBox, addStairs, registerSolid } from '../world';
 
-const matWall   = new THREE.MeshLambertMaterial({ color: 0xc9a86c });
-const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });
-const matCrate  = new THREE.MeshLambertMaterial({ color: 0x8a6d3f });
-const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
+const matWall   = createCelMaterial({ color: 0xc9a86c });
+const matWall2  = createCelMaterial({ color: 0xa8895a });
+const matCrate  = createCelMaterial({ color: 0x8a6d3f });
+const matGround = createCelMaterial({ color: 0xb59a67 });
 
 /** Build the de_dust-inspired arena. Called once, via the maps/index.ts registry. */
 export function buildArena(): void {

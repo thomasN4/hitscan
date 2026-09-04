@@ -30,6 +30,7 @@
 // this instance — weapons.ts raycasts against head/torso/legs directly and
 // multiplies damage by zone.
 import * as THREE from 'three';
+import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
 import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads } from './world';
@@ -151,9 +152,9 @@ const botGeo = {
   legs:   new THREE.BoxGeometry(0.6, 0.9, 0.35),
 };
 /** Gunmetal, shared by both teams — a weapon reads as a weapon, not as a side. */
-const matBarrel = new THREE.MeshLambertMaterial({ color: 0x23262b });
+const matBarrel = createCelMaterial({ color: 0x23262b });
 /** Walnut, for the shotgun's furniture — the one weapon that isn't all steel. */
-const matStock = new THREE.MeshLambertMaterial({ color: 0x4a331f });
+const matStock = createCelMaterial({ color: 0x4a331f });
 
 /** Shared weapon geometry: one allocation per shape, for every bot carrying it. */
 const wpnGeo = {
@@ -224,16 +225,16 @@ const BOT_WEAPON_MODELS: Record<BotWeaponId, BotWeaponModel> = {
     muzzle: 0.34,
   },
 };
-const palettes: Record<Team, { body: THREE.MeshLambertMaterial; head: THREE.MeshLambertMaterial; legs: THREE.MeshLambertMaterial }> = {
+const palettes: Record<Team, { body: THREE.MeshToonMaterial; head: THREE.MeshToonMaterial; legs: THREE.MeshToonMaterial }> = {
   T: {
-    body: new THREE.MeshLambertMaterial({ color: 0x8a6b2e }),
-    head: new THREE.MeshLambertMaterial({ color: 0xd8c39a }),
-    legs: new THREE.MeshLambertMaterial({ color: 0x4d4436 }),
+    body: createCelMaterial({ color: 0x8a6b2e }),
+    head: createCelMaterial({ color: 0xd8c39a }),
+    legs: createCelMaterial({ color: 0x4d4436 }),
   },
   CT: {
-    body: new THREE.MeshLambertMaterial({ color: 0x4a5a78 }),
-    head: new THREE.MeshLambertMaterial({ color: 0xc9d2df }),
-    legs: new THREE.MeshLambertMaterial({ color: 0x2f3646 }),
+    body: createCelMaterial({ color: 0x4a5a78 }),
+    head: createCelMaterial({ color: 0xc9d2df }),
+    legs: createCelMaterial({ color: 0x2f3646 }),
   },
 };
 

@@ -24,14 +24,15 @@
 // comments on each section before moving anything. Geometry goes through
 // world.ts, as always — never scene.add a solid here.
 import * as THREE from 'three';
+import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
 import { addSolidBox, addStairs, registerSolid } from '../world';
 
-const matWall   = new THREE.MeshLambertMaterial({ color: 0xc9a86c });
-const matWall2  = new THREE.MeshLambertMaterial({ color: 0xa8895a });
-const matCrate  = new THREE.MeshLambertMaterial({ color: 0x8a6d3f });
-const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
-const matSlab   = new THREE.MeshLambertMaterial({ color: 0x8f8577 }); // floors/decks read cooler than walls
+const matWall   = createCelMaterial({ color: 0xc9a86c });
+const matWall2  = createCelMaterial({ color: 0xa8895a });
+const matCrate  = createCelMaterial({ color: 0x8a6d3f });
+const matGround = createCelMaterial({ color: 0xb59a67 });
+const matSlab   = createCelMaterial({ color: 0x8f8577 }); // floors/decks read cooler than walls
 
 // ---------- Elevation constants ----------
 // The whole map is built from these four numbers so a change stays consistent.

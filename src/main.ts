@@ -293,7 +293,7 @@ animate();
 // smoke test both read `__cs.game.x` — and holds no state of its own:
 // every access round-trips to a slice. Gameplay code imports the slices
 // directly; do not route logic through this object.
-type DebugGame = SessionState & InputState & AimState & Omit<WeaponDynamics, 'reloadSfxHandle'> & MotionState & ScoreState & LoadoutState;
+type DebugGame = SessionState & InputState & AimState & Omit<WeaponDynamics, 'reloadSfxHandle' | 'animation'> & MotionState & ScoreState & LoadoutState;
 
 const game: DebugGame = {
   get map() { return session.map; }, set map(v: MapName) { session.map = v; },

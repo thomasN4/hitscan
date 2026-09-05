@@ -142,3 +142,65 @@ Omit `CS_VIEWMODEL_QUERY` for the range and point `CS_SMOKE_BASE` at production
 preview to check the bundled version. Visually check that front/rear sights
 meet the crosshair and that moving reload parts carry their ink without stray
 lines. Run lint, typecheck, unit tests, build and the all-map smoke suite.
+
+## Weapon follow-up: hands and mechanisms
+
+The next pass adds procedural charcoal gloves, articulated fingers and olive
+sleeves to all six first-person rigs. The current sniper is now deliberately
+bolt-action: its existing shot interval, forced unscoping and scope gate remain.
+There is no extra sniper catalog entry or asset archive. The revolver hammer is
+lowered below the sight line; the shotgun's red/brass loading shell is hidden
+outside insertion phases.
+
+`WeaponViewModel` now exposes typed mechanism assemblies, saved rest transforms,
+hands and interaction anchors instead of a universal moving `mag`. The pump,
+bolt handle, pistol slide, SMG charging handle, cylinder and hammer move with
+all their child details and ink. `core/weaponHands.ts` constructs the glove
+joints and sleeves; `core/weaponPresentation.ts` applies absolute poses and
+keeps forearms connected to their wrist targets. The bolt hand target follows
+the rotating handle. Reload poses turn the shotgun to expose the loading port.
+
+`sim/weaponAnimation.ts` evaluates pure pose envelopes from game time and actual
+shot/reload event clocks. The weapon-owned animation state lives in `wpn` and
+resets on swaps, loadout changes and respawn. `weapons.ts` applies poses after
+this frame's ammo transfers and trigger handling, preserving the main stage
+order. No animation creates a shot, moves ammo or adds a readiness delay.
+
+- Shotgun: support-hand pump cycle finishes inside the existing 0.9-second
+  firing interval; individual shells enter the underside loading port.
+- Revolver: cylinder swing-out, individual-round insertion, cylinder indexing
+  and hammer motion. It stays open between transfers and closes on the final
+  round or reserve exhaustion. An interrupting shot restores the firing pose
+  immediately and uses only rounds already transferred.
+- Sniper: unlock, pull, return and lock the bolt inside the existing 1.1-second
+  shot interval; the right hand follows the handle. Detachable-magazine reload.
+- SMG/pistol: magazine removal and seating with support-hand motion; slide or
+  charging-handle movement after firing and on empty reloads.
+- Knife: gripping hands and a hit-frame follow-through with recovery.
+- All six: restrained idle motion, sprint lowering and cosmetic holster/draw.
+  The 80-ms lowering and subsequent raise are overridden by aiming, reloading
+  or a successful shot, so selection remains mechanically immediate.
+
+Reload sounds use their weapon's duration. Pump/bolt clacks emit on game-clock
+milestone crossings; no wall-clock mechanism callbacks survive cancellation.
+Pause freezes hands, mechanisms, reload props and sound progression together.
+The existing `semiAuto` catalog flag is an input latch (one shot per press), so
+it remains true for the manually operated sniper and shotgun.
+
+Verification includes pure cycle/transfer/transition tests, loadout-reset tests,
+and a real-input browser capture suite:
+
+```sh
+CS_SMOKE_BASE=http://127.0.0.1:5180 \
+  node scripts/weapon-animation-check.mjs /tmp/weapon-animation-poses
+```
+
+Optional weapon IDs after the output directory select a subset. Set
+`CS_SMOKE_STYLE=original` to check ordinary shading. The suite verifies actual
+hammer vertices below the aimed sight line, both hands, pump/bolt travel,
+pause stability, individual-round reload boundaries, fire cancellation, full
+empty reloads, reserve exhaustion and rapid swaps. It captures hip, ADS, firing,
+opening, insertion, seating and restored poses. Run it serially with the all-map
+smoke suite against a dedicated production preview, plus lint, typecheck, unit
+tests and build. Existing `viewmodel-shots.mjs` and `ligne-claire-shots.mjs` remain
+available for the wider style comparison and resize/DPR checks.

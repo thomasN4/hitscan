@@ -143,13 +143,18 @@ export function sfxEnemyShoot(pos: THREE.Vector3, weapon: BotWeaponId): void {
  * sounds stay in sync with the animation instead of playing over a
  * suspended one.
  */
-export function sfxReload(): ScheduledHandle {
+export function sfxReload(duration: number): ScheduledHandle {
   playGunshot(0.12, 500, 0.06);   // click 1: immediately
   const pending = [
-    gameTime.schedule(0.25, () => playGunshot(0.12, 800, 0.06)),
-    gameTime.schedule(1.1, () => playGunshot(0.15, 1000, 0.08)),
+    gameTime.schedule(duration * 0.25, () => playGunshot(0.12, 800, 0.06)),
+    gameTime.schedule(duration * 0.77, () => playGunshot(0.15, 1000, 0.08)),
   ];
   return { cancel: () => pending.forEach(handle => handle.cancel()) };
+}
+
+/** Short dry clack at the pump/bolt's travel milestones; called on game ticks. */
+export function sfxMechanism(): void {
+  playGunshot(0.09, 620, 0.045);
 }
 
 /** One shell/chamber seating home — the per-round reload's transfer click. */

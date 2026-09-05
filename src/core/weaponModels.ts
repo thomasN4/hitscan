@@ -1,14 +1,19 @@
 // First-person prop construction, independent of input, firing and the engine.
 // Coordinates are metres: the muzzle points down -z. Each model returns the
-// offset that centers its sight line; the outer group is reserved for reload.
+// offset that centers its sight line; the outer group owns cosmetic action poses.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createCelMaterial } from './materials';
 import type { WeaponId } from './state';
+import { createHandRig, type HandRig } from './weaponHands';
 
 export interface WeaponViewModel {
   group: THREE.Group;
-  mag: THREE.Mesh;
+  body: THREE.Group;
+  mechanisms: Partial<Record<'magazine' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'bolt' | 'slide' | 'shell', THREE.Object3D>>;
+  rest: Map<THREE.Object3D, { position: THREE.Vector3; rotation: THREE.Euler }>;
+  hands: { right: HandRig; left: HandRig };
+  anchors: { right: THREE.Vector3; left: THREE.Vector3; reload: THREE.Vector3 };
   aimOffset: { x: number; y: number };
 }
 
@@ -107,9 +112,17 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
     const trigger = box(0.008, 0.033, 0.009, 0, y - 0.021, z, dark, 0.002);
     trigger.rotation.x = -0.25;
   }
-  function reloadPart(mesh: THREE.Mesh): THREE.Mesh {
-    mesh.userData.baseY = mesh.position.y;
-    return mesh;
+  const mechanisms: WeaponViewModel['mechanisms'] = {};
+  function assembly(children: THREE.Object3D[], pivot = new THREE.Vector3()): THREE.Group {
+    const node = new THREE.Group();
+    node.position.copy(pivot);
+    body.add(node);
+    for (const child of children) {
+      body.remove(child);
+      child.position.sub(pivot);
+      node.add(child);
+    }
+    return node;
   }
 
   let mag: THREE.Mesh;
@@ -125,9 +138,9 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
       profile([[0.16, -0.04], [0.39, -0.055], [0.405, -0.19], [0.35, -0.19], [0.30, -0.085], [0.16, -0.075]], 0.036, dark);
       box(0.052, 0.16, 0.035, 0, -0.12, 0.40, dark, 0.012);
       triggerGuard(0.055, -0.10);
-      mag = reloadPart(profile([[-0.07, -0.10], [-0.016, -0.10], [0.0, -0.21], [-0.018, -0.315], [-0.076, -0.305], [-0.055, -0.21]], 0.038));
+      mag = profile([[-0.07, -0.10], [-0.016, -0.10], [0.0, -0.21], [-0.018, -0.315], [-0.076, -0.305], [-0.055, -0.21]], 0.038);
       box(0.043, 0.012, 0.062, 0, -0.31, -0.047, dark, 0.003, mag);
-      box(0.002, 0.026, 0.065, 0.038, -0.055, 0.055, dark, 0.001);
+      mechanisms.slide = box(0.002, 0.026, 0.065, 0.038, -0.055, 0.055, dark, 0.001);
       sights(-0.27, 0.14, true);
       break;
     }
@@ -138,7 +151,7 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
       muzzle(0.018, -0.68, -0.072);
       box(0.076, 0.13, 0.027, 0, -0.165, 0.435, dark, 0.009);
       triggerGuard(0.075, -0.135);
-      mag = reloadPart(box(0.045, 0.075, 0.095, 0, -0.162, -0.045));
+      mag = box(0.045, 0.075, 0.095, 0, -0.162, -0.045);
       for (const z of [-0.10, 0.09]) {
         box(0.03, 0.033, 0.035, 0, -0.036, z, dark);
         ring(0.024, 0.004, 0, 0, z);
@@ -150,9 +163,11 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
       ring(0.031, 0.003, 0, 0, 0.187);
       const turret = cylinder(0.012, 0.035, 0, 0.031, 0.005, dark);
       turret.rotation.x = Math.PI / 2;
+      const boltShaft = cylinder(0.018, 0.13, 0, -0.07, 0.08);
       const bolt = cylinder(0.006, 0.045, 0.044, -0.07, 0.12);
       bolt.rotation.y = Math.PI / 2;
-      part(new THREE.SphereGeometry(0.014, 12, 8), dark, 0.065, -0.08, 0.12);
+      const knob = part(new THREE.SphereGeometry(0.014, 12, 8), dark, 0.065, -0.08, 0.12);
+      mechanisms.bolt = assembly([boltShaft, bolt, knob], new THREE.Vector3(0, -0.07, 0.12));
       break;
     }
     case 'shotgun': {
@@ -160,31 +175,39 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
       cylinder(0.020, 0.56, 0, -0.052, -0.345);
       cylinder(0.017, 0.42, 0, -0.097, -0.275);
       muzzle(0.024, -0.63, -0.052);
+      const pumpStart = body.children.length;
       cylinder(0.035, 0.17, 0, -0.093, -0.265, wood);
       for (const z of [-0.33, -0.305, -0.28, -0.255, -0.23, -0.205]) ring(0.035, 0.002, 0, -0.093, z, wood);
+      mechanisms.pump = assembly(body.children.slice(pumpStart));
       profile([[0.15, -0.055], [0.25, -0.075], [0.41, -0.10], [0.43, -0.23], [0.35, -0.23], [0.20, -0.155], [0.16, -0.11]], 0.059, wood);
       box(0.071, 0.14, 0.025, 0, -0.165, 0.432, dark, 0.009);
       box(0.003, 0.023, 0.085, 0.033, -0.052, 0.025, dark, 0.002);
       triggerGuard(0.105, -0.108);
-      mag = reloadPart(cylinder(0.011, 0.055, 0, -0.135, 0.005, silver));
+      mag = cylinder(0.011, 0.055, 0, -0.135, 0.005, createCelMaterial({ color: 0xa94d39 }));
+      cylinder(0.012, 0.009, 0, 0, 0.027, createCelMaterial({ color: 0xc6994f }), 0.012, mag);
+      mechanisms.shell = mag;
+      mag.visible = false;
       part(new THREE.SphereGeometry(0.006, 8, 6), silver, 0, 0, -0.56);
       box(0.010, 0.028, 0.013, 0, -0.022, -0.56, dark, 0.002);
       break;
     }
     case 'pistol': {
-      box(0.058, 0.052, 0.25, 0, -0.048, -0.018, steel, 0.008);
+      const slide = box(0.058, 0.052, 0.25, 0, -0.048, -0.018, steel, 0.008);
       box(0.055, 0.029, 0.20, 0, -0.086, -0.007, dark, 0.006);
       profile([[0.045, -0.08], [0.105, -0.08], [0.15, -0.235], [0.08, -0.235]], 0.051, dark);
-      mag = reloadPart(box(0.040, 0.12, 0.056, 0, -0.185, 0.108, steel, 0.004));
+      mag = box(0.040, 0.12, 0.056, 0, -0.185, 0.108, steel, 0.004);
       box(0.056, 0.014, 0.077, 0, -0.064, 0, dark, 0.004, mag);
       triggerGuard(0.007, -0.098, 0.073);
       cylinder(0.016, 0.01, 0, -0.047, -0.148, dark);
       cylinder(0.009, 0.012, 0, -0.080, -0.128, steel);
+      const slideDetailStart = body.children.length;
       for (const z of [0.047, 0.060, 0.073, 0.086]) {
         box(0.002, 0.032, 0.003, 0.029, -0.048, z, dark, 0.001);
       }
       box(0.029, 0.002, 0.041, 0.009, -0.021, -0.005, dark, 0.001);
       sights(-0.118, 0.091, false, 0.010);
+      const slideDetails = [slide, ...body.children.slice(slideDetailStart)];
+      mechanisms.slide = assembly(slideDetails);
       break;
     }
     case 'revolver': {
@@ -192,7 +215,7 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
       cylinder(0.016, 0.21, 0, -0.052, -0.19);
       box(0.026, 0.025, 0.20, 0, -0.075, -0.185);
       muzzle(0.022, -0.30, -0.052);
-      mag = reloadPart(cylinder(0.049, 0.094, 0, -0.08, -0.018));
+      mag = cylinder(0.049, 0.094, 0, -0.08, -0.018);
       // Six recessed chamber marks on the visible rear cylinder face.
       for (let i = 0; i < 6; i++) {
         const angle = i * Math.PI / 3;
@@ -200,14 +223,19 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
       }
       profile([[0.055, -0.105], [0.105, -0.085], [0.18, -0.23], [0.13, -0.264], [0.064, -0.23], [0.083, -0.16]], 0.056, wood);
       triggerGuard(0.025, -0.13, 0.08);
-      const hammer = box(0.015, 0.045, 0.018, 0, -0.027, 0.09, dark, 0.003);
+      const hammer = box(0.015, 0.045, 0.018, 0, -0.056, 0.09, dark, 0.003);
       hammer.rotation.x = -0.35;
+      mechanisms.hammer = assembly([hammer], new THREE.Vector3(0, -0.075, 0.078));
+      mechanisms.rotor = mag;
+      mechanisms.cylinder = assembly([mag], new THREE.Vector3(-0.028, -0.115, 0.015));
+      mechanisms.shell = cylinder(0.007, 0.034, -0.09, -0.08, 0.075, createCelMaterial({ color: 0xc6994f }));
+      mechanisms.shell.visible = false;
       sights(-0.27, 0.06, false, 0.012);
       break;
     }
     case 'knife': {
       // Beveled, asymmetric clip-point profile replaces the two blunt boxes.
-      mag = reloadPart(profile([[-0.05, -0.03], [-0.30, -0.03], [-0.41, -0.066], [-0.29, -0.100], [-0.05, -0.104]], 0.007, silver));
+      mag = profile([[-0.05, -0.03], [-0.30, -0.03], [-0.41, -0.066], [-0.29, -0.100], [-0.05, -0.104]], 0.007, silver);
       box(0.05, 0.098, 0.019, 0, -0.066, -0.035, steel, 0.008);
       cylinder(0.032, 0.16, 0, -0.066, 0.059, dark, 0.028);
       for (const z of [0.007, 0.034, 0.061, 0.088, 0.115]) ring(0.032, 0.002, 0, -0.066, z);
@@ -215,5 +243,22 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
       break;
     }
   }
-  return { group, mag, aimOffset: { x: -offset.x, y: offset.y - sightLine } };
+  if (id === 'smg' || id === 'sniper' || id === 'pistol') mechanisms.magazine = mag;
+  const right = new THREE.Vector3(0.043, -0.22, id === 'shotgun' ? 0.205 : id === 'knife' ? 0.07 : 0.13);
+  if (id === 'sniper') right.set(0.045, -0.22, 0.155);
+  if (id === 'knife') right.y = -0.145;
+  const left = new THREE.Vector3(-0.044, -0.145, id === 'shotgun' ? -0.27 : id === 'sniper' ? -0.19 : -0.205);
+  if (id === 'pistol' || id === 'revolver') left.set(-0.038, -0.23, 0.125);
+  if (id === 'knife') left.set(-0.27, -0.22, 0.02);
+  const reload = new THREE.Vector3(id === 'revolver' ? -0.12 : -0.025,
+    id === 'shotgun' ? -0.17 : -0.23, id === 'pistol' ? 0.11 : 0);
+  const hands = { right: createHandRig(1), left: createHandRig(-1) };
+  for (const hand of Object.values(hands)) body.add(hand.wrist, hand.sleeve);
+  const rest: WeaponViewModel['rest'] = new Map();
+  for (const [key, node] of Object.entries(mechanisms)) {
+    node.name = `weapon-mechanism-${key}`;
+    rest.set(node, { position: node.position.clone(), rotation: node.rotation.clone() });
+  }
+  return { group, body, mechanisms, rest, hands, anchors: { right, left, reload },
+    aimOffset: { x: -offset.x, y: offset.y - sightLine } };
 }

@@ -82,6 +82,24 @@ describe('state module purity', () => {
 });
 
 describe('armLoadout', () => {
+  test('respawn and loadout changes clear old mechanism, draw and reload event clocks', () => {
+    wpn.animation.shotAt = 10;
+    wpn.animation.switchedAt = 10;
+    wpn.animation.outgoingId = 'shotgun';
+    wpn.animation.reloadStartedAt = 10;
+    wpn.animation.closeAt = 10;
+    wpn.animation.reloadBlend = 1;
+    wpn.animation.closeBlend = 1;
+    armLoadout();
+    expect(wpn.animation.shotAt).toBe(-Infinity);
+    expect(wpn.animation.switchedAt).toBe(-Infinity);
+    expect(wpn.animation.outgoingId).toBeNull();
+    expect(wpn.animation.reloadStartedAt).toBe(-Infinity);
+    expect(wpn.animation.closeAt).toBe(-Infinity);
+    expect(wpn.animation.reloadBlend).toBe(0);
+    expect(wpn.animation.closeBlend).toBe(0);
+  });
+
   beforeEach(() => {
     // Dirty every field armLoadout is responsible for restoring.
     setLoadout('smg', 'pistol');

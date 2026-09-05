@@ -280,7 +280,7 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
       (mesh as THREE.Mesh).material = [original, original, original, original, painted, original];
     }
     if (mesh.geometry instanceof THREE.PlaneGeometry) continue;
-    const weaponPart = mesh.name === 'weapon-part';
+    const weaponPart = mesh.name.startsWith('weapon-');
     let geometry = edges.get(mesh.geometry);
     if (!geometry) {
       const creases = new THREE.EdgesGeometry(mesh.geometry, weaponPart ? 65 : 25);

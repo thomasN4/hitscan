@@ -116,7 +116,7 @@ export interface WeaponDef {
   perRound?: boolean;
   /** Recoil below which a fresh RMB press may enter the scope. Sniper only. */
   scopeGate?: number;
-  /** One shot per LMB press; holding does nothing. Sniper only. */
+  /** One shot per LMB press; also used by manually cycled weapons. */
   semiAuto?: boolean;
   /** Firing kicks you out of the scope (re-press RMB). Sniper only. */
   unscopeOnShot?: boolean;
@@ -417,7 +417,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     name: 'SNIPER',
     class: 'primary',
     magSize: 10, reserveMax: 30,
-    fireRate: 1.1,   // semi-auto pacing (~0.9 shots/sec)
+    fireRate: 1.1,   // bolt-action cycle (~0.9 shots/sec)
     reloadTime: 3.2,
     damage: 60,      // two torso shots to kill; head x4 = one-tap, legs x0.75
     headshotMult: 4,
@@ -521,7 +521,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     class: 'secondary',
     magSize: 6, reserveMax: 24,
     fireRate: 0.45,  // semi-auto pacing (~2.2 shots/sec click ceiling)
-    reloadTime: 3.0, // moon-clip style: slower than the pistol, hits far harder
+    reloadTime: 3.0, // individual chambers: slower than the pistol, hits far harder
     damage: 55,      // two torso shots to kill; head x4 one-taps with room to spare
     headshotMult: 4,
     zoomFovs: [56],  // iron sights
@@ -673,6 +673,7 @@ export const weapon: LiveWeapon = {
  * weapon match the loadout" happens — boot, Deploy and respawn all land here.
  */
 export function armLoadout(): void {
+  wpn.animation = freshWeaponAnimation();
   SLOTS.forEach(i => {
     const def = WEAPONS[equippedId(i)];
     ammoStore[i].mag = def.magSize;
@@ -1041,6 +1042,23 @@ export const aim: AimState = {
   pitch: 0,
 };
 
+export interface WeaponAnimationState {
+  shotAt: number;
+  switchedAt: number;
+  outgoingId: WeaponId | null;
+  reloadStartedAt: number;
+  closeAt: number;
+  emptyReload: boolean;
+  previousShotAge: number;
+  reloadBlend: number;
+  closeBlend: number;
+}
+
+export function freshWeaponAnimation(): WeaponAnimationState {
+  return { shotAt: -Infinity, switchedAt: -Infinity, outgoingId: null, reloadStartedAt: -Infinity,
+    closeAt: -Infinity, emptyReload: false, previousShotAge: Infinity, reloadBlend: 0, closeBlend: 0 };
+}
+
 /**
  * Weapon DYNAMICS — the live accuracy/recoil/ADS state driven by firing and
  * per-frame upkeep. Written by weapons.ts (shoot, switchWeapon, tryReload,
@@ -1076,6 +1094,8 @@ export interface WeaponDynamics {
   emptyReloadLatch: boolean;
   /** Delayed whole-mag reload clicks; cancelled by every reload teardown. */
   reloadSfxHandle: ScheduledHandle | undefined;
+  /** Cosmetic event clocks; negative infinity means no event in this life. */
+  animation: WeaponAnimationState;
 }
 
 /**
@@ -1148,6 +1168,7 @@ export const wpn: WeaponDynamics = {
   triggerLatch: false,
   emptyReloadLatch: false,
   reloadSfxHandle: undefined,
+  animation: freshWeaponAnimation(),
 };
 
 /** Cancel delayed whole-mag reload clicks through their shared state owner. */

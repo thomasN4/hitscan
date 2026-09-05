@@ -12,13 +12,14 @@
 // the whole range map was no-clip (`431ac6e`). There is now one
 // implementation to get wrong.
 import * as THREE from 'three';
+import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
 import { addSolidBox, registerSolid, registerGroupParts } from '../world';
 
-const matWall   = new THREE.MeshLambertMaterial({ color: 0xb0a48c });
-const matWall2  = new THREE.MeshLambertMaterial({ color: 0x968a72 });
-const matGround = new THREE.MeshLambertMaterial({ color: 0xb59a67 });
-const matPost   = new THREE.MeshLambertMaterial({ color: 0x6b5a3e });
+const matWall   = createCelMaterial({ color: 0xb0a48c });
+const matWall2  = createCelMaterial({ color: 0x968a72 });
+const matGround = createCelMaterial({ color: 0xb59a67 });
+const matPost   = createCelMaterial({ color: 0x6b5a3e });
 
 /** Options for makeTextTexture — all optional, with the shipped defaults. */
 interface TextTextureOpts {
@@ -100,10 +101,10 @@ interface TargetOpts {
 }
 
 function addTarget(x: number, z: number, { height = 0, yaw = 0 }: TargetOpts = {}): THREE.Group {
-  const bullseyeMat = new THREE.MeshLambertMaterial({ map: makeBullseyeTexture() });
-  const matBody  = new THREE.MeshLambertMaterial({ color: 0x8a6b2e });
-  const matHead  = new THREE.MeshLambertMaterial({ color: 0xd8c39a });
-  const matLegs  = new THREE.MeshLambertMaterial({ color: 0x4d4436 });
+  const bullseyeMat = createCelMaterial({ map: makeBullseyeTexture() });
+  const matBody  = createCelMaterial({ color: 0x8a6b2e });
+  const matHead  = createCelMaterial({ color: 0xd8c39a });
+  const matLegs  = createCelMaterial({ color: 0x4d4436 });
 
   const g = new THREE.Group();
 
@@ -153,7 +154,7 @@ export function buildRange(): void {
   addSolidBox(0, 0, -80.5, 21, 5, 1, matWall);    // backstop
 
   // Firing-line marker strip across the floor
-  const line = new THREE.Mesh(new THREE.BoxGeometry(18, 0.02, 0.4), new THREE.MeshLambertMaterial({ color: 0x3a3226 }));
+  const line = new THREE.Mesh(new THREE.BoxGeometry(18, 0.02, 0.4), createCelMaterial({ color: 0x3a3226 }));
   line.position.set(0, 0.01, 5);
   scene.add(line);
 

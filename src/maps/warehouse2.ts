@@ -43,6 +43,7 @@
 // raycast target and a movement AABB. Do not add meshes to the scene directly:
 // that is how you get walk-through / shoot-through bugs.
 import * as THREE from 'three';
+import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
 import {
   addSolidBox, addOpenStairs, addLiftPad, registerSolid, registerGroupParts,
@@ -57,26 +58,26 @@ import { launchApex } from '../sim/lift';
 // hemisphere has no direction — it flattens. Values that read as distinct
 // surfaces outdoors, where the sun separates them, collapse into one grey mass
 // in here, so the separation has to come from the materials themselves.
-const matYard   = new THREE.MeshLambertMaterial({ color: 0x6a7078 }); // asphalt
-const matFloor  = new THREE.MeshLambertMaterial({ color: 0x868b92 }); // sealed concrete
-const matShell  = new THREE.MeshLambertMaterial({ color: 0x969ca5 }); // corrugated steel
+const matYard   = createCelMaterial({ color: 0x6a7078 }); // asphalt
+const matFloor  = createCelMaterial({ color: 0x868b92 }); // sealed concrete
+const matShell  = createCelMaterial({ color: 0x969ca5 }); // corrugated steel
 // Darker than the floor on purpose: the deck is read from ABOVE and BELOW all
 // game, and matching the concrete would leave the void's edge invisible from
 // the ring — which is the one edge on this map you can walk off.
-const matSlab   = new THREE.MeshLambertMaterial({ color: 0x767d85 });
+const matSlab   = createCelMaterial({ color: 0x767d85 });
 // The brightest things in the building, for warehouse1's reason: the rail and
 // the stairs are the geometry a player most needs to pick out at a glance, and
 // at close values they vanish into the deck they stand on.
-const matRail   = new THREE.MeshLambertMaterial({ color: 0xb4bcc5 });
-const matStair  = new THREE.MeshLambertMaterial({ color: 0xaab2bb });
-const matRack   = new THREE.MeshLambertMaterial({ color: 0x3f6a8c });
-const matCrate  = new THREE.MeshLambertMaterial({ color: 0x8a6d3f });
-const matLift   = new THREE.MeshLambertMaterial({ color: 0xe08b28 }); // safety orange
-const matFence  = new THREE.MeshLambertMaterial({ color: 0x7e858e });
+const matRail   = createCelMaterial({ color: 0xb4bcc5 });
+const matStair  = createCelMaterial({ color: 0xaab2bb });
+const matRack   = createCelMaterial({ color: 0x3f6a8c });
+const matCrate  = createCelMaterial({ color: 0x8a6d3f });
+const matLift   = createCelMaterial({ color: 0xe08b28 }); // safety orange
+const matFence  = createCelMaterial({ color: 0x7e858e });
 // Overhead and wanting to recede — the darkest surface in the shell.
-const matRoof   = new THREE.MeshLambertMaterial({ color: 0x50565e });
-const matBeam   = new THREE.MeshLambertMaterial({ color: 0x434952 });
-const matGlass  = new THREE.MeshLambertMaterial({ color: 0xc2d6e6, transparent: true, opacity: 0.5 });
+const matRoof   = createCelMaterial({ color: 0x50565e });
+const matBeam   = createCelMaterial({ color: 0x434952 });
+const matGlass  = createCelMaterial({ color: 0xc2d6e6, transparent: true, opacity: 0.5 });
 
 // ---------- Dimensions ----------
 // Every number the map is built from, each pinned to the engine constant that

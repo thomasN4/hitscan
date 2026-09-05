@@ -255,7 +255,7 @@ function build(): THREE.LineSegments {
 /**
  * Flip the level's materials to wireframe (and back).
  *
- * Map builders share a handful of module-level MeshLambertMaterials, so the set
+ * Map builders share a handful of module-level MeshToonMaterials, so the set
  * is a few entries rather than one per mesh. Bot materials live in bots.ts's own
  * palettes and are deliberately untouched — they must stay solid, or the view
  * hides the very thing it exists to show.
@@ -266,13 +266,13 @@ function setXray(on: boolean): void {
       const mesh = o as Partial<THREE.Mesh>;
       if (!mesh.material) continue;
       for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-        if ('wireframe' in m) { (m as THREE.MeshLambertMaterial).wireframe = true; wireframed.add(m); }
+        if ('wireframe' in m) { (m as THREE.MeshToonMaterial).wireframe = true; wireframed.add(m); }
       }
     }
     savedFog = scene.fog;
     scene.fog = null; // 40-140 m falloff hides exactly the distant bots this view is for
   } else {
-    for (const m of wireframed) (m as THREE.MeshLambertMaterial).wireframe = false;
+    for (const m of wireframed) (m as THREE.MeshToonMaterial).wireframe = false;
     wireframed.clear();
     scene.fog = savedFog;
     savedFog = null;

@@ -33,20 +33,21 @@
 // staircase goes through addStairs specifically, which is also what publishes
 // its NavLink — a hand-built flight is one bots cannot see.
 import * as THREE from 'three';
+import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
 import { addSolidBox, addStairs, registerSolid } from '../world';
 
-const matFloor   = new THREE.MeshLambertMaterial({ color: 0x7a7c80 }); // sealed concrete
-const matShell   = new THREE.MeshLambertMaterial({ color: 0x8d9199 }); // corrugated shed wall
-const matOffice  = new THREE.MeshLambertMaterial({ color: 0xa8adb4 });
-const matRack    = new THREE.MeshLambertMaterial({ color: 0x3f6a8c }); // painted steel racking
-const matDeck    = new THREE.MeshLambertMaterial({ color: 0x848b91 }); // mezzanine + dock slabs
+const matFloor   = createCelMaterial({ color: 0x7a7c80 }); // sealed concrete
+const matShell   = createCelMaterial({ color: 0x8d9199 }); // corrugated shed wall
+const matOffice  = createCelMaterial({ color: 0xa8adb4 });
+const matRack    = createCelMaterial({ color: 0x3f6a8c }); // painted steel racking
+const matDeck    = createCelMaterial({ color: 0x848b91 }); // mezzanine + dock slabs
 // Galvanised, and kept well clear of matFloor's value on purpose: stairs
 // and parapets are the geometry a player most needs to pick out at a
 // glance, and at close values they vanish into the concrete.
-const matStair   = new THREE.MeshLambertMaterial({ color: 0x9aa2ab });
-const matCrate   = new THREE.MeshLambertMaterial({ color: 0x8a6d3f }); // pallet stacks
-const matSteel   = new THREE.MeshLambertMaterial({ color: 0xb0b4bb }); // conveyors
+const matStair   = createCelMaterial({ color: 0x9aa2ab });
+const matCrate   = createCelMaterial({ color: 0x8a6d3f }); // pallet stacks
+const matSteel   = createCelMaterial({ color: 0xb0b4bb }); // conveyors
 
 // ---------- Dimensions ----------
 // Every number the map is built from, each pinned to the engine constant that

@@ -1,9 +1,8 @@
 // core/sessionConfig.ts — pure parse/serialize for the match-config query.
 //
 // The start menu commits settings by navigating to ONE query string
-// (?map=&tbots=&ctbots=&time=&tweap=&ctweap=); main.ts parses it back once at
-// startup and
-// writes the result into `session`. Parsing lives here rather than in
+// (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
+// back once at startup and writes the result into `session`. Parsing lives here rather than in
 // main.ts so the clamp/fallback matrix is unit-testable in plain Node: the
 // input is a minimal `{ get(name) }` view (URLSearchParams satisfies it
 // structurally), never `location` — core/state.ts must stay browser-free.
@@ -18,7 +17,7 @@
 // menu.ts. asMapName is shared for the same reason: menu.ts used to open-code
 // its own `=== 'range' ? 'range' : 'arena'`, which silently drops any map
 // added after it was written.
-import type { BotWeaponChoice, MapName } from './state';
+import type { BotSecondaryChoice, BotWeaponChoice, MapName } from './state';
 import { SESSION_DEFAULTS } from './state';
 
 /** Everything the menu configures about a match; mirrors session's config fields. */
@@ -34,6 +33,10 @@ export interface SessionConfig {
   botWeaponT: BotWeaponChoice;
   /** Same for the CT side. */
   botWeaponCt: BotWeaponChoice;
+  /** Secondary firearm for T-side bot loadouts; 'mixed' draws per bot, 'none' skips it. */
+  botSecondaryT: BotSecondaryChoice;
+  /** Same for the CT side. */
+  botSecondaryCt: BotSecondaryChoice;
 }
 
 // ---------- Accepted ranges ----------
@@ -145,6 +148,29 @@ export function asBotWeapon(
     : fallback;
 }
 
+/**
+ * Narrow an untrusted string to a bot SECONDARY setting, falling back to
+ * `fallback` for anything unrecognized.
+ *
+ * Exhaustive Record and hasOwn for exactly asMapName's reasons. The knife is
+ * not a key: the blade is already the last position of every loadout
+ * (sim/botWeapons.ts:makeBotLoadout), so naming it here would ask for a
+ * duplicate the loadout then drops — a silently ignored setting is worse
+ * than one that falls back.
+ */
+const IS_BOT_SECONDARY: Record<BotSecondaryChoice, true> = {
+  mixed: true, none: true, smg: true, sniper: true, shotgun: true, pistol: true, revolver: true,
+};
+
+export function asBotSecondary(
+  raw: string | null | undefined,
+  fallback: BotSecondaryChoice,
+): BotSecondaryChoice {
+  return typeof raw === 'string' && Object.hasOwn(IS_BOT_SECONDARY, raw)
+    ? (raw as BotSecondaryChoice)
+    : fallback;
+}
+
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
   return {
@@ -155,7 +181,9 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
       clampTo(numOr(src.get('time'), SESSION_DEFAULTS.roundSeconds), TIME_LIMITS_S),
     ),
     botWeaponT: asBotWeapon(src.get('tweap'), SESSION_DEFAULTS.botWeaponT),
+    botSecondaryT: asBotSecondary(src.get('tsec'), SESSION_DEFAULTS.botSecondaryT),
     botWeaponCt: asBotWeapon(src.get('ctweap'), SESSION_DEFAULTS.botWeaponCt),
+    botSecondaryCt: asBotSecondary(src.get('ctsec'), SESSION_DEFAULTS.botSecondaryCt),
   };
 }
 
@@ -171,7 +199,9 @@ export function configToQuery(cfg: SessionConfig): string {
   p.set('ctbots', String(cfg.botsCt));
   p.set('time', String(cfg.roundSeconds));
   p.set('tweap', cfg.botWeaponT);
+  p.set('tsec', cfg.botSecondaryT);
   p.set('ctweap', cfg.botWeaponCt);
+  p.set('ctsec', cfg.botSecondaryCt);
   return '?' + p.toString();
 }
 
@@ -183,6 +213,8 @@ export function configsEqual(a: SessionConfig, b: SessionConfig): boolean {
     a.botsCt === b.botsCt &&
     a.roundSeconds === b.roundSeconds &&
     a.botWeaponT === b.botWeaponT &&
-    a.botWeaponCt === b.botWeaponCt
+    a.botSecondaryT === b.botSecondaryT &&
+    a.botWeaponCt === b.botWeaponCt &&
+    a.botSecondaryCt === b.botSecondaryCt
   );
 }

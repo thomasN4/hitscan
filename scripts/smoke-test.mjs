@@ -803,7 +803,7 @@ async function runConfigCheck() {
   const mapErrors = [];
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=10&ctbots=3&time=90&tweap=smg&ctweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(BASE + '/?map=arena&tbots=10&ctbots=3&time=90&tweap=smg&tsec=pistol&ctweap=smg&ctsec=pistol', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
 
     const applied = await page.evaluate(() => ({
@@ -812,6 +812,8 @@ async function runConfigCheck() {
       roundSeconds: window.__cs.game.roundSeconds,
       botCount: window.__cs.bots.length,
       botWeaponT: window.__cs.game.botWeaponT,
+      botSecondaryT: window.__cs.game.botSecondaryT,
+      botSecondaryCt: window.__cs.game.botSecondaryCt,
       weapons: window.__cs.bots.map(b => b.weapon),
       form: {
         map: document.getElementById('cfgMap').value,
@@ -820,6 +822,8 @@ async function runConfigCheck() {
         timeMin: document.getElementById('cfgTimeMin').value,
         weaponT: document.getElementById('cfgWeaponT').value,
         weaponCt: document.getElementById('cfgWeaponCt').value,
+        secondaryT: document.getElementById('cfgSecondaryT').value,
+        secondaryCt: document.getElementById('cfgSecondaryCt').value,
       },
     }));
     if (applied.botsT !== 10 || applied.botsCt !== 3 || applied.roundSeconds !== 90) {
@@ -836,6 +840,10 @@ async function runConfigCheck() {
     if (applied.botWeaponT !== 'smg' || applied.form.weaponT !== 'smg' || applied.form.weaponCt !== 'smg') {
       throw new Error(`bot weapon not applied: ${JSON.stringify(applied)}`);
     }
+    if (applied.botSecondaryT !== 'pistol' || applied.botSecondaryCt !== 'pistol'
+        || applied.form.secondaryT !== 'pistol' || applied.form.secondaryCt !== 'pistol') {
+      throw new Error(`bot secondary not applied: ${JSON.stringify(applied)}`);
+    }
     if (!applied.weapons.every(w => w === 'smg')) {
       throw new Error(`forced weapon did not arm every bot: ${JSON.stringify(applied.weapons)}`);
     }
@@ -849,7 +857,7 @@ async function runConfigCheck() {
       page.click('#playBtn'),
     ]);
     const url = page.url();
-    if (!/[?&]tbots=12&/.test(url) || !/[?&]time=90&/.test(url) || !/[?&]ctweap=smg$/.test(url)) {
+    if (!/[?&]tbots=12&/.test(url) || !/[?&]time=90&/.test(url) || !/[?&]ctsec=pistol$/.test(url)) {
       throw new Error(`Play with changed settings navigated wrong: ${url}`);
     }
     const recommitted = await page.evaluate(() => ({ botsT: window.__cs.game.botsT, botCount: window.__cs.bots.length }));

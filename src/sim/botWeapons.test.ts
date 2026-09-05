@@ -1,14 +1,18 @@
 import { describe, expect, test } from 'vitest';
 import {
+  BOT_FIREARM_IDS,
   BOT_WEAPON_IDS,
   BOT_WEAPON_TUNING,
+  SWAP_DELAY,
   FIRST_SHOT_DELAY_MIN,
   FIRST_SHOT_DELAY_SPAN,
   MeleeFireController,
   WeaponFireController,
   botBrainParams,
   botHitChance,
+  makeBotLoadout,
   makeFireController,
+  resolveBotSecondary,
   resolveBotWeapon,
   type BotRangedTuning,
   type FireController,
@@ -689,5 +693,238 @@ describe('makeFireController', () => {
       expect(fire.resolution).toBe('ranged');
       expect(fire).toBeInstanceOf(WeaponFireController);
     }
+  });
+});
+
+describe('BotLoadout', () => {
+  /** A loadout over the real catalog: primary, optional secondary, blade last. */
+  function loadout(primary: BotWeaponId, secondary: BotWeaponId | null, rng: () => number) {
+    return makeBotLoadout(primary, secondary, id => WEAPONS[id], rng);
+  }
+
+  /** Past the spawn stagger, so a test can get straight to the trigger. */
+  function past(fire: FireController): void {
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 0.01, false);
+  }
+
+  /**
+   * Burn the ACTIVE position to nothing: pull whenever ready, ticking in
+   * frames. Returns once the loadout has moved on or the budget runs out.
+   */
+  function drain(fire: FireController, seconds = 600): void {
+    const start = fire.weapon;
+    for (let t = 0; t < seconds && fire.weapon === start; t += DT) {
+      fire.tick(DT, true);
+      if (fire.ready()) fire.pull();
+    }
+  }
+
+  test('arm() spends exactly ONE draw for three positions', () => {
+    // The draw contract botBrains.test.ts scripts against is [strafeDir,
+    // stagger]. Three positions each taking their own stagger would shift
+    // every scripted sequence in that suite by two.
+    const c = counting([0.5]);
+    const fire = loadout('smg', 'pistol', c.rng);
+    expect(c.taken()).toBe(0);
+    fire.arm();
+    expect(c.taken()).toBe(1);
+  });
+
+  test('the one stagger is applied to EVERY position, so a swap cannot bypass it', () => {
+    // A magazine of 1 and no reserve: the primary is spent after a single
+    // pull, which lands the bot on the sidearm while the stagger would still
+    // be running had only the primary been held.
+    const fire = loadout('smg', 'pistol', queueRng([1 - 1e-9]));  // the longest stagger
+    fire.arm();
+    expect(fire.ready()).toBe(false);
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN - 0.01, false);
+    expect(fire.ready()).toBe(false);
+  });
+
+  test('a spent primary hands over to the secondary, then to the blade', () => {
+    const fire = loadout('smg', 'pistol', queueRng([0]));
+    fire.arm();
+    past(fire);
+    expect(fire.weapon).toBe('smg');
+    drain(fire);
+    expect(fire.weapon).toBe('pistol');
+    drain(fire);
+    expect(fire.weapon).toBe('knife');
+    // The ladder terminates: the blade is never dry, however long it swings.
+    drain(fire, 120);
+    expect(fire.weapon).toBe('knife');
+  });
+
+  test('an empty MAGAZINE reloads; only an empty reserve swaps', () => {
+    // The distinction the whole ladder rests on. A bot that swapped at every
+    // empty magazine would be holding the knife two minutes into a match.
+    const fire = loadout('smg', 'pistol', queueRng([0]));
+    fire.arm();
+    past(fire);
+    for (let i = 0; i < WEAPONS.smg.magSize; i++) {
+      while (!fire.ready()) fire.tick(DT, true);
+      fire.pull();
+    }
+    expect(fire.mag).toBe(0);
+    fire.tick(DT, true);
+    expect(fire.weapon).toBe('smg');   // reserve remains: no swap
+    expect(fire.reserve).toBeGreaterThan(0);
+    // And it is a reload, not a stall.
+    fire.tick(DT, false);
+    expect(fire.reloading).toBe(true);
+    expect(fire.weapon).toBe('smg');
+  });
+
+  test('the swap costs SWAP_DELAY, and nothing is drawn for it', () => {
+    const c = counting([0]);
+    const fire = loadout('smg', 'pistol', c.rng);
+    fire.arm();
+    past(fire);
+    const before = c.taken();
+    drain(fire);
+    expect(fire.weapon).toBe('pistol');
+    // Every draw taken during the drain belongs to a pull's burst pause; the
+    // swap itself took none.
+    const pulls = c.taken() - before;
+    expect(pulls).toBeGreaterThan(0);
+    expect(fire.ready()).toBe(false);
+    fire.tick(SWAP_DELAY - DT, false);
+    expect(fire.ready()).toBe(false);
+    expect(c.taken()).toBe(before + pulls);
+  });
+
+  test('every delegated member reports the NEW position after a swap', () => {
+    const fire = loadout('sniper', 'revolver', queueRng([0]));
+    fire.arm();
+    past(fire);
+    expect(fire.magSize).toBe(WEAPONS.sniper.magSize);
+    drain(fire);
+    expect(fire.weapon).toBe('revolver');
+    expect(fire.magSize).toBe(WEAPONS.revolver.magSize);
+    expect(fire.mag).toBe(WEAPONS.revolver.magSize);
+    expect(fire.reserve).toBe(WEAPONS.revolver.reserveMax);
+    expect(fire.reloading).toBe(false);
+    expect(fire.resolution).toBe('ranged');
+    // The bands follow the weapon: this is what makes a fallen-back bot
+    // fight at its sidearm's range rather than its rifle's.
+    const revolver = BOT_WEAPON_TUNING.revolver;
+    expect(fire.params(DEFAULT_BRAIN_PARAMS).engageRange).toBe(revolver.engageRange);
+  });
+
+  test('the blade reports melee resolution and no rounds', () => {
+    const fire = loadout('knife', 'pistol', queueRng([0]));
+    fire.arm();
+    expect(fire.weapon).toBe('knife');
+    expect(fire.resolution).toBe('melee');
+    expect(fire.magSize).toBe(0);
+    expect(fire.reserve).toBe(0);
+    expect(fire.params(DEFAULT_BRAIN_PARAMS).engageRange)
+      .toBe(BOT_WEAPON_TUNING.knife.engageRange);
+  });
+
+  test('arm() re-arms a spent loadout back to its primary for a new life', () => {
+    const fire = loadout('smg', 'pistol', queueRng([0]));
+    fire.arm();
+    past(fire);
+    drain(fire);
+    expect(fire.weapon).toBe('pistol');
+    fire.arm();
+    expect(fire.weapon).toBe('smg');
+    expect(fire.mag).toBe(WEAPONS.smg.magSize);
+    expect(fire.reserve).toBe(WEAPONS.smg.reserveMax);
+  });
+});
+
+describe('makeBotLoadout', () => {
+  const defOf = (id: BotWeaponId) => WEAPONS[id];
+
+  test('a knife PRIMARY is a blade-only bot: the secondary is dropped', () => {
+    // Not placed above a knife it could never fall past.
+    const fire = makeBotLoadout('knife', 'pistol', defOf, queueRng([0]));
+    fire.arm();
+    expect(fire.weapon).toBe('knife');
+    fire.tick(120, false);
+    expect(fire.weapon).toBe('knife');
+  });
+
+  test("a 'knife' secondary is dropped rather than duplicated", () => {
+    const fire = makeBotLoadout('smg', 'knife', defOf, queueRng([0]));
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 0.01, false);
+    for (let t = 0; t < 600 && fire.weapon === 'smg'; t += DT) {
+      fire.tick(DT, true);
+      if (fire.ready()) fire.pull();
+    }
+    // Straight to the blade: there is no second knife position above it.
+    expect(fire.weapon).toBe('knife');
+  });
+
+  test('a null secondary falls straight from the primary to the blade', () => {
+    const fire = makeBotLoadout('pistol', null, defOf, queueRng([0]));
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 0.01, false);
+    for (let t = 0; t < 600 && fire.weapon === 'pistol'; t += DT) {
+      fire.tick(DT, true);
+      if (fire.ready()) fire.pull();
+    }
+    expect(fire.weapon).toBe('knife');
+  });
+
+  test('a secondary equal to the primary is legal and simply doubles the ammunition', () => {
+    // The swap is invisible in `weapon` here — both positions are smg — so the
+    // observable is the ammunition coming BACK: a spent position handing over
+    // to a fresh one of the same weapon, rather than the bot falling to the
+    // blade with a magazine still to spend.
+    const fire = makeBotLoadout('smg', 'smg', defOf, queueRng([0]));
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 0.01, false);
+    let spent = false;
+    let refilled = false;
+    for (let t = 0; t < 600 && fire.weapon === 'smg'; t += DT) {
+      fire.tick(DT, true);
+      if (fire.ready()) fire.pull();
+      if (fire.mag === 0 && fire.reserve === 0) spent = true;
+      else if (spent && fire.reserve === WEAPONS.smg.reserveMax) refilled = true;
+    }
+    expect(spent).toBe(true);
+    expect(refilled).toBe(true);
+    // And only after BOTH smg positions are gone does the blade come out.
+    expect(fire.weapon).toBe('knife');
+  });
+});
+
+describe('resolveBotSecondary', () => {
+  test("'none' yields no secondary position at all, and spends no draw", () => {
+    const c = counting([0.5]);
+    expect(resolveBotSecondary('none', c.rng)).toBe(null);
+    expect(c.taken()).toBe(0);
+  });
+
+  test('a named firearm passes through and spends no draw', () => {
+    const c = counting([0.5]);
+    expect(resolveBotSecondary('revolver', c.rng)).toBe('revolver');
+    expect(c.taken()).toBe(0);
+  });
+
+  test('mixed draws over the firearms, spending exactly one', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < BOT_FIREARM_IDS.length; i++) {
+      const c = counting([(i + 0.5) / BOT_FIREARM_IDS.length]);
+      seen.add(resolveBotSecondary('mixed', c.rng)!);
+      expect(c.taken()).toBe(1);
+    }
+    expect([...seen].sort()).toEqual([...BOT_FIREARM_IDS].sort());
+  });
+
+  test('the secondary pool holds no blade', () => {
+    // The knife is every loadout's last position already; drawing one here
+    // would ask for a duplicate makeBotLoadout then drops.
+    expect(BOT_FIREARM_IDS).not.toContain('knife');
+    expect([...BOT_FIREARM_IDS].sort())
+      .toEqual([...BOT_WEAPON_IDS].filter(id => id !== 'knife').sort());
+  });
+
+  test('a draw of exactly 1 stays in range', () => {
+    expect(resolveBotSecondary('mixed', () => 1)).toBe(BOT_FIREARM_IDS[BOT_FIREARM_IDS.length - 1]);
   });
 });

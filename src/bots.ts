@@ -32,7 +32,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotSecondaryChoice, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads } from './world';
 import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
 import { GRAVITY } from './sim/movement';
@@ -43,7 +43,7 @@ import { spawnImpact } from './effects';
 import { addKillfeed, botKillTag, updateScore } from './hud';
 import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode } from './sim/botBrains';
 import {
-  BOT_WEAPON_TUNING, botBrainParams, makeFireController, resolveBotWeapon,
+  makeBotLoadout, resolveBotSecondary, resolveBotWeapon,
 } from './sim/botWeapons';
 import { meleeSwing, isBackstab, type MeleeCandidate } from './sim/melee';
 import { damageForPart } from './sim/damage';
@@ -310,24 +310,26 @@ export class Bot implements BotShape {
   speed = 3.2 + Math.random() * 1.4;
   respawnPoint = new THREE.Vector3();
   /**
-   * The catalog weapon this bot carries for the whole match. Drawn once at
-   * construction and never re-drawn — a stable "T-3 is the sniper" is what
-   * lets a playtest attribute a behavior to a weapon rather than guess at it.
+   * The catalog weapon this bot is holding RIGHT NOW, which changes within a
+   * life as positions run dry. Written here alone: resynced from the brain's
+   * weapon after decide() returns, so a swap inside decide() is reflected in
+   * this frame's attack, audio and silhouette.
    */
-  readonly weapon: BotWeaponId;
+  weapon: BotWeaponId;
   /**
    * This bot's policy and the weapon it fights with. Both are per-bot state;
    * the brain's whole stimulus ladder is weapon-independent, and everything
    * that differs between an smg bot and a sniper bot is either a BrainParams
-   * number or something the composed FireController owns.
+   * number or something the composed loadout owns.
    */
   private readonly brain: DefaultBrain;
   /**
    * Barrel-tip offset along the aim hinge's local +z. Per weapon, so a
    * sniper's muzzle flash leaves the end of its longer barrel rather than
-   * hanging in the middle of it.
+   * hanging in the middle of it. Mutable because a dry swap changes weapons
+   * mid-life.
    */
-  private readonly muzzleZ: number;
+  private muzzleZ: number;
   /**
    * Fair-rotation cursor for the per-frame visual acquisition: the index the
    * next scan starts from when the brain's tracked identity is not cheaply
@@ -414,7 +416,7 @@ export class Bot implements BotShape {
    */
   private patrolGoal: THREE.Vector3 | null = null;
 
-  constructor(team: Team = 'T', weapon: BotWeaponId = 'smg') {
+  constructor(team: Team = 'T', weapon: BotWeaponId = 'smg', secondary: BotWeaponId | null = 'pistol') {
     // Plain assignments, not parameter properties: the `name` derivation must
     // see the team, and field initializers run before constructor-body
     // parameter-property writes would. The brain is the same case for a
@@ -423,11 +425,10 @@ export class Bot implements BotShape {
     this.team = team;
     this.name = `${team}-${++teamSerials[team]}`;
     this.weapon = weapon;
-    const tuning = BOT_WEAPON_TUNING[weapon];
     this.brain = new DefaultBrain(
-      botBrainParams(tuning, DEFAULT_BRAIN_PARAMS),
+      DEFAULT_BRAIN_PARAMS,
       Math.random,
-      makeFireController(weapon, WEAPONS[weapon], tuning, Math.random),
+      makeBotLoadout(weapon, secondary, id => WEAPONS[id], Math.random),
     );
 
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
@@ -646,6 +647,13 @@ export class Bot implements BotShape {
     // cannot inherit a stale destination.
     if (intent.mode === 'search' || intent.mode === 'hold') this.clearRouteCache();
     if (intent.mode !== 'patrol') this.clearPatrolGoal();
+
+    // A swap that happened inside decide() is reflected in this frame's
+    // attack, audio and silhouette — resync before the shot is realized.
+    if (this.brain.weapon !== this.weapon) {
+      this.weapon = this.brain.weapon;
+      this.rebuildAimGroup();
+    }
 
     // Horizontal gate: the SAME axis-separated slide the player uses, with
     // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
@@ -1077,20 +1085,46 @@ export class Bot implements BotShape {
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }
+
+  /**
+   * Rebuild the aim group's silhouette for the current weapon. Removing and
+   * re-adding the shared meshes — never disposing their geometry or
+   * materials, which are module-level and shared by every bot carrying that
+   * weapon, so disposing them would blank the barrels of the whole field —
+   * and re-reading the muzzle offset.
+   */
+  private rebuildAimGroup(): void {
+    this.aim.clear();
+    const model = BOT_WEAPON_MODELS[this.weapon];
+    this.muzzleZ = model.muzzle;
+    for (const part of model.parts) {
+      const mesh = new THREE.Mesh(part.geo, part.mat);
+      mesh.position.set(part.pos[0], part.pos[1], part.pos[2]);
+      mesh.castShadow = true;
+      this.aim.add(mesh);
+    }
+  }
 }
 
 /**
  * Create a starting wave of one team. Called from main.ts with the
- * menu-configured counts (the parser clamps Ts to >= 1, CTs to >= 0) and that
- * team's weapon setting.
+ * menu-configured counts (the parser clamps Ts to >= 1, CTs to >= 0) and
+ * that team's weapon settings.
  *
- * `choice` is resolved PER BOT, so 'mixed' gives a varied wave while a named
- * weapon arms every bot on the side identically — which is what lets a smoke
- * phase or a playtest hold the weapon still and vary something else.
+ * Both choices are resolved PER BOT, so 'mixed' gives a varied wave in
+ * either position while a named weapon arms every bot on the side
+ * identically — which is what lets a smoke phase or a playtest hold the
+ * weapon still and vary something else. The primary draws over
+ * BOT_WEAPON_IDS (blade included); the secondary draws over the firearms
+ * and 'none' yields null.
  */
-export function spawnBots(count: number, team: Team, choice: BotWeaponChoice = 'smg'): void {
+export function spawnBots(count: number, team: Team, choice: BotWeaponChoice = 'smg', secondaryChoice: BotSecondaryChoice = 'pistol'): void {
   for (let i = 0; i < count; i++) {
-    bots.push(new Bot(team, resolveBotWeapon(choice, Math.random)));
+    bots.push(new Bot(
+      team,
+      resolveBotWeapon(choice, Math.random),
+      resolveBotSecondary(secondaryChoice, Math.random),
+    ));
   }
 }
 

@@ -40,6 +40,25 @@ export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'k
 export type BotWeaponId = WeaponId;
 
 /**
+ * Firearms — every catalog weapon that fires a round. Derived from WeaponId,
+ * so a new weapon lands here and in every Record over it by widening that
+ * union alone.
+ */
+export type BotFirearmId = Exclude<WeaponId, 'knife'>;
+
+/**
+ * A menu/URL setting for a bot's SECONDARY position, or 'none' for a bot that
+ * falls straight from its primary to the blade.
+ *
+ * The knife is not a legal value, and that is not the 7a exclusion returning:
+ * the blade is ALWAYS the last position of every loadout (sim/botWeapons.ts:
+ * makeBotLoadout), so naming it here would be asking for a duplicate the
+ * loadout then drops. A setting that is silently ignored is worse than one
+ * that falls back.
+ */
+export type BotSecondaryChoice = BotFirearmId | 'mixed' | 'none';
+
+/**
  * A menu/URL bot-weapon setting: one weapon for the whole team, or an
  * independent draw per bot (sim/botWeapons.ts:resolveBotWeapon). 'knife' is a
  * legal setting (a blade-only bot) and is in the 'mixed' pool.
@@ -180,13 +199,11 @@ export interface Bot {
   /** What the bot's brain is doing, for the DEV readout. Display only. */
   mode: BrainMode;
   /**
-   * The catalog weapon this bot carries for the match, drawn once at
-   * construction. Drives its accuracy curve, engagement bands, cadence,
-   * magazine, silhouette and report — and names it in the killfeed and the
-   * DEV readout. Read-only outside bots.ts: a bot's weapon does not change
-   * within a life or between lives.
+   * The catalog weapon this bot is holding RIGHT NOW, which changes within a
+   * life as positions run dry. Still written by `bots.ts` alone — treat it as
+   * read-only from outside.
    */
-  readonly weapon: BotWeaponId;
+  weapon: BotWeaponId;
   /**
    * Rounds chambered, magazine capacity, and whether a reload is running.
    * Display only — a reload you cannot see is a mechanism you cannot debug,
@@ -920,6 +937,8 @@ export const SESSION_DEFAULTS: Readonly<{
   roundSeconds: number;
   botWeaponT: BotWeaponChoice;
   botWeaponCt: BotWeaponChoice;
+  botSecondaryT: BotSecondaryChoice;
+  botSecondaryCt: BotSecondaryChoice;
 }> = {
   map: 'arena',
   botsT: 6,
@@ -930,6 +949,10 @@ export const SESSION_DEFAULTS: Readonly<{
   // single weapon is what smoke phases and playtests do deliberately.
   botWeaponT: 'mixed',
   botWeaponCt: 'mixed',
+  // Pistol rather than 'none' so the dry swap exists in a default match
+  // rather than only when someone goes looking for it.
+  botSecondaryT: 'pistol',
+  botSecondaryCt: 'pistol',
 };
 
 // ---------- Owner-scoped slices ----------
@@ -968,6 +991,14 @@ export interface SessionState {
    */
   botWeaponT: BotWeaponChoice;
   botWeaponCt: BotWeaponChoice;
+  /**
+   * Secondary firearm for each side's bot loadouts, or 'mixed' for an
+   * independent draw per bot, or 'none' to fall straight from the primary to
+   * the blade. Read once by main.ts when it spawns the waves, like the weapon
+   * pair above.
+   */
+  botSecondaryT: BotSecondaryChoice;
+  botSecondaryCt: BotSecondaryChoice;
   /** Pointer lock active (Esc/menu releases it). */
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */

@@ -14,7 +14,7 @@
 // post-move distance and routes the damage. All of a bot's dice still come
 // from the brain's own rng stream, which is why the controller is handed it
 // rather than reaching for Math.random.
-import type { BotWeaponChoice, BotWeaponId, HitZone, WeaponDef } from '../core/state';
+import type { BotFirearmId, BotSecondaryChoice, BotWeaponChoice, BotWeaponId, HitZone, WeaponDef } from '../core/state';
 import { isLowAmmo, planReload, roundInterval, roundTransfer } from './ammo';
 import { damageForPart } from './damage';
 import type { BrainParams } from './botBrains';
@@ -262,6 +262,12 @@ export interface FireController {
    */
   readonly resolution: 'ranged' | 'melee';
   /**
+   * Movement policy for the ACTIVE weapon, laid over the shipped base — bands,
+   * engage range and drift. Everything else in BrainParams is
+   * weapon-independent and passes through untouched. Takes no draws.
+   */
+  params(base: BrainParams): BrainParams;
+  /**
    * Per-life reset: full magazine and reserve, no reload in flight, a fresh
    * burst, and ONE draw for the spawn stagger.
    *
@@ -326,8 +332,27 @@ export function botBrainParams(tuning: BotWeaponPosture, base: BrainParams): Bra
   };
 }
 
+/**
+ * What one position of a loadout must offer. It is `FireController` plus what
+ * only the loadout needs.
+ */
+export interface FirePosition extends FireController {
+  /** This position's own tuning, so the loadout can derive the active BrainParams. */
+  readonly tuning: BotWeaponTuning;
+  /**
+   * No rounds anywhere: this position is spent for the rest of the life.
+   * A firearm is dry when its magazine AND reserve are empty and no reload is
+   * running; a blade never is.
+   */
+  readonly dry: boolean;
+  /** Refill to a full magazine and reserve, cancelling any reload. Takes NO draws. */
+  load(): void;
+  /** Hold the trigger for `seconds` — the spawn stagger, or a swap. Takes NO draws. */
+  waitFor(seconds: number): void;
+}
+
 /** The shipped FireController: one catalog firearm, fought by the table above. */
-export class WeaponFireController implements FireController {
+export class WeaponFireController implements FirePosition {
   readonly weapon: BotWeaponId;
   private rounds: number;
   private held: number;
@@ -344,7 +369,7 @@ export class WeaponFireController implements FireController {
   constructor(
     weapon: BotWeaponId,
     private readonly def: WeaponDef,
-    private readonly tuning: BotRangedTuning,
+    readonly tuning: BotRangedTuning,
     private readonly rng: () => number,
   ) {
     this.weapon = weapon;
@@ -361,13 +386,8 @@ export class WeaponFireController implements FireController {
   readonly resolution = 'ranged' as const;
 
   arm(): void {
-    this.rounds = this.def.magSize;
-    this.held = this.def.reserveMax;
-    this.burstLeft = this.tuning.burst;
-    this.inReload = false;
-    this.reloadLeft = 0;
-    this.nextRoundIn = 0;
-    this.cooldown = FIRST_SHOT_DELAY_MIN + this.rng() * FIRST_SHOT_DELAY_SPAN;
+    this.load();
+    this.waitFor(FIRST_SHOT_DELAY_MIN + this.rng() * FIRST_SHOT_DELAY_SPAN);
   }
 
   tick(dt: number, engaged: boolean): void {
@@ -424,6 +444,28 @@ export class WeaponFireController implements FireController {
 
   hitChance(dist: number): number {
     return botHitChance(dist, this.tuning);
+  }
+
+  params(base: BrainParams): BrainParams {
+    return botBrainParams(this.tuning, base);
+  }
+
+  load(): void {
+    this.rounds = this.def.magSize;
+    this.held = this.def.reserveMax;
+    this.burstLeft = this.tuning.burst;
+    this.inReload = false;
+    this.reloadLeft = 0;
+    this.nextRoundIn = 0;
+    this.cooldown = 0;
+  }
+
+  waitFor(seconds: number): void {
+    this.cooldown = Math.max(this.cooldown, seconds);
+  }
+
+  get dry(): boolean {
+    return this.rounds <= 0 && this.held <= 0 && !this.inReload;
   }
 
   /** One draw: head, else legs, else torso. */
@@ -493,14 +535,14 @@ export class WeaponFireController implements FireController {
  * per-frame draw contract is identical for a blade bot and no scripted rng
  * sequence in botBrains.test.ts moves.
  */
-export class MeleeFireController implements FireController {
+export class MeleeFireController implements FirePosition {
   readonly weapon: BotWeaponId;
   /** Seconds until the next swing is allowed. */
   private cooldown = 0;
 
   constructor(
     weapon: BotWeaponId,
-    private readonly tuning: BotMeleeTuning,
+    readonly tuning: BotMeleeTuning,
     private readonly rng: () => number,
   ) {
     this.weapon = weapon;
@@ -514,7 +556,24 @@ export class MeleeFireController implements FireController {
   readonly resolution = 'melee' as const;
 
   arm(): void {
-    this.cooldown = FIRST_SHOT_DELAY_MIN + this.rng() * FIRST_SHOT_DELAY_SPAN;
+    this.load();
+    this.waitFor(FIRST_SHOT_DELAY_MIN + this.rng() * FIRST_SHOT_DELAY_SPAN);
+  }
+
+  load(): void {
+    this.cooldown = 0;
+  }
+
+  waitFor(seconds: number): void {
+    this.cooldown = Math.max(this.cooldown, seconds);
+  }
+
+  get dry(): boolean {
+    return false;
+  }
+
+  params(base: BrainParams): BrainParams {
+    return botBrainParams(this.tuning, base);
   }
 
   /** `engaged` is not taken at all: there is no reload for it to gate. */
@@ -557,8 +616,140 @@ export function makeFireController(
   def: WeaponDef,
   tuning: BotWeaponTuning,
   rng: () => number,
-): FireController {
+): FirePosition {
   return tuning.kind === 'melee'
     ? new MeleeFireController(weapon, tuning, rng)
     : new WeaponFireController(weapon, def, tuning, rng);
+}
+
+/**
+ * Seconds a bot spends switching to the next position after the current one
+ * runs out. Fixed, and it takes NO draw: every random draw a bot makes is
+ * positionally scripted by botBrains.test.ts.
+ *
+ * The player's own switch is still instant (issue #15) — this is not that fix,
+ * and must not become it. It exists because a swap that cost nothing would let
+ * a bot fire its sidearm in the same frame its rifle ran out, which reads as a
+ * second weapon appearing rather than as a bot reaching for one.
+ */
+export const SWAP_DELAY = 0.5;
+
+/**
+ * One bot's whole weapon ladder: an ordered list of POSITIONS that delegates
+ * the whole FireController surface to whichever is active. When a position
+ * runs out of rounds entirely it is spent for the life, and the loadout falls
+ * to the next one. The blade at the bottom never runs out.
+ */
+export class BotLoadout implements FireController {
+  private i = 0;
+
+  constructor(
+    private readonly positions: FirePosition[],
+    private readonly rng: () => number,
+  ) {
+    if (positions.length === 0) throw new Error('a bot loadout needs at least one position');
+  }
+
+  private get active(): FirePosition {
+    return this.positions[this.i]!;
+  }
+
+  get weapon(): BotWeaponId { return this.active.weapon; }
+  get mag(): number { return this.active.mag; }
+  get magSize(): number { return this.active.magSize; }
+  get reserve(): number { return this.active.reserve; }
+  get reloading(): boolean { return this.active.reloading; }
+  get resolution(): 'ranged' | 'melee' { return this.active.resolution; }
+
+  params(base: BrainParams): BrainParams {
+    return this.active.params(base);
+  }
+
+  arm(): void {
+    for (const p of this.positions) p.load();     // no draws
+    this.i = 0;
+    // Exactly ONE draw, applied to every position so a swap during the
+    // stagger cannot bypass it. The random-draw contract in the plan: three
+    // positions each taking their own stagger draw would shift every scripted
+    // rng sequence in botBrains.test.ts by two.
+    const stagger = FIRST_SHOT_DELAY_MIN + this.rng() * FIRST_SHOT_DELAY_SPAN;
+    for (const p of this.positions) p.waitFor(stagger);
+  }
+
+  tick(dt: number, engaged: boolean): void {
+    this.active.tick(dt, engaged);
+    // The dry swap. A spent position stays spent for the life — the ladder
+    // only descends, and the blade at the bottom is never dry. Ticking only
+    // the active position is deliberate: the ones below it are full and have
+    // nothing to reload, and the ones above are finished.
+    while (this.i < this.positions.length - 1 && this.active.dry) {
+      this.i++;
+      this.active.waitFor(SWAP_DELAY);
+    }
+  }
+
+  ready(): boolean {
+    return this.active.ready();
+  }
+
+  pull(): void {
+    this.active.pull();
+  }
+
+  resolve(dist: number): ShotOutcome {
+    return this.active.resolve(dist);
+  }
+
+  hitChance(dist: number): number {
+    return this.active.hitChance(dist);
+  }
+}
+
+/**
+ * Every firearm a bot may be handed as a SECONDARY, in a stable order. Listed
+ * rather than derived for the same reason as BOT_WEAPON_IDS: Object.keys
+ * erases the union. The blade is not in the pool — it is already every
+ * loadout's last position — and 'none' is not a weapon, so neither appears
+ * here.
+ */
+export const BOT_FIREARM_IDS: readonly BotFirearmId[] =
+  ['smg', 'sniper', 'shotgun', 'pistol', 'revolver'];
+
+/**
+ * Turn a menu/URL secondary setting into the firearm ONE bot carries there,
+ * or null for a bot that falls straight from its primary to the blade.
+ * `'mixed'` draws uniformly over BOT_FIREARM_IDS and spends one draw; a named
+ * id spends none, like resolveBotWeapon.
+ */
+export function resolveBotSecondary(choice: BotSecondaryChoice, rng: () => number): BotFirearmId | null {
+  if (choice === 'none') return null;
+  if (choice !== 'mixed') return choice;
+  const i = Math.min(BOT_FIREARM_IDS.length - 1, Math.floor(rng() * BOT_FIREARM_IDS.length));
+  // Bound-guarded read: i is clamped into range above, so the index cannot
+  // miss (AGENTS.md's rule on dynamic index reads).
+  return BOT_FIREARM_IDS[i]!;
+}
+
+/**
+ * Build one bot's loadout. The blade is ALWAYS the last position — it is the
+ * one weapon that cannot run out, which is what makes the ladder terminate.
+ *
+ * A knife PRIMARY means a blade-only bot: the secondary is dropped rather than
+ * placed above a knife it could never fall past. That is the playtest lever for
+ * the melee path, reachable as ?tweap=knife.
+ *
+ * `defOf` is a lookup rather than a runtime import of core/state.ts's catalog —
+ * the same seam WeaponFireController takes its WeaponDef through.
+ */
+export function makeBotLoadout(
+  primary: BotWeaponId,
+  secondary: BotWeaponId | null,
+  defOf: (id: BotWeaponId) => WeaponDef,
+  rng: () => number,
+): BotLoadout {
+  const ids: BotWeaponId[] = primary === 'knife'
+    ? ['knife']
+    : [primary, ...(secondary !== null && secondary !== 'knife' ? [secondary] : []), 'knife'];
+  const positions = ids.map(id => makeFireController(id, defOf(id), BOT_WEAPON_TUNING[id], rng));
+  return new BotLoadout(positions, rng);
 }

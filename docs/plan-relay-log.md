@@ -187,3 +187,51 @@ rather than another sentence.
 The relay was worth using: 25 minutes and twelve cents for a twelve-file
 type-widening that compiled, passed its own new pins, and needed only comment-
 level correction.
+
+### 2026-09-04 — wave `d78f09828e52.2lSRdF` — 1 executor
+
+Relay v5, plan schema v1. Baseline `d78f09828e52`. A wave of one for tranche 7b
+part B (the loadout and the dry swap); wall clock 45m 01s — the watchdog
+ceiling — against 42m 35s of executor event time.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/bot-loadouts` | `d78f09828e52.2lSRdF` | 1 | 42m 35s | $0.7140 | 10 (+428/-71) | fail — watchdog timeout at 2700 s |
+
+Verdict: **killed, and kept.** `OPENCODE_TIMEOUT` fired at 45 minutes with exit
+124 and a skipped liveness gate, after 82 steps, 95 tool calls, 51 edits and 0
+denied calls, reporting 13,229,548 total tokens for $0.71 — six times part A's
+cost for a comparable diff. The planner finished the work by hand rather than
+re-running: the expensive half was already on disk, and a second run would have
+spent another 45 minutes re-deriving it.
+
+What the kill left behind is the useful record here. Ten of the plan's twelve
+files were complete and correct — `BotLoadout`, the one-draw `arm()`, the dry
+swap, the brain's params resync, the silhouette rebuild, `tsec`/`ctsec` through
+the parser, menu, facade and smoke config phase. What was missing or damaged:
+
+- **`src/bots.ts` was left syntactically invalid.** The class's closing brace
+  landed above `rebuildAimGroup()`, orphaning the method and re-indenting
+  `spawnBots` as though it were a member. An edit interrupted between its two
+  halves is the failure mode a watchdog produces, and it is not visible in the
+  file list — only `npm run typecheck` names it.
+- **A JSDoc line and a header comment were truncated mid-sentence**, one of them
+  ending on an unclosed parenthesis.
+- **Neither test file was reached.** `botWeapons.test.ts` and
+  `sessionConfig.test.ts` got zero edits, so the tranche's new pins — the
+  one-draw contract, the swap conditions, `makeBotLoadout`'s cases, the
+  `tsec`/`ctsec` matrix — did not exist, while three EXISTING sessionConfig
+  tests failed against the widened config. A run that dies before its tests is
+  strictly worse than one that dies before its implementation: the code looks
+  finished and nothing pins it.
+
+The planner wrote all of that (25 new pins, 717 tests total), repaired the four
+damaged sites, and reverted one unrelated comment rewrite the executor had made
+outside the plan.
+
+Two lessons for the next wave. **The timeout is the plan's problem, not the
+runner's**: part A took 25 minutes for twelve files, so a twelve-file part B at
+the same rate had no headroom, and the plan should either have been split again
+or launched with a raised `OPENCODE_TIMEOUT`. **Order the Implementation section
+so tests come before the last of the wiring** — the plan listed them last, which
+is exactly the order that loses them to a kill.

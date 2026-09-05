@@ -64,6 +64,9 @@ export function initEngine(map: MapName): void {
   sun.position.set(40, 60, 25);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
+  // Toon shading evaluates lighting per fragment, exposing self-shadow
+  // stripes on broad faces. Offset the shadow lookup slightly off the surface.
+  sun.shadow.normalBias = 0.04;
   sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
   sun.shadow.camera.top = 80; sun.shadow.camera.bottom = -80;
   scene.add(sun);

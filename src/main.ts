@@ -31,6 +31,7 @@ import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLo
 import { sfxZoom } from './audio';
 import { decideWinner } from './sim/match';
 import { validateWeapons } from './sim/validateWeapons';
+import { initLigneClaire } from './core/ligneClaire';
 
 // ---------- Startup ----------
 // Order matters and is deliberately explicit: initEngine() creates the
@@ -52,6 +53,9 @@ score.roundTime = session.roundSeconds;
 // where it never runs) would show the stale markup default until Play.
 setTimer(score.roundTime);
 const RANGE = session.map === 'range';
+// A reload-based visual experiment, deliberately separate from match rules.
+const ligneClaire = session.map === 'arena'
+  && new URLSearchParams(location.search).get('style') === 'ligne-claire';
 
 // Loud, not fatal: this runs before initEngine(), so throwing would blank
 // the page and hide the message behind a broken app. A violation is a
@@ -77,9 +81,14 @@ if (!RANGE) {
   if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt);
 }
 respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
+const illustration = ligneClaire ? initLigneClaire(scene, renderer) : null;
 initMenus({
   onStart: () => showLoadoutPicker('start'),
-  onCommit: query => { location.href = location.pathname + query; },
+  onCommit: query => {
+    const params = new URLSearchParams(query);
+    if (ligneClaire && params.get('map') === 'arena') params.set('style', 'ligne-claire');
+    location.href = location.pathname + '?' + params.toString();
+  },
   onResume: lock,
   onQuit: () => { location.reload(); },
   // End screen Rematch: same config query, fresh match — a reload IS the
@@ -103,6 +112,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  illustration?.resize();
 });
 
 addEventListener('keydown', e => {
@@ -269,6 +279,7 @@ function animate(): void {
   // Outside the simulate block for the same reason, and after updateBots so
   // the lines match this frame's positions rather than the previous one's.
   if (import.meta.env.DEV) updateDebugView();
+  illustration?.update(session.debugView);
   renderer.render(scene, camera);
 }
 animate();

@@ -31,3 +31,66 @@ No outlines, new assets, postprocessing passes, or gameplay changes in this pass
 The effect is clearest on curved surfaces and moving models as they cross a
 lighting threshold. Static axis-aligned boxes already had flat faces under
 Lambert lighting, and fully shadowed interiors still rely on the ambient fill.
+
+## Arena study: ligne claire for an FPS
+
+Open `/?map=arena&style=ligne-claire` for the study, or `/?map=arena` for the
+original. This is a reload-based, opt-in arena treatment. The other four maps
+ignore the style parameter. Changing match settings while staying on arena
+preserves it; choosing another map or returning to the bare start URL clears it.
+Rematch and reload preserve the current URL as before.
+
+The direction is thin dark ink, warm plaster, terracotta shutters, a pale blue
+sky, muted gunmetal, and distinct red/blue uniforms. Bright hemisphere fill and
+a weaker directional light flatten the three-band material ramp while keeping
+restrained cast shadows for depth. Buildings receive painted closed shutters,
+doors and signs; crates receive planks and bracing. Bot faces and shirt pockets
+appear only on their front faces. All six held weapons receive the palette and
+ink treatment.
+
+`core/ligneClaire.ts:initLigneClaire()` runs after world registration, navigation,
+bot creation and respawn. It owns its render resources in a startup closure,
+with no import-time DOM/engine access and no new shared mutable state. Existing
+mesh/material names identify the surfaces to paint. Nothing changes the map's
+geometry, collision boxes, hit zones, or world registries.
+
+Ink uses cached `EdgesGeometry` at a 25-degree crease threshold and Three's
+bundled `LineSegments2`, 1.35 CSS pixels wide. The viewport resolution is updated
+on resize. Ink is depth-tested, does not write depth, has no raycast behavior,
+and follows its parent through weapon swaps, reload animation, bot death and
+respawn. Filled surfaces use a small polygon offset to keep coplanar strokes
+visible. The diagnostic debug flag hides the extra ink. Procedural sRGB canvas
+textures use mipmaps and up to 8x anisotropy for distant and oblique surfaces.
+
+This is an art-direction test on the existing box models. It does not introduce
+smooth-model silhouette extraction, remesh characters, redraw the HUD, or make
+every painted detail maintain a constant screen-space line weight. It adds an
+ink draw per outlined mesh, plus material groups on decorated boxes; performance
+on the intended hardware still needs a playtest. Resources live for the page's
+lifetime, matching the existing full-reload map lifecycle.
+
+### Reproduce and inspect
+
+```sh
+npm run dev -- --host 127.0.0.1 --port 5178 --strictPort
+CS_SMOKE_BASE=http://127.0.0.1:5178 node scripts/ligne-claire-shots.mjs
+CS_SMOKE_BASE=http://127.0.0.1:5178 CS_SMOKE_STYLE=ligne-claire node scripts/smoke-test.mjs
+```
+
+`ligne-claire-shots.mjs` writes matching original/styled courtyard and bot views,
+all six held weapons, maximum sniper zoom and a resized DPR-2 view into
+`/tmp/ligne-claire-shots` by default. It asserts identical collision bounds and
+navigation node counts, ink present only in the styled arena, and no browser
+errors or shader warnings. The debug screenshot exercises the V toggle on dev;
+that binding is intentionally unavailable in production.
+
+Run lint, typecheck, unit tests and build as usual. Point the same browser scripts
+at a production preview server to check the bundled build. The smoke test's
+optional `CS_SMOKE_STYLE` applies the query to every map and covers preserving
+the arena style when match settings change. The overlay check recognizes Vite's
+dev client: V must open the overlay in dev and remain inert in production, with
+bot perception active in both. Run software-rendered browser suites serially;
+competing instances can exhaust the smoke test's wall-clock timing allowances.
+Check camera motion, stairs, distant
+bots, weapon occlusion and reloads during a human playtest before broadening the
+style to other maps.

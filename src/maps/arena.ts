@@ -12,6 +12,8 @@ const matWall   = createCelMaterial({ color: 0xc9a86c });
 const matWall2  = createCelMaterial({ color: 0xa8895a });
 const matCrate  = createCelMaterial({ color: 0x8a6d3f });
 const matGround = createCelMaterial({ color: 0xb59a67 });
+// Semantic tags for the opt-in illustration pass; no gameplay consumer.
+matCrate.name = 'arena-crate';
 
 /** Build the de_dust-inspired arena. Called once, via the maps/index.ts registry. */
 export function buildArena(): void {
@@ -34,10 +36,10 @@ export function buildArena(): void {
   addSolidBox(35, 0, 0, 40, 6, 2, matWall);
 
   // Buildings / corner blocks
-  addSolidBox(-42, 0, -42, 24, 10, 24, matWall);
-  addSolidBox( 42, 0, -42, 20, 12, 20, matWall2);
-  addSolidBox(-42, 0,  42, 26, 9, 26, matWall2);
-  addSolidBox( 44, 0,  44, 22, 11, 22, matWall);
+  addSolidBox(-42, 0, -42, 24, 10, 24, matWall).name = 'arena-building';
+  addSolidBox( 42, 0, -42, 20, 12, 20, matWall2).name = 'arena-building';
+  addSolidBox(-42, 0,  42, 26, 9, 26, matWall2).name = 'arena-building';
+  addSolidBox( 44, 0,  44, 22, 11, 22, matWall).name = 'arena-building';
 
   // Crates for cover. Clusters of three are arranged so a crouching player
   // can hide behind the pair while using the stacked crate as a firing step.

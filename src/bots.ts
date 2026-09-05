@@ -410,8 +410,10 @@ export class Bot implements BotShape {
     // raycasts can distinguish hit zones. All parts share this group's transform.
     const palette = palettes[team];
     this.torso = new THREE.Mesh(botGeo.torso, palette.body);
+    this.torso.name = 'bot-torso';
     this.torso.position.y = 1.35;
     this.head = new THREE.Mesh(botGeo.head, palette.head);
+    this.head.name = 'bot-head';
     this.head.position.y = 2.0;
     this.legs = new THREE.Mesh(botGeo.legs, palette.legs);
     this.legs.position.y = 0.45;

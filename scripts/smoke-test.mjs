@@ -10,6 +10,13 @@ const BRAVE = '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave
 // Parallel worktrees run parallel dev servers on distinct ports (see
 // AGENTS.md); point the test at one with CS_SMOKE_BASE=http://localhost:5174
 const BASE = process.env.CS_SMOKE_BASE || 'http://localhost:5173';
+// Opt-in visual regression run; the other maps must also tolerate the query.
+const STYLE = process.env.CS_SMOKE_STYLE;
+function mapUrl(path) {
+  const url = new URL(path, BASE);
+  if (STYLE) url.searchParams.set('style', STYLE);
+  return url.href;
+}
 
 const browser = await puppeteer.launch({
   executablePath: BRAVE,
@@ -56,7 +63,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + url, { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl(url), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1500));
 
     const hook = await page.evaluate(() => !!window.__cs);
@@ -803,7 +810,7 @@ async function runConfigCheck() {
   const mapErrors = [];
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=10&ctbots=3&time=90&tweap=smg&ctweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=10&ctbots=3&time=90&tweap=smg&ctweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
 
     const applied = await page.evaluate(() => ({
@@ -849,7 +856,10 @@ async function runConfigCheck() {
       page.click('#playBtn'),
     ]);
     const url = page.url();
-    if (!/[?&]tbots=12&/.test(url) || !/[?&]time=90&/.test(url) || !/[?&]ctweap=smg$/.test(url)) {
+    const committedParams = new URL(url).searchParams;
+    if (committedParams.get('tbots') !== '12' || committedParams.get('time') !== '90'
+      || committedParams.get('ctweap') !== 'smg'
+      || (STYLE === 'ligne-claire' && committedParams.get('style') !== STYLE)) {
       throw new Error(`Play with changed settings navigated wrong: ${url}`);
     }
     const recommitted = await page.evaluate(() => ({ botsT: window.__cs.game.botsT, botCount: window.__cs.bots.length }));
@@ -890,7 +900,7 @@ async function runAllyCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=4&ctbots=2&tweap=smg&ctweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=4&ctbots=2&tweap=smg&ctweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -987,7 +997,7 @@ async function runFlatRouteCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1135,7 +1145,7 @@ async function runVisionAwarenessCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1460,7 +1470,7 @@ async function runHearingCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=1&time=180&tweap=smg&ctweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=1&time=180&tweap=smg&ctweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1682,7 +1692,7 @@ async function runBotClimbCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=elevation&tbots=1&ctbots=0&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1500));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1743,7 +1753,7 @@ async function runWedgeCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=0&ctbots=0', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=elevation&tbots=0&ctbots=0'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1802,7 +1812,7 @@ async function runNavGraphCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=elevation&tbots=1&ctbots=0&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1000));
     const result = await page.evaluate(() => {
       const cs = window.__cs;
@@ -1905,7 +1915,11 @@ async function runDebugViewCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
 
   try {
-    await page.goto(BASE + '/?map=elevation&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=elevation&tbots=1&ctbots=0&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
+    // V is deliberately DEV-only. A production preview must keep the view
+    // hidden, while the same gameplay-perception census still applies.
+    const devServer = await page.evaluate(() => Array.from(document.scripts)
+      .some(script => new URL(script.src, location.href).pathname === '/@vite/client'));
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -1998,7 +2012,8 @@ async function runDebugViewCheck() {
     if (result.fail) throw new Error(`${result.fail} (${JSON.stringify(result)})`);
     if (result.before === -1) throw new Error('no bot mesh to reach the scene through');
     if (result.before !== 0) throw new Error(`level geometry was already wireframed before the toggle: ${JSON.stringify(result)}`);
-    if (result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
+    if (devServer && result.on === 0) throw new Error(`toggling the debug view wireframed nothing — the x-ray is not wired: ${JSON.stringify(result)}`);
+    if (!devServer && result.on !== 0) throw new Error(`production enabled the developer wireframe: ${JSON.stringify(result)}`);
     if (result.off !== 0) throw new Error(`toggling the debug view off left ${result.off} materials wireframed: ${JSON.stringify(result)}`);
     for (const [label, census] of [['before', result.censusBefore], ['on', result.censusOn], ['off', result.censusOff], ['re-toggle', result.censusBackOn]]) {
       if (!census || census.mode !== 'engage' || census.los !== true || !census.inRange || !census.endpoint) {
@@ -2006,9 +2021,9 @@ async function runDebugViewCheck() {
       }
     }
     if (!result.roBefore || result.roBefore.shown) throw new Error(`bot readout was visible before any V press: ${JSON.stringify(result)}`);
-    if (!result.roOn || !result.roOn.shown || result.roOn.text === '') throw new Error(`bot readout did not show with text while the debug view was up: ${JSON.stringify(result)}`);
+    if (!result.roOn || result.roOn.shown !== devServer || (devServer && result.roOn.text === '')) throw new Error(`bot readout did not match the build's debug visibility: ${JSON.stringify(result)}`);
     if (!result.roOff || result.roOff.shown) throw new Error(`bot readout stayed visible after the debug view went down: ${JSON.stringify(result)}`);
-    if (!result.roBackOn || !result.roBackOn.shown) throw new Error(`bot readout stayed hidden on re-toggle — the inactive path must clear hud.ts's string cache: ${JSON.stringify(result)}`);
+    if (!result.roBackOn || result.roBackOn.shown !== devServer) throw new Error(`bot readout did not match the build's debug visibility on re-toggle: ${JSON.stringify(result)}`);
     console.log('[debugView] OK', JSON.stringify(result));
   } catch (e) {
     failures++;
@@ -2029,7 +2044,7 @@ async function runShotgunCheck() {
   const mapErrors = [];
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=range', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=range'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1500));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -2140,7 +2155,7 @@ async function runKnifeCheck() {
   const mapErrors = [];
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=0&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1500));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -2294,7 +2309,7 @@ async function runMatchEndCheck() {
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
     // ---- Elimination: CT wins outright when the wave is wiped ----
-    await page.goto(BASE + '/?map=arena&tbots=3&ctbots=0&time=30&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=3&ctbots=0&time=30&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     await page.evaluate(() => {
       window.__cs.game.started = true;
@@ -2345,7 +2360,7 @@ async function runMatchEndCheck() {
     if (!rematch.urlTime) throw new Error(`rematch lost the config query: ${location.search}`);
 
     // ---- Clock expiry: higher score wins, readout freezes at 0:00 ----
-    await page.goto(BASE + '/?map=arena&tbots=2&ctbots=0&time=30&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=2&ctbots=0&time=30&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     await page.evaluate(() => {
       const g = window.__cs.game;
@@ -2409,7 +2424,7 @@ async function runPatrolCheck() {
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=0&time=120&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
@@ -2650,7 +2665,7 @@ async function runBotWeaponsCheck() {
   };
   try {
     // ---- A. 'mixed' arms a varied field, and never with a knife.
-    await page.goto(BASE + '/?map=arena&tbots=8&ctbots=0&time=120&tweap=mixed', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=8&ctbots=0&time=120&tweap=mixed'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const mixed = await page.evaluate(() => {
       const cs = window.__cs;
@@ -2720,7 +2735,7 @@ async function runBotWeaponsCheck() {
       }, weapon, botZ, playerZ, simSeconds);
 
     const load = async (weapon) => {
-      await page.goto(BASE + `/?map=arena&tbots=1&ctbots=0&time=600&tweap=${weapon}`, { waitUntil: 'networkidle0', timeout: 20000 });
+      await page.goto(mapUrl(`/?map=arena&tbots=1&ctbots=0&time=600&tweap=${weapon}`), { waitUntil: 'networkidle0', timeout: 20000 });
       await new Promise(r => setTimeout(r, 1200));
     };
 

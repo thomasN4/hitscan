@@ -973,8 +973,9 @@ smoke phase and playtest record.
 
 ### Tranche 7a — bots carry a real catalog weapon
 
-**Status: implemented on `feat/bot-weapons`; the PR is open and not yet
-merged.** 7b (loadouts, the dry swap, the knife) is under Planned.
+**Status: merged as PR #89.** *(Annotation, tranche 7b: this said "the PR is
+open and not yet merged" until 7b went looking for the seams it describes. 7b
+is now implemented too — see its own section below.)*
 
 Bots had no weapon. They had an *abstraction* of one, baked into
 `BrainParams`: a Bernoulli curve (0.65 at point blank, /80 falloff, 0.12
@@ -1119,35 +1120,168 @@ curve, not from per-shot precision, and an entity raycast per bot shot spends a
 budget tranche 5 measured carefully. Flagged for the playtest — if snipers
 shooting allies through allies reads wrong, that is the evidence to reopen it.
 
-## Planned
+## Recently implemented
 
 ### Tranche 7b — loadouts, the dry swap and the knife
 
-7a gives a bot ONE weapon. 7b gives it the player's shape: a primary and a
-secondary, reserve ammunition that runs out, a swap when the primary is dry,
-and the knife as a real melee option.
+**Implementation completed 2026-09-04**, in two commits on `feat/bot-loadouts`
+(PR #92), each its own Plan Relay handoff verified independently before the next
+was written.
 
-The seams 7a left for it, and the two places to be careful:
+7a gave a bot ONE weapon. 7b gives it the player's shape: a primary and a
+secondary, reserve ammunition that runs out, a swap when the primary is dry, and
+the knife as a real melee option.
 
-- **`FireController` is already per-weapon and per-bot**, so "hold two and
-  switch which one the brain asks" is the whole swap. What is NOT ready is
-  `BotBrain.weapon` becoming mutable — every consumer (the bot's barrel model,
-  the audio table, the readout, the killfeed) currently reads it as a
-  match-long constant, and the barrel model in particular is built once in the
-  constructor.
-- **`BotWeaponId = Exclude<WeaponId, 'knife'>` is the boundary**, enforced by
-  the type system and by `sessionConfig.ts:asBotWeapon`'s exhaustive Record.
-  7b widens it by widening that alias, which fails to compile at every per-
-  weapon table until each says what to do with a blade. A knife bot needs a
-  swing through `sim/melee.ts` rather than a hit die, and `meleeSwing` is
-  already generic over its payload — but `weapons.ts:swingMelee` hardcodes a
-  `team === 'CT'` skip and routes only through `damageBot`, so a bot knifing
-  the PLAYER has no path today.
+#### Why it split at the type, not at the feature
 
-7a also leaves one interim behaviour that 7b is the answer to: a bot that
-empties both its magazine and its reserve keeps maneuvering and stops
-shooting. Rare (an smg bot carries ~48 s of continuous engagement against a
-much shorter life expectancy) and visible in the DEV readout as `0`, but real.
+The obvious split — "the pure `sim/` half, then the wiring" — cannot compile.
+`BotWeaponId = Exclude<WeaponId, 'knife'>` is the tranche's central edit, and
+widening a union is ATOMIC: the moment it widens, every `Record` over it fails
+at once (`BOT_WEAPON_TUNING`, `BOT_WEAPON_MODELS`, the audio table), across both
+halves of the dependency graph. A first commit holding only `sim/` would have
+left `npm run typecheck` red.
+
+So the boundary went somewhere else: **part A landed the whole blade** — a knife
+bot is a SINGLE-weapon bot, which 7a's architecture already supported — and
+**part B added the multi-position loadout on top**. Each half is independently
+green on lint, typecheck, tests and build, which is what let the second relay run
+take the first's commit as its baseline. See lesson 32.
+
+#### Part A — a bot may hold the knife
+
+**The tuning table is now a discriminated union.** A blade has no per-ray hit
+chance, no falloff divisor and no zone weights, so `BotWeaponTuning` splits into
+a shared `BotWeaponPosture` (how a bot moves and paces with it) plus
+`BotRangedTuning` and `BotMeleeTuning`. The alternative — a knife row carrying
+five ballistics fields nothing reads — is five lies per row, and the compiler
+cannot tell you which of them matter. The five firearm rows gained `kind:
+'ranged'` and changed in no other way; the smg row is bit-identical, because
+every existing bot smoke phase is pinned to it.
+
+**The hit is geometry, not a die.** `MeleeFireController` owns a blade's cadence
+with no magazine, no reserve and no reload, and `bots.ts:swing()` resolves
+through `sim/melee.ts:meleeSwing` against the focused target's own zone points.
+Reach and arc are the catalog's, the nearest part wins, and `isBackstab` supplies
+the ×3 — so a knife bot that gets behind a full-health player kills in one
+strike, exactly as the player's knife does to a bot.
+
+Three things about that path are deliberate:
+
+- **The arc is measured against the bot's ACTUAL pose** — `this.aim`'s world +Z,
+  the barrel axis the update loop just wrote from `intent.lookAt` — and not
+  against the eye→target vector, which is always perfectly aligned and would
+  make the arc test decorative. A bot that has not finished turning whiffs.
+- **The candidates are the ONE focused target's zone points**, not the field.
+  The brain already decided WHO; melee.ts decides whether and where. The player
+  has no part meshes, so the three points are synthesized at fractions of the
+  eye height mirroring the bot mesh's own 2.0 / 1.35 / 0.45 over a 1.9 m eye.
+- **A swing emits no `soundEvents` gunshot.** A blade is silent to 6b's hearing,
+  so a knife bot cannot summon investigators by attacking — the same shape as the
+  player's melee path, which returns before `weapons.ts`'s emit.
+
+**This is the first path by which a bot can melee the PLAYER.**
+`weapons.ts:swingMelee` skips `team === 'CT'` and routes only through
+`damageBot`, so it could never have served. The two paths share `sim/melee.ts`
+rather than each other — `bots.ts` importing `weapons.ts` would be the module
+cycle the architecture rules ban.
+
+**Draw discipline is unchanged.** One draw in `arm()`, one per `pull()`, exactly
+as a burst-of-one firearm — so the documented `[strafeDir, stagger]` construction
+order holds and every scripted rng sequence in `botBrains.test.ts` passed
+unedited. That file's only change is one added stub member.
+
+**Selection and presentation.** `?tweap=knife` is a legal setting and the blade
+is in the `mixed` pool — roughly one bot in six of a mixed wave carries one,
+which inverts the `[botWeapons]` phase's old "mixed never draws a knife"
+assertion into its opposite. `ENEMY_ATTACK_TONE` gains a `voice` discriminator
+beside the five reports rather than routing a blade through `playGunshot`, and
+the DEV readout's ammo cell shows the reserve and a dash for a weapon that holds
+no rounds.
+
+#### Part B — the loadout and the dry swap
+
+**A `BotLoadout` is an ordered list of POSITIONS** — `[primary, secondary?,
+knife]` — delegating the whole `FireController` surface to whichever is active.
+Both controllers grew a `FirePosition` surface for it: `tuning`, `dry`, and the
+draw-free `load()` / `waitFor()`.
+
+**What "dry" means is the whole design.** A position is spent when its magazine
+AND its reserve are empty and no reload is running — not when its magazine is.
+A bot that swapped at every empty magazine would be holding the knife two
+minutes into every match; a bot that swaps only when a weapon is genuinely
+finished swaps perhaps twice a life. The ladder only ever descends, and the
+blade at the bottom is never dry, which is what makes it terminate. That is the
+answer to 7a's interim behaviour, quoted in the forecast above: a bot which
+emptied everything used to keep maneuvering and never shoot again.
+
+**`arm()` takes exactly ONE draw and applies it to every position.** This is
+the constraint the commit was built around rather than a detail: `botBrains.
+test.ts` scripts ~1500 lines of rng positionally against the documented
+`[strafeDir, stagger]` construction order, so three positions each drawing
+their own stagger would have shifted every one of those sequences by two.
+Applying the single drawn stagger to ALL positions also means a swap during the
+stagger cannot bypass it. `SWAP_DELAY` is 0.5 s and takes no draw either.
+
+**The brain's params stop being a match-long constant.** `DefaultBrain` now
+takes the BASE params and re-derives the per-weapon bands through
+`FireController.params()` whenever the held weapon changes — so a bot that falls
+back to its pistol fights at the pistol's range, and one that reaches the blade
+closes to 1.8 m. The derivation lives on the controller rather than in the brain
+because both edges between those two modules are type-only, and importing
+`botBrainParams` as a value would have added a runtime dependency direction that
+did not exist.
+
+`Bot.weapon` loses its `readonly` and the aim group's silhouette is rebuilt on a
+swap — removing the shared meshes without disposing their geometry or materials,
+which every other bot carrying that weapon is still drawing from.
+
+**Selection.** `tsec`/`ctsec` join the committed query and the start menu,
+narrowed by `asBotSecondary` over an exhaustive Record exactly as `asBotWeapon`
+is. Both sides default to `pistol`, so the dry swap exists in a default match
+rather than only when someone goes looking for it. `'knife'` is deliberately
+NOT a legal secondary: the blade is already every loadout's last position, so
+accepting it would name a duplicate `makeBotLoadout` then drops, and a silently
+ignored setting is worse than one that falls back. A knife PRIMARY, by contrast,
+means a blade-only bot — the playtest lever for the melee path.
+
+#### Coverage
+
+717 pure tests, +35 over 7a. `botWeapons.test.ts` pins the melee controller's
+draw discipline and empty magazine, `makeFireController`'s dispatch, the
+loadout's one-draw `arm()`, the stagger reaching every position, the swap firing
+on a spent reserve and NOT on an empty magazine, `SWAP_DELAY` costing no draw,
+every delegated member reporting the new position, the ladder terminating on the
+blade, and `makeBotLoadout`'s knife-primary / null-secondary / dropped-knife /
+doubled-weapon cases. `botBrains.test.ts` pins that the bands follow a swap and
+that nothing is re-derived while the weapon holds still — and, more importantly,
+that **every pre-existing scripted sequence passes unedited**, which is the
+evidence that awareness and cadence did not move. `sessionConfig.test.ts` pins
+the `tsec`/`ctsec` matrix including the knife's refusal.
+
+Browser: the `[botWeapons]` phase's "mixed never draws a knife" assertion
+inverted, the `[config]` phase carries `tsec`/`ctsec` end to end, and a new
+`[botKnife]` phase runs the blade twice on the weapon phases' own one-bot lane —
+pinned at 60 m it sees the player, grades out of range and touches nothing;
+released, it closes to ~1.1 m and deals 55 and 165 while holding no rounds at
+all. Damage is asserted as membership in the knife's zone set, which no firearm
+can produce in full.
+
+**The dry swap has no browser phase**, deliberately: draining 30 + 90 rounds
+takes minutes of real time, so it is pinned at the unit layer where it can be
+driven directly.
+
+#### Deferred by 7b, deliberately
+
+- A **draw/holster delay for the PLAYER** (issue #15) stays deferred. `SWAP_DELAY`
+  is bot-side only and does not touch `switchWeapon`; the asymmetry is deliberate
+  and recorded here so a later reader does not read it as the issue being fixed.
+- Everything 7a deferred is still deferred: per-weapon `soundRadius`, sound
+  occlusion, bot spread/crouch/ADS state, and bot bullets ignoring intervening
+  bodies.
+- **Bots are not class-restricted** the way the player's picker is: any firearm
+  may occupy either position. `setLoadout`'s primary/secondary validation is the
+  player's rule, and extending it to bots would buy nothing but a second place to
+  keep the catalog's classes in sync.
 
 ### Tranche 6b follow-up — nearest gunshot, and who may be interrupted
 
@@ -1380,3 +1514,46 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
     every idle bot's patrol picks are rooftop nodes it silently discards. That
     is a candidate follow-up (bias the selector toward reachable nodes), not a
     7a fix.
+
+32. **A union widening is an atomic commit boundary; put the seam somewhere else.**
+    7b's first plan was the obvious one: land the pure `sim/` half, wire it
+    second. That split cannot compile. `BotWeaponId` is consumed by a full
+    `Record` in three modules on both sides of the dependency graph, so the
+    instant the alias widens, every one of them fails at once — there is no
+    intermediate state in which only `sim/` knows about the blade. The
+    workable boundary was a FEATURE that happened to be type-complete (the
+    knife as a single-weapon bot, which 7a's architecture already supported),
+    with the multi-position loadout as a second commit on top of it. Before
+    splitting a tranche, ask which edit is atomic and route around it: a
+    boundary that leaves `npm run typecheck` red between two commits is not a
+    boundary, it is one commit someone stopped writing halfway.
+
+33. **A constant written in three places is one constant and two lies — and the
+    dangerous copy is the one that only writes.**
+    Plan Relay's OpenCode version lived in `plan-relay.sh` (the gate that
+    refuses a wrong client), `planRelaySummary.mjs` (the stamp every run record
+    carries) and `planRelay.test.mjs` (the fake binary the suite runs against).
+    Bumping the first two shipped a run whose `summary.json` claimed 1.18.25
+    for an executor the gate had just verified as 1.18.28 — a record
+    contradicting the run that produced it, which is the one thing that file
+    exists not to do. Note which copy each layer caught: `npm test` failed
+    loudly on the third, because a test that hardcodes the value it checks
+    fails the moment the value moves. NOTHING caught the second, because a
+    summary is written and never read back. When you duplicate a constant, the
+    copies with tests are the safe ones; audit the copies that only emit.
+
+34. **A watchdog kill is not a clean stop, and its damage is not in the file list.**
+    Tranche 7b part B's relay run hit `OPENCODE_TIMEOUT` at 45 minutes. Ten of
+    twelve planned files were complete, which made the run look nearly
+    finished — but the kill landed mid-edit and left `bots.ts` syntactically
+    invalid (a class brace above the method that should have been inside it),
+    two comments truncated mid-sentence, one on an unclosed parenthesis, and
+    BOTH test files untouched, so three pre-existing tests failed against a
+    widened config and none of the tranche's new pins existed at all. A run
+    that dies before its tests is strictly worse than one that dies before its
+    implementation: the code reads as finished and nothing holds it in place.
+    Two consequences. The timeout is the PLAN's problem — part A took 25
+    minutes for twelve files, so an equally large part B had no headroom and
+    should have been split again or launched with a raised ceiling. And an
+    Implementation section should order the tests BEFORE the last of the
+    wiring, because the tail is what a kill takes.

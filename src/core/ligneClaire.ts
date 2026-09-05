@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const INK = '#29383c';
 const PAPER = '#eddbb5';
@@ -192,6 +193,34 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
     depthTest: true, depthWrite: false, alphaToCoverage: true,
   });
   renderer.getSize(ink.resolution);
+  // Weapon props have rounded edges. A back-face hull supplies their moving
+  // silhouette; crease ink alone cannot outline a smooth barrel. Smooth ONLY
+  // the hull normals, leaving the visible material's surface normals intact.
+  const silhouette = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthTest: true, depthWrite: false,
+    uniforms: {
+      resolution: { value: ink.resolution },
+      inkColour: { value: new THREE.Color(0x29383c) },
+    },
+    vertexShader: `
+      uniform vec2 resolution;
+      void main() {
+        vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec4 n = projectionMatrix * vec4(normalMatrix * normal, 0.0);
+        vec2 direction = (n.xy * clip.w - clip.xy * n.w) * resolution;
+        direction /= max(length(direction), 0.00001);
+        clip.xy += direction * (2.0 * 1.05 / resolution) * clip.w;
+        gl_Position = clip;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 inkColour;
+      void main() {
+        gl_FragColor = vec4(inkColour, 1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
 
   const surfaces = new Set<THREE.MeshToonMaterial>();
   const meshes: THREE.Mesh<THREE.BufferGeometry, THREE.MeshToonMaterial>[] = [];
@@ -218,7 +247,8 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
   const facades = [facade(renderer, TEAL), facade(renderer, RED)];
   const botPaint = new Map<THREE.MeshToonMaterial, THREE.MeshToonMaterial>();
   const edges = new Map<THREE.BufferGeometry, LineSegmentsGeometry>();
-  const strokes: LineSegments2[] = [];
+  const hulls = new Map<THREE.BufferGeometry, THREE.BufferGeometry>();
+  const strokes: THREE.Object3D[] = [];
   let building = 0;
   for (const mesh of meshes) {
     const original = mesh.material;
@@ -250,9 +280,10 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
       (mesh as THREE.Mesh).material = [original, original, original, original, painted, original];
     }
     if (mesh.geometry instanceof THREE.PlaneGeometry) continue;
+    const weaponPart = mesh.name === 'weapon-part';
     let geometry = edges.get(mesh.geometry);
     if (!geometry) {
-      const creases = new THREE.EdgesGeometry(mesh.geometry, 25);
+      const creases = new THREE.EdgesGeometry(mesh.geometry, weaponPart ? 65 : 25);
       geometry = new LineSegmentsGeometry().fromEdgesGeometry(creases);
       creases.dispose();
       edges.set(mesh.geometry, geometry);
@@ -264,6 +295,24 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
     stroke.renderOrder = 1;
     mesh.add(stroke);
     strokes.push(stroke);
+    if (weaponPart) {
+      let hullGeometry = hulls.get(mesh.geometry);
+      if (!hullGeometry) {
+        const positions = mesh.geometry.clone();
+        positions.deleteAttribute('normal');
+        positions.deleteAttribute('uv');
+        hullGeometry = mergeVertices(positions, 0.00001);
+        positions.dispose();
+        hullGeometry.computeVertexNormals();
+        hulls.set(mesh.geometry, hullGeometry);
+      }
+      const hull = new THREE.Mesh(hullGeometry, silhouette);
+      hull.name = 'weapon-ink-silhouette';
+      hull.raycast = () => {};
+      hull.renderOrder = 1;
+      mesh.add(hull);
+      strokes.push(hull);
+    }
   }
   return {
     resize: () => { renderer.getSize(ink.resolution); },

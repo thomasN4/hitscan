@@ -62,8 +62,8 @@ respawn. Filled surfaces use a small polygon offset to keep coplanar strokes
 visible. The diagnostic debug flag hides the extra ink. Procedural sRGB canvas
 textures use mipmaps and up to 8x anisotropy for distant and oblique surfaces.
 
-This is an art-direction test on the existing box models. It does not introduce
-smooth-model silhouette extraction, remesh characters, redraw the HUD, or make
+The first arena pass was an art-direction test on the existing box models. It
+did not introduce smooth-model silhouettes (added for weapons below), remesh characters, redraw the HUD, or make
 every painted detail maintain a constant screen-space line weight. It adds an
 ink draw per outlined mesh, plus material groups on decorated boxes; performance
 on the intended hardware still needs a playtest. Resources live for the page's
@@ -94,3 +94,51 @@ competing instances can exhaust the smoke test's wall-clock timing allowances.
 Check camera motion, stairs, distant
 bots, weapon occlusion and reloads during a human playtest before broadening the
 style to other maps.
+
+## Weapon follow-up: shaped first-person props
+
+Replace all six first-person box assemblies with procedural models in
+`core/weaponModels.ts`. This geometry improvement applies on every map;
+the illustrated palette and ink remain exclusive to the arena study URL.
+Bot-held models remain the earlier simple silhouettes.
+
+- SMG: tubular receiver, ribbed fore-end, curved magazine, shaped grip/stock,
+  aperture sight and recessed muzzle.
+- Sniper: tapered barrel, shaped stock, scope bells/mounts and bolt handle.
+- Shotgun: paired barrel/magazine tubes, ribbed wooden pump, shaped stock and bead.
+- Pistol: beveled slide/frame, slanted grip, ejection port, serrations and sights.
+- Revolver: separate round cylinder with chamber marks, shaped grip and hammer.
+- Knife: beveled clip-point blade, guard and ribbed round handle.
+
+The factory returns the existing animated group, moving magazine/cylinder/shell
+mesh and sight-alignment offset. Construction remains engine/DOM-free; weapon
+selection, camera recoil, shot aim and reload timing stay in their existing
+systems. The cosmetic reload pose now moves inward and rolls slightly upward,
+keeping the remodeled prop visible instead of dropping it below the viewport.
+
+Weapon parts carry a `weapon-part` name. The illustration pass gives these
+65-degree crease ink plus a 1.05 CSS-pixel back-face silhouette hull. Hulls use
+welded, averaged normals on a separate cached geometry; the visible surface
+normals are unchanged. This avoids drawing every cylinder facet and bevel as
+an interior ink line. Hulls follow parent visibility/animation, never cast
+shadows or accept raycasts, and hide with the existing diagnostic flag. Their
+resolution uniform shares the line pass's resize handling. World and bot ink
+retain the first pass's 25-degree threshold.
+
+The silhouettes are additional draws on the active first-person model; this
+pass does not add arms, skeletal animations or a replacement asset pipeline.
+
+```sh
+CS_SMOKE_BASE=http://127.0.0.1:5178 \
+CS_VIEWMODEL_QUERY='?map=arena&style=ligne-claire&tbots=1' \
+node scripts/viewmodel-shots.mjs /tmp/weapon-poses
+```
+
+The updated capture tool equips real persisted loadouts and switches slots
+through input, so weapon stats and HUD labels match the prop. It checks hip,
+fully aimed, mid-reload and restored views for all five guns, plus knife hip
+and inert ADS. It asserts reload completion and rejects browser/shader errors.
+Omit `CS_VIEWMODEL_QUERY` for the range and point `CS_SMOKE_BASE` at production
+preview to check the bundled version. Visually check that front/rear sights
+meet the crosshair and that moving reload parts carry their ink without stray
+lines. Run lint, typecheck, unit tests, build and the all-map smoke suite.

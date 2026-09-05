@@ -6,7 +6,7 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
-import { createCelMaterial } from './core/materials';
+import { createWeaponViewModel, type WeaponViewModel } from './core/weaponModels';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
 import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTime,
@@ -84,149 +84,17 @@ function magBaseY(mag: THREE.Mesh): number {
 // initEngine() to have run first — see initWeaponViewmodels().
 export const gunGroup = new THREE.Group();
 
-const smgGroup = new THREE.Group();
-let smgMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x2b2b2b });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.5), dark);
-  body.position.set(0.25, -0.22, -0.45); // lower-right of the view
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
-  barrel.position.set(0.25, -0.19, -0.82);
-  smgMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
-  smgMag.position.set(0.25, -0.31, -0.42);
-  smgMag.userData.baseY = -0.31;
-  smgGroup.add(body, barrel, smgMag);
-}
-
-const sniperGroup = new THREE.Group();
-let sniperMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x24301f }); // green gunmetal
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.62), dark);
-  body.position.set(0.26, -0.21, -0.55);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.72), dark);
-  barrel.position.set(0.26, -0.18, -1.15); // long barrel reaching mid-screen
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.13, 0.22), dark);
-  stock.position.set(0.26, -0.24, -0.14);
-  // Scope: cylinder laid along the barrel (default axis is y -> rotate x)
-  const scopeMat = createCelMaterial({ color: 0x111111 });
-  const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.26, 12), scopeMat);
-  scope.rotation.x = Math.PI / 2;
-  scope.position.set(0.26, -0.12, -0.6);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.10, 0.10), dark);
-  mag.position.set(0.26, -0.29, -0.52);
-  mag.userData.baseY = -0.29;
-  sniperMag = mag;
-  sniperGroup.add(body, barrel, stock, scope, mag);
-}
-
-const pistolGroup = new THREE.Group();
-let pistolMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x33322f });
-  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.30), dark);
-  slide.position.set(0.24, -0.20, -0.38);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.15, 0.09), dark);
-  grip.position.set(0.24, -0.30, -0.27);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.13, 0.07), dark);
-  mag.position.set(0.24, -0.31, -0.28);
-  mag.userData.baseY = -0.31;
-  pistolMag = mag;
-  pistolGroup.add(slide, grip, mag);
-}
-
-const shotgunGroup = new THREE.Group();
-let shotgunMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const wood = createCelMaterial({ color: 0x4a331f }); // oiled walnut
-  const steel = createCelMaterial({ color: 0x26262a });
-  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.34), steel);
-  receiver.position.set(0.25, -0.22, -0.5);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.62), steel);
-  barrel.position.set(0.25, -0.18, -0.95);
-  const tube = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.55), steel); // under-barrel shell tube
-  tube.position.set(0.25, -0.235, -0.9);
-  const pump = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.16), wood);
-  pump.position.set(0.25, -0.24, -0.78);
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.26), wood);
-  stock.position.set(0.25, -0.25, -0.1);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.12), steel); // loading gate/shell
-  mag.position.set(0.25, -0.29, -0.46);
-  mag.userData.baseY = -0.29;
-  shotgunMag = mag;
-  shotgunGroup.add(receiver, barrel, tube, pump, stock, mag);
-}
-
-const revolverGroup = new THREE.Group();
-let revolverMag: THREE.Mesh; // kept for the reload animation (cylinder drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x2e2e33 });
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.075, 0.34), dark);
-  frame.position.set(0.24, -0.2, -0.4);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.22), dark);
-  barrel.position.set(0.24, -0.185, -0.62);
-  // Cylinder: a short fat cylinder laid along the barrel (default axis is y
-  // -> rotate x), the visual signature of a revolver.
-  const cylinder = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.05, 0.09, 8), dark);
-  cylinder.rotation.x = Math.PI / 2;
-  cylinder.position.set(0.24, -0.2, -0.44);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.08),
-    createCelMaterial({ color: 0x4a331f })); // wood grips
-  grip.position.set(0.24, -0.3, -0.28);
-  const mag = cylinder; // the reload pose drops/swings the cylinder itself
-  mag.userData.baseY = -0.2;
-  revolverMag = mag;
-  revolverGroup.add(frame, barrel, cylinder, grip);
-}
-
-const knifeGroup = new THREE.Group();
-let knifeBlade: THREE.Mesh; // poseReload's target slot — never reloads, but keeps
-                            // the pose-reset path uniform with every viewmodel
-{
-  const steel = createCelMaterial({ color: 0xb9bdc6 }); // honed edge
-  const dark = createCelMaterial({ color: 0x1f1f22 });
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.16), dark);
-  grip.position.set(0.24, -0.24, -0.32);
-  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.03), dark);
-  guard.position.set(0.24, -0.235, -0.41);
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.055, 0.36), steel);
-  blade.position.set(0.24, -0.225, -0.6);
-  blade.userData.baseY = -0.225;
-  knifeBlade = blade;
-  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.055, 0.1), steel);
-  tip.position.set(0.24, -0.212, -0.82);
-  tip.rotation.x = 0.25; // clip-point lean toward the thrust line
-  knifeGroup.add(grip, guard, blade, tip);
-}
-
-gunGroup.add(smgGroup, sniperGroup, pistolGroup, shotgunGroup, revolverGroup, knifeGroup);
-
-/**
- * Per-weapon viewmodel: the animated group, the mesh poseReload() drops and
- * reseats during a reload, and the hip→ADS position delta that brings THIS
- * gun's sights onto the screen center at full adsLerp (each viewmodel rests
- * at its own offset/sight height — one hardcoded shift cannot center them
- * all; playtest round 1). Keyed by catalog id so a new weapon fails to
- * compile until it registers here.
- */
-interface ViewModel {
-  group: THREE.Group;
-  mag: THREE.Mesh;
-  /** Position delta applied at full ADS: x re-centers the rest offset,
-   *  y raises the sight line to eye height. Tuned against screenshots
-   *  (scripts/viewmodel-shots.mjs). */
-  aimOffset: { x: number; y: number };
-}
-
-const VIEWMODELS: Record<WeaponId, ViewModel> = {
-  smg:     { group: smgGroup,     mag: smgMag,     aimOffset: { x: -0.25, y: 0.14 } },  // the baseline every sight line matches
-  sniper:  { group: sniperGroup,  mag: sniperMag,  aimOffset: { x: -0.26, y: 0.12 } },  // scope tube centered (overlay takes over at full ADS)
-  shotgun: { group: shotgunGroup, mag: shotgunMag, aimOffset: { x: -0.25, y: 0.105 } },  // bead line rides ~30% lower than the others' sight lines (playtest round 2)
-  pistol:  { group: pistolGroup,  mag: pistolMag,  aimOffset: { x: -0.24, y: 0.15 } },  // slide-top sight line at the smg's height
-  revolver:{ group: revolverGroup,mag: revolverMag,aimOffset: { x: -0.24, y: 0.147 } }, // frame-top sight line at the smg's height
-  knife:   { group: knifeGroup,   mag: knifeBlade, aimOffset: { x: -0.24, y: 0.14 } },  // catalog-complete; RMB is inert while melee so the offset never blends in
+// Models own their geometry, rest-space sight line and moving reload part.
+// Gameplay continues to own selection, recoil, reload progress and shot aim.
+const VIEWMODELS: Record<WeaponId, WeaponViewModel> = {
+  smg: createWeaponViewModel('smg'),
+  sniper: createWeaponViewModel('sniper'),
+  shotgun: createWeaponViewModel('shotgun'),
+  pistol: createWeaponViewModel('pistol'),
+  revolver: createWeaponViewModel('revolver'),
+  knife: createWeaponViewModel('knife'),
 };
+for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
 
 /**
  * The equipped weapon's hip→ADS viewmodel delta, for player.ts:updateViewmodel
@@ -314,10 +182,12 @@ function holdEnv(t: number, inFrac: number, outFrac: number): number {
  */
 function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
   const dip = holdEnv(t, 0.2, 0.25);
-  // Negative x-rotation tips the muzzle down; z rolls it toward center
-  group.position.y = -0.15 * dip;
-  group.rotation.x = -0.32 * dip;
-  group.rotation.z = 0.15 * dip;
+  // Bring the prop inward and roll it into view. The old downward tip hid
+  // nearly the entire new model; this changes only presentation, not timing.
+  group.position.x = -0.10 * dip;
+  group.position.y = -0.05 * dip;
+  group.rotation.x = 0.10 * dip;
+  group.rotation.z = 0.28 * dip;
   // Mag falls out early (8%..38%), seats home late (55%..88%)
   const drop = THREE.MathUtils.smoothstep(t, 0.08, 0.38);
   const seat = THREE.MathUtils.smoothstep(t, 0.55, 0.88);

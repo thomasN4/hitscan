@@ -93,7 +93,7 @@ export const sfxSwitch = (): void => playGunshot(0.1, 1800, 0.04);
 export const sfxZoom = (): void => playGunshot(0.08, 2400, 0.03);
 
 /**
- * A weapon's report as heard from ELSEWHERE in the world, plus how fast it
+ * A weapon's attack as heard from ELSEWHERE in the world, plus how fast it
  * fades with distance.
  *
  * Deliberately a second table rather than a shared one with the player's
@@ -110,8 +110,12 @@ export const sfxZoom = (): void => playGunshot(0.08, 2400, 0.03);
  * Changing one of these does not change the other, and it must not: a sniper
  * that sounds louder than a pistol is a cue, while a sniper that is HEARD
  * further than a pistol is a balance change to 6b's investigation geometry.
+ * The blade has no hearing radius at all, which applies the same warning with
+ * even more force — its falloff below is presentation only.
  */
-interface EnemyShotTone {
+interface EnemyAttackTone {
+  /** Which synth realizes it: a firearm's report, or a blade's swish. */
+  voice: 'report' | 'swish';
   /** Volume at zero distance, before attenuation. */
   vol: number;
   /** Metres of separation that bleed one unit of `vol`. */
@@ -120,21 +124,45 @@ interface EnemyShotTone {
   dur: number;
 }
 
-const ENEMY_SHOT_TONE: Record<BotWeaponId, EnemyShotTone> = {
-  smg:      { vol: 0.30, falloff: 150, freqBase: 800, dur: 0.09 },
-  pistol:   { vol: 0.26, falloff: 130, freqBase: 950, dur: 0.08 },
-  revolver: { vol: 0.36, falloff: 190, freqBase: 640, dur: 0.16 },
+const ENEMY_ATTACK_TONE: Record<BotWeaponId, EnemyAttackTone> = {
+  smg:      { voice: 'report', vol: 0.30, falloff: 150, freqBase: 800, dur: 0.09 },
+  pistol:   { voice: 'report', vol: 0.26, falloff: 130, freqBase: 950, dur: 0.08 },
+  revolver: { voice: 'report', vol: 0.36, falloff: 190, freqBase: 640, dur: 0.16 },
   // Deepest and longest-tailed, and it carries furthest — the report is how
   // you learn there is a sniper before you find out the hard way.
-  sniper:   { vol: 0.40, falloff: 260, freqBase: 430, dur: 0.26 },
-  shotgun:  { vol: 0.42, falloff: 170, freqBase: 330, dur: 0.24 },
+  sniper:   { voice: 'report', vol: 0.40, falloff: 260, freqBase: 430, dur: 0.26 },
+  shotgun:  { voice: 'report', vol: 0.42, falloff: 170, freqBase: 330, dur: 0.24 },
+  // A swing you hear only if it is nearly on you: close-range and short.
+  knife:    { voice: 'swish', vol: 0.22, falloff: 45, freqBase: 1400, dur: 0.12 },
 };
 
-/** Enemy gunshot: attenuated with distance from the camera, timbre by weapon. */
-export function sfxEnemyShoot(pos: THREE.Vector3, weapon: BotWeaponId): void {
-  const tone = ENEMY_SHOT_TONE[weapon];
+/**
+ * A short filtered noise burst: the bandpass pattern sfxFootstep already
+ * uses, attenuated by camera distance the same way the report is.
+ */
+function playSwish(vol: number, freqBase: number, dur: number): void {
+  const ctx = ac();
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx, dur);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.Q.value = 1.2;
+  filter.frequency.setValueAtTime(freqBase, ctx.currentTime);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(60, freqBase / 4), ctx.currentTime + dur);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(vol, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.start();
+}
+
+/** Enemy attack: attenuated with distance from the camera, timbre by weapon. */
+export function sfxEnemyAttack(pos: THREE.Vector3, weapon: BotWeaponId): void {
+  const tone = ENEMY_ATTACK_TONE[weapon];
   const d = camera.position.distanceTo(pos);
-  playGunshot(Math.max(0.05, tone.vol - d / tone.falloff), tone.freqBase, tone.dur);
+  const vol = Math.max(0.05, tone.vol - d / tone.falloff);
+  if (tone.voice === 'swish') playSwish(vol, tone.freqBase, tone.dur);
+  else playGunshot(vol, tone.freqBase, tone.dur);
 }
 
 /**

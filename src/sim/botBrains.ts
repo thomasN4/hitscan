@@ -297,10 +297,17 @@ export interface BotBrain {
    * the executor never uses it to compute damage — see resolveShot.
    */
   readonly weapon: BotWeaponId;
-  /** Rounds chambered, magazine capacity and reload state. Display only. */
+  /** Rounds chambered, magazine capacity, reserve and reload state. Display only. */
   readonly mag: number;
   readonly magSize: number;
+  readonly reserve: number;
   readonly reloading: boolean;
+  /**
+   * How the executor must realize a pull: 'ranged' resolves through
+   * resolveShot below; 'melee' means the executor swings instead — a melee
+   * brain never reaches resolveShot.
+   */
+  readonly resolution: 'ranged' | 'melee';
   /** Hit probability for ONE ray at eye-to-eye 3D `dist` under this weapon. */
   hitChance(dist: number): number;
   /**
@@ -310,7 +317,8 @@ export interface BotBrain {
    *
    * ALL of a bot's dice come from the brain's own rng stream — never a
    * global — which is why this is the brain's to draw and not the
-   * executor's, even though the executor is what asked for the shot.
+   * executor's, even though the executor is what asked for the shot. A melee
+   * brain never reaches this; the executor swings instead.
    */
   resolveShot(dist: number): ShotOutcome;
   /**
@@ -373,6 +381,8 @@ export function pickHeardLead(heard: readonly HeardSound[], listenerFeet: THREE.
 
 /** The shipped bot policy, parameterized for future variants. */
 export class DefaultBrain implements BotBrain {
+  private params: BrainParams;
+  private held: BotWeaponId;
   private strafeDir: 1 | -1;
   /** True while following the executor's route rather than steering at the target. */
   private routing = false;
@@ -462,12 +472,16 @@ export class DefaultBrain implements BotBrain {
   private advanceRequested = false;
 
   /**
+   * @param base the weapon-independent policy. The per-weapon bands, engage
+   *   range and drift are derived from whatever the loadout is HOLDING, and
+   *   re-derived when a dry swap changes it — so the caller passes the shipped
+   *   defaults rather than a weapon's own row.
    * @param fire this brain's weapon. Required rather than defaulted: bots.ts
    *   is the only production construction site, and a defaulted controller
    *   would let a wiring failure ship silently as a bot that never shoots.
    */
   constructor(
-    private readonly params: BrainParams,
+    private readonly base: BrainParams,
     private rng: () => number,
     private readonly fire: FireController,
   ) {
@@ -479,6 +493,8 @@ export class DefaultBrain implements BotBrain {
     // built would have to be built first, silently shifting every scripted
     // rng sequence in the suite by one.
     this.fire.arm();
+    this.params = this.fire.params(this.base);
+    this.held = this.fire.weapon;
     // Spawn counts as a pause: the first patrol request waits one second.
     this.patrolPause = this.params.patrolPause;
   }
@@ -499,6 +515,8 @@ export class DefaultBrain implements BotBrain {
     // decide() so the per-frame sequence the tests script against is
     // untouched.
     this.fire.arm();
+    this.held = this.fire.weapon;
+    this.params = this.fire.params(this.base);
     this.routing = false;
     this.blockedFor = 0;
     this.commitLeft = 0;
@@ -638,7 +656,9 @@ export class DefaultBrain implements BotBrain {
   get weapon(): BotWeaponId { return this.fire.weapon; }
   get mag(): number { return this.fire.mag; }
   get magSize(): number { return this.fire.magSize; }
+  get reserve(): number { return this.fire.reserve; }
   get reloading(): boolean { return this.fire.reloading; }
+  get resolution(): 'ranged' | 'melee' { return this.fire.resolution; }
 
   hitChance(dist: number): number {
     return this.fire.hitChance(dist);
@@ -708,6 +728,18 @@ export class DefaultBrain implements BotBrain {
       dt,
       this.pendingBearing === null && shootable !== null && this.inRange(shootable.dist3),
     );
+    // The dry swap happens inside tick(): a bot that just fell back to its
+    // sidearm fights at the SIDEARM's bands, and one that reached the blade
+    // closes to contact. Recomputed only on a change, and it takes no draws.
+    //
+    // This frame's `engaged` argument above was computed against the OUTGOING
+    // weapon's engage range — one frame of staleness on an opportunistic reload
+    // gate, and the alternative is asking the controller to swap before it has
+    // ticked.
+    if (this.fire.weapon !== this.held) {
+      this.held = this.fire.weapon;
+      this.params = this.fire.params(this.base);
+    }
 
     // Priority 1: a pending incoming-fire bearing — even over a same-frame
     // visual. The shot's direction is ALL that is known: no identity, no

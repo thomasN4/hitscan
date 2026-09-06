@@ -76,7 +76,7 @@ None.
   writeFileSync(fake, `#!/usr/bin/env bash
 set -eu
 if test "\${1:-}" = "--version"; then
-  echo 1.18.25
+  echo 1.18.28
   exit 0
 fi
 printf '%s\\n' "$@" > "$PLAN_RELAY_TEST_ARGS"

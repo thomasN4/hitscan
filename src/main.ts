@@ -13,7 +13,7 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
                LoadoutState,
-               MapName, WeaponSlot, WeaponId, BotWeaponChoice, LiveWeapon, PlayerState } from './core/state';
+               MapName, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
 import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
@@ -38,7 +38,7 @@ import { validateWeapons } from './sim/validateWeapons';
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
 // core/state.ts stays free of browser globals, so the committed match-config
-// query (?map=&tbots=&ctbots=&time=&tweap=&ctweap=) is parsed here and written
+// query (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) is parsed here and written
 // into the shared state before anything reads session — initMenus initializes
 // the form from it.
 Object.assign(session, parseSessionConfig(new URLSearchParams(location.search)));
@@ -73,8 +73,8 @@ BUILDERS[session.map]();
 // this runs once per session.
 buildNav();
 if (!RANGE) {
-  spawnBots(session.botsT, 'T', session.botWeaponT);
-  if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt);
+  spawnBots(session.botsT, 'T', session.botWeaponT, session.botSecondaryT);
+  if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt, session.botSecondaryCt);
 }
 respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
 initMenus({
@@ -293,6 +293,8 @@ const game: DebugGame = {
   get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
   get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
   get botWeaponCt() { return session.botWeaponCt; }, set botWeaponCt(v: BotWeaponChoice) { session.botWeaponCt = v; },
+  get botSecondaryT() { return session.botSecondaryT; }, set botSecondaryT(v: BotSecondaryChoice) { session.botSecondaryT = v; },
+  get botSecondaryCt() { return session.botSecondaryCt; }, set botSecondaryCt(v: BotSecondaryChoice) { session.botSecondaryCt = v; },
   get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
   get started() { return session.started; }, set started(v: boolean) { session.started = v; },
   get debugView() { return session.debugView; }, set debugView(v: boolean) { session.debugView = v; },

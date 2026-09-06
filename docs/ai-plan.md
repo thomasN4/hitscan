@@ -1006,6 +1006,12 @@ real table through a parameter, but separately runtime-imports the shared
 - **`BotWeaponId = Exclude<WeaponId, 'knife'>`** puts the 7a/7b boundary in
   the type system. A knife needs a swing, not a hit die, and nothing — not the
   URL parser, not the menu, not a future caller — can hand a bot one.
+  *(Annotation, tranche 7b (PR #92): the alias is now `BotWeaponId = WeaponId`
+  and all three of those routes CAN hand a bot a blade — `?tweap=knife`, the
+  menu's Knife option, and the `mixed` draw. The claim was true when written
+  and the boundary did its job: widening the alias is what made every Record
+  over it demand an answer for a knife. The old exclusion survives as
+  `BotFirearmId`, which is what the secondary position is drawn from.)*
 - One damage call per trigger pull, however many rays land, with the zone the
   best any ray struck. `damagePlayer` flashes the vignette and plays `sfxHurt`
   per CALL, so eight pellets routed separately would be eight grunts in a

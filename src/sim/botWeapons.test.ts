@@ -793,6 +793,27 @@ describe('BotLoadout', () => {
     expect(c.taken()).toBe(before + pulls);
   });
 
+  test('a swap costs SWAP_DELAY even when the spawn stagger was long', () => {
+    // Regression (review round 1): arm() holds EVERY position for the drawn
+    // stagger, but tick() advances only the active one — so an untouched
+    // secondary's cooldown sat frozen at its spawn value. With waitFor taking
+    // the max of the two, a late swap then waited out a stale 1-3 s stagger
+    // instead of the documented half second.
+    const stagger = FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN;   // the longest
+    const fire = loadout('smg', 'pistol', queueRng([1 - 1e-9]));
+    fire.arm();
+    past(fire);
+    drain(fire);
+    expect(fire.weapon).toBe('pistol');
+    // Just short of the swap delay is still blocked...
+    fire.tick(SWAP_DELAY - 0.01, false);
+    expect(fire.ready()).toBe(false);
+    // ...and just past it fires, rather than serving out the stagger.
+    fire.tick(0.02, false);
+    expect(fire.ready()).toBe(true);
+    expect(SWAP_DELAY).toBeLessThan(stagger);
+  });
+
   test('every delegated member reports the NEW position after a swap', () => {
     const fire = loadout('sniper', 'revolver', queueRng([0]));
     fire.arm();

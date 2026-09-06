@@ -328,8 +328,13 @@ export class Bot implements BotShape {
    * sniper's muzzle flash leaves the end of its longer barrel rather than
    * hanging in the middle of it. Mutable because a dry swap changes weapons
    * mid-life.
+   *
+   * Initialized here rather than in the constructor body because
+   * rebuildAimGroup() is what actually sets it, and a method assignment is
+   * invisible to strictPropertyInitialization. The zero never reaches a
+   * frame: the constructor calls that helper before anything can read it.
    */
-  private muzzleZ: number;
+  private muzzleZ = 0;
   /**
    * Fair-rotation cursor for the per-frame visual acquisition: the index the
    * next scan starts from when the brain's tracked identity is not cheaply
@@ -458,14 +463,9 @@ export class Bot implements BotShape {
     // reached that list would silently become a torso hit rather than error.
     // Bot LOS rays against `solids` only, so it never blocks sight either.
     this.aim.position.set(0.16, 1.5, 0);
-    const model = BOT_WEAPON_MODELS[weapon];
-    this.muzzleZ = model.muzzle;
-    for (const part of model.parts) {
-      const mesh = new THREE.Mesh(part.geo, part.mat);
-      mesh.position.set(part.pos[0], part.pos[1], part.pos[2]);
-      mesh.castShadow = true;
-      this.aim.add(mesh);
-    }
+    // The silhouette itself goes through the same helper a dry swap uses, so
+    // the barrel layout has ONE definition rather than two that drift.
+    this.rebuildAimGroup();
     this.mesh.add(this.aim);
 
     this.spawnAtRandom();
@@ -534,6 +534,16 @@ export class Bot implements BotShape {
     // The brain outlived the body: re-arm its spawn stagger and drop the
     // corpse's attention, memory and reactions — a new life inherits nothing.
     this.brain.onRespawn();
+    // arm() put the loadout back on its primary, so the BODY must follow in
+    // this same call rather than at the next frame's resync in update(). A
+    // respawn is a full-life reset, and a bot that stands up carrying the
+    // silhouette — and the killfeed name — of the weapon it died holding is
+    // exactly the stale display this method exists to clear. It also cannot
+    // wait for a frame that may not come: the loop only simulates under
+    // pointer lock, so a respawn scheduled across a pause would otherwise
+    // show the wrong barrel for as long as the menu is up.
+    this.weapon = this.brain.weapon;
+    this.rebuildAimGroup();
     this.perceptionCursor = 0;
     // The present, not zero: six seconds of combat happened while this bot
     // was a corpse and none of it is news.

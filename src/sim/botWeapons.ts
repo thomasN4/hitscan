@@ -347,7 +347,17 @@ export interface FirePosition extends FireController {
   readonly dry: boolean;
   /** Refill to a full magazine and reserve, cancelling any reload. Takes NO draws. */
   load(): void;
-  /** Hold the trigger for `seconds` — the spawn stagger, or a swap. Takes NO draws. */
+  /**
+   * Hold the trigger for exactly `seconds` — the spawn stagger, or a swap.
+   * Takes NO draws, and SETS the wait rather than extending it.
+   *
+   * Absolute on purpose. arm() holds every position for the drawn stagger but
+   * tick() advances only the active one, so an untouched position's cooldown
+   * is frozen at its spawn value however long the primary fought. Taking the
+   * max here made a late swap serve out that stale 1-3 s stagger instead of
+   * SWAP_DELAY; the position being switched TO is precisely the one whose
+   * clock is meaningless.
+   */
   waitFor(seconds: number): void;
 }
 
@@ -461,7 +471,7 @@ export class WeaponFireController implements FirePosition {
   }
 
   waitFor(seconds: number): void {
-    this.cooldown = Math.max(this.cooldown, seconds);
+    this.cooldown = seconds;
   }
 
   get dry(): boolean {
@@ -565,7 +575,7 @@ export class MeleeFireController implements FirePosition {
   }
 
   waitFor(seconds: number): void {
-    this.cooldown = Math.max(this.cooldown, seconds);
+    this.cooldown = seconds;
   }
 
   get dry(): boolean {

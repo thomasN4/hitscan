@@ -971,10 +971,13 @@ export const SESSION_DEFAULTS: Readonly<{
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
-  // query string (?map=&tbots=&ctbots=&time=&tweap=&ctweap=) via a full page
-  // reload — map
+  // query string (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
+  // a full page reload — map
   // switching is a reload and there is deliberately no hot-swapping of scenes
-  // at runtime. main.ts overwrites all of them from core/sessionConfig.ts's
+  // at runtime. The key list is spelled out in four places (here, AGENTS.md,
+  // sessionConfig.ts's header and configToQuery itself) and only the last is
+  // executable; when the query grows, grep the literal rather than trusting
+  // this copy — tranche 7b's reviewer caught three of the four stale. main.ts overwrites all of them from core/sessionConfig.ts's
   // parse of the URL at startup — reading `location` here would break this
   // module's importability in Node.
   map: MapName;
@@ -985,9 +988,16 @@ export interface SessionState {
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;
   /**
-   * Weapon every bot on each side carries, or 'mixed' to draw one per bot.
-   * Read once by main.ts when it spawns the waves; a bot's weapon is fixed
-   * for the match, so nothing re-reads these.
+   * PRIMARY weapon every bot on each side starts with, or 'mixed' to draw one
+   * per bot. Read once by main.ts when it spawns the waves; the SETTING is
+   * fixed for the match, so nothing re-reads these.
+   *
+   * What is no longer fixed is the weapon a bot is HOLDING. Since tranche 7b a
+   * bot carries a loadout — sim/botWeapons.ts:BotLoadout descends
+   * [primary, secondary?, knife] as each position runs dry — so `Bot.weapon`
+   * changes within a life, the brain re-derives its bands when it does, and
+   * the silhouette is rebuilt to match. Read this pair as configuration, never
+   * as what a given bot has in its hands right now.
    */
   botWeaponT: BotWeaponChoice;
   botWeaponCt: BotWeaponChoice;

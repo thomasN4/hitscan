@@ -204,9 +204,16 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
     },
     vertexShader: `
       uniform vec2 resolution;
+      #include <common>
+      #include <skinning_pars_vertex>
       void main() {
-        vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        vec4 n = projectionMatrix * vec4(normalMatrix * normal, 0.0);
+        #include <beginnormal_vertex>
+        #include <skinbase_vertex>
+        #include <skinnormal_vertex>
+        #include <begin_vertex>
+        #include <skinning_vertex>
+        vec4 clip = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+        vec4 n = projectionMatrix * vec4(normalMatrix * objectNormal, 0.0);
         vec2 direction = (n.xy * clip.w - clip.xy * n.w) * resolution;
         direction /= max(length(direction), 0.00001);
         clip.xy += direction * (2.0 * 1.05 / resolution) * clip.w;
@@ -278,6 +285,20 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
       }
       // Bots face local +z. Faces and pockets belong on the front only.
       (mesh as THREE.Mesh).material = [original, original, original, original, painted, original];
+    }
+    if (mesh instanceof THREE.SkinnedMesh) {
+      // Crease lines built from the rest mesh do not skin. A skinned backface
+      // hull follows the same skeleton and supplies the illustrated contour.
+      const hull = new THREE.SkinnedMesh(mesh.geometry, silhouette);
+      hull.name = 'weapon-ink-silhouette';
+      hull.bindMode = mesh.bindMode;
+      hull.bind(mesh.skeleton, mesh.bindMatrix);
+      hull.frustumCulled = false;
+      hull.raycast = () => {};
+      hull.renderOrder = 1;
+      mesh.add(hull);
+      strokes.push(hull);
+      continue;
     }
     if (mesh.geometry instanceof THREE.PlaneGeometry) continue;
     const weaponPart = mesh.name.startsWith('weapon-');

@@ -76,22 +76,13 @@ function aimFovFor(def: WeaponDef): number {
 // Position is animated each frame in
 // updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.ts).
-// The viewmodel meshes below are pure THREE objects, so they are built at
-// module scope; only ATTACHING them to the engine's camera/scene needs
-// initEngine() to have run first — see initWeaponViewmodels().
+// Geometry is built during explicit startup after the arm asset loads.
 export const gunGroup = new THREE.Group();
 
 // Models own geometry, sight lines, grip anchors and mechanism assemblies.
 // Gameplay continues to own selection, recoil, reload progress and shot aim.
-const VIEWMODELS: Record<WeaponId, WeaponViewModel> = {
-  smg: createWeaponViewModel('smg'),
-  sniper: createWeaponViewModel('sniper'),
-  shotgun: createWeaponViewModel('shotgun'),
-  pistol: createWeaponViewModel('pistol'),
-  revolver: createWeaponViewModel('revolver'),
-  knife: createWeaponViewModel('knife'),
-};
-for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
+// Read only after initWeaponViewmodels(), like the engine bindings.
+let VIEWMODELS: Record<WeaponId, WeaponViewModel>;
 
 /**
  * The equipped weapon's hip→ADS viewmodel delta, for player.ts:updateViewmodel
@@ -128,7 +119,16 @@ const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
  * Requires initEngine() to have run; call once from main.ts before the loop.
  * `scene.add(camera)` is what makes the camera-parented gun render at all.
  */
-export function initWeaponViewmodels(): void {
+export function initWeaponViewmodels(armAsset: THREE.Object3D): void {
+  VIEWMODELS = {
+    smg: createWeaponViewModel('smg', armAsset),
+    sniper: createWeaponViewModel('sniper', armAsset),
+    shotgun: createWeaponViewModel('shotgun', armAsset),
+    pistol: createWeaponViewModel('pistol', armAsset),
+    revolver: createWeaponViewModel('revolver', armAsset),
+    knife: createWeaponViewModel('knife', armAsset),
+  };
+  for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
   camera.add(gunGroup);
   scene.add(camera);
   scene.add(muzzleFlashLight);

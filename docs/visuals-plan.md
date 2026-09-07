@@ -204,3 +204,25 @@ opening, insertion, seating and restored poses. Run it serially with the all-map
 smoke suite against a dedicated production preview, plus lint, typecheck, unit
 tests and build. Existing `viewmodel-shots.mjs` and `ligne-claire-shots.mjs` remain
 available for the wider style comparison and resize/DPR checks.
+
+## Blender arm pipeline follow-up
+
+The earlier procedural glove/sleeve implementation above is superseded by a
+Blender-authored skin with upper-arm, forearm, wrist and finger bones. The
+source remains editable; headless export merges pieces by material into three
+skinned meshes. `docs/assets.md` owns the source/export contract and local
+Blender setup. Committed GLB and provenance hashes keep Blender out of normal
+builds, while `npm test` checks the asset contract and source/output agreement.
+
+Fixed-length two-bone IK replaces the old stretch-to-wrist cylinders. Camera-
+relative shoulder anchors are tuned to reach the existing weapon grips; the
+elbows can now enter the frame. Fingers, reload reaches and mechanism poses
+still follow the pure game-clock envelopes. Skinned backface hulls follow the
+same bones instead of drawing rest-pose crease lines.
+
+Startup awaits the arm asset before viewmodel construction and menu activation.
+An unavailable or incompatible asset leaves Play disabled with a retry message.
+`node scripts/arm-assets-check.mjs` exercises missing/corrupt assets, single-load
+behavior, independent skeletons and the real Deploy/respawn callback. The
+weapon-animation capture suite also checks fixed bone scales and lengths and
+captures sprint/swap poses alongside the existing shot/reload milestones.

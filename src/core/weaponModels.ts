@@ -5,14 +5,14 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createCelMaterial } from './materials';
 import type { WeaponId } from './state';
-import { createHandRig, type HandRig } from './weaponHands';
+import { createArmRig, type ArmRig } from './weaponHands';
 
 export interface WeaponViewModel {
   group: THREE.Group;
   body: THREE.Group;
   mechanisms: Partial<Record<'magazine' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'bolt' | 'slide' | 'shell', THREE.Object3D>>;
   rest: Map<THREE.Object3D, { position: THREE.Vector3; rotation: THREE.Euler }>;
-  hands: { right: HandRig; left: HandRig };
+  hands: ArmRig;
   anchors: { right: THREE.Vector3; left: THREE.Vector3; reload: THREE.Vector3 };
   aimOffset: { x: number; y: number };
 }
@@ -33,7 +33,7 @@ function profileGeometry(points: Profile, width: number, bevel = 0.004): THREE.E
 }
 
 /** Build a fresh model; caller owns it for the page's lifetime. */
-export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
+export function createWeaponViewModel(id: WeaponId, armAsset: THREE.Object3D): WeaponViewModel {
   const group = new THREE.Group();
   group.name = `viewmodel-${id}`;
   const body = new THREE.Group();
@@ -252,8 +252,8 @@ export function createWeaponViewModel(id: WeaponId): WeaponViewModel {
   if (id === 'knife') left.set(-0.27, -0.22, 0.02);
   const reload = new THREE.Vector3(id === 'revolver' ? -0.12 : -0.025,
     id === 'shotgun' ? -0.17 : -0.23, id === 'pistol' ? 0.11 : 0);
-  const hands = { right: createHandRig(1), left: createHandRig(-1) };
-  for (const hand of Object.values(hands)) body.add(hand.wrist, hand.sleeve);
+  const hands = createArmRig(armAsset);
+  body.add(hands.root);
   const rest: WeaponViewModel['rest'] = new Map();
   for (const [key, node] of Object.entries(mechanisms)) {
     node.name = `weapon-mechanism-${key}`;

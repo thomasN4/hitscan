@@ -63,14 +63,15 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   } else if (pose.charge > 0) {
     left.lerp(new THREE.Vector3(-0.035, -0.065, 0.10), pose.charge);
   }
-  // Elbows remain below the camera even while the prop turns for a reload.
-  // Inverting only the local rig transforms avoids reading stale camera matrices
-  // (player.ts applies this frame's camera/ADS transforms after weapons.ts).
+  // Shoulder anchors and pole directions are in camera-relative prop space.
+  // Invert only this frame's local transforms: the camera updates later.
   group.updateMatrix();
   vm.body.updateMatrix();
   const toBody = vm.body.matrix.clone().invert().multiply(group.matrix.clone().invert());
-  const rightElbow = new THREE.Vector3(0.33, -0.45, -0.12).applyMatrix4(toBody);
-  const leftElbow = new THREE.Vector3(-0.33, -0.45, -0.12).applyMatrix4(toBody);
-  poseHand(hands.right, right, rightRotation, 1 - 0.25 * boltReach, rightElbow);
-  poseHand(hands.left, left, leftRotation, 1 - 0.25 * pose.reach, leftElbow);
+  const rightShoulder = new THREE.Vector3(0.22, -0.40, -0.39).applyMatrix4(toBody);
+  const leftShoulder = new THREE.Vector3(-0.12, -0.40, -0.39).applyMatrix4(toBody);
+  const rightPole = new THREE.Vector3(0.6, -1, 0.3).transformDirection(toBody);
+  const leftPole = new THREE.Vector3(-0.6, -1, 0.3).transformDirection(toBody);
+  poseHand(hands.right, right, rightRotation, 1 - 0.25 * boltReach, rightShoulder, rightPole);
+  poseHand(hands.left, left, leftRotation, 1 - 0.25 * pose.reach, leftShoulder, leftPole);
 }

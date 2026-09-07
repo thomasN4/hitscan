@@ -1,68 +1,84 @@
-// Procedural glove articulation; all coordinates are local to the weapon body.
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { createCelMaterial } from './materials';
+import { solveArmIK } from '../sim/armIK';
 
 export interface HandRig {
-  wrist: THREE.Group;
-  sleeve: THREE.Mesh;
-  fingers: THREE.Group[];
-  side: 1 | -1;
+  upper: THREE.Bone;
+  forearm: THREE.Bone;
+  wrist: THREE.Bone;
+  thumb: THREE.Bone;
+  fingers: THREE.Bone[];
+  upperLength: number;
+  forearmLength: number;
+}
+export interface ArmRig {
+  root: THREE.Object3D;
+  right: HandRig;
+  left: HandRig;
+}
+function requireBone(root: THREE.Object3D, name: string): THREE.Bone {
+  const node = root.getObjectByName(name);
+  if (!(node instanceof THREE.Bone)) throw new Error(`Arms asset: missing bone ${name}`);
+  return node;
+}
+function hand(root: THREE.Object3D, side: 'right' | 'left'): HandRig {
+  const upper = requireBone(root, `${side}_upper`);
+  const forearm = requireBone(root, `${side}_forearm`);
+  const wrist = requireBone(root, `${side}-hand`);
+  const fingers = Array.from({ length: 12 }, (_, i) => requireBone(root, `${side}_finger_${Math.floor(i / 3)}_${i % 3}`));
+  if (forearm.parent !== upper || wrist.parent !== forearm
+    || Math.abs(forearm.position.y - .30) > 1e-5 || Math.abs(wrist.position.y - .29) > 1e-5)
+    throw new Error(`Arms asset: incompatible ${side} bone hierarchy or dimensions`);
+  return { upper, forearm, wrist, fingers, thumb: requireBone(root, `${side}_thumb`),
+    upperLength: forearm.position.length(), forearmLength: wrist.position.length() };
+}
+export function createArmRig(asset: THREE.Object3D): ArmRig {
+  const root = clone(asset);
+  return { root, right: hand(root, 'right'), left: hand(root, 'left') };
+}
+/** Explicit startup I/O; the caller owns the loaded template. */
+export async function loadArmAsset(url: string): Promise<THREE.Object3D> {
+  const { scene } = await new GLTFLoader().loadAsync(url);
+  hand(scene, 'right'); hand(scene, 'left');
+  const palette: Record<string, number> = { sleeve: 0x626954, glove: 0x343b3c, panel: 0x525b58 };
+  const materials = new Map<string, THREE.MeshToonMaterial>();
+  let meshes = 0;
+  scene.traverse(node => {
+    if (!(node instanceof THREE.Mesh)) return;
+    if (!(node instanceof THREE.SkinnedMesh)) throw new Error(`Arms asset: unskinned mesh ${node.name}`);
+    const mesh = node as THREE.SkinnedMesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>;
+    if (!mesh.geometry.hasAttribute('skinIndex') || !mesh.geometry.hasAttribute('skinWeight'))
+      throw new Error(`Arms asset: missing skin attributes ${node.name}`);
+    const convert = (material: THREE.Material): THREE.MeshToonMaterial => {
+      const colour = palette[material.name];
+      if (colour === undefined) throw new Error(`Arms asset: unknown material ${material.name}`);
+      let cel = materials.get(material.name);
+      if (!cel) { cel = createCelMaterial({ color: colour }); cel.name = material.name; materials.set(material.name, cel); }
+      material.dispose();
+      return cel;
+    };
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(convert) : convert(mesh.material);
+    node.frustumCulled = false; // Rest-pose bounds do not contain all IK poses in Three r160.
+    node.name = `weapon-arm-${node.name}`;
+    meshes++;
+  });
+  if (!meshes) throw new Error('Arms asset contains no skinned meshes');
+  return scene;
 }
 
-export function createHandRig(side: 1 | -1): HandRig {
-  const wrist = new THREE.Group();
-  wrist.name = side === 1 ? 'right-hand' : 'left-hand';
-  const glove = createCelMaterial({ color: 0x343b3c });
-  const panel = createCelMaterial({ color: 0x525b58 });
-  const cloth = createCelMaterial({ color: 0x626954 });
-  function pad(w: number, h: number, d: number, x: number, y: number, z: number,
-    parent: THREE.Object3D, material = glove): THREE.Mesh {
-    const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d) * 0.3), material);
-    mesh.name = 'weapon-part';
-    mesh.position.set(x, y, z);
-    parent.add(mesh);
-    return mesh;
-  }
-  pad(0.058, 0.065, 0.026, 0, 0.038, 0, wrist);
-  pad(0.042, 0.043, 0.004, 0, 0.042, 0.014, wrist, panel);
-  pad(0.051, 0.024, 0.030, 0, -0.003, 0, wrist);
-  const fingers: THREE.Group[] = [];
-  for (let i = 0; i < 4; i++) {
-    const knuckle = new THREE.Group();
-    knuckle.position.set((i - 1.5) * 0.014, 0.063, 0);
-    wrist.add(knuckle);
-    let parent = knuckle;
-    const length = i === 3 ? 0.017 : 0.021;
-    for (let j = 0; j < 3; j++) {
-      if (j > 0) {
-        const joint = new THREE.Group();
-        joint.position.y = length;
-        parent.add(joint);
-        parent = joint;
-      }
-      fingers.push(parent);
-      pad(0.012, length + 0.003, 0.014, 0, length / 2, 0, parent);
-    }
-  }
-  const thumb = new THREE.Group();
-  thumb.position.set(-side * 0.03, 0.023, -0.005);
-  thumb.rotation.set(-0.75, 0, side * 0.65);
-  wrist.add(thumb);
-  pad(0.020, 0.037, 0.020, 0, 0.013, 0, thumb);
-  pad(0.018, 0.028, 0.019, 0, 0.034, -0.012, thumb);
-  const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.049, 1, 12), cloth);
-  sleeve.name = `weapon-forearm-${side === 1 ? 'right' : 'left'}`;
-  return { wrist, sleeve, fingers, side };
-}
-
-/** Wrist targets are in body space; the forearm reaches an off-screen elbow. */
-export function poseHand(hand: HandRig, position: THREE.Vector3, rotation: THREE.Euler, grasp: number, elbow: THREE.Vector3): void {
-  hand.wrist.position.copy(position);
-  hand.wrist.rotation.copy(rotation);
-  hand.fingers.forEach((joint, i) => { joint.rotation.x = -(i % 3 === 0 ? 0.7 : 1.0) * grasp; });
-  const direction = position.clone().sub(elbow);
-  hand.sleeve.position.copy(elbow).add(position).multiplyScalar(0.5);
-  hand.sleeve.scale.y = direction.length();
-  hand.sleeve.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+/** The skeleton root is identity in weapon body space. Bone lengths never scale. */
+export function poseHand(hand: HandRig, target: THREE.Vector3, rotation: THREE.Euler, grasp: number,
+  shoulder: THREE.Vector3, pole: THREE.Vector3): void {
+  const { elbow, wrist } = solveArmIK(shoulder, target, pole, hand.upperLength, hand.forearmLength);
+  const up = new THREE.Vector3(0, 1, 0);
+  const upperRotation = new THREE.Quaternion().setFromUnitVectors(up, elbow.clone().sub(shoulder).normalize());
+  const foreRotation = new THREE.Quaternion().setFromUnitVectors(up, wrist.clone().sub(elbow).normalize());
+  hand.upper.position.copy(shoulder);
+  hand.upper.quaternion.copy(upperRotation);
+  hand.forearm.quaternion.copy(upperRotation).invert().multiply(foreRotation);
+  hand.wrist.quaternion.copy(foreRotation).invert().multiply(new THREE.Quaternion().setFromEuler(rotation));
+  hand.fingers.forEach((joint, i) => { joint.rotation.set(-(i % 3 === 0 ? .7 : 1) * grasp, 0, 0); });
+  hand.thumb.rotation.set(-.7 * grasp, 0, hand.upper.name.startsWith('right') ? -.5 : .5);
 }

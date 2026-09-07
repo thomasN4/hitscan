@@ -34,19 +34,21 @@ async function snapshot(page) {
     const scene = cs.bots[0].mesh.parent;
     const vm = scene.getObjectByName(`viewmodel-${cs.weapon.name.toLowerCase()}`);
     const parts = {};
-    const camera = scene.children.find(node => node.isCamera);
-    let forearmsOffscreen = true;
+    let validArms = true;
+    let armBones = 0;
     vm.traverse(node => {
-      if (node.name.startsWith('weapon-forearm-')) {
-        const elbow = node.position.clone().set(0, -0.5, 0);
-        node.localToWorld(elbow); elbow.project(camera);
-        forearmsOffscreen &&= elbow.y < -1;
+      if (node.isBone) {
+        armBones++;
+        validArms &&= [...node.position.toArray(), ...node.quaternion.toArray()].every(Number.isFinite);
+        validArms &&= node.scale.toArray().every(v => Math.abs(v - 1) < 1e-6);
+        if (node.name.endsWith('_forearm')) validArms &&= Math.abs(node.position.length() - .30) < 1e-5;
+        if (node.name.endsWith('-hand')) validArms &&= Math.abs(node.position.length() - .29) < 1e-5;
       }
       if (node.name.startsWith('weapon-mechanism-') || node.name.endsWith('-hand')) {
         parts[node.name] = { position: node.position.toArray(), rotation: node.rotation.toArray().slice(0, 3), visible: node.visible };
       }
     });
-    return { parts, forearmsOffscreen, mag: cs.weapon.mag, reserve: cs.weapon.reserve, reloading: cs.weapon.reloading };
+    return { parts, validArms: validArms && armBones === 32, mag: cs.weapon.mag, reserve: cs.weapon.reserve, reloading: cs.weapon.reloading };
   });
 }
 async function trigger(page) {
@@ -81,7 +83,7 @@ try {
     await runFor(page, 0.35);
     assert.equal(await page.evaluate(() => window.__cs.weapon.name.toLowerCase()), id);
     const idle = await snapshot(page);
-    assert.ok(idle.forearmsOffscreen, `${id}: forearm ends visible at rest`);
+    assert.ok(idle.validArms, `${id}: invalid arm skeleton at rest`);
     assert.ok(idle.parts['right-hand'] && idle.parts['left-hand']);
     if (idle.parts['weapon-mechanism-shell']) assert.equal(idle.parts['weapon-mechanism-shell'].visible, false);
     await page.screenshot({ path: `${OUT}/${id}-hip.png` });
@@ -136,7 +138,7 @@ try {
       for (const [label, fraction] of [['open', 0.18], ['insert', 0.5], ['seat', 0.80]]) {
         await freezeAt(page, schedule.start + schedule.duration * fraction);
         const pose = await snapshot(page);
-        assert.ok(pose.forearmsOffscreen, `${id}: forearm ends visible during reload`);
+        assert.ok(pose.validArms, `${id}: invalid arm skeleton during reload`);
         if (label === 'insert' && perRound) assert.equal(pose.parts['weapon-mechanism-shell'].visible, true);
         if (label === 'insert' && id === 'revolver') assert.ok(pose.parts['weapon-mechanism-cylinder'].position[0] < idle.parts['weapon-mechanism-cylinder'].position[0] - 0.03);
         await page.screenshot({ path: `${OUT}/${id}-reload-${label}.png` });
@@ -181,6 +183,19 @@ try {
       assert.equal(swapped.reloading, false);
       if (swapped.parts['weapon-mechanism-shell']) assert.equal(swapped.parts['weapon-mechanism-shell'].visible, false);
     }
+    await page.keyboard.down('ShiftLeft');
+    await page.keyboard.down('KeyW');
+    await runFor(page, .5);
+    assert.ok((await snapshot(page)).validArms, `${id}: invalid sprint arms`);
+    await page.screenshot({ path: `${OUT}/${id}-sprint.png` });
+    await page.keyboard.up('KeyW'); await page.keyboard.up('ShiftLeft');
+    await runFor(page, .3);
+    await page.keyboard.press(id === 'knife' ? 'Digit1' : 'Digit3');
+    await runFor(page, .1);
+    await page.keyboard.press(id === 'knife' ? 'Digit3' : ['pistol', 'revolver'].includes(id) ? 'Digit2' : 'Digit1');
+    await runFor(page, .1);
+    assert.ok((await snapshot(page)).validArms, `${id}: invalid swap arms`);
+    await page.screenshot({ path: `${OUT}/${id}-swap.png` });
     console.log(`${id}: ${id === 'knife' ? 'hip/ADS, swing and pause' : 'sights, shot cycle, pause, reload milestones, ammo and interruption'} checked`);
     await page.close();
   }

@@ -183,6 +183,9 @@ export function createWeaponViewModel(id: WeaponId, armAsset: THREE.Object3D): W
       box(0.071, 0.14, 0.025, 0, -0.165, 0.432, dark, 0.009);
       box(0.003, 0.023, 0.085, 0.033, -0.052, 0.025, dark, 0.002);
       triggerGuard(0.105, -0.108);
+      // Underside loading recess and lifter, readable in the raised reload pose.
+      box(0.039, 0.003, 0.083, 0, -0.112, 0.021, dark, 0.004);
+      box(0.024, 0.002, 0.058, 0, -0.114, 0.009, steel, 0.002);
       mag = cylinder(0.011, 0.055, 0, -0.135, 0.005, createCelMaterial({ color: 0xa94d39 }));
       cylinder(0.012, 0.009, 0, 0, 0.027, createCelMaterial({ color: 0xc6994f }), 0.012, mag);
       mechanisms.shell = mag;

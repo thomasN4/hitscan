@@ -226,3 +226,15 @@ An unavailable or incompatible asset leaves Play disabled with a retry message.
 behavior, independent skeletons and the real Deploy/respawn callback. The
 weapon-animation capture suite also checks fixed bone scales and lengths and
 captures sprint/swap poses alongside the existing shot/reload milestones.
+
+### Shotgun reload choreography
+
+The shotgun now raises and rolls around the receiver to expose its underside
+loading port. Its left hand supports the rear of the pump while the right
+retrieves, pinches and feeds each shell. The shell follows the loading wrist,
+and the right fingers use a dedicated pinch rather than the trigger grip.
+The receiver comes inward during the turn to keep the support target within
+fixed arm reach. This presentation replaces the earlier left-hand shell feed;
+other weapons and shotgun firing/pump timing are unchanged. Completion,
+reserve exhaustion, shooting and sprint interruptions retain the existing
+reload rules and restore the firing grip through the same pose reset path.

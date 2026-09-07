@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { WeaponId } from './state';
 import type { WeaponViewModel } from './weaponModels';
 import type { WeaponPose } from '../sim/weaponAnimation';
+import { poseShotgunReload, poseShotgunFingers } from './shotgunPresentation';
 import { poseHand } from './weaponHands';
 
 /** Apply absolute offsets to saved rest transforms, never accumulate rotations. */
@@ -63,15 +64,19 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   } else if (pose.charge > 0) {
     left.lerp(new THREE.Vector3(-0.035, -0.065, 0.10), pose.charge);
   }
+  if (id === 'shotgun' && pose.reload > 0) {
+    poseShotgunReload(vm, pose, right, left, rightRotation, leftRotation);
+  }
   // Shoulder anchors and pole directions are in camera-relative prop space.
   // Invert only this frame's local transforms: the camera updates later.
   group.updateMatrix();
   vm.body.updateMatrix();
   const toBody = vm.body.matrix.clone().invert().multiply(group.matrix.clone().invert());
   const rightShoulder = new THREE.Vector3(0.22, -0.40, -0.39).applyMatrix4(toBody);
-  const leftShoulder = new THREE.Vector3(-0.12, -0.40, -0.39).applyMatrix4(toBody);
+  const leftShoulder = new THREE.Vector3(-0.12, -0.40 + (id === 'shotgun' ? .06 * pose.reload : 0), -0.39).applyMatrix4(toBody);
   const rightPole = new THREE.Vector3(0.6, -1, 0.3).transformDirection(toBody);
   const leftPole = new THREE.Vector3(-0.6, -1, 0.3).transformDirection(toBody);
   poseHand(hands.right, right, rightRotation, 1 - 0.25 * boltReach, rightShoulder, rightPole);
-  poseHand(hands.left, left, leftRotation, 1 - 0.25 * pose.reach, leftShoulder, leftPole);
+  poseHand(hands.left, left, leftRotation, id === 'shotgun' ? 1 : 1 - 0.25 * pose.reach, leftShoulder, leftPole);
+  if (id === 'shotgun') poseShotgunFingers(vm, pose.reload);
 }

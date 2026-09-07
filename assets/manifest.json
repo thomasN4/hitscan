@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "source": "assets/source/arms.blend",
+  "output": "public/assets/arms.glb",
+  "exporter": "scripts/assets/export-arms.py",
+  "sourceSha256": "75f2ae3deef754280a0bfef55a527da88ed1446db6ac022deef1b0a77473d6ff",
+  "outputSha256": "536b23aac882382b0484852bc331d2ba290c7b66bffefd5e18e26e817af5134e",
+  "exporterSha256": "18ab27ddc64f6aff43ded7d511a8ac41a1feeb584696e107b684addfed585572",
+  "blender": "5.2.0 LTS",
+  "settings": {
+    "format": "GLB",
+    "coordinates": "metres, Y-up, forward -Z",
+    "export_yup": false,
+    "animations": false
+  },
+  "stats": {
+    "bones": 32,
+    "vertices": 3328,
+    "bytes": 194544
+  }
+}

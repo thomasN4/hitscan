@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "assets:export": "node scripts/assets/pipeline.mjs export",
+    "assets:check": "node scripts/assets/pipeline.mjs check"
   },
   "dependencies": {
     "three": "^0.160.0"

@@ -18,3 +18,8 @@ review.md
 # planner's wave entry in docs/plan-relay-log.md, which cites a run directory by
 # name and has to survive that directory going away.
 .plan-relay
+
+# Blender sources are committed; rotating backups and temporary renders are not.
+*.blend1
+*.blend2
+assets/previews/

@@ -530,7 +530,7 @@ and two copies drifted apart within one PR the first time there were two.
 
 - Real types on exported functions (`src/` is TypeScript); keep "why" comments for non-obvious logic and inline tuning notes on gameplay constants (e.g., `fireRate: 0.105 // ≈ 9.5 rounds/sec`) — those comments survive conversion because the numbers' reasons don't fit signatures. JSDoc `@param` prose only where the parameter's meaning isn't in its name.
 - No comments that merely restate code. Keep existing `// ---------- Section ----------` headers.
-- Audio remains WebAudio-synthesized. First-person arms use Blender sources and checked GLB exports; see `docs/assets.md`. Other visuals remain procedural.
+- Audio remains WebAudio-synthesized. The first-person shotgun and revolver use Blender sources and checked GLB exports; see `docs/assets.md`. Other visuals remain procedural.
 
 ## Roadmap / deferred ideas
 

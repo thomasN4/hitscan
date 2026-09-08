@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { poseWeapon } from './core/weaponPresentation';
 import { weaponPose, crossedCue } from './sim/weaponAnimation';
+import type { WeaponAssets } from './core/weaponAssets';
 import { createWeaponViewModel, type WeaponViewModel } from './core/weaponModels';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
@@ -76,10 +77,10 @@ function aimFovFor(def: WeaponDef): number {
 // Position is animated each frame in
 // updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.ts).
-// Geometry is built during explicit startup after the arm asset loads.
+// Geometry is built during explicit startup after the weapon assets load.
 export const gunGroup = new THREE.Group();
 
-// Models own geometry, sight lines, grip anchors and mechanism assemblies.
+// Models own geometry, sight lines and mechanism assemblies.
 // Gameplay continues to own selection, recoil, reload progress and shot aim.
 // Read only after initWeaponViewmodels(), like the engine bindings.
 let VIEWMODELS: Record<WeaponId, WeaponViewModel>;
@@ -119,14 +120,14 @@ const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
  * Requires initEngine() to have run; call once from main.ts before the loop.
  * `scene.add(camera)` is what makes the camera-parented gun render at all.
  */
-export function initWeaponViewmodels(armAsset: THREE.Object3D): void {
+export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
   VIEWMODELS = {
-    smg: createWeaponViewModel('smg', armAsset),
-    sniper: createWeaponViewModel('sniper', armAsset),
-    shotgun: createWeaponViewModel('shotgun', armAsset),
-    pistol: createWeaponViewModel('pistol', armAsset),
-    revolver: createWeaponViewModel('revolver', armAsset),
-    knife: createWeaponViewModel('knife', armAsset),
+    smg: createWeaponViewModel('smg'),
+    sniper: createWeaponViewModel('sniper'),
+    shotgun: createWeaponViewModel('shotgun', weaponAssets),
+    pistol: createWeaponViewModel('pistol'),
+    revolver: createWeaponViewModel('revolver', weaponAssets),
+    knife: createWeaponViewModel('knife'),
   };
   for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
   camera.add(gunGroup);

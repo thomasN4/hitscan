@@ -57,7 +57,6 @@ describe('weapon presentation timelines', () => {
     const pose = weaponPose({ ...idle, id: 'revolver', shotAt: 10, closeAt: -Infinity });
     expect(pose.cylinder).toBe(0);
     expect(pose.shell).toBe(false);
-    expect(pose.reach).toBe(0);
   });
 
   test('aiming and firing override the cosmetic draw', () => {
@@ -88,4 +87,12 @@ describe('weapon presentation timelines', () => {
     expect(crossedCue(0.5, 0.6, 0.3)).toBe(false);
     expect(weaponPose({ ...input, now: 12 }).pump).toBe(0);
   });
+});
+
+
+test('revolver advances the cylinder only after the cartridge hand withdraws', () => {
+  const loading = {...idle, id: 'revolver' as const, reloading: true, reloadStartedAt: 8};
+  expect(weaponPose({...loading, reloadT: .8}).index).toBe(0);
+  expect(weaponPose({...loading, reloadT: .91}).index).toBeGreaterThan(0);
+  expect(weaponPose({...loading, reloadT: .99}).index).toBe(1);
 });

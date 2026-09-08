@@ -23,3 +23,7 @@ review.md
 *.blend1
 *.blend2
 assets/previews/
+
+# Ad-hoc weapon animation review recordings (local only; regenerate with
+# recordings/capture-weapon-clips.mjs against a preview server).
+recordings

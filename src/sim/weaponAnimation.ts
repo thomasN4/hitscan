@@ -20,7 +20,6 @@ export interface WeaponAnimationInput {
 
 export interface WeaponPose {
   reload: number;
-  reach: number;
   magazine: number;
   shell: boolean;
   insert: number;
@@ -54,16 +53,14 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
   const firing = cycle >= 0 && cycle < 1;
   const perRound = id === 'shotgun' || id === 'revolver';
   const closing = input.closeBlend * (1 - smooth(0, 0.14, now - input.closeAt));
-  const opening = smooth(0, input.roundInterval * 0.16, now - input.reloadStartedAt);
+  const opening = smooth(0, perRound ? .18 : input.roundInterval * .16, now - input.reloadStartedAt);
   const finalClose = input.lastRound ? 1 - smooth(0.86, 1, t) : 1;
   const reload = reloading ? (perRound ? opening * finalClose : hold(t, 0, 0.12, 0.89, 1)) : closing;
-  const reach = reloading ? (perRound ? hold(t, 0.12, 0.35, 0.76, 0.92) : hold(t, 0.06, 0.2, 0.86, 0.98)) : 0;
   const swapAge = now - input.switchedAt;
   const swapping = !input.aiming && !reloading && !firing;
   const holster = swapping && input.hasOutgoing && swapAge >= 0 && swapAge < 0.08;
   return {
     reload,
-    reach,
     magazine: reloading && !perRound ? hold(t, 0.14, 0.36, 0.52, 0.77) : 0,
     shell: reloading && perRound && t >= 0.25 && t < 0.83,
     insert: smooth(0.35, 0.82, t),
@@ -73,7 +70,9 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
     boltPull: id === 'sniper' && firing && !reloading ? hold(cycle, 0.27, 0.46, 0.54, 0.75) : 0,
     slide: (id === 'pistol' || id === 'smg') && firing && !reloading ? hold(shotAge, -0.001, 0.025, 0.035, 0.09) : 0,
     hammer: id === 'revolver' && firing && !reloading ? hold(cycle, 0.05, 0.25, 0.35, 0.48) : 0,
-    index: id === 'revolver' && firing && !reloading ? smooth(0.05, 0.28, cycle) : 0,
+    // Index the next chamber after the loading fingers withdraw. A full sixth
+    // turn is geometrically identical at the next round's zero phase.
+    index: id === 'revolver' ? (reloading ? smooth(.84, .98, t) : firing ? smooth(0.05, 0.28, cycle) : 0) : 0,
     charge: reloading && input.emptyReload && !perRound ? hold(t, 0.79, 0.85, 0.89, 0.95) : 0,
     draw: swapping ? 1 - smooth(input.hasOutgoing ? 0.08 : 0, 0.24, swapAge) : 0,
     holster,

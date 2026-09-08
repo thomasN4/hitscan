@@ -31,7 +31,7 @@ import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLo
 import { sfxZoom } from './audio';
 import { decideWinner } from './sim/match';
 import { validateWeapons } from './sim/validateWeapons';
-import { loadArmAsset } from './core/weaponHands';
+import { loadWeaponAssets } from './core/weaponAssets';
 import { initLigneClaire } from './core/ligneClaire';
 
 // ---------- Startup ----------
@@ -72,8 +72,7 @@ async function start(): Promise<void> {
   initEngine(session.map);
   initHUD();
   setAssetStatus('loading');
-  const armAsset = await loadArmAsset(`${import.meta.env.BASE_URL}assets/arms.glb`);
-  initWeaponViewmodels(armAsset);
+  initWeaponViewmodels(await loadWeaponAssets(import.meta.env.BASE_URL));
   setAssetStatus('ready');
   // Geometry first, then the wave. RANGE stays a separate flag from the builder
   // lookup because it means something narrower — "no bots, no round clock" — and

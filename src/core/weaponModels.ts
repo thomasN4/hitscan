@@ -5,15 +5,14 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createCelMaterial } from './materials';
 import type { WeaponId } from './state';
-import { createArmRig, type ArmRig } from './weaponHands';
+import { createAuthoredWeaponRig, type AuthoredWeaponRig, type WeaponAssets } from './weaponAssets';
 
 export interface WeaponViewModel {
+  authored?: AuthoredWeaponRig;
   group: THREE.Group;
   body: THREE.Group;
   mechanisms: Partial<Record<'magazine' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'bolt' | 'slide' | 'shell', THREE.Object3D>>;
   rest: Map<THREE.Object3D, { position: THREE.Vector3; rotation: THREE.Euler }>;
-  hands: ArmRig;
-  anchors: { right: THREE.Vector3; left: THREE.Vector3; reload: THREE.Vector3 };
   aimOffset: { x: number; y: number };
 }
 
@@ -33,20 +32,19 @@ function profileGeometry(points: Profile, width: number, bevel = 0.004): THREE.E
 }
 
 /** Build a fresh model; caller owns it for the page's lifetime. */
-export function createWeaponViewModel(id: WeaponId, armAsset: THREE.Object3D): WeaponViewModel {
+export function createWeaponViewModel(id: WeaponId, weaponAssets?: WeaponAssets): WeaponViewModel {
   const group = new THREE.Group();
   group.name = `viewmodel-${id}`;
   const body = new THREE.Group();
   const offset = id === 'sniper' ? { x: 0.26, y: 0.12 }
     : id === 'shotgun' ? { x: 0.25, y: 0.105 }
       : id === 'smg' ? { x: 0.25, y: 0.14 } : { x: 0.24, y: 0.15 };
-  const sightLine = id === 'pistol' ? -0.012 : id === 'revolver' ? -0.018 : 0;
-  body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' ? -0.43 : -0.57);
+  const sightLine = id === 'pistol' ? -0.012 : id === 'revolver' ? 0.037 : id === 'shotgun' ? .034 : 0;
+  body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' ? -0.43 : id === 'shotgun' ? -.53 : -0.57);
   group.add(body);
 
   const steel = createCelMaterial({ color: 0x2b2b2b });
   const dark = createCelMaterial({ color: 0x111111 });
-  const wood = createCelMaterial({ color: 0x4a331f });
   const silver = createCelMaterial({ color: 0xb9bdc6 });
   const olive = createCelMaterial({ color: 0x24301f });
 
@@ -125,7 +123,8 @@ export function createWeaponViewModel(id: WeaponId, armAsset: THREE.Object3D): W
     return node;
   }
 
-  let mag: THREE.Mesh;
+  let mag: THREE.Mesh | undefined;
+  let authored: AuthoredWeaponRig | undefined;
   switch (id) {
     case 'smg': {
       cylinder(0.038, 0.32, 0, -0.055, 0.015);
@@ -171,27 +170,14 @@ export function createWeaponViewModel(id: WeaponId, armAsset: THREE.Object3D): W
       break;
     }
     case 'shotgun': {
-      box(0.064, 0.084, 0.24, 0, -0.069, 0.035, steel, 0.012);
-      cylinder(0.020, 0.56, 0, -0.052, -0.345);
-      cylinder(0.017, 0.42, 0, -0.097, -0.275);
-      muzzle(0.024, -0.63, -0.052);
-      const pumpStart = body.children.length;
-      cylinder(0.035, 0.17, 0, -0.093, -0.265, wood);
-      for (const z of [-0.33, -0.305, -0.28, -0.255, -0.23, -0.205]) ring(0.035, 0.002, 0, -0.093, z, wood);
-      mechanisms.pump = assembly(body.children.slice(pumpStart));
-      profile([[0.15, -0.055], [0.25, -0.075], [0.41, -0.10], [0.43, -0.23], [0.35, -0.23], [0.20, -0.155], [0.16, -0.11]], 0.059, wood);
-      box(0.071, 0.14, 0.025, 0, -0.165, 0.432, dark, 0.009);
-      box(0.003, 0.023, 0.085, 0.033, -0.052, 0.025, dark, 0.002);
-      triggerGuard(0.105, -0.108);
-      // Underside loading recess and lifter, readable in the raised reload pose.
-      box(0.039, 0.003, 0.083, 0, -0.112, 0.021, dark, 0.004);
-      box(0.024, 0.002, 0.058, 0, -0.114, 0.009, steel, 0.002);
-      mag = cylinder(0.011, 0.055, 0, -0.135, 0.005, createCelMaterial({ color: 0xa94d39 }));
-      cylinder(0.012, 0.009, 0, 0, 0.027, createCelMaterial({ color: 0xc6994f }), 0.012, mag);
+      if (!weaponAssets) throw new Error('Shotgun asset was not loaded before viewmodel creation');
+      authored = createAuthoredWeaponRig(id, weaponAssets.shotgun);
+      body.add(authored.root);
+      Object.assign(mechanisms, authored.mechanisms);
+      mag = cylinder(.011, .055, 0, 0, 0, createCelMaterial({ color: 0xa94d39 }));
+      cylinder(.012, .009, 0, 0, .027, createCelMaterial({ color: 0xc6994f }), .012, mag);
       mechanisms.shell = mag;
       mag.visible = false;
-      part(new THREE.SphereGeometry(0.006, 8, 6), silver, 0, 0, -0.56);
-      box(0.010, 0.028, 0.013, 0, -0.022, -0.56, dark, 0.002);
       break;
     }
     case 'pistol': {
@@ -214,26 +200,12 @@ export function createWeaponViewModel(id: WeaponId, armAsset: THREE.Object3D): W
       break;
     }
     case 'revolver': {
-      profile([[-0.092, -0.030], [0.08, -0.030], [0.105, -0.075], [0.07, -0.13], [-0.09, -0.13]], 0.046);
-      cylinder(0.016, 0.21, 0, -0.052, -0.19);
-      box(0.026, 0.025, 0.20, 0, -0.075, -0.185);
-      muzzle(0.022, -0.30, -0.052);
-      mag = cylinder(0.049, 0.094, 0, -0.08, -0.018);
-      // Six recessed chamber marks on the visible rear cylinder face.
-      for (let i = 0; i < 6; i++) {
-        const angle = i * Math.PI / 3;
-        cylinder(0.009, 0.002, Math.cos(angle) * 0.031, Math.sin(angle) * 0.031, 0.048, dark, 0.009, mag);
-      }
-      profile([[0.055, -0.105], [0.105, -0.085], [0.18, -0.23], [0.13, -0.264], [0.064, -0.23], [0.083, -0.16]], 0.056, wood);
-      triggerGuard(0.025, -0.13, 0.08);
-      const hammer = box(0.015, 0.045, 0.018, 0, -0.056, 0.09, dark, 0.003);
-      hammer.rotation.x = -0.35;
-      mechanisms.hammer = assembly([hammer], new THREE.Vector3(0, -0.075, 0.078));
-      mechanisms.rotor = mag;
-      mechanisms.cylinder = assembly([mag], new THREE.Vector3(-0.028, -0.115, 0.015));
-      mechanisms.shell = cylinder(0.007, 0.034, -0.09, -0.08, 0.075, createCelMaterial({ color: 0xc6994f }));
+      if (!weaponAssets) throw new Error('Revolver asset was not loaded before viewmodel creation');
+      authored = createAuthoredWeaponRig(id, weaponAssets.revolver);
+      body.add(authored.root);
+      Object.assign(mechanisms, authored.mechanisms);
+      mechanisms.shell = cylinder(.008, .034, 0, 0, 0, createCelMaterial({ color: 0xc6994f }));
       mechanisms.shell.visible = false;
-      sights(-0.27, 0.06, false, 0.012);
       break;
     }
     case 'knife': {
@@ -246,22 +218,15 @@ export function createWeaponViewModel(id: WeaponId, armAsset: THREE.Object3D): W
       break;
     }
   }
-  if (id === 'smg' || id === 'sniper' || id === 'pistol') mechanisms.magazine = mag;
-  const right = new THREE.Vector3(0.043, -0.22, id === 'shotgun' ? 0.205 : id === 'knife' ? 0.07 : 0.13);
-  if (id === 'sniper') right.set(0.045, -0.22, 0.155);
-  if (id === 'knife') right.y = -0.145;
-  const left = new THREE.Vector3(-0.044, -0.145, id === 'shotgun' ? -0.27 : id === 'sniper' ? -0.19 : -0.205);
-  if (id === 'pistol' || id === 'revolver') left.set(-0.038, -0.23, 0.125);
-  if (id === 'knife') left.set(-0.27, -0.22, 0.02);
-  const reload = new THREE.Vector3(id === 'revolver' ? -0.12 : -0.025,
-    id === 'shotgun' ? -0.17 : -0.23, id === 'pistol' ? 0.11 : 0);
-  const hands = createArmRig(armAsset);
-  body.add(hands.root);
+  if (id === 'smg' || id === 'sniper' || id === 'pistol') {
+    if (!mag) throw new Error(`Missing magazine for ${id}`);
+    mechanisms.magazine = mag;
+  }
   const rest: WeaponViewModel['rest'] = new Map();
   for (const [key, node] of Object.entries(mechanisms)) {
     node.name = `weapon-mechanism-${key}`;
     rest.set(node, { position: node.position.clone(), rotation: node.rotation.clone() });
   }
-  return { group, body, mechanisms, rest, hands, anchors: { right, left, reload },
+  return { authored, group, body, mechanisms, rest,
     aimOffset: { x: -offset.x, y: offset.y - sightLine } };
 }

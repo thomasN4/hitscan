@@ -20,7 +20,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**'] },
+  { ignores: ['dist/**', 'recordings/**'] },
 
   // Rules live here ONCE, with no `files`, so every linted file gets them.
   // Spreading recommended into each block instead left any file matching no

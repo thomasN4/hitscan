@@ -34,22 +34,19 @@ async function snapshot(page) {
     const scene = cs.bots[0].mesh.parent;
     const vm = scene.getObjectByName(`viewmodel-${cs.weapon.name.toLowerCase()}`);
     const parts = {};
-    let validArms = true;
-    let armBones = 0;
     vm.traverse(node => {
-      if (node.isBone) {
-        armBones++;
-        validArms &&= [...node.position.toArray(), ...node.quaternion.toArray()].every(Number.isFinite);
-        validArms &&= node.scale.toArray().every(v => Math.abs(v - 1) < 1e-6);
-        if (node.name.endsWith('_forearm')) validArms &&= Math.abs(node.position.length() - .30) < 1e-5;
-        if (node.name.endsWith('-hand')) validArms &&= Math.abs(node.position.length() - .29) < 1e-5;
-      }
-      if (node.name.startsWith('weapon-mechanism-') || node.name.endsWith('-hand')) {
+      if (node.name.startsWith('weapon-mechanism-')) {
         parts[node.name] = { position: node.position.toArray(), rotation: node.rotation.toArray().slice(0, 3), visible: node.visible };
       }
     });
-    return { parts, validArms: validArms && armBones === 32, mag: cs.weapon.mag, reserve: cs.weapon.reserve, reloading: cs.weapon.reloading };
+    return { parts, mag: cs.weapon.mag, reserve: cs.weapon.reserve, reloading: cs.weapon.reloading };
   });
+}
+/** Every mechanism transform is a real number: a pose that divides by zero or
+ * normalizes a zero-length vector shows up here rather than as an invisible gun. */
+function finite(snap) {
+  return Object.values(snap.parts).every(part =>
+    [...part.position, ...part.rotation].every(Number.isFinite));
 }
 async function trigger(page) {
   const before = await page.evaluate(() => window.__cs.weapon.lastShot);
@@ -83,8 +80,6 @@ try {
     await runFor(page, 0.35);
     assert.equal(await page.evaluate(() => window.__cs.weapon.name.toLowerCase()), id);
     const idle = await snapshot(page);
-    assert.ok(idle.validArms, `${id}: invalid arm skeleton at rest`);
-    assert.ok(idle.parts['right-hand'] && idle.parts['left-hand']);
     if (idle.parts['weapon-mechanism-shell']) assert.equal(idle.parts['weapon-mechanism-shell'].visible, false);
     await page.screenshot({ path: `${OUT}/${id}-hip.png` });
     await page.evaluate(() => window.dispatchEvent(new MouseEvent('mousedown', { button: 2 })));
@@ -123,7 +118,7 @@ try {
     if (id === 'sniper') assert.ok(fired.parts['weapon-mechanism-bolt'].position[2] > idle.parts['weapon-mechanism-bolt'].position[2] + 0.04);
     await page.screenshot({ path: `${OUT}/${id}-fire.png` });
     await new Promise(resolve => setTimeout(resolve, 150));
-    assert.deepEqual(await snapshot(page), fired, 'Pause must freeze hands, mechanisms and ammo');
+    assert.deepEqual(await snapshot(page), fired, 'Pause must freeze mechanisms and ammo');
     await runFor(page, interval + 0.1);
 
     if (id !== 'knife') {
@@ -138,9 +133,9 @@ try {
       for (const [label, fraction] of [['open', 0.18], ['insert', 0.5], ['seat', 0.80]]) {
         await freezeAt(page, schedule.start + schedule.duration * fraction);
         const pose = await snapshot(page);
-        assert.ok(pose.validArms, `${id}: invalid arm skeleton during reload`);
+        assert.ok(finite(pose), `${id}: non-finite mechanism transform during reload`);
         if (label === 'insert' && perRound) assert.equal(pose.parts['weapon-mechanism-shell'].visible, true);
-        if (label === 'insert' && id === 'revolver') assert.ok(pose.parts['weapon-mechanism-cylinder'].position[0] < idle.parts['weapon-mechanism-cylinder'].position[0] - 0.03);
+        if (label === 'insert' && id === 'revolver') assert.ok(pose.parts['weapon-mechanism-cylinder'].rotation[2] > idle.parts['weapon-mechanism-cylinder'].rotation[2] + 1.4);
         await page.screenshot({ path: `${OUT}/${id}-reload-${label}.png` });
       }
       if (perRound) {
@@ -148,13 +143,13 @@ try {
         const transferred = await snapshot(page);
         assert.equal(transferred.mag, idle.mag - 1);
         assert.ok(transferred.reloading);
-        if (id === 'revolver') assert.ok(transferred.parts['weapon-mechanism-cylinder'].position[0] < idle.parts['weapon-mechanism-cylinder'].position[0] - 0.03);
+        if (id === 'revolver') assert.ok(transferred.parts['weapon-mechanism-cylinder'].rotation[2] > idle.parts['weapon-mechanism-cylinder'].rotation[2] + 1.4);
         await trigger(page);
         const interrupted = await snapshot(page);
         assert.equal(interrupted.reloading, false);
         assert.equal(interrupted.mag, idle.mag - 2);
         assert.equal(interrupted.parts['weapon-mechanism-shell'].visible, false);
-        if (id === 'revolver') assert.deepEqual(interrupted.parts['weapon-mechanism-cylinder'].position, idle.parts['weapon-mechanism-cylinder'].position);
+        if (id === 'revolver') assert.deepEqual(interrupted.parts['weapon-mechanism-cylinder'].rotation, idle.parts['weapon-mechanism-cylinder'].rotation);
         await runFor(page, interval + 0.1);
       } else await runFor(page, schedule.duration);
       // Empty reload exercises charge gestures and every chamber/shell transfer.
@@ -186,7 +181,7 @@ try {
     await page.keyboard.down('ShiftLeft');
     await page.keyboard.down('KeyW');
     await runFor(page, .5);
-    assert.ok((await snapshot(page)).validArms, `${id}: invalid sprint arms`);
+    assert.ok(finite(await snapshot(page)), `${id}: non-finite mechanisms while sprinting`);
     await page.screenshot({ path: `${OUT}/${id}-sprint.png` });
     await page.keyboard.up('KeyW'); await page.keyboard.up('ShiftLeft');
     await runFor(page, .3);
@@ -194,7 +189,7 @@ try {
     await runFor(page, .1);
     await page.keyboard.press(id === 'knife' ? 'Digit3' : ['pistol', 'revolver'].includes(id) ? 'Digit2' : 'Digit1');
     await runFor(page, .1);
-    assert.ok((await snapshot(page)).validArms, `${id}: invalid swap arms`);
+    assert.ok(finite(await snapshot(page)), `${id}: non-finite mechanisms after a swap`);
     await page.screenshot({ path: `${OUT}/${id}-swap.png` });
     console.log(`${id}: ${id === 'knife' ? 'hip/ADS, swing and pause' : 'sights, shot cycle, pause, reload milestones, ammo and interruption'} checked`);
     await page.close();

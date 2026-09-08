@@ -238,3 +238,59 @@ fixed arm reach. This presentation replaces the earlier left-hand shell feed;
 other weapons and shotgun firing/pump timing are unchanged. Completion,
 reserve exhaustion, shooting and sprint interruptions retain the existing
 reload rules and restore the firing grip through the same pose reset path.
+
+### Approved Blender weapons and attachment-driven reloads
+
+The shotgun and revolver now use the reviewed Blender sources and committed
+GLBs. The shotgun stock follows the supplied curved grip reference; the revolver
+uses the approved heavier .44 Magnum proportions. Exported grip/loading markers
+and moving mechanism parents are validated during startup and by the asset checks.
+
+The shotgun reload brings the receiver inward, regrips the near pump surface,
+and lets the support wrist follow the bent forearm while the right hand feeds
+shells. This replaces the old rolled firing grip that crossed the receiver.
+The revolver opens about its authored crane pivot, feeds the exposed chamber,
+and indexes after the loading hand withdraws. Ammunition, fire rates, and
+interruption rules retain their game-clock owners.
+
+Verification adds exported hierarchy/independence tests, support forearm
+clearance and wrist alignment checks, missing/corrupt weapon startup cases,
+and captures under a non-root production base URL. Reproducible real-input reload
+videos use `scripts/weapon-reload-video.mjs`; headless source previews use
+`scripts/assets/create-weapon-previews.py` (a source-overwriting design generator).
+
+## Arms removed from the viewmodel
+
+The Blender-authored arms above are removed from the first-person rigs. This
+supersedes the hands and Blender arm sections rather than rewriting them: the
+implementation is in `81388c1`, `4ae6ac3` and `76fa8ba` if it is picked up again.
+
+The reason is readability, not correctness. Screen recordings of every weapon's
+aim/fire/reload cycle showed the hands reading as outline-less dark masses with
+no finger separation, forearms tapering into the wrist with no cuff, and — on
+half the weapons — hands outside the frame entirely. Measured NDC y of the hand
+bones at rest: pistol -1.62/-1.60 and revolver -1.08/-1.09 (both hands below the
+bottom edge), smg and sniper -1.06 for the trigger hand. All six shared one
+camera-relative shoulder anchor pair, so which hands appeared was a side effect
+of where each weapon sat rather than of any per-weapon authoring. The check
+suite passed throughout, because it asserted the hand objects *existed* and
+never that they were inside the frustum.
+
+What stays: every mechanism animation (magazine, pump, bolt, slide, cylinder,
+rotor, hammer), the pose envelopes in `sim/weaponAnimation.ts`, the authored
+shotgun/revolver GLBs and their marker-driven reload trajectories, and the
+startup asset gate — which the weapon GLBs still need, so an unavailable or
+incompatible asset still leaves Play disabled with a retry message.
+
+The loading shell and cartridge previously had their authored port trajectories
+overwritten by the loading wrist position each frame. With no wrist, the
+authored trajectory is what ships: each round travels into the port on its own.
+`sim/weaponAnimation.ts` loses its `reach` envelope, which only ever drove hand
+targets.
+
+`weaponHands.ts`, `sim/armIK.ts`, the arm Blender source, its GLB, its manifest
+and the `create-arms`/`export-arms`/`preview-arms` scripts are gone.
+`scripts/assets/weapon-pipeline.mjs` now owns the `assets:export` / `assets:check`
+CLI that the arm pipeline used to host, and `scripts/arm-assets-check.mjs` is
+`scripts/weapon-assets-check.mjs`, checking viewmodel clone independence through
+a mechanism node instead of a hand bone.

@@ -345,6 +345,6 @@ export function setAssetStatus(status: 'loading' | 'ready' | 'error'): void {
   const button = requireEl('playBtn');
   if (!(button instanceof HTMLButtonElement)) throw new Error('playBtn must be a button');
   button.disabled = status !== 'ready';
-  requireEl('assetStatus').textContent = status === 'loading' ? 'Loading arms…'
-    : status === 'error' ? 'Could not load arms. Reload to retry; if this continues, check the deployed assets.' : '';
+  requireEl('assetStatus').textContent = status === 'loading' ? 'Loading weapon assets…'
+    : status === 'error' ? 'Could not load weapon assets. Reload to retry; if this continues, check the deployed assets.' : '';
 }

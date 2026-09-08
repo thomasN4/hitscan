@@ -286,20 +286,6 @@ export function initLigneClaire(scene: THREE.Scene, renderer: THREE.WebGLRendere
       // Bots face local +z. Faces and pockets belong on the front only.
       (mesh as THREE.Mesh).material = [original, original, original, original, painted, original];
     }
-    if (mesh instanceof THREE.SkinnedMesh) {
-      // Crease lines built from the rest mesh do not skin. A skinned backface
-      // hull follows the same skeleton and supplies the illustrated contour.
-      const hull = new THREE.SkinnedMesh(mesh.geometry, silhouette);
-      hull.name = 'weapon-ink-silhouette';
-      hull.bindMode = mesh.bindMode;
-      hull.bind(mesh.skeleton, mesh.bindMatrix);
-      hull.frustumCulled = false;
-      hull.raycast = () => {};
-      hull.renderOrder = 1;
-      mesh.add(hull);
-      strokes.push(hull);
-      continue;
-    }
     if (mesh.geometry instanceof THREE.PlaneGeometry) continue;
     const weaponPart = mesh.name.startsWith('weapon-');
     let geometry = edges.get(mesh.geometry);

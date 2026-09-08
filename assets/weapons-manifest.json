@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "blender": "5.2.0 LTS",
+  "exporter": "scripts/assets/export-weapons.py",
+  "exporterSha256": "2d55f2e34eb569669002d36bc943993e57869326ab8cc867f11b3171558f898f",
+  "settings": {
+    "format": "GLB",
+    "export_yup": false,
+    "export_texcoords": false,
+    "animations": false,
+    "coordinates": "metres, Y-up, forward -Z"
+  },
+  "assets": [
+    {
+      "id": "shotgun",
+      "source": "assets/source/shotgun.blend",
+      "output": "public/assets/shotgun.glb",
+      "sourceSha256": "0e8c3983d65eda7cc3b2d9b281b62f1375105aca27f43ed5cc801d03d25d7652",
+      "outputSha256": "446152fe2d91aef3f6d9290eeaee549904693803db3c31d83b0a948006ba720e",
+      "stats": {
+        "vertices": 30098,
+        "meshes": 9,
+        "bytes": 848228
+      }
+    },
+    {
+      "id": "revolver",
+      "source": "assets/source/revolver.blend",
+      "output": "public/assets/revolver.glb",
+      "sourceSha256": "76bbb4b021878f2843b35193e00d5e13e4319cd0a10dcaa42398cfba00698589",
+      "outputSha256": "3d166372b62f2476902e023592e37db97a73cd12a336dd0ba9e5968f709d0cc8",
+      "stats": {
+        "vertices": 16110,
+        "meshes": 11,
+        "bytes": 466468
+      }
+    }
+  ]
+}

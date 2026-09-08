@@ -10,10 +10,11 @@ const browser = await puppeteer.launch({
   headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });
 try {
-  for (const id of ['shotgun', 'revolver']) {
+  const ids = process.argv.slice(3);
+  for (const id of ids.length ? ids : ['shotgun', 'revolver', 'pistol']) {
     const page = await browser.newPage();
     await page.setViewport({ width: 960, height: 540 });
-    await page.evaluateOnNewDocument(() => sessionStorage.setItem('acsc.loadout', JSON.stringify({primary:'shotgun',secondary:'revolver'})));
+    await page.evaluateOnNewDocument(secondary => sessionStorage.setItem('acsc.loadout', JSON.stringify({primary:'shotgun',secondary})), id === 'pistol' ? 'pistol' : 'revolver');
     await page.goto(`${base}/?map=arena&tbots=1&time=600&style=ligne-claire`, {waitUntil:'networkidle0'});
     await page.waitForFunction(() => Boolean(window.__cs));
     await page.evaluate(() => {
@@ -24,8 +25,8 @@ try {
       document.getElementById('startMenu').style.display = 'none';
       document.getElementById('hud').style.display = 'block';
     });
-    if (id === 'revolver') await page.keyboard.press('Digit2');
-    await page.evaluate(() => { window.__cs.weapon.mag = 3; });
+    if (id === 'revolver' || id === 'pistol') await page.keyboard.press('Digit2');
+    await page.evaluate(id => { window.__cs.weapon.mag = id === 'pistol' ? 0 : 3; }, id);
     const video = await page.screencast({path:`${out}/acsc-${id}-authored.webm`,fps:24});
     await new Promise(resolve => setTimeout(resolve, 700));
     await page.keyboard.press('KeyR');

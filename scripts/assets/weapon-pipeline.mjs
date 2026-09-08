@@ -17,14 +17,24 @@ export function validateWeaponGlb(bytes, id) {
   assert.equal(gltf.buffers.length, 1);
   assert.ok(!gltf.buffers[0].uri && gltf.buffers[0].byteLength <= bytes.length - length - 28);
   assert.ok(!gltf.images?.length && !gltf.animations?.length && !gltf.extensionsRequired?.length);
-  const required = ['grip_right', 'reload_port', 'Muzzle', ...(id === 'shotgun' ? ['grip_left', 'mechanism_pump'] : ['mechanism_cylinder', 'mechanism_rotor', 'mechanism_hammer'])];
+  assert.ok(['shotgun', 'revolver', 'pistol'].includes(id), 'Unknown weapon asset');
+  const required = ['grip_right', 'reload_port', 'Muzzle', ...(id === 'shotgun' ? ['grip_left', 'mechanism_pump'] : id === 'pistol' ? ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'] : ['mechanism_cylinder', 'mechanism_rotor', 'mechanism_hammer'])];
   for (const name of required) assert.equal(gltf.nodes.filter(n => n.name === name).length, 1, `Missing/duplicate ${name}`);
-  assert.deepEqual(gltf.materials.map(m => m.name).sort(), ['Brass', 'Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Walnut end grain', 'Warm walnut']);
+  assert.deepEqual(gltf.materials.map(m => m.name).sort(), (id === 'pistol' ? ['Brushed steel', 'Charcoal blued steel', 'Ivory sight inserts', 'Recess / rubber', 'Satin graphite slide', 'Slate grip panels'] : ['Brass', 'Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Walnut end grain', 'Warm walnut']));
   assert.ok(gltf.meshes.length > 0);
   const nodeIndex = name => gltf.nodes.findIndex(n => n.name === name);
-  const owner = gltf.nodes[nodeIndex(id === 'shotgun' ? 'mechanism_pump' : 'mechanism_cylinder')];
-  for (const name of id === 'shotgun' ? ['grip_left'] : ['mechanism_rotor', 'reload_port'])
+  const owner = gltf.nodes[nodeIndex(id === 'shotgun' ? 'mechanism_pump' : id === 'pistol' ? 'mechanism_magazine' : 'mechanism_cylinder')];
+  for (const name of id === 'shotgun' ? ['grip_left'] : id === 'pistol' ? [] : ['mechanism_rotor', 'reload_port'])
     assert.ok(owner.children.includes(nodeIndex(name)), `Detached attachment ${name}`);
+  if (id === 'pistol') {
+    const roots = gltf.scenes[gltf.scene].nodes;
+    for (const name of required) assert.ok(roots.includes(nodeIndex(name)), `Pistol attachment must be fixed at root: ${name}`);
+    const start = gltf.nodes[nodeIndex('reload_port')].translation;
+    const end = gltf.nodes[nodeIndex('magazine_out')].translation;
+    assert.ok(start?.length === 3 && end?.length === 3 && [...start, ...end].every(Number.isFinite));
+    const travel = end.map((value, i) => value - start[i]);
+    assert.ok(Math.abs(travel[0]) < 1e-6 && travel[1] < -.13 && travel[2] > 0 && Math.hypot(...travel) < .3, 'Invalid pistol magazine path');
+  }
   let vertices = 0;
   for (const mesh of gltf.meshes) for (const p of mesh.primitives) {
     assert.ok(gltf.materials[p.material], 'Missing material');
@@ -42,7 +52,7 @@ export function weaponPipeline(mode) {
     if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr + result.stdout);
     const blender = result.stdout.match(/ASSET_BLENDER_VERSION=(.+)/)?.[1];
     assert.ok(blender);
-    const assets = ['shotgun','revolver'].map(id => {
+    const assets = ['shotgun','revolver','pistol'].map(id => {
       const source=`assets/source/${id}.blend`, output=`public/assets/${id}.glb`;
       return {id,source,output,sourceSha256:hash(source),outputSha256:hash(output),stats:validateWeaponGlb(readFileSync(root+output),id)};
     });

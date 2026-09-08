@@ -410,3 +410,20 @@ during them. The sniper is sampled at `adsLerp` 0.85, the last blend value at
 which `weapons.ts` still draws the viewmodel, and its station is the scope body
 rather than a sight. The knife never reaches ADS at all, so it is checked at the
 hip; both exemptions are pinned against their catalog flags.
+
+
+### Authored pistol and magazine clearance
+
+The pistol source now lives alongside the other authored weapons on the
+ligne-claire branch. Its magazine fits inside a cut grip channel with bevel
+clearance, and the floorplate no longer extends behind the backstrap. Fixed
+magwell/out markers define the removal path along the grip slope. A receiver-
+centered reload roll keeps the magazine visible in the hands-free presentation.
+The slide cycles on firing and racks after an empty reload's magazine seats;
+partial reloads do not rack. Gameplay timing and interruption rules are unchanged.
+
+The source generator checks containment and surface intersections at 101 poses.
+Rig tests cover the exported hierarchy/path, independent clones, repeated frozen
+poses, seating before charging, and restoration at every reload milestone.
+Browser checks cover sights, firing, empty/partial reloads, pause, aiming/sprint
+cancellation and switching; startup checks include the pistol asset and respawn.

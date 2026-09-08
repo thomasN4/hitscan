@@ -18,7 +18,7 @@ def group(name, names, pivot):
         obj.matrix_world=world
     return node
 
-for weapon in ('shotgun','revolver'):
+for weapon in ('shotgun','revolver','pistol'):
     bpy.ops.wm.open_mainfile(filepath=str(ROOT/f'assets/source/{weapon}.blend'))
     for obj in list(bpy.context.scene.objects):
         if obj.type in ('CAMERA','LIGHT'):
@@ -28,6 +28,12 @@ for weapon in ('shotgun','revolver'):
         bpy.data.objects['Grip.Primary.Stock'].name='grip_right'
         bpy.data.objects['Grip.Support.Pump'].name='grip_left'
         bpy.data.objects['Reload.LoadingPort'].name='reload_port'
+    elif weapon=='pistol':
+        for source, target in [('Mechanism.Slide','mechanism_slide'),
+                ('Mechanism.Magazine','mechanism_magazine'),('Grip.Primary','grip_right'),
+                ('Grip.Support','grip_left'),('Reload.MagazineWell','reload_port'),
+                ('Reload.MagazineOut','magazine_out')]:
+            bpy.data.objects[source].name=target
     else:
         rotor=group('mechanism_rotor',['Cylinder / six chamber rotor','Extractor hub'],bpy.data.objects['Mechanism.CylinderAxis'].location)
         crane=group('mechanism_cylinder',[rotor.name,'Cylinder crane','Ejector rod'],bpy.data.objects['Mechanism.CranePivot'].location)

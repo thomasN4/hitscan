@@ -7,7 +7,7 @@ const browser = await puppeteer.launch({
   headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });
 try {
-  for (const asset of ['shotgun', 'revolver']) for (const failure of ['missing', 'corrupt', 'none']) {
+  for (const asset of ['shotgun', 'revolver', 'pistol']) for (const failure of ['missing', 'corrupt', 'none']) {
     const page = await browser.newPage();
     let requests = 0;
     await page.setRequestInterception(true);
@@ -18,6 +18,7 @@ try {
       else if (failure === 'corrupt') void request.respond({ status: 200, contentType: 'model/gltf-binary', body: 'broken asset' });
       else void request.continue();
     });
+    if (asset === 'pistol') await page.evaluateOnNewDocument(() => sessionStorage.setItem('acsc.loadout', JSON.stringify({primary:'smg',secondary:'pistol'})));
     await page.goto(base + '/?map=arena&tbots=1', { waitUntil: 'networkidle0' });
     if (failure !== 'none') {
       await page.waitForFunction(() => document.getElementById('assetStatus').textContent.includes('Could not load'));
@@ -38,6 +39,11 @@ try {
         return ok;
       });
       assert.equal(independent, true);
+      const pistolRest = asset === 'pistol' ? await page.evaluate(() => {
+        const vm = window.__cs.bots[0].mesh.parent.getObjectByName('viewmodel-pistol');
+        return ['slide', 'magazine'].map(key => vm.getObjectByName(`weapon-mechanism-${key}`).position.toArray());
+      }) : null;
+      if (asset === 'pistol') await page.keyboard.press('Digit2');
       await page.evaluate(() => {
         const cs = window.__cs;
         cs.game.started = true; cs.game.locked = true;
@@ -53,6 +59,16 @@ try {
       });
       await page.waitForFunction(() => window.__cs.player.alive && !window.__cs.weapon.reloading);
       await page.evaluate(() => { window.__cs.game.locked = true; });
+      if (pistolRest) {
+        await page.keyboard.press('Digit2');
+        await page.waitForFunction(rest => {
+          const vm = window.__cs.bots[0].mesh.parent.getObjectByName('viewmodel-pistol');
+          return ['slide', 'magazine'].every((key, i) => {
+            const position = vm.getObjectByName(`weapon-mechanism-${key}`).position.toArray();
+            return position.every((v, axis) => Math.abs(v - rest[i][axis]) < 1e-6);
+          });
+        }, {}, pistolRest);
+      }
       // A cancelled reload must leave finite mechanism transforms behind.
       await page.waitForFunction(() => {
         const scene = window.__cs.bots[0].mesh.parent;

@@ -159,6 +159,35 @@ def group(name, objects):
     return parent
 
 
+def validate_magazine_fit(grip, mag, base):
+    """Check evaluated geometry, including bevels, against the actual cut grip."""
+    from mathutils.bvhtree import BVHTree
+    bpy.context.view_layer.update()
+    depsgraph=bpy.context.evaluated_depsgraph_get()
+    def tree(obj, delta=Vector((0,0,0))):
+        evaluated=obj.evaluated_get(depsgraph)
+        mesh=evaluated.to_mesh()
+        vertices=[evaluated.matrix_world @ v.co + delta for v in mesh.vertices]
+        faces=[tuple(p.vertices) for p in mesh.polygons]
+        result=BVHTree.FromPolygons(vertices,faces)
+        evaluated.to_mesh_clear()
+        return result, vertices
+    shell,_=tree(grip)
+    _,vertices=tree(mag)
+    for v in vertices:
+        if v.y < -.229:
+            continue  # The neck and floorplate extend below the curved grip heel.
+        for side in (-1,1):
+            hit,_,_,distance=shell.ray_cast(v,Vector((side,0,0)),.1)
+            assert hit is not None and distance > .001, 'Magazine protrudes through grip'
+    for i in range(101):
+        delta=Vector((0,-.180,.05760))*(i/100)
+        for part in (mag,base):
+            moving,_=tree(part,delta)
+            assert not shell.overlap(moving), f'Magazine/grip intersection at extraction {i}%'
+    print('PISTOL_FIT: rest containment and 101 extraction poses clear, bevels included')
+
+
 def pistol():
     steel, dark, wood, grain, silver, brass = setup()
     slide_mat = material('Satin graphite slide', (.24, .30, .34))
@@ -192,8 +221,15 @@ def pistol():
     cyl('Recoil guide cap',.006,.005,(0,-.067,-.143),steel,32)
     profile('Frame dust cover',[(-.139,-.070),(.106,-.070),(.111,-.085),
         (.057,-.098),(-.128,-.098),(-.139,-.088)],.054,steel,.003)
-    profile('Grip frame',[(.043,-.083),(.099,-.080),(.147,-.223),
+    grip=profile('Grip frame',[(.043,-.083),(.099,-.080),(.147,-.223),
         (.134,-.236),(.083,-.232),(.046,-.133)],.049,dark,.005)
+    # Parallel walls leave clearance for the magazine's bevels along the whole path.
+    def magazine_profile(top, bottom, half_depth):
+        def center(y):
+            return .095 - .32 * (y + .170)
+        return [(center(top)-half_depth,top),(center(top)+half_depth,top),
+                (center(bottom)+half_depth,bottom),(center(bottom)-half_depth,bottom)]
+    cut(grip,profile('Magazine well cutter',magazine_profile(-.102,-.260,.019),.038,dark,0))
     profile('Beavertail',[(.079,-.072),(.123,-.072),(.130,-.078),
         (.107,-.091),(.091,-.091)],.048,steel,.002)
     # The open guard is an extruded ring, not a solid block under the action.
@@ -216,14 +252,16 @@ def pistol():
             pin.rotation_euler.y=math.pi/2
     box('Slide stop lever',(.006,.008,.031),(-.029,-.078,.035),silver,.001)
     box('Magazine release',(.005,.011,.010),(-.027,-.111,.051),steel,.001)
-    mag=profile('Magazine body',[(.067,-.128),(.104,-.128),(.137,-.231),(.097,-.233)],.034,silver,.002)
-    base=profile('Magazine floorplate',[(.085,-.228),(.144,-.228),(.149,-.240),(.085,-.240)],.055,dark,.002)
+    mag=profile('Magazine body',magazine_profile(-.108,-.237,.016),.032,silver,.001)
+    base=profile('Magazine floorplate',[(.089,-.237),(.134,-.237),(.137,-.246),(.092,-.246)],.047,dark,.001)
     group('Mechanism.Magazine',[mag,base])
     marker('Grip.Primary',(0,-.160,.098))
     marker('Grip.Support',(0,-.147,.060))
-    marker('Reload.MagazineWell',(0,-.226,.113))
+    marker('Reload.MagazineWell',(0,-.237,.11644))
+    marker('Reload.MagazineOut',(0,-.417,.17404))
     marker('Muzzle',(0,-.044,-.153))
     bpy.context.scene['Mechanisms']='Slide moves along +Z; magazine extracts down and rearward along grip. No animation clips.'
+    validate_magazine_fit(grip, mag, base)
     bpy.context.scene['Asset']='Original stylized semi-automatic pistol, visual game prop'
     # Make the file pleasant to open even outside camera view.
     for screen in bpy.data.screens:

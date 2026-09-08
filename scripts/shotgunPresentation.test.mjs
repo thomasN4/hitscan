@@ -15,7 +15,7 @@ async function asset(id) {
   return (await new GLTFLoader().parseAsync(buffer, '')).scene;
 }
 async function model() {
-  return createWeaponViewModel('shotgun', {shotgun: await asset('shotgun'), revolver: await asset('revolver')});
+  return createWeaponViewModel('shotgun', {shotgun: await asset('shotgun'), revolver: await asset('revolver'), pistol: await asset('pistol')});
 }
 function pose(reloading, reloadT = .5) {
   return weaponPose({ id: 'shotgun', now: 10, shotAt: -10, fireInterval: .9,

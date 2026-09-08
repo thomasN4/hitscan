@@ -1,8 +1,8 @@
 # First-person weapon assets
 
-Editable sources: `assets/source/shotgun.blend` and `revolver.blend`. Runtime:
-`public/assets/shotgun.glb` and `revolver.glb`. The game retains procedural
-maps, the other four weapons and synthesized audio. Blender is an
+Editable sources: `assets/source/shotgun.blend`, `revolver.blend`, and `pistol.blend`.
+Runtime exports live under `public/assets/` with the matching `.glb` names. The
+game retains procedural maps, the other three weapons and synthesized audio. Blender is an
 asset-authoring dependency, never a requirement for normal builds or deployment.
 
 ## Headless workflow
@@ -88,3 +88,25 @@ respawn. Use `scripts/weapon-animation-check.mjs <output-dir> shotgun revolver`
 for input-driven pose captures, pause, per-round transfer and interruptions.
 Test production preview as well. Sources and runtime assets are small enough to
 commit directly; Blender backup files and temporary render output are excluded.
+
+## Pistol
+
+The pistol exports independent slide and magazine assemblies. The fixed
+`reload_port` and `magazine_out` markers define the magazine travel vector;
+its downward/backward slope matches the grip cavity. The Blender generator
+checks the beveled magazine against the cut grip at rest and at 101 extraction
+positions. The floorplate sits beneath the grip without a rear overhang.
+
+The hands-free reload rolls about the receiver to keep magazine travel visible.
+A partial reload swaps the magazine; an empty reload also racks the slide after
+seating. Existing game clocks own ammunition and cancellation. The source has
+no baked animation clips. Generate review footage with:
+
+```sh
+CS_SMOKE_BASE=http://127.0.0.1:5189 node scripts/weapon-reload-video.mjs /tmp/pistol-review pistol
+```
+
+The pistol design generator is `scripts/assets/create-pistol-preview.py` and
+explicitly overwrites only the pistol source. Normal `assets:export` preserves
+all edited sources. The older two-weapon generator still overwrites only its
+shotgun and revolver sources.

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createCelMaterial } from './materials';
 
-export type AuthoredWeaponId = 'shotgun' | 'revolver';
+export type AuthoredWeaponId = 'shotgun' | 'revolver' | 'pistol';
 export type WeaponAssets = Record<AuthoredWeaponId, THREE.Object3D>;
 export interface AuthoredWeaponRig {
   root: THREE.Object3D;
@@ -10,7 +10,8 @@ export interface AuthoredWeaponRig {
   support: THREE.Object3D;
   port: THREE.Object3D;
   muzzle: THREE.Object3D;
-  mechanisms: Partial<Record<'pump' | 'cylinder' | 'rotor' | 'hammer', THREE.Object3D>>;
+  magazineOut?: THREE.Object3D;
+  mechanisms: Partial<Record<'pump' | 'cylinder' | 'rotor' | 'hammer' | 'slide' | 'magazine', THREE.Object3D>>;
 }
 function required(root: THREE.Object3D, name: string): THREE.Object3D {
   const matches: THREE.Object3D[] = [];
@@ -23,13 +24,26 @@ export function createAuthoredWeaponRig(id: AuthoredWeaponId, asset: THREE.Objec
   const grip = required(root, 'grip_right');
   const mechanisms: AuthoredWeaponRig['mechanisms'] = id === 'shotgun'
     ? { pump: required(root, 'mechanism_pump') }
+    : id === 'pistol' ? { slide: required(root, 'mechanism_slide'), magazine: required(root, 'mechanism_magazine') }
     : { cylinder: required(root, 'mechanism_cylinder'), rotor: required(root, 'mechanism_rotor'), hammer: required(root, 'mechanism_hammer') };
-  const support = id === 'shotgun' ? required(root, 'grip_left') : grip;
+  const support = id !== 'revolver' ? required(root, 'grip_left') : grip;
   const port = required(root, 'reload_port');
   if (id === 'shotgun' && support.parent !== mechanisms.pump
     || id === 'revolver' && (port.parent !== mechanisms.cylinder || mechanisms.rotor?.parent !== mechanisms.cylinder))
     throw new Error(`Weapon asset: incompatible ${id} mechanism hierarchy`);
-  return { root, grip, support, port, muzzle: required(root, 'Muzzle'), mechanisms };
+  const magazineOut = id === 'pistol' ? required(root, 'magazine_out') : undefined;
+  if (magazineOut) {
+    const magazine = mechanisms.magazine;
+    const slide = mechanisms.slide;
+    if (!magazine || !slide || magazine.parent !== root || slide.parent !== root
+      || port.parent !== root || magazineOut.parent !== root || grip.parent !== root || support.parent !== root)
+      throw new Error('Weapon asset: incompatible pistol mechanism hierarchy');
+    const travel = magazineOut.position.clone().sub(port.position);
+    if (![...travel.toArray()].every(Number.isFinite) || Math.abs(travel.x) > 1e-6
+      || travel.y >= -0.13 || travel.z <= 0 || travel.length() > .3)
+      throw new Error('Weapon asset: invalid pistol magazine path');
+  }
+  return { root, grip, support, port, magazineOut, muzzle: required(root, 'Muzzle'), mechanisms };
 }
 export async function loadWeaponAssets(base: string): Promise<WeaponAssets> {
   async function load(id: AuthoredWeaponId): Promise<THREE.Object3D> {
@@ -38,6 +52,7 @@ export async function loadWeaponAssets(base: string): Promise<WeaponAssets> {
     const palette: Record<string, number> = {
       'Charcoal blued steel': 0x2b2b2b, 'Recess / rubber': 0x111111,
       'Warm walnut': 0x4a331f, 'Walnut end grain': 0x302015,
+      'Satin graphite slide': 0x59666e, 'Slate grip panels': 0x28343c, 'Ivory sight inserts': 0xe7d6ac,
       'Brushed steel': 0xb9bdc6, Brass: 0xc6994f,
     };
     const materials = new Map<string, THREE.MeshToonMaterial>();
@@ -62,8 +77,8 @@ export async function loadWeaponAssets(base: string): Promise<WeaponAssets> {
     if (!meshes) throw new Error(`Weapon asset: ${id} contains no meshes`);
     return scene;
   }
-  const [shotgun, revolver] = await Promise.all([load('shotgun'), load('revolver')]);
-  return { shotgun, revolver };
+  const [shotgun, revolver, pistol] = await Promise.all([load('shotgun'), load('revolver'), load('pistol')]);
+  return { shotgun, revolver, pistol };
 }
 /** Evaluate an authored marker in body coordinates, including moving parents. */
 export function attachmentPoint(node: THREE.Object3D, body: THREE.Object3D): THREE.Vector3 {

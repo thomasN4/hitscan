@@ -1,6 +1,7 @@
 import type { WeaponId } from './state';
 import type { WeaponViewModel } from './weaponModels';
 import type { WeaponPose } from '../sim/weaponAnimation';
+import { posePistolMagazine, posePistolReload } from './pistolPresentation';
 import { poseShotgunReload } from './shotgunPresentation';
 import { poseRevolverReload } from './revolverPresentation';
 
@@ -23,7 +24,8 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   group.rotation.set(0.10 * pose.reload - 0.22 * pose.draw + 0.16 * running - 0.6 * pose.swing,
     0.1 * pose.swing,
     0.28 * pose.reload - 0.22 * running - 0.45 * pose.swing);
-  if (m.magazine) m.magazine.position.y -= 0.18 * pose.magazine;
+  if (id === 'pistol') posePistolMagazine(vm, pose);
+  else if (m.magazine) m.magazine.position.y -= 0.18 * pose.magazine;
   if (m.pump) m.pump.position.z += 0.095 * pose.pump;
   if (m.bolt) {
     m.bolt.rotation.z += 1.15 * Math.max(pose.boltLift, pose.charge);
@@ -47,6 +49,7 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   // The authored weapons override the generic shell path above with a trajectory
   // anchored to their own loading port, and the shotgun additionally replaces the
   // group transform to expose that port.
+  if (id === 'pistol' && pose.reload > 0) posePistolReload(vm, pose);
   if (id === 'shotgun' && pose.reload > 0) poseShotgunReload(vm, pose);
   if (id === 'revolver') poseRevolverReload(vm, pose);
 }

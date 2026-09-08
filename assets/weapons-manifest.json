@@ -2,7 +2,7 @@
   "version": 1,
   "blender": "5.2.0 LTS",
   "exporter": "scripts/assets/export-weapons.py",
-  "exporterSha256": "2d55f2e34eb569669002d36bc943993e57869326ab8cc867f11b3171558f898f",
+  "exporterSha256": "3eb74c20da8082cf1fb81be9fbdf40013ffa52aac3a89f93acc975f3e730cc0e",
   "settings": {
     "format": "GLB",
     "export_yup": false,
@@ -33,6 +33,18 @@
         "vertices": 16110,
         "meshes": 11,
         "bytes": 466468
+      }
+    },
+    {
+      "id": "pistol",
+      "source": "assets/source/pistol.blend",
+      "output": "public/assets/pistol.glb",
+      "sourceSha256": "9349da246b8738f2ff1221d9f82e6852bb7ebfceed34d4eb34540360ba4ebc32",
+      "outputSha256": "6a929143631f1f02531d67bb9c8a9e2fb35f6ba326d00653bf467460e3337d20",
+      "stats": {
+        "vertices": 26322,
+        "meshes": 9,
+        "bytes": 753464
       }
     }
   ]

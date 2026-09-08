@@ -130,6 +130,7 @@ try {
     const fired = await snapshot(page);
     if (id === 'shotgun') assert.ok(fired.parts['weapon-mechanism-pump'].position[2] > idle.parts['weapon-mechanism-pump'].position[2] + 0.06);
     if (id === 'sniper') assert.ok(fired.parts['weapon-mechanism-bolt'].position[2] > idle.parts['weapon-mechanism-bolt'].position[2] + 0.04);
+    if (id === 'pistol') assert.ok(fired.parts['weapon-mechanism-slide'].position[2] > idle.parts['weapon-mechanism-slide'].position[2] + .003, 'Pistol slide must cycle');
     await page.screenshot({ path: `${OUT}/${id}-fire.png` });
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.deepEqual(await snapshot(page), fired, 'Pause must freeze mechanisms and ammo');
@@ -150,6 +151,15 @@ try {
         assert.ok(finite(pose), `${id}: non-finite mechanism transform during reload`);
         if (label === 'insert' && perRound) assert.equal(pose.parts['weapon-mechanism-shell'].visible, true);
         if (label === 'insert' && id === 'revolver') assert.ok(pose.parts['weapon-mechanism-cylinder'].rotation[2] > idle.parts['weapon-mechanism-cylinder'].rotation[2] + 1.4);
+        if (id === 'pistol') {
+          const rest = idle.parts['weapon-mechanism-magazine'].position;
+          const mag = pose.parts['weapon-mechanism-magazine'].position;
+          const dy = mag[1] - rest[1], dz = mag[2] - rest[2];
+          assert.ok(Math.abs(dz + .32 * dy) < 1e-6, 'Magazine must track the grip slope');
+          if (label === 'insert') assert.ok(dy < -.17 && dz > .05, 'Magazine must clear the well');
+          if (label === 'seat') assert.ok(Math.hypot(...mag.map((v,i)=>v-rest[i])) < 1e-6, 'Magazine must reseat');
+          assert.deepEqual(pose.parts['weapon-mechanism-slide'].position, idle.parts['weapon-mechanism-slide'].position, 'Partial reload must not rack the slide');
+        }
         await page.screenshot({ path: `${OUT}/${id}-reload-${label}.png` });
       }
       if (perRound) {
@@ -169,6 +179,15 @@ try {
       // Empty reload exercises charge gestures and every chamber/shell transfer.
       await page.evaluate(() => { window.__cs.weapon.mag = 0; window.__cs.weapon.reserve = window.__cs.weapon.magSize; });
       await page.keyboard.press('KeyR');
+      if (id === 'pistol') {
+        const chargeAt = await page.evaluate(() => window.__cs.weapon.reloadEnd - window.__cs.weapon.reloadTime * .14);
+        await freezeAt(page, chargeAt);
+        const charged = await snapshot(page);
+        assert.ok(charged.parts['weapon-mechanism-slide'].position[2] > idle.parts['weapon-mechanism-slide'].position[2] + .04);
+        const mag = charged.parts['weapon-mechanism-magazine'].position;
+        assert.ok(Math.hypot(...mag.map((v,i)=>v-idle.parts['weapon-mechanism-magazine'].position[i])) < 1e-6);
+        await page.screenshot({ path: `${OUT}/${id}-empty-charge.png` });
+      }
       await runFor(page, await page.evaluate(() => window.__cs.weapon.reloadTime + 0.3));
       const full = await snapshot(page);
       assert.equal(full.reloading, false); assert.equal(full.mag, idle.mag); assert.equal(full.reserve, 0);
@@ -190,6 +209,24 @@ try {
       await runFor(page, 0.3);
       const swapped = await snapshot(page);
       assert.equal(swapped.reloading, false);
+      if (id === 'pistol') {
+        for (const action of ['aim', 'sprint']) {
+          await page.keyboard.press('KeyR'); await runFor(page, .5);
+          if (action === 'aim') await page.mouse.down({button:'right'});
+          else { await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyW'); }
+          await runFor(page, .4);
+          const cancelled = await snapshot(page);
+          assert.equal(cancelled.reloading, false);
+          for (const key of ['slide', 'magazine']) {
+            const rest = idle.parts[`weapon-mechanism-${key}`].position;
+            const actual = cancelled.parts[`weapon-mechanism-${key}`].position;
+            assert.ok(Math.hypot(...actual.map((v,i)=>v-rest[i])) < 1e-6, `${action} cancellation must restore ${key}`);
+          }
+          if (action === 'aim') await page.mouse.up({button:'right'});
+          else { await page.keyboard.up('ShiftLeft'); await page.keyboard.up('KeyW'); }
+          await runFor(page, .4);
+        }
+      }
       if (swapped.parts['weapon-mechanism-shell']) assert.equal(swapped.parts['weapon-mechanism-shell'].visible, false);
     }
     await page.keyboard.down('ShiftLeft');

@@ -39,7 +39,7 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets?: WeaponAssets)
   const offset = id === 'sniper' ? { x: 0.26, y: 0.12 }
     : id === 'shotgun' ? { x: 0.25, y: 0.105 }
       : id === 'smg' ? { x: 0.25, y: 0.14 } : { x: 0.24, y: 0.15 };
-  const sightLine = id === 'pistol' ? -0.012 : id === 'revolver' ? 0.037 : id === 'shotgun' ? .034 : 0;
+  const sightLine = id === 'pistol' ? -0.004 : id === 'revolver' ? 0.037 : id === 'shotgun' ? .034 : 0;
   body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' ? -0.43 : id === 'shotgun' ? -.53 : -0.57);
   group.add(body);
 
@@ -181,22 +181,10 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets?: WeaponAssets)
       break;
     }
     case 'pistol': {
-      const slide = box(0.058, 0.052, 0.25, 0, -0.048, -0.018, steel, 0.008);
-      box(0.055, 0.029, 0.20, 0, -0.086, -0.007, dark, 0.006);
-      profile([[0.045, -0.08], [0.105, -0.08], [0.15, -0.235], [0.08, -0.235]], 0.051, dark);
-      mag = box(0.040, 0.12, 0.056, 0, -0.185, 0.108, steel, 0.004);
-      box(0.056, 0.014, 0.077, 0, -0.064, 0, dark, 0.004, mag);
-      triggerGuard(0.007, -0.098, 0.073);
-      cylinder(0.016, 0.01, 0, -0.047, -0.148, dark);
-      cylinder(0.009, 0.012, 0, -0.080, -0.128, steel);
-      const slideDetailStart = body.children.length;
-      for (const z of [0.047, 0.060, 0.073, 0.086]) {
-        box(0.002, 0.032, 0.003, 0.029, -0.048, z, dark, 0.001);
-      }
-      box(0.029, 0.002, 0.041, 0.009, -0.021, -0.005, dark, 0.001);
-      sights(-0.118, 0.091, false, 0.010);
-      const slideDetails = [slide, ...body.children.slice(slideDetailStart)];
-      mechanisms.slide = assembly(slideDetails);
+      if (!weaponAssets) throw new Error('Pistol asset was not loaded before viewmodel creation');
+      authored = createAuthoredWeaponRig(id, weaponAssets.pistol);
+      body.add(authored.root);
+      Object.assign(mechanisms, authored.mechanisms);
       break;
     }
     case 'revolver': {
@@ -218,7 +206,7 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets?: WeaponAssets)
       break;
     }
   }
-  if (id === 'smg' || id === 'sniper' || id === 'pistol') {
+  if (id === 'smg' || id === 'sniper') {
     if (!mag) throw new Error(`Missing magazine for ${id}`);
     mechanisms.magazine = mag;
   }

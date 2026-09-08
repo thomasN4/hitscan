@@ -1,6 +1,6 @@
 # Weapon model candidates
 
-`shotgun.blend` and `revolver.blend` are the approved editable weapon sources.
+`shotgun.blend`, `revolver.blend`, and `pistol.blend` are the approved editable weapon sources.
 Their GLBs and hashes are produced by `npm run assets:export`; runtime
 animations follow the exported grip markers and mechanism pivots.
 
@@ -35,3 +35,7 @@ Second review revision: the shotgun stock wrist follows the user-supplied curved
 grip reference. The revolver uses exaggerated .44 Magnum visual proportions
 with a wider bore, longer and heavier barrel, and larger cylinder and chambers.
 These are stylized game proportions, not dimensionally faithful replicas.
+
+Pistol: fitted magazine and open well, animated along the grip slope; independent
+slide cycling and empty-reload charging. Its dedicated generator and clearance
+checks are documented in `pistol-model.md`.

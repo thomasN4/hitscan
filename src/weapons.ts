@@ -125,7 +125,7 @@ export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
     smg: createWeaponViewModel('smg'),
     sniper: createWeaponViewModel('sniper'),
     shotgun: createWeaponViewModel('shotgun', weaponAssets),
-    pistol: createWeaponViewModel('pistol'),
+    pistol: createWeaponViewModel('pistol', weaponAssets),
     revolver: createWeaponViewModel('revolver', weaponAssets),
     knife: createWeaponViewModel('knife'),
   };

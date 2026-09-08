@@ -58,7 +58,7 @@ const tmpTarget = new THREE.Vector3();
  * Capped at MAX_HOLES via FIFO: once full, the oldest decal is removed so
  * long sessions can't accumulate unbounded draw calls.
  */
-export function spawnBulletHole(point: THREE.Vector3, normal: THREE.Vector3): void {
+export function spawnBulletHole(point: THREE.Vector3, normal: THREE.Vector3, surface?: THREE.Object3D): void {
   const hole = new THREE.Mesh(holeGeo, holeMat);
 
   // Lift slightly off the surface along the normal to avoid z-fighting,
@@ -70,10 +70,11 @@ export function spawnBulletHole(point: THREE.Vector3, normal: THREE.Vector3): vo
   hole.rotateZ(Math.random() * Math.PI * 2);
 
   scene.add(hole);
+  if (surface) surface.attach(hole);
   bulletHoles.push(hole);
 
   if (bulletHoles.length > MAX_HOLES) {
     const oldest = bulletHoles.shift();
-    if (oldest) scene.remove(oldest);
+    if (oldest) oldest.removeFromParent();
   }
 }

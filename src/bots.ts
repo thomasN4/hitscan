@@ -33,8 +33,10 @@ import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
 import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotSecondaryChoice, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
-import { solids, colliders, liftPads } from './world';
-import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
+import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
+import { elevatorSupports } from './sim/elevator';
+import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, HEAD_HEIGHT } from './collision';
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
@@ -49,8 +51,8 @@ import { meleeSwing, isBackstab, type MeleeCandidate } from './sim/melee';
 import { damageForPart } from './sim/damage';
 import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
-import { NAV_RADIUS, route, navGrid } from './nav';
-import { nearestNode, navNode, pickPatrolNode } from './sim/navGrid';
+import { NAV_RADIUS, transportRoute, navGrid } from './nav';
+import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -375,6 +377,9 @@ export class Bot implements BotShape {
   mode: BrainMode = 'hold';
   /** Waypoints the bot is currently walking, nav-graph order; empty when none. */
   private path: THREE.Vector3[] = [];
+  private transportPath: RouteWaypoint[] = [];
+  private elevatorTrip: ElevatorTrip | null = null;
+  private elevatorRequested = false;
   /** How far along `path` the bot has got. */
   private leg = 0;
   /**
@@ -484,6 +489,8 @@ export class Bot implements BotShape {
    * reject the good draws and keep the bad ones.
    */
   spawnAtRandom(): void {
+    this.elevatorTrip = null;
+    this.clearRouteCache();
     const zone = BOT_SPAWNS[session.map][this.team];
     const p = findFreeSpawn(
       () => new THREE.Vector3(
@@ -567,6 +574,16 @@ export class Bot implements BotShape {
    */
   update(dt: number, player: PlayerState): void {
     if (!this.alive) return;
+    this.mesh.position.y += elevatorCarry({ x: this.mesh.position.x, z: this.mesh.position.z,
+      feetY: this.mesh.position.y, radius: BOT_RADIUS, height: HEAD_HEIGHT, grounded: this.onGround });
+    // Input on the previous frame can have crossed onto the deck. Commit
+    // that actual support before this frame's brain can interrupt the route.
+    if (this.elevatorTrip?.phase === 'board') {
+      const deck = elevators.find(e => e.spec.id === this.elevatorTrip?.id);
+      if (deck && elevatorSupports({ x: this.mesh.position.x, z: this.mesh.position.z,
+        feetY: this.mesh.position.y, radius: BOT_RADIUS, height: HEAD_HEIGHT, grounded: this.onGround },
+      deck.collider, colliders)) this.elevatorTrip.phase = 'ride';
+    }
 
     // Opposing entities as STABLE CANDIDATES — no positional selection here.
     // Perception owns acquisition; the brain only ever learns about the one
@@ -625,6 +642,7 @@ export class Bot implements BotShape {
     // first request after a lull should fire immediately either way.
     this.routeCooldown = Math.max(0, this.routeCooldown - dt);
 
+    this.elevatorRequested = false;
     const intent = this.brain.decide(
       {
         selfFeet: this.mesh.position,
@@ -665,12 +683,36 @@ export class Bot implements BotShape {
       this.rebuildAimGroup();
     }
 
+    // Transport is movement execution: the brain can still aim and fire.
+    // An unboarded trip is cancelled when its route is no longer requested.
+    if (this.elevatorTrip && !committedTrip(this.elevatorTrip) && !this.elevatorRequested) this.elevatorTrip = null;
+    let movementStep = intent.step;
+    if (this.elevatorTrip) {
+      const elevator = elevators.find(e => e.spec.id === this.elevatorTrip?.id);
+      if (!elevator) this.elevatorTrip = null;
+      else {
+        const spec = elevator.spec;
+        const result = elevatorTravel(this.elevatorTrip, {
+          feet: this.mesh.position, grounded: this.onGround,
+          supported: elevatorSupports({ x: this.mesh.position.x, z: this.mesh.position.z,
+            feetY: this.mesh.position.y, radius: BOT_RADIUS, height: HEAD_HEIGHT, grounded: this.onGround },
+          elevator.collider, colliders),
+          dock: elevator.dock, lowerLanding: spec.lowerLanding, upperLanding: spec.upperLanding,
+          center: new THREE.Vector3(spec.x, elevator.collider.max.y, spec.z),
+          lowerY: spec.lowerY, upperY: spec.upperY,
+        }, this.speed * dt);
+        this.elevatorTrip = result.trip;
+        movementStep = result.step;
+        if (!result.trip) this.clearRouteCache();
+      }
+    }
+
     // Horizontal gate: the SAME axis-separated slide the player uses, with
     // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
     const prevFeet = this.mesh.position.y;
     const preX = this.mesh.position.x, preZ = this.mesh.position.z;
-    const intended = intent.step.length();
-    slideMoveXZ(this.mesh.position, intent.step.x, intent.step.z, BOT_RADIUS, prevFeet, colliders);
+    const intended = movementStep.length();
+    slideMoveXZ(this.mesh.position, movementStep.x, movementStep.z, BOT_RADIUS, prevFeet, colliders);
     // Report rejection for NEXT frame's brain. DefaultBrain consumes the
     // contact's leading edge to reverse once; sustained rejection preserves
     // that committed drift until the bot clears the geometry.
@@ -686,7 +728,7 @@ export class Bot implements BotShape {
     this.vy = vert.velY;
     this.onGround = vert.onGround;
 
-    // Cargo lift. AFTER the resolve, because it keys off the grounded state
+    // Launch pad. AFTER the resolve, because it keys off the grounded state
     // this frame actually produced, and it overwrites that state rather than
     // feeding into it. The launch begins after this frame's resolve; later
     // rising frames still pass through resolveVertical's ceiling sweep.
@@ -818,6 +860,15 @@ export class Bot implements BotShape {
     patrolArrival: boolean,
   ): THREE.Vector3 | undefined | null {
     const here = this.mesh.position;
+    if (this.elevatorTrip) {
+      if (!committedTrip(this.elevatorTrip) && this.routeKey !== key) {
+        this.elevatorTrip = null;
+        this.clearRouteCache();
+      } else {
+        this.elevatorRequested = true;
+        return undefined;
+      }
+    }
     if (this.routeKey !== key) {
       this.routeKey = key;
       this.path = [];
@@ -841,9 +892,10 @@ export class Bot implements BotShape {
       routeBudget--;
       recomputed = true;
       this.routeCooldown = ROUTE_INTERVAL;
-      const found = route(here, goal);
+      const found = transportRoute(here, goal);
       if (found) {
-        this.path = found;
+        this.transportPath = found;
+        this.path = found.map(w => w.point);
         this.leg = 0;
       } else {
         // A failed recompute must not keep walking a stale path.
@@ -860,10 +912,21 @@ export class Bot implements BotShape {
     // Consume waypoints already stood on, planar — the step is planar too.
     while (this.leg < this.path.length - 1) {
       const w = this.path[this.leg]!;
+      if (this.transportPath[this.leg]?.elevatorId) break;
       if (Math.hypot(w.x - here.x, w.z - here.z) >= WAYPOINT_REACHED) break;
       this.leg++;
     }
     const w = this.path[this.leg]!;
+    const elevatorId = this.transportPath[this.leg]?.elevatorId;
+    if (elevatorId) {
+      const elevator = elevators.find(e => e.spec.id === elevatorId);
+      if (elevator) {
+        this.elevatorTrip = { id: elevatorId,
+          destination: Math.abs(w.y - elevator.spec.upperY) < 0.3 ? 'upper' : 'lower', phase: 'approach' };
+        this.elevatorRequested = true;
+        return undefined;
+      }
+    }
     const to = new THREE.Vector3(w.x - here.x, 0, w.z - here.z);
     // A patrol's FINAL node within the one-metre threshold IS the arrival:
     // the leg is over, the goal and route die, and the brain stands down.
@@ -877,6 +940,7 @@ export class Bot implements BotShape {
   /** Drop the cached route: path, leg and goal key. */
   private clearRouteCache(): void {
     this.path = [];
+    this.transportPath = [];
     this.leg = 0;
     this.routeKey = null;
   }
@@ -1060,6 +1124,7 @@ export class Bot implements BotShape {
    */
   die(killerPart: HitZone, killerName?: string): void {
     this.alive = false;
+    this.elevatorTrip = null;
     this.mesh.visible = false;
     this.deaths++;
     // Team scores: scoreKills is the CT score (player kills and CT allies

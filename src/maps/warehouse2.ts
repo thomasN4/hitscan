@@ -27,9 +27,8 @@
 //     you walk under (world.ts:addOpenStairs). Built the ordinary solid way
 //     they would be two 13 m wedges of cover in the middle of the hole the map
 //     exists for.
-//   - The cargo lifts are the fast way up and cost you the arc: no cover, no
-//     control, and everyone can see where you will land. One-way, so the
-//     graph never routes a bot down one (world.ts:addLiftPad).
+//   - The cargo lifts cycle between the floor and ring. Both teams can
+//     wait, board and ride in either direction, exposed to the open atrium.
 //   - Spawns are ASYMMETRIC — CTs muster in the yard and have to come through
 //     a doorway, Ts start already on the ring (core/state.ts:BOT_SPAWNS). The
 //     ring is the prize and one side begins holding it.
@@ -46,12 +45,10 @@ import * as THREE from 'three';
 import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
 import {
-  addSolidBox, addOpenStairs, addLiftPad, registerSolid, registerGroupParts,
+  addSolidBox, addOpenStairs, addElevator, registerSolid, registerGroupParts,
   colliders, coplanarTopOverlaps,
 } from '../world';
 import { STEP_HEIGHT, HEAD_HEIGHT } from '../collision';
-import { GRAVITY } from '../sim/movement';
-import { launchApex } from '../sim/lift';
 
 // Deliberately spread WIDER than warehouse1's palette, not just shifted
 // brighter. Under a roof the hemisphere is doing most of the lighting, and a
@@ -132,59 +129,11 @@ const YARD_X = 44, YARD_Z = 34;
 const RAIL_H = 1.1, RAIL_T = 0.16;
 /** Width of both main flights, and so of the rail gaps that receive them. */
 const FLIGHT_W = 3.6;
-/**
- * Extra rail gap either side of a lift pad, beyond the pad's own width.
- *
- * A flight arrives on a fixed line and needs a gap no wider than itself. An
- * ARC does not: a launched body steers all the way up, so where it comes down
- * is the pad's position plus whatever the brain did with a second and a half
- * of air. Measured drift on a bot riding pad A was 2.4 m off the pad's centre-
- * line, which cleared a pad-width gap and put it on TOP of the rail — a 0.16 m
- * ledge the nav graph treats as standable and connects to nothing, so the bot
- * perches there for the rest of its life. Two metres of margin covers the
- * observed drift with room to spare, and a wide opening opposite a goods lift
- * is what the real building would have anyway.
- */
-const LIFT_GAP_MARGIN = 2;
-
-/**
- * Upward velocity a cargo lift imparts.
- *
- * Sized off the ARC, not the apex. Apex alone only has to beat DECK_Y; what
- * actually matters is how long the body spends ABOVE DECK_Y, because until it
- * clears the deck its head is under the slab and slideMoveXZ will not let it
- * move over. 17 m/s gives ~0.73 s over the deck, ~4.7 m of travel at walk
- * speed against the ~3 m a pad centre needs. At 16 that window halves and
- * bots start clipping the lip and falling back in.
- */
-const LAUNCH_VEL = 17;
-/** Pad height. At or under STEP_HEIGHT or it must be JUMPED onto, and bots have no jump. */
+/** Clearance per side between the moving deck and the catwalk rail. */
+const LIFT_GAP_MARGIN = 0.25;
 const PAD_H = 0.25;
-/** Pad footprint. */
 const PAD_W = 4;
-/**
- * Largest body footprint radius on the map.
- *
- * Two sources, and the larger wins: bots.ts:BOT_RADIUS is nav.ts:NAV_RADIUS =
- * 0.5, and core/state.ts:player.radius is 0.45.
- */
-const BODY_RADIUS_MAX = 0.5;
-/**
- * How far a pad's far edge stands back from the void lip.
- *
- * The ring slab's underside is at DECK_Y - SLAB_T = 4.7 and its collider runs
- * from the lip outward, so a footprint that reaches under it gets its head
- * swept by collision.ts:resolveVertical, clamped to feet 4.7 - HEAD_HEIGHT =
- * 2.7, and dropped straight back onto the pad — which fires again. A
- * permanent bounce, not a ride. LIP_GAP is at least twice BODY_RADIUS_MAX,
- * so "footprint overlaps the slab" (z < -VOID_Z + r) and "footprint overlaps
- * the pad" (z > padMinZ - r) are disjoint sets: a body the ceiling stops is
- * by construction no longer on the pad, so it lands on the floor and stays
- * there. It is a floor strip, not a rail — the pad is still walked onto from
- * the lip side, it just no longer reaches it. Proven in checkClearances()
- * and pinned in sim/lift.test.ts.
- */
-const LIP_GAP = 1;
+const LIFT_SPEED = 1.5, LIFT_DWELL = 2;
 
 /**
  * Minimum clear width of anything meant to be walked down.
@@ -327,8 +276,7 @@ function buildRing(): void {
   //
   // The greybox's rail runs are decorative and line up with nothing; these
   // gaps are placed deliberately. Each flight lands through one, and each lift
-  // arc comes down through one — a body thrown onto the deck edge and stopped
-  // by a 1.1 m rail falls straight back into the void.
+  // docks beside one. Passengers need an unobstructed walk onto the ring.
   //
   // The four corners go to the x-runs, for the shell wall's reason: two runs
   // each built to the lip would double-cover a RAIL_T square at every corner,
@@ -404,26 +352,23 @@ function buildFlights(): void {
 }
 
 // ---------- E. Cargo lifts ----------
-// One per half, rotationally symmetric with the flights. Each stands LIP_GAP
-// back from the void lip — a pad flush with it launches bodies into the ring
-// slab's underside, which is the permanent bounce LIP_GAP exists to remove —
-// so the arc now carries a body the ~3 m from the pad's centre to the lip,
-// and comes down through a rail gap cut for it.
-
-/**
- * Pad centres. Each lands on the band its arc is aimed at, a LIP_GAP short of
- * the lip.
- */
-const PAD_A_X = 8, PAD_A_Z = -(VOID_Z - PAD_W / 2 - LIP_GAP);  // (8, -9) -> the -z band
-const PAD_B_X = -8, PAD_B_Z = VOID_Z - PAD_W / 2 - LIP_GAP;    // (-8, 9) -> the +z band
-/** How far onto the band the arc is aimed — clear of the lip, short of the wall. */
-const PAD_LANDING_INSET = 2;
+// Physical decks at the greybox's locations, flush against the catwalk lip.
+// Lower landings sit on the floor outside the sweep; upper landings are on
+// the ring. Navigation waits there until the deck is docked.
+const PAD_A_X = 8, PAD_A_Z = -VOID_Z + PAD_W / 2;
+const PAD_B_X = -8, PAD_B_Z = VOID_Z - PAD_W / 2;
 
 function buildLifts(): void {
-  addLiftPad(PAD_A_X, 0, PAD_A_Z, PAD_W, PAD_W, PAD_H, LAUNCH_VEL,
-    new THREE.Vector3(PAD_A_X, DECK_Y, -VOID_Z - PAD_LANDING_INSET), matLift);
-  addLiftPad(PAD_B_X, 0, PAD_B_Z, PAD_W, PAD_W, PAD_H, LAUNCH_VEL,
-    new THREE.Vector3(PAD_B_X, DECK_Y, VOID_Z + PAD_LANDING_INSET), matLift);
+  for (const [id, x, z, sign] of [
+    ['cargo-a', PAD_A_X, PAD_A_Z, -1],
+    ['cargo-b', PAD_B_X, PAD_B_Z, 1],
+  ] as const) {
+    addElevator({ id, x, z, width: PAD_W, depth: PAD_W, thickness: PAD_H,
+      lowerY: PAD_H, upperY: DECK_Y, speed: LIFT_SPEED, dwell: LIFT_DWELL,
+      lowerLanding: new THREE.Vector3(x, 0, z - sign * (PAD_W / 2 + 1)),
+      upperLanding: new THREE.Vector3(x, DECK_Y, sign * (VOID_Z + 1)),
+      material: matLift });
+  }
 }
 
 // ---------- F. Ground cover ----------
@@ -619,9 +564,8 @@ function buildRoof(): void {
 //
 // Three failure modes, all quiet. A route narrowed under AISLE_MIN still looks
 // walkable and still lets the PLAYER through, but stops holding sampled nav
-// cells, so bots simply never use it. A lift whose arc no longer clears the
-// deck it serves still launches you — it just drops you back where you
-// started, which reads as a broken pad rather than a changed constant. And a
+// cells, so bots simply never use it. An elevator that no longer docks flush with the
+// ring strands its passengers at the upper stop. And a
 // solid built to a centre-line rather than a face lands its top face in the
 // same plane as its neighbour's, which renders as a flickering patch and is
 // invisible in the source: see INNER_X/OUTER_X, and world.ts's
@@ -661,17 +605,13 @@ function checkClearances(): void {
   atMost('flight riser', STEP_H, STEP_HEIGHT);
   atMost('lift pad height', PAD_H, STEP_HEIGHT);
 
-  // Lifts. The apex has to beat the deck, and the flight has to land ON the
-  // band — a pad aimed past the wall is as broken as one that falls short.
-  const apex = launchApex(LAUNCH_VEL, GRAVITY);
-  atLeast('lift apex over the deck', apex - DECK_Y, 0.5);
-  atMost('lift landing inset', PAD_LANDING_INSET, RING - AISLE_MIN / 2);
-  atLeast('lift rail gap', PAD_W + 2 * LIFT_GAP_MARGIN, AISLE_MIN + PAD_W / 2);
-  // review-bot caught this group testing the apex and the landing inset but
-  // never the lip gap itself; the relaunch bounce it prevents is LIP_GAP's.
+  // A docked deck is step-on-able below and flush with the ring above.
+  atLeast('lift rail clearance', LIFT_GAP_MARGIN, 0.25);
+  atLeast('lift headroom at upper stop', ROOF_Y - DECK_Y, HEAD_HEIGHT);
   for (const padZ of [PAD_A_Z, PAD_B_Z]) {
-    atLeast('lift pad gap to the void lip',
-      VOID_Z - (Math.abs(padZ) + PAD_W / 2), 2 * BODY_RADIUS_MAX);
+    if (Math.abs(Math.abs(padZ) + PAD_W / 2 - VOID_Z) > 1e-6) {
+      problems.push('lift deck is not flush with the void lip');
+    }
   }
 
   // Flush joins. Both void flights must top out exactly on the void lip, or

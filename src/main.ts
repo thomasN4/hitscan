@@ -17,9 +17,11 @@ import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, S
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
 import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
-import { colliders } from './world';
+import { colliders, elevators, updateElevators } from './world';
+import { HEAD_HEIGHT } from './collision';
+import { NAV_RADIUS } from './nav';
 import { BUILDERS } from './maps';
-import { buildNav, route, navGrid } from './nav';
+import { buildNav, route, transportRoute, navGrid } from './nav';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
@@ -227,6 +229,12 @@ function animate(): void {
     // already clamped, so a tab-switch spike can't fast-forward the
     // scheduler.
     gameTime.advance(dt);
+    updateElevators(dt, [
+      ...(player.alive ? [{ x: player.pos.x, z: player.pos.z, feetY: player.pos.y - player.eyeHeight,
+        radius: player.radius, height: HEAD_HEIGHT, grounded: player.onGround }] : []),
+      ...bots.filter(b => b.alive).map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z,
+        feetY: b.mesh.position.y, radius: NAV_RADIUS, height: HEAD_HEIGHT, grounded: b.onGround })),
+    ]);
 
     // Stage order is load-bearing, which is why it lives here rather than
     // nested inside updateMovement. It is pinned from both sides:
@@ -339,6 +347,7 @@ declare global {
       bots: typeof bots;
       bulletHoles: typeof bulletHoles;
       colliders: typeof colliders;
+      elevators: typeof elevators;
       /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */
       gameTime: typeof gameTime;
       /**
@@ -346,8 +355,8 @@ declare global {
        * correctness can be checked without watching a bot move, so the smoke
        * test asks it directly whether the deck is reachable from the floor.
        */
-      nav: { route: typeof route; grid: typeof navGrid };
+      nav: { route: typeof route; transportRoute: typeof transportRoute; grid: typeof navGrid };
     };
   }
 }
-window.__cs = { game, weapon, player, bots, bulletHoles, colliders, gameTime, nav: { route, grid: navGrid } };
+window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, nav: { route, transportRoute, grid: navGrid } };

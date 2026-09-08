@@ -25,7 +25,7 @@ import { spawnImpact, spawnBulletHole } from './effects';
 import { GUNSHOT_RADIUS_M } from './sim/soundEvents';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
-import { roundInterval, roundTransfer, planReload } from './sim/ammo';
+import { roundInterval, roundTransfer, planReload, cancelsReload } from './sim/ammo';
 import {
   aimPitch,
   aimYaw,
@@ -183,7 +183,9 @@ function cancelReload(): void {
  * sights are up DROPS them (dropAim): one motion at a time, and like
  * unscopeOnShot, clearing input.aiming means a fresh RMB press is needed to
  * re-raise even if the button is still held. A REFUSED reload leaves the aim
- * exactly as it was.
+ * exactly as it was. The opposite order — sights raised DURING a reload —
+ * belongs to sim/ammo.ts:cancelsReload, applied per frame in updateWeapon;
+ * that fresh RMB press is what cancels.
  *
  * Whole-mag weapons (no `perRound`): one timer, the mag refills once at
  * reloadEnd. Per-round weapons (shotgun/revolver): reloadTime is spread
@@ -516,11 +518,17 @@ export function updateWeapon(dt: number): void {
 
   const def = currentDef();
 
-  // Sprint wins when it begins during a reload. Run this before animation or
+  // Sprinting or raising the sights wins when it begins during a reload — the
+  // mirror of tryReload's dropAim, and the same one-motion-at-a-time rule seen
+  // from the order where nothing presses R. Run this before animation or
   // transfer/completion so the cancel frame cannot sneak in one last round.
   // Rounds already moved by a per-round reload remain live; whole-mag reloads
   // have not moved anything yet.
-  if (weapon.reloading && currentSprintActive(effectiveCrouching())) {
+  if (cancelsReload({
+    reloading: weapon.reloading,
+    sprinting: currentSprintActive(effectiveCrouching()),
+    aiming: input.aiming,
+  })) {
     cancelReload();
   }
 

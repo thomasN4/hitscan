@@ -354,3 +354,59 @@ rig's camera-space pose does not move. Both were written red first: the unit
 suite fails three cases against the ungated formula, and the browser check reads
 2.9e-2 against the ungated build versus a 5e-4 tolerance. The tolerance is not
 zero because `adsLerp` approaches 1 asymptotically, leaving about 1e-4.
+
+### The revolver hammer, and a check that asks the right question
+
+`weapon-animation-check.mjs` asserted `hammerTop < -0.005` — the hammer's topmost
+vertex projects below the view axis — and it passed, at **−0.0060**. That is a
+margin of 0.37 px at 720p, a coincidence rather than a design. It was also the
+wrong question: "below the view axis" is not "clear of the aiming point", because
+a part only 21.7 mrad wide still covers the crosshair when it is centred on x = 0.
+
+Measured at full ADS, as elevation off the view axis: front blade crest
+−9.57 mrad, rear notch shoulders −10.14 mrad, **hammer spur top −3.21 mrad**. The
+hammer was authored 2.5 mm proud of the rear notch and 4.5 mm proud of the front
+blade, 8 cm nearer the eye, so it hid both sights. A ray from the eye to the
+front blade hit the hammer at 0.296 m against a 0.575 m target.
+
+The cocking sign was also backwards. `rotation.x -= 0.5 * pose.hammer` *lifted*
+the spur through the aim point at `pose.hammer ≈ 0.083`, peaking at +14.18 mrad —
+9.6 px above the crosshair for 167 ms of every 450 ms shot, 37% of the cycle. A
+thumbed-back hammer swings rearward and down, so the fix is `+=`.
+
+The sign flip clears the crosshair but not the sights: at rest the spur still
+stood +6.36 mrad above the eye→crest ray. Runtime droop cannot close that — 10°
+of ADS-blended cant clears the crest by 1.1 px and still hides the blade, and the
+~20° it would really take rotates the hammer's nose out through the frame's face.
+The frame-only profile tops out at body y = 0.0335 while the hammer reached
+0.0360, standing ~4 cm of bare spur above the frame. So the hammer was lowered
+5 mm in `assets/source/revolver.blend` and re-exported; at that drop the nearest
+thing on the sight line becomes the barrel's own top rib at −9.69 mrad, 0.13 mrad
+below the eye→crest ray, which is this model's geometric floor. Vertex and mesh
+counts are unchanged (16110 / 11); only the revolver's hashes moved.
+
+Moving `sightLine` was rejected: it moves the hammer and the sights together.
+Lowering it to put the blade on axis puts the hammer permanently +14.5 mrad over
+the crosshair; raising it to duck the hammer drops both sights ~20 px below
+centre and falsifies the ADS invariant above. `sightLine = 0.037` looks like it
+was already chosen to duck the hammer, which is why the old margin was 0.37 px.
+
+`scripts/sightPicture.test.mjs` replaces the `hammerTop` block. It raycasts from
+the eye through a 20 mrad upper half-cone across 21 phases of each weapon's fire
+cycle, and asserts nothing intrudes nearer than a pinned per-weapon station. It
+raycasts rather than projects because a projected bounding box cannot answer an
+occlusion question here: the stock legitimately sits beside the camera so
+near-plane vertices project to garbage, and the depth punch on z legitimately
+rescales everything. Only the upper half-cone, because every front sight sits at
+or below the aim point by construction. Three guards keep it honest — a probe fan
+proving the rays reach each weapon at all, an in-file mutation applying the old
+hammer signature absolutely, and the red run: against the pre-fix revolver it
+reports 0.2997 m against a 0.55 m station, and against a sign-only regression
+with the new geometry it still reports 0.318 m.
+
+Reload and swap poses are deliberately out of scope: `weaponPresentation.ts`
+moves the whole group by design there, and the sight picture is not promised
+during them. The sniper is sampled at `adsLerp` 0.85, the last blend value at
+which `weapons.ts` still draws the viewmodel, and its station is the scope body
+rather than a sight. The knife never reaches ADS at all, so it is checked at the
+hip; both exemptions are pinned against their catalog flags.

@@ -34,7 +34,10 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
     m.cylinder.rotation.z += 1.60 * pose.cylinder;
   }
   if (m.rotor) m.rotor.rotation.z += Math.PI / 3 * pose.index;
-  if (m.hammer) m.hammer.rotation.x -= 0.5 * pose.hammer;
+  // A thumbed-back hammer swings the spur REARWARD and down, away from the sight
+  // line. The old `-=` swung it the other way, up through the aim point for
+  // 167 ms of every 450 ms shot and peaking 9.6 px above the crosshair at 720p.
+  if (m.hammer) m.hammer.rotation.x += 0.5 * pose.hammer;
   if (m.shell) {
     m.shell.visible = pose.shell;
     m.shell.position.set(id === 'revolver' ? -0.09 : -0.025 * (1 - pose.insert),

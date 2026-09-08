@@ -27,8 +27,8 @@
       "id": "revolver",
       "source": "assets/source/revolver.blend",
       "output": "public/assets/revolver.glb",
-      "sourceSha256": "76bbb4b021878f2843b35193e00d5e13e4319cd0a10dcaa42398cfba00698589",
-      "outputSha256": "3d166372b62f2476902e023592e37db97a73cd12a336dd0ba9e5968f709d0cc8",
+      "sourceSha256": "62d4c0e2384d37c61dfff3c974c8626d3dc61c320c7f899f912c47182e0ac4c1",
+      "outputSha256": "67b62c90f79afb32b2bda870e3b87afea0d41295a43685921d705da04e112063",
       "stats": {
         "vertices": 16110,
         "meshes": 11,

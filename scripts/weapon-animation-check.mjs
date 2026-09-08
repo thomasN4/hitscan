@@ -117,24 +117,6 @@ try {
       await page.evaluate(() => { window.__cs.game.recoil = 0; window.__cs.game.recoilYaw = 0; });
       await runFor(page, 0.2);
     }
-    if (id === 'revolver') {
-      const hammerTop = await page.evaluate(() => {
-        const scene = window.__cs.bots[0].mesh.parent;
-        const camera = scene.children.find(node => node.isCamera);
-        const hammer = scene.getObjectByName('viewmodel-revolver').getObjectByName('weapon-mechanism-hammer');
-        let top = -Infinity;
-        hammer.traverse(node => {
-          if (node.name !== 'weapon-part') return;
-          const positions = node.geometry.getAttribute('position');
-          for (let i = 0; i < positions.count; i++) {
-            const point = node.position.clone().fromBufferAttribute(positions, i);
-            node.localToWorld(point); point.project(camera); top = Math.max(top, point.y);
-          }
-        });
-        return top;
-      });
-      assert.ok(hammerTop < -0.005, `Hammer blocks sight line: NDC top ${hammerTop}`);
-    }
     if (id === 'sniper') {
       await trigger(page);
       assert.equal(await page.evaluate(() => window.__cs.game.aiming), false);

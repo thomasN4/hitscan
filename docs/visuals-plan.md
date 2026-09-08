@@ -294,3 +294,30 @@ and the `create-arms`/`export-arms`/`preview-arms` scripts are gone.
 CLI that the arm pipeline used to host, and `scripts/arm-assets-check.mjs` is
 `scripts/weapon-assets-check.mjs`, checking viewmodel clone independence through
 a mechanism node instead of a hand bone.
+
+### Reload framing
+
+The reload pose returns to its pre-arms form (`f62aa60`): the weapon tilts to the
+right and dips slightly, and does not travel. Three terms added with the arms are
+gone — a 0.12 m push down the view axis, an upward lift where the pre-arms pose
+dipped, and a per-weapon reload yaw of 0.15 to 0.55 rad. All three existed to
+hold a magwell or loading port inside a fixed arm's reach; without arms they only
+shrink the prop and swing it off its own frame. The per-weapon reload roll
+(0.48 pistol, -0.45 revolver, 0.30 otherwise) collapses back to a shared 0.28.
+
+The revolver's negative roll is the reason its reload read as a shift rather than
+a tilt: `vm.group` rotates about the camera origin, not about the weapon, so with
+the other three terms reverted a -0.45 roll drops the silhouette to NDC y -1.41,
+out of the bottom of the frame. It only survived because the lift and push-back
+were compensating. The sign buys nothing on chamber visibility either — the
+cylinder pivots about its own bore axis, so the chambers face the camera at 0.88
+under +0.28 against 0.92 under -0.45.
+
+The shotgun's reload raise drops from 66 to 37 degrees of pitch, with the
+receiver held near its rest position and a smaller inward ease. The roll that
+exposes the underside loading port is kept. At the old pitch the muzzle reached
+NDC y 1.02 at the shotgun's 60-degree ADS fov — past the top edge — and
+`scripts/shotgunPresentation.test.mjs` now sweeps the reload blend and pins the
+muzzle and port inside the frame at that fov. The check fails at the old pose,
+which is what makes it worth having. Mechanism animations and every reload
+timing rule are untouched.

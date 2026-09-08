@@ -1,6 +1,8 @@
 import { test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { PerspectiveCamera } from 'three';
+import { WEAPONS, BASE_FOV } from '../src/core/state.ts';
 import { createWeaponViewModel } from '../src/core/weaponModels.ts';
 import { poseWeapon } from '../src/core/weaponPresentation.ts';
 import { attachmentPoint } from '../src/core/weaponAssets.ts';
@@ -53,4 +55,33 @@ test('cancelling a reload restores the firing pose and hides the shell immediate
   expect(vm.mechanisms.shell.visible).toBe(false);
   expect(vm.group.position.distanceTo(position)).toBeLessThan(1e-9);
   expect(vm.group.quaternion.angleTo(quaternion)).toBeLessThan(1e-9);
+});
+
+/** Where a body-local point lands in NDC. vm.group has no parent here, so world
+ * space IS camera space — the relationship gunGroup gives it in game once its
+ * ADS terms have centred the sight line. */
+function ndc(vm, local, fovDeg) {
+  const camera = new PerspectiveCamera(fovDeg, 16 / 9, .1, 300);
+  camera.updateMatrixWorld(true);
+  camera.updateProjectionMatrix();
+  vm.group.updateMatrixWorld(true);
+  return vm.body.localToWorld(local.clone()).project(camera);
+}
+
+test('the reload pose keeps the muzzle and port in frame at the narrowest fov', async () => {
+  const vm = await model();
+  // Sampled at rest for the same reason as above: the port rides the pump.
+  poseWeapon(vm, 'shotgun', pose(false), 10, 0, 0);
+  const muzzle = attachmentPoint(vm.authored.muzzle, vm.body);
+  const port = attachmentPoint(vm.authored.port, vm.body);
+  // The ADS fov is what actually clips, not BASE_FOV. At the 1.15 rad of nose-up
+  // this pose replaced, the muzzle read 1.02 here — off the top edge.
+  const fov = WEAPONS.shotgun.zoomFovs[0];
+  expect(fov).toBeLessThan(BASE_FOV);
+  for (let i = 0; i <= 20; i++) {
+    const amount = i / 20;
+    poseWeapon(vm, 'shotgun', { ...pose(amount > 0), reload: amount }, 10, 0, 0);
+    expect(ndc(vm, muzzle, fov).y, `muzzle at reload ${amount}`).toBeLessThan(.6);
+    expect(ndc(vm, port, fov).y, `port at reload ${amount}`).toBeGreaterThan(-.9);
+  }
 });

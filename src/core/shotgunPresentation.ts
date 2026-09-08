@@ -9,11 +9,17 @@ import { attachmentPoint } from './weaponAssets';
  */
 export function poseShotgunReload(vm: WeaponViewModel, pose: WeaponPose): void {
   const amount = pose.reload;
-  const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(1.15, .10, 2.65));
+  // Roll the receiver onto its back to expose the underside loading port, and
+  // pitch only enough that the shell's travel down the tube reads as vertical
+  // screen motion rather than pure foreshortening. The 66 degrees of nose-up
+  // this replaces existed to hold the feed hand in a fixed arm's reach; it put
+  // the muzzle past the top edge at the shotgun's 60-degree ADS fov. The bound
+  // is pinned in scripts/shotgunPresentation.test.mjs.
+  const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(.65, .12, 2.60));
   const receiverLocal = new THREE.Vector3(0, -.025, .0).add(vm.body.position);
   const receiver = receiverLocal.clone().applyQuaternion(vm.group.quaternion).add(vm.group.position);
-  receiver.lerp(new THREE.Vector3(-.11, -.11, -.48), amount);
-  receiver.z += .08 * Math.sin(Math.PI * amount); // Ease the turn inward, then back.
+  receiver.lerp(new THREE.Vector3(0, -.16, -.50), amount);
+  receiver.z += .04 * Math.sin(Math.PI * amount); // Ease the turn inward, then back.
   vm.group.quaternion.slerp(rotation, amount);
   // Rotate about the receiver, not the distant camera origin: otherwise the
   // intermediate pose swings the whole prop through an arc across the frame.

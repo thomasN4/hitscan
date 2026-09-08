@@ -13,12 +13,16 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   }
   const { mechanisms: m, group } = vm;
   const quiet = (1 - ads) * (1 - pose.reload);
-  group.position.set(-0.095 * pose.reload - 0.045 * pose.swing,
-    0.035 * pose.reload - 0.12 * pose.draw - 0.055 * running + Math.sin(now * 1.7) * 0.0012 * quiet,
-    -0.12 * pose.reload - 0.16 * pose.swing + 0.07 * pose.draw);
-  group.rotation.set(0.12 * pose.reload - 0.22 * pose.draw + 0.16 * running - 0.6 * pose.swing,
-    (id === 'shotgun' ? 0.55 : id === 'sniper' || id === 'smg' ? 0.15 : 0) * pose.reload + 0.1 * pose.swing,
-    (id === 'pistol' ? 0.48 : id === 'revolver' ? -.45 : 0.30) * pose.reload - 0.22 * running - 0.45 * pose.swing);
+  // Reloading tilts the weapon to the right and dips it slightly; it does not
+  // travel. The z push-back and the per-weapon reload yaw that used to live here
+  // existed to hold a magwell or loading port inside a fixed arm's reach, and
+  // with the arms gone they only shrink the prop and swing it off its own frame.
+  group.position.set(-0.10 * pose.reload - 0.045 * pose.swing,
+    -0.05 * pose.reload - 0.12 * pose.draw - 0.055 * running + Math.sin(now * 1.7) * 0.0012 * quiet,
+    -0.16 * pose.swing + 0.07 * pose.draw);
+  group.rotation.set(0.10 * pose.reload - 0.22 * pose.draw + 0.16 * running - 0.6 * pose.swing,
+    0.1 * pose.swing,
+    0.28 * pose.reload - 0.22 * running - 0.45 * pose.swing);
   if (m.magazine) m.magazine.position.y -= 0.18 * pose.magazine;
   if (m.pump) m.pump.position.z += 0.095 * pose.pump;
   if (m.bolt) {

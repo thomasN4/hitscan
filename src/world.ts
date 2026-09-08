@@ -8,13 +8,11 @@
 // each used to carry their own copy of this logic, and the range copy shipped
 // without the `colliders` push — the whole map was no-clip (`431ac6e`).
 //
-// Two more registries live here, both bot-facing and both populated only by
-// the builders below: `navLinks` (traversable level changes, read by
-// sim/navGrid.ts) and `liftPads` (launch triggers, read by sim/lift.ts).
+// Builders also own `navLinks` (level changes), `liftPads` (launch triggers),
+// and `elevators` (moving geometry with persistent collider identities).
 //
-// Only `addSolidBox` touches the scene — `addOpenStairs` composes it for the
-// treads and adds its stringer group directly, making it the one other scene
-// reader. Everything else is pure, so the two
+// `addSolidBox` and `addElevator` attach geometry to the scene. `addOpenStairs` composes boxes for the
+// treads and adds its stringer group directly. Registration is scene-free, so the two
 // invariants that have actually broken here — registering both registries,
 // and flushing a group's world matrix before measuring it — are unit-tested
 // in plain Node. `scene` is never read at module scope, and
@@ -23,6 +21,7 @@
 import * as THREE from 'three';
 import { scene } from './core/engine';
 import type { LiftPad } from './sim/lift';
+import { elevatorSample, elevatorBlocked, elevatorSupports, type ElevatorBody, type ElevatorMotion } from './sim/elevator';
 
 /** Meshes that block bullets AND bot line-of-sight. */
 export const solids: THREE.Object3D[] = [];
@@ -31,7 +30,7 @@ export const colliders: THREE.Box3[] = [];
 
 /**
  * A level change a walker can traverse but a grid of standable cells cannot
- * express cheaply — today, a stair flight or a lift launch arc.
+ * express cheaply — a stair flight, launch arc, or timed elevator ride.
  *
  * The navigation grid (sim/navGrid.ts) samples at 1 m, and a 0.75 m tread
  * means one cell along a flight climbs more than STEP_HEIGHT; sampled that
@@ -52,14 +51,17 @@ export interface NavLink {
   halfWidth: number;
   /**
    * Traversable in the up direction only. Omitted means both ways, which is
-   * right for stairs and wrong for a cargo lift: a bidirectional lift edge
+   * right for stairs/elevators and wrong for a launch pad: a bidirectional pad edge
    * tells a bot it can descend by stepping off the deck onto the pad below —
    * which launches it straight back up, and it oscillates there forever.
    */
   oneWay?: boolean;
+  elevatorId?: string;
+  /** Extra cost in distance-equivalent units, for waiting and slow travel. */
+  extraCost?: number;
 }
 
-/** Traversable level changes, one per flight or lift. Populated by the stair and lift builders. */
+/** Traversable level changes, populated only by the corresponding world builders. */
 export const navLinks: NavLink[] = [];
 
 /**
@@ -70,6 +72,90 @@ export const navLinks: NavLink[] = [];
  * player.ts and bots.ts read this after their vertical resolve.
  */
 export const liftPads: LiftPad[] = [];
+
+export interface ElevatorSpec extends ElevatorMotion {
+  id: string;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  thickness: number;
+  lowerLanding: THREE.Vector3;
+  upperLanding: THREE.Vector3;
+  material?: THREE.Material;
+}
+export interface Elevator {
+  spec: ElevatorSpec;
+  mesh: THREE.Mesh;
+  collider: THREE.Box3;
+  previous: THREE.Box3;
+  elapsed: number;
+  deltaY: number;
+  blocked: boolean;
+  dock: 'lower' | 'upper' | null;
+}
+/** Dynamic world geometry, owned and advanced here just like its registries. */
+export const elevators: Elevator[] = [];
+
+/** Register without touching the scene, also usable by Node verification. */
+export function registerElevator(spec: ElevatorSpec): Elevator {
+  const numbers = [spec.x, spec.z, spec.width, spec.depth, spec.thickness, spec.lowerY,
+    spec.upperY, spec.speed, spec.dwell, ...spec.lowerLanding.toArray(), ...spec.upperLanding.toArray()];
+  if (!spec.id || elevators.some(e => e.spec.id === spec.id) || !numbers.every(Number.isFinite)
+      || spec.width <= 0 || spec.depth <= 0 || spec.thickness <= 0 || spec.lowerY < spec.thickness
+      || spec.upperY <= spec.lowerY || spec.speed <= 0 || spec.dwell <= 0) {
+    throw new Error('Invalid or duplicate elevator specification');
+  }
+  const mesh = createSolidBox(spec.x, spec.lowerY - spec.thickness, spec.z,
+    spec.width, spec.thickness, spec.depth, spec.material);
+  mesh.updateMatrixWorld(true);
+  const collider = new THREE.Box3().setFromObject(mesh);
+  const elevator: Elevator = { spec, mesh, collider, previous: collider.clone(), elapsed: 0,
+    deltaY: 0, blocked: false, dock: 'lower' };
+  solids.push(mesh);
+  colliders.push(collider);
+  elevators.push(elevator);
+  // A* uses metres. Convert the expected half-cycle wait and ride to walking
+  // distance (5 m/s); the geometric edge length remains the lower bound.
+  const travel = (spec.upperY - spec.lowerY) / spec.speed;
+  navLinks.push({ bottom: spec.lowerLanding.clone(), top: spec.upperLanding.clone(),
+    halfWidth: Math.min(spec.width, spec.depth) / 2, elevatorId: spec.id,
+    extraCost: (2 * travel + spec.dwell) * 5 });
+  return elevator;
+}
+
+export function addElevator(spec: ElevatorSpec): Elevator {
+  const elevator = registerElevator(spec);
+  scene.add(elevator.mesh);
+  return elevator;
+}
+
+/** Called before actor updates, so raycasts and physics see the same deck. */
+export function updateElevators(dt: number, bodies: readonly ElevatorBody[]): void {
+  for (const e of elevators) {
+    e.previous.copy(e.collider);
+    const next = elevatorSample(e.spec, e.elapsed + dt);
+    const dy = next.topY - e.collider.max.y;
+    e.blocked = elevatorBlocked(e.collider, dy, bodies, colliders);
+    e.deltaY = e.blocked ? 0 : dy;
+    if (e.blocked) continue;
+    e.elapsed += dt;
+    e.dock = next.dock;
+    e.mesh.position.y = next.topY - e.spec.thickness / 2;
+    e.mesh.updateMatrixWorld(true);
+    e.collider.min.y = next.topY - e.spec.thickness;
+    e.collider.max.y = next.topY;
+  }
+}
+
+/** Each actor consumes its support displacement once, before its own input. */
+export function elevatorCarry(body: ElevatorBody): number {
+  for (const e of elevators) {
+    const others = colliders.filter(c => c !== e.collider);
+    if (elevatorSupports(body, e.previous, others)) return e.deltaY;
+  }
+  return 0;
+}
 
 /**
  * Register a mesh as a raycast target only — no movement AABB.
@@ -321,7 +407,7 @@ export function addOpenStairs(
 }
 
 /**
- * Build a cargo lift: a low pad that throws whatever stands on it up to
+ * Build a launch pad: a low pad that throws whatever stands on it up to
  * `landing`.
  *
  * The pad itself is an ordinary solid — you walk onto it, it is shot at, it
@@ -477,4 +563,5 @@ export function resetWorld(): void {
   colliders.length = 0;
   navLinks.length = 0;
   liftPads.length = 0;
+  elevators.length = 0;
 }

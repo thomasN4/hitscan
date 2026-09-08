@@ -1,20 +1,10 @@
 // lift.ts — cargo lifts: the predicate that decides when a body is thrown
 // upward, and nothing else.
 //
-// maps/warehouse2.ts is built around vertical movement, and stairs are not the
-// whole answer: a flight is slow, visible and easy to hold, so the map needs a
-// second way up that costs something different. The mockup calls it a cargo
-// lift and marks it "one-way up".
-//
-// It is a LAUNCH, not a moving platform, and that is a deliberate constraint
-// rather than a shortcut. `colliders` in world.ts are AABBs measured once when
-// the map is built (world.ts:registerSolidBox) and never updated, so there is
-// no moving geometry in this engine at all; a platform that rose would carry
-// no collision with it. What DOES already exist is collision.ts:resolveVertical
-// integrating the whole ascent — the head swept against ceilings, support
-// taken on the way down — so a pad that sets an upward velocity reuses the
-// vertical model unchanged, and behaves identically for the player and for
-// bots because both run that same resolve.
+// This is the launch-pad mechanic originally used by Warehouse 2. That map
+// now uses physical elevators (sim/elevator.ts); this API remains available
+// for maps that want an upward impulse. It reuses resolveVertical's ceiling
+// sweep and landing support, identically for players and bots.
 //
 // Pure and engine-free like everything in sim/: pads are plain numbers, so
 // this is testable without a scene or a collider registry. world.ts owns the

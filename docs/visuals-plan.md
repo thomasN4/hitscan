@@ -321,3 +321,36 @@ NDC y 1.02 at the shotgun's 60-degree ADS fov — past the top edge — and
 muzzle and port inside the frame at that fov. The check fails at the old pose,
 which is what makes it worth having. Mechanism animations and every reload
 timing rule are untouched.
+
+### Aiming locks the sight picture
+
+`player.ts:updateViewmodel()` applied view bob and the rotational recoil kick to
+`gunGroup` with no ADS gate, so while aimed the weapon rotated *inside* camera
+space on top of the camera's own punch and its sights walked off the crosshair.
+On the smg — the only full-auto weapon, so the one where `recoilYaw` random-walks
+continuously — that was up to 0.03 rad of sight lift plus a lateral swim, against
+a full-spray aim climb of 0.072 rad. This predates the arena work; `player.ts` is
+unchanged from `main`. It became visible when the smg gained a real aperture
+sight in `f62aa60`.
+
+The arithmetic moves to `sim/viewmodelTransform.ts`, a pure seam in the pattern
+`sim/recoil.ts:convertOnSwap` set, because `eslint.config.js` bans
+`src/**/*.test.ts` from importing browser-side modules and this is the layer that
+decides where the sights sit. Bob and the rotational kick now scale by
+`1 - adsLerp`; hip fire is unchanged. The depth punch on z is deliberately not
+gated: with x and y at their ADS values the sight sits on the view axis, and
+translating along that axis leaves an on-axis point on it, so the punch is
+NDC-neutral.
+
+Fully gating the bob is a deliberate choice, not an oversight. `motion.bobAmt` is
+weapon-only — there is no camera head-bob — so any residual is sights-versus-
+crosshair error with no shared motion to read it against, and the existing idle
+sine in `poseWeapon` is already taken to zero at full ADS by its `quiet` factor.
+Aiming while walking is now perfectly still.
+
+`sim/viewmodelTransform.test.ts` pins it, and `weapon-animation-check.mjs` holds
+RMB to full ADS, drives recoil to the cap while walking for bob, and asserts the
+rig's camera-space pose does not move. Both were written red first: the unit
+suite fails three cases against the ungated formula, and the browser check reads
+2.9e-2 against the ungated build versus a 5e-4 tolerance. The tolerance is not
+zero because `adsLerp` approaches 1 asymptotically, leaving about 1e-4.

@@ -42,6 +42,18 @@ async function snapshot(page) {
     return { parts, mag: cs.weapon.mag, reserve: cs.weapon.reserve, reloading: cs.weapon.reloading };
   });
 }
+/** The weapon rig's pose in CAMERA space: the two translations and the two
+ * rotations that can slide the sights off screen centre. Deliberately not a
+ * projected bounding box — the depth punch on z is kept, and a box is dominated
+ * by it (and by stock vertices near the near plane), so a box cannot tell a
+ * legitimate 2 cm depth punch from the sights actually walking off the crosshair. */
+async function aimRig(page, id) {
+  return page.evaluate(id => {
+    const rig = window.__cs.bots[0].mesh.parent.getObjectByName(`viewmodel-${id}`).parent;
+    return [rig.position.x, rig.position.y, rig.rotation.x, rig.rotation.y];
+  }, id);
+}
+
 /** Every mechanism transform is a real number: a pose that divides by zero or
  * normalizes a zero-length vector shows up here rather than as an invisible gun. */
 function finite(snap) {
@@ -85,6 +97,26 @@ try {
     await page.evaluate(() => window.dispatchEvent(new MouseEvent('mousedown', { button: 2 })));
     if (id !== 'knife') await page.waitForFunction(() => window.__cs.game.adsLerp > 0.995);
     await page.screenshot({ path: `${OUT}/${id}-ads.png` });
+    if (id !== 'knife') {
+      // Aiming is a sight picture: the camera may kick, the weapon may not move
+      // relative to screen centre. Recoil is set directly rather than fired so
+      // this measures the transform, not a weapon's fire rate; bob has to be
+      // earned by walking, because updateMovement recomputes bobAmt every frame.
+      const aimed = await aimRig(page, id);
+      await page.keyboard.down('KeyW');
+      await page.evaluate(() => { window.__cs.game.recoil = 6; window.__cs.game.recoilYaw = 3; });
+      await runFor(page, 0.3);
+      assert.ok(await page.evaluate(() => window.__cs.game.bobAmt > 0), `${id}: walk never produced bob`);
+      const kicked = await aimRig(page, id);
+      const drift = Math.max(...kicked.map((v, i) => Math.abs(v - aimed[i])));
+      // Not zero: adsLerp approaches 1 asymptotically, so (1 - ads) leaves a
+      // residual around 1e-4 rad. 5e-4 rad is 0.03 degrees, half a millimetre at
+      // the sight, and still 60x below the ~0.03 rad the ungated kick produces.
+      assert.ok(drift < 5e-4, `${id}: aimed rig moved ${drift.toExponential(2)} under recoil and bob`);
+      await page.keyboard.up('KeyW');
+      await page.evaluate(() => { window.__cs.game.recoil = 0; window.__cs.game.recoilYaw = 0; });
+      await runFor(page, 0.2);
+    }
     if (id === 'revolver') {
       const hammerTop = await page.evaluate(() => {
         const scene = window.__cs.bots[0].mesh.parent;

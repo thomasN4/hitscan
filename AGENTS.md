@@ -560,4 +560,11 @@ Deferred to a later tranche:
 
 - Making weapon switching cost time (a draw/holster delay, ideally with a viewmodel animation on `poseReload`'s model). Switching is instant today, so `1-2-1` is a free recoil cancel — the conversion in `switchWeapon` is lossless, but the incoming weapon's `recoilRecover` then drains the carried units, and the sniper's 13/s clears a full smg climb in 0.277 s. The same zero-cost window also lets a swap dodge `scopeGate` and re-clamp `spray`. Tracked as **issue #15**; pre-existing behavior, pinned in `sim/recoil.test.ts` so a fix has to update the test deliberately.
 
+- The revolver's hammer sits in front of the sights and the crosshair while
+  aiming. `weapon-animation-check.mjs` already pins the hammer's NDC top below
+  the sight line, so the geometry clears the *sights*; what it does not check is
+  that no weapon part occludes the aiming point itself. The fix and a
+  sight-obstruction check covering all six weapons land together, so the check
+  goes green in the commit that earns it.
+
 Dropped: unifying Bot and the player under a shared entity base class. It addresses none of the regression classes this codebase has actually hit, and would couple a probabilistic AI to a physics-driven controller.

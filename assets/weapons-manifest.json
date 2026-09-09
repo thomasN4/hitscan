@@ -27,20 +27,20 @@
       "id": "revolver",
       "source": "assets/source/revolver.blend",
       "output": "public/assets/revolver.glb",
-      "sourceSha256": "62d4c0e2384d37c61dfff3c974c8626d3dc61c320c7f899f912c47182e0ac4c1",
-      "outputSha256": "67b62c90f79afb32b2bda870e3b87afea0d41295a43685921d705da04e112063",
+      "sourceSha256": "48fa2a85641c0a62d07916c2a2a6380669462722c308f75c8de72126ed8b97ad",
+      "outputSha256": "d3f27392d0b792845e62ce1cfe13a897ff7c43f519c248a30c8f7b3e730aa3f8",
       "stats": {
-        "vertices": 16110,
+        "vertices": 16878,
         "meshes": 11,
-        "bytes": 466468
+        "bytes": 487160
       }
     },
     {
       "id": "pistol",
       "source": "assets/source/pistol.blend",
       "output": "public/assets/pistol.glb",
-      "sourceSha256": "9349da246b8738f2ff1221d9f82e6852bb7ebfceed34d4eb34540360ba4ebc32",
-      "outputSha256": "6a929143631f1f02531d67bb9c8a9e2fb35f6ba326d00653bf467460e3337d20",
+      "sourceSha256": "f8331cf053e7298fb11997754d6b50f173c32e6b5603232a583ee9765bee4e93",
+      "outputSha256": "12dcb5731adfbbc16184184c309705e506261932c375561c7a78385627047f00",
       "stats": {
         "vertices": 26322,
         "meshes": 9,

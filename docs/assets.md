@@ -110,3 +110,18 @@ The pistol design generator is `scripts/assets/create-pistol-preview.py` and
 explicitly overwrites only the pistol source. Normal `assets:export` preserves
 all edited sources. The older two-weapon generator still overwrites only its
 shotgun and revolver sources.
+
+## Handgun sight attachment and alignment
+
+The edited pistol source extends the front blade and rear sight base down into
+its slide, preserving the aiming heights. The revolver source has a notched rear
+sight and a front blade raised to the existing 37 mm ADS reference. Its front
+blade remains seated on the barrel rib; the lowered hammer is preserved. These
+are manual source edits, so the initial design generators will overwrite them.
+Runtime ADS offsets and mechanism animations are unchanged.
+
+The sight tests now probe the pistol supports where sky gaps used to appear and
+raycast through the revolver notch to its front blade throughout firing. The
+revolver's expected near geometry in the upper aim cone is now its aligned rear
+shoulders, rather than the old low sights. The old obstructing hammer mutation
+still fails the check. Sky-background ADS captures verify the visible result.

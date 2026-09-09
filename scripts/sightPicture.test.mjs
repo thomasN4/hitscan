@@ -108,7 +108,7 @@ const AIM_STATION = {
   sniper: 0.66,    // scope body during the ADS blend (0.668), not a sight — see below
   shotgun: 1.04,   // brass bead, on the axis (1.046)
   pistol: Infinity,
-  revolver: 0.55,  // the hammer used to answer 0.299 here
+  revolver: 0.33,  // aligned rear shoulders at 0.337; the old hammer answers 0.299
   knife: Infinity,
 };
 
@@ -158,4 +158,29 @@ test('the check is not vacuous: the old hammer signature fails it', () => {
   gun.updateMatrixWorld(true);
   expect(pose.hammer, 'the mutation must have something to rotate').toBeGreaterThan(0.5);
   expect(nearestInAimCone(gun)).toBeLessThan(AIM_STATION.revolver);
+});
+
+
+test('pistol sight feet connect to the slide instead of leaving sky gaps', () => {
+  const { gun, vm } = rig('pistol', 1, 0);
+  const caster = new Raycaster();
+  for (const [y,z] of [[-.0185,-.126],[-.0195,.088]]) {
+    const origin = vm.body.localToWorld(new Vector3(.1,y,z));
+    caster.set(origin, new Vector3(-1,0,0));
+    const hit = caster.intersectObjects(visibleMeshes(gun),false)[0];
+    expect(hit, `sight support at z=${z}`).toBeDefined();
+    expect(hit.distance).toBeLessThan(.101);
+  }
+});
+
+test('revolver front crest is visible through the rear notch throughout firing', () => {
+  for (let i=0;i<=20;i++) {
+    const { gun } = rig('revolver',1,i/20);
+    // Just below the aiming axis: a clear axis alone cannot detect a solid rear block.
+    const caster = new Raycaster(EYE,new Vector3(0,-.0002,-.575).normalize());
+    const hit = caster.intersectObjects(visibleMeshes(gun),false)[0];
+    expect(hit, `front blade at cycle ${i/20}`).toBeDefined();
+    expect(hit.distance).toBeGreaterThan(.56);
+    expect(hit.distance).toBeLessThan(.59);
+  }
 });

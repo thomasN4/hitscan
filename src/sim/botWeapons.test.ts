@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BOT_FIREARM_IDS,
-  BOT_WEAPON_IDS,
+  BOT_PRIMARY_IDS,
+  BOT_SIDEARM_IDS,
   BOT_WEAPON_TUNING,
   SWAP_DELAY,
   FIRST_SHOT_DELAY_MIN,
@@ -19,9 +19,17 @@ import {
 } from './botWeapons';
 import { DEFAULT_BRAIN_PARAMS } from './botBrains';
 import { damageForPart } from './damage';
-import { WEAPONS, type BotWeaponId } from '../core/state';
+import { WEAPONS, type BotPrimaryId, type BotSidearmId, type BotWeaponId } from '../core/state';
 
 const DT = 1 / 60;
+
+/**
+ * Every weapon with a tuning row: the two mixed pools plus the fallback
+ * blade. Per-row invariant checks iterate this, not either pool — the pools
+ * are subsets of what a bot may HOLD, and the tuning table must cover every
+ * held weapon.
+ */
+const TUNED_IDS: readonly BotWeaponId[] = [...BOT_PRIMARY_IDS, ...BOT_SIDEARM_IDS, 'knife'];
 
 /** `n` copies of `v` — Array(n).fill(v) infers any[] under the no-unsafe rules. */
 function repeat(n: number, v: number): number[] {
@@ -74,22 +82,25 @@ function counting(values: number[]): { rng: () => number; taken: () => number } 
 }
 
 describe('BOT_WEAPON_TUNING', () => {
-  test('BOT_WEAPON_IDS lists exactly the tuned weapons', () => {
-    // The list is hand-written because Object.keys erases the union; this is
-    // what stops a weapon being tuned and then silently left out of the
-    // mixed draw.
-    expect([...BOT_WEAPON_IDS].sort()).toEqual(Object.keys(BOT_WEAPON_TUNING).sort());
+  test('the pools plus the blade list exactly the tuned weapons', () => {
+    // The pools are hand-written because Object.keys erases the union; this
+    // is what stops a weapon being tuned and then silently unreachable — a
+    // tuning row with no way into a bot's hands, or hands with no tuning row.
+    expect([...TUNED_IDS].sort()).toEqual(Object.keys(BOT_WEAPON_TUNING).sort());
   });
 
-  test('no bot weapon is missing from the draw, knife included', () => {
-    expect(BOT_WEAPON_IDS).toContain('knife');
+  test('the mixed pools are exactly the primaries and the sidearms', () => {
+    // Pins the product decision: sidearms never appear as primaries, the
+    // blade never draws at all — it arrives only as every loadout's fallback.
+    expect([...BOT_PRIMARY_IDS].sort()).toEqual(['shotgun', 'smg', 'sniper']);
+    expect([...BOT_SIDEARM_IDS].sort()).toEqual(['pistol', 'revolver']);
   });
 
   test('a burst pause is never shorter than the weapon it paces', () => {
     // A pause below the def's own fireRate would let a bot cycle its weapon
     // faster than the catalog says it can — the knife row included, where the
     // pause must keep pace with WEAPONS.knife.fireRate.
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       expect(BOT_WEAPON_TUNING[id].burstPauseMin).toBeGreaterThanOrEqual(WEAPONS[id].fireRate);
     }
   });
@@ -111,14 +122,14 @@ describe('BOT_WEAPON_TUNING', () => {
     // The executor realizes at most one shot per bot per frame, so a burst
     // whose interval undercut a frame would silently drop rounds. Ranged rows
     // only — a blade fires no bursts.
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       const t = BOT_WEAPON_TUNING[id];
       if (t.kind === 'ranged' && t.burst > 1) expect(WEAPONS[id].fireRate).toBeGreaterThanOrEqual(1 / 60);
     }
   });
 
   test('zone weights are a probability split', () => {
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       const t = BOT_WEAPON_TUNING[id];
       if (t.kind !== 'ranged') continue;
       expect(t.headChance).toBeGreaterThanOrEqual(0);
@@ -179,7 +190,7 @@ describe('expected damage per second', () => {
     // edit, or the next tuner will widen the test instead of thinking.
     // Melee rows are skipped explicitly: a blade has no dps to band — its
     // damage is geometry, and at contact it is deliberately lethal.
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       const t = BOT_WEAPON_TUNING[id];
       if (t.kind !== 'ranged') continue;
       const band = (t.nearBand + t.farBand) / 2;
@@ -194,7 +205,7 @@ describe('expected damage per second', () => {
     // shotgun stays within roughly twice that at its own preferred range —
     // this tranche is about character, not difficulty. Melee rows skipped as
     // above: a blade has no dps to band.
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       if (id === 'shotgun' || id === 'knife') continue; // see the cliff test below
       const t = BOT_WEAPON_TUNING[id];
       if (t.kind !== 'ranged') continue;
@@ -211,7 +222,7 @@ describe('expected damage per second', () => {
     expect(dps('shotgun', 1)).toBeGreaterThan(2 * dps('shotgun', 6));
     expect(dps('shotgun', 11)).toBe(0);
     expect(dps('shotgun', 0)).toBeGreaterThan(dps('smg', 0));
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       if (id === 'shotgun' || id === 'knife') continue;
       expect(dps(id, 11)).toBeGreaterThan(0);
     }
@@ -219,7 +230,7 @@ describe('expected damage per second', () => {
 
   test('the sniper is the only weapon that still bites at 50 m', () => {
     expect(dps('sniper', 50)).toBeGreaterThan(3);
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       if (id === 'sniper' || id === 'knife') continue;
       expect(dps(id, 50)).toBeLessThan(dps('sniper', 50));
     }
@@ -246,7 +257,7 @@ describe('botHitChance', () => {
   });
 
   test('never increases with distance', () => {
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       const tuning = BOT_WEAPON_TUNING[id];
       if (tuning.kind !== 'ranged') continue;
       let prev = Infinity;
@@ -286,29 +297,29 @@ describe('resolveBotWeapon', () => {
     expect(c.taken()).toBe(0);
   });
 
-  test('mixed spends exactly one draw and covers the whole list', () => {
-    const seen = new Set<BotWeaponId>();
-    for (let i = 0; i < BOT_WEAPON_IDS.length; i++) {
-      const c = counting([(i + 0.5) / BOT_WEAPON_IDS.length]);
+  test('mixed spends exactly one draw and covers the primary pool', () => {
+    const seen = new Set<BotPrimaryId>();
+    for (let i = 0; i < BOT_PRIMARY_IDS.length; i++) {
+      const c = counting([(i + 0.5) / BOT_PRIMARY_IDS.length]);
       seen.add(resolveBotWeapon('mixed', c.rng));
       expect(c.taken()).toBe(1);
     }
-    expect([...seen].sort()).toEqual([...BOT_WEAPON_IDS].sort());
+    expect([...seen].sort()).toEqual([...BOT_PRIMARY_IDS].sort());
   });
 
-  test('mixed can draw the knife', () => {
-    // The blade is in the pool by deliberate product decision (7b): drive the
-    // draw at the knife's own index.
-    const i = BOT_WEAPON_IDS.indexOf('knife');
-    const c = counting([(i + 0.5) / BOT_WEAPON_IDS.length]);
-    expect(resolveBotWeapon('mixed', c.rng)).toBe('knife');
-    expect(c.taken()).toBe(1);
+  test('mixed never draws a sidearm or the blade', () => {
+    // The pools pin this statically, but the draw arithmetic is worth a
+    // dynamic claim too: sweep [0, 1) finely and assert every draw lands on
+    // a primary.
+    for (let n = 0; n < 32; n++) {
+      expect(BOT_PRIMARY_IDS).toContain(resolveBotWeapon('mixed', () => n / 32));
+    }
   });
 
   test('a draw of exactly 1 stays in range', () => {
     // rng() is documented as [0, 1), but a clamped read costs nothing and an
     // out-of-bounds index here would hand a bot `undefined` for a life.
-    expect(BOT_WEAPON_IDS).toContain(resolveBotWeapon('mixed', () => 1));
+    expect(BOT_PRIMARY_IDS).toContain(resolveBotWeapon('mixed', () => 1));
   });
 });
 
@@ -685,7 +696,7 @@ describe('makeFireController', () => {
     const knife = makeFireController('knife', WEAPONS.knife, knifeTuning, queueRng([0]));
     expect(knife.resolution).toBe('melee');
     expect(knife).toBeInstanceOf(MeleeFireController);
-    for (const id of BOT_WEAPON_IDS) {
+    for (const id of TUNED_IDS) {
       if (id === 'knife') continue;
       const tuning = BOT_WEAPON_TUNING[id];
       if (tuning.kind !== 'ranged') continue;
@@ -697,8 +708,8 @@ describe('makeFireController', () => {
 });
 
 describe('BotLoadout', () => {
-  /** A loadout over the real catalog: primary, optional secondary, blade last. */
-  function loadout(primary: BotWeaponId, secondary: BotWeaponId | null, rng: () => number) {
+  /** A loadout over the real catalog: primary, sidearm, blade last. */
+  function loadout(primary: BotPrimaryId, secondary: BotSidearmId, rng: () => number) {
     return makeBotLoadout(primary, secondary, id => WEAPONS[id], rng);
   }
 
@@ -833,8 +844,14 @@ describe('BotLoadout', () => {
   });
 
   test('the blade reports melee resolution and no rounds', () => {
-    const fire = loadout('knife', 'pistol', queueRng([0]));
+    // No loadout STARTS on the blade anymore — reach it the way a match does,
+    // by running both firearms dry.
+    const fire = loadout('smg', 'pistol', queueRng([0]));
     fire.arm();
+    past(fire);
+    drain(fire);
+    expect(fire.weapon).toBe('pistol');
+    drain(fire);
     expect(fire.weapon).toBe('knife');
     expect(fire.resolution).toBe('melee');
     expect(fire.magSize).toBe(0);
@@ -856,96 +873,32 @@ describe('BotLoadout', () => {
   });
 });
 
-describe('makeBotLoadout', () => {
-  const defOf = (id: BotWeaponId) => WEAPONS[id];
-
-  test('a knife PRIMARY is a blade-only bot: the secondary is dropped', () => {
-    // Not placed above a knife it could never fall past.
-    const fire = makeBotLoadout('knife', 'pistol', defOf, queueRng([0]));
-    fire.arm();
-    expect(fire.weapon).toBe('knife');
-    fire.tick(120, false);
-    expect(fire.weapon).toBe('knife');
-  });
-
-  test("a 'knife' secondary is dropped rather than duplicated", () => {
-    const fire = makeBotLoadout('smg', 'knife', defOf, queueRng([0]));
-    fire.arm();
-    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 0.01, false);
-    for (let t = 0; t < 600 && fire.weapon === 'smg'; t += DT) {
-      fire.tick(DT, true);
-      if (fire.ready()) fire.pull();
-    }
-    // Straight to the blade: there is no second knife position above it.
-    expect(fire.weapon).toBe('knife');
-  });
-
-  test('a null secondary falls straight from the primary to the blade', () => {
-    const fire = makeBotLoadout('pistol', null, defOf, queueRng([0]));
-    fire.arm();
-    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 0.01, false);
-    for (let t = 0; t < 600 && fire.weapon === 'pistol'; t += DT) {
-      fire.tick(DT, true);
-      if (fire.ready()) fire.pull();
-    }
-    expect(fire.weapon).toBe('knife');
-  });
-
-  test('a secondary equal to the primary is legal and simply doubles the ammunition', () => {
-    // The swap is invisible in `weapon` here — both positions are smg — so the
-    // observable is the ammunition coming BACK: a spent position handing over
-    // to a fresh one of the same weapon, rather than the bot falling to the
-    // blade with a magazine still to spend.
-    const fire = makeBotLoadout('smg', 'smg', defOf, queueRng([0]));
-    fire.arm();
-    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 0.01, false);
-    let spent = false;
-    let refilled = false;
-    for (let t = 0; t < 600 && fire.weapon === 'smg'; t += DT) {
-      fire.tick(DT, true);
-      if (fire.ready()) fire.pull();
-      if (fire.mag === 0 && fire.reserve === 0) spent = true;
-      else if (spent && fire.reserve === WEAPONS.smg.reserveMax) refilled = true;
-    }
-    expect(spent).toBe(true);
-    expect(refilled).toBe(true);
-    // And only after BOTH smg positions are gone does the blade come out.
-    expect(fire.weapon).toBe('knife');
-  });
-});
-
 describe('resolveBotSecondary', () => {
-  test("'none' yields no secondary position at all, and spends no draw", () => {
-    const c = counting([0.5]);
-    expect(resolveBotSecondary('none', c.rng)).toBe(null);
-    expect(c.taken()).toBe(0);
-  });
-
-  test('a named firearm passes through and spends no draw', () => {
+  test('a named sidearm passes through and spends no draw', () => {
     const c = counting([0.5]);
     expect(resolveBotSecondary('revolver', c.rng)).toBe('revolver');
     expect(c.taken()).toBe(0);
   });
 
-  test('mixed draws over the firearms, spending exactly one', () => {
-    const seen = new Set<string>();
-    for (let i = 0; i < BOT_FIREARM_IDS.length; i++) {
-      const c = counting([(i + 0.5) / BOT_FIREARM_IDS.length]);
-      seen.add(resolveBotSecondary('mixed', c.rng)!);
+  test('mixed draws over the sidearms, spending exactly one', () => {
+    const seen = new Set<BotSidearmId>();
+    for (let i = 0; i < BOT_SIDEARM_IDS.length; i++) {
+      const c = counting([(i + 0.5) / BOT_SIDEARM_IDS.length]);
+      seen.add(resolveBotSecondary('mixed', c.rng));
       expect(c.taken()).toBe(1);
     }
-    expect([...seen].sort()).toEqual([...BOT_FIREARM_IDS].sort());
+    expect([...seen].sort()).toEqual([...BOT_SIDEARM_IDS].sort());
   });
 
-  test('the secondary pool holds no blade', () => {
-    // The knife is every loadout's last position already; drawing one here
-    // would ask for a duplicate makeBotLoadout then drops.
-    expect(BOT_FIREARM_IDS).not.toContain('knife');
-    expect([...BOT_FIREARM_IDS].sort())
-      .toEqual([...BOT_WEAPON_IDS].filter(id => id !== 'knife').sort());
+  test('mixed never draws a primary or the blade', () => {
+    // Same sweep as the primary pool's: every sub-interval of [0, 1) must
+    // land on a sidearm.
+    for (let n = 0; n < 32; n++) {
+      expect(BOT_SIDEARM_IDS).toContain(resolveBotSecondary('mixed', () => n / 32));
+    }
   });
 
   test('a draw of exactly 1 stays in range', () => {
-    expect(resolveBotSecondary('mixed', () => 1)).toBe(BOT_FIREARM_IDS[BOT_FIREARM_IDS.length - 1]);
+    expect(resolveBotSecondary('mixed', () => 1)).toBe(BOT_SIDEARM_IDS[BOT_SIDEARM_IDS.length - 1]);
   });
 });

@@ -40,30 +40,39 @@ export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'k
 export type BotWeaponId = WeaponId;
 
 /**
- * Firearms — every catalog weapon that fires a round. Derived from WeaponId,
- * so a new weapon lands here and in every Record over it by widening that
- * union alone.
+ * Primary firearms — the catalog weapons a bot may carry in its PRIMARY
+ * position. Kept as an explicit union (rather than derived from WeaponClass)
+ * so the menu/URL boundary says exactly what it accepts; a new primary must
+ * be added here AND to sim/botWeapons.ts:BOT_PRIMARY_IDS.
  */
-export type BotFirearmId = Exclude<WeaponId, 'knife'>;
+export type BotPrimaryId = 'smg' | 'sniper' | 'shotgun';
 
 /**
- * A menu/URL setting for a bot's SECONDARY position, or 'none' for a bot that
- * falls straight from its primary to the blade.
- *
- * The knife is not a legal value, and that is not the 7a exclusion returning:
- * the blade is ALWAYS the last position of every loadout (sim/botWeapons.ts:
- * makeBotLoadout), so naming it here would be asking for a duplicate the
- * loadout then drops. A setting that is silently ignored is worse than one
- * that falls back.
+ * Sidearms — the catalog weapons a bot may carry in its SECONDARY position.
+ * Same explicit-union reasoning as BotPrimaryId; extends to
+ * sim/botWeapons.ts:BOT_SIDEARM_IDS.
  */
-export type BotSecondaryChoice = BotFirearmId | 'mixed' | 'none';
+export type BotSidearmId = 'pistol' | 'revolver';
 
 /**
- * A menu/URL bot-weapon setting: one weapon for the whole team, or an
- * independent draw per bot (sim/botWeapons.ts:resolveBotWeapon). 'knife' is a
- * legal setting (a blade-only bot) and is in the 'mixed' pool.
+ * A menu/URL setting for a bot's SECONDARY position: one sidearm for the
+ * whole team, or 'mixed' for an independent pistol/revolver draw per bot
+ * (sim/botWeapons.ts:resolveBotSecondary). Every bot always carries a
+ * sidearm — there is no 'none': the blade is already the last position of
+ * every loadout (sim/botWeapons.ts:makeBotLoadout), so the ladder always
+ * terminates there without being asked for.
  */
-export type BotWeaponChoice = BotWeaponId | 'mixed';
+export type BotSecondaryChoice = BotSidearmId | 'mixed';
+
+/**
+ * A menu/URL bot-PRIMARY setting: one primary firearm for the whole team, or
+ * 'mixed' for an independent smg/sniper/shotgun draw per bot
+ * (sim/botWeapons.ts:resolveBotWeapon). Sidearms and the blade are not legal
+ * here — the secondary position and the fallback blade already cover those —
+ * so an unrecognized value (including a stale ?tweap=knife bookmark) falls
+ * back rather than arming something the menu never offered.
+ */
+export type BotWeaponChoice = BotPrimaryId | 'mixed';
 
 /**
  * Static stats for one weapon, shaped like the WEAPONS entries below.
@@ -950,8 +959,8 @@ export const SESSION_DEFAULTS: Readonly<{
   // single weapon is what smoke phases and playtests do deliberately.
   botWeaponT: 'mixed',
   botWeaponCt: 'mixed',
-  // Pistol rather than 'none' so the dry swap exists in a default match
-  // rather than only when someone goes looking for it.
+  // Pistol, so the dry swap exists in a default match rather than only when
+  // someone goes looking for it: every bot always carries a sidearm.
   botSecondaryT: 'pistol',
   botSecondaryCt: 'pistol',
 };
@@ -989,13 +998,13 @@ export interface SessionState {
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;
   /**
-   * PRIMARY weapon every bot on each side starts with, or 'mixed' to draw one
-   * per bot. Read once by main.ts when it spawns the waves; the SETTING is
-   * fixed for the match, so nothing re-reads these.
+   * PRIMARY firearm every bot on each side starts with (smg/sniper/shotgun),
+   * or 'mixed' to draw one per bot. Read once by main.ts when it spawns the
+   * waves; the SETTING is fixed for the match, so nothing re-reads these.
    *
    * What is no longer fixed is the weapon a bot is HOLDING. Since tranche 7b a
    * bot carries a loadout — sim/botWeapons.ts:BotLoadout descends
-   * [primary, secondary?, knife] as each position runs dry — so `Bot.weapon`
+   * [primary, secondary, knife] as each position runs dry — so `Bot.weapon`
    * changes within a life, the brain re-derives its bands when it does, and
    * the silhouette is rebuilt to match. Read this pair as configuration, never
    * as what a given bot has in its hands right now.
@@ -1003,10 +1012,9 @@ export interface SessionState {
   botWeaponT: BotWeaponChoice;
   botWeaponCt: BotWeaponChoice;
   /**
-   * Secondary firearm for each side's bot loadouts, or 'mixed' for an
-   * independent draw per bot, or 'none' to fall straight from the primary to
-   * the blade. Read once by main.ts when it spawns the waves, like the weapon
-   * pair above.
+   * Secondary sidearm (pistol/revolver) for each side's bot loadouts, or
+   * 'mixed' for an independent draw per bot. Read once by main.ts when it
+   * spawns the waves, like the primary pair above.
    */
   botSecondaryT: BotSecondaryChoice;
   botSecondaryCt: BotSecondaryChoice;

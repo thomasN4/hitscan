@@ -32,7 +32,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotSecondaryChoice, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
@@ -426,7 +426,7 @@ export class Bot implements BotShape {
    */
   private patrolGoal: THREE.Vector3 | null = null;
 
-  constructor(team: Team = 'T', weapon: BotWeaponId = 'smg', secondary: BotWeaponId | null = 'pistol') {
+  constructor(team: Team = 'T', weapon: BotPrimaryId = 'smg', secondary: BotSidearmId = 'pistol') {
     // Plain assignments, not parameter properties: the `name` derivation must
     // see the team, and field initializers run before constructor-body
     // parameter-property writes would. The brain is the same case for a
@@ -1192,8 +1192,8 @@ export class Bot implements BotShape {
  * either position while a named weapon arms every bot on the side
  * identically — which is what lets a smoke phase or a playtest hold the
  * weapon still and vary something else. The primary draws over
- * BOT_WEAPON_IDS (blade included); the secondary draws over the firearms
- * and 'none' yields null.
+ * BOT_PRIMARY_IDS (smg/sniper/shotgun); the secondary draws over
+ * BOT_SIDEARM_IDS (pistol/revolver).
  */
 export function spawnBots(count: number, team: Team, choice: BotWeaponChoice = 'smg', secondaryChoice: BotSecondaryChoice = 'pistol'): void {
   for (let i = 0; i < count; i++) {

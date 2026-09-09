@@ -14,7 +14,7 @@
 // post-move distance and routes the damage. All of a bot's dice still come
 // from the brain's own rng stream, which is why the controller is handed it
 // rather than reaching for Math.random.
-import type { BotFirearmId, BotSecondaryChoice, BotWeaponChoice, BotWeaponId, HitZone, WeaponDef } from '../core/state';
+import type { BotPrimaryId, BotSecondaryChoice, BotSidearmId, BotWeaponChoice, BotWeaponId, HitZone, WeaponDef } from '../core/state';
 import { isLowAmmo, planReload, roundInterval, roundTransfer } from './ammo';
 import { damageForPart } from './damage';
 import type { BrainParams } from './botBrains';
@@ -199,29 +199,29 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
 };
 
 /**
- * Every weapon a bot may be handed, in a stable order. Listed rather than
+ * Every PRIMARY a bot may be handed, in a stable order. Listed rather than
  * derived from BOT_WEAPON_TUNING's keys because Object.keys erases the union
- * back to string[]; botWeapons.test.ts asserts the two agree, so a weapon
- * added to the table but not here fails the suite rather than quietly
- * dropping out of the mixed draw. The mixed draw includes the blade by
- * deliberate product decision (tranche 7b): roughly one bot in six of a mixed
- * wave carries a knife.
+ * back to string[]; botWeapons.test.ts asserts the primaries agree with the
+ * tuning table's primary rows, so a weapon added to one but not the other
+ * fails the suite rather than quietly changing the mixed draw. The mixed draw
+ * covers primaries only — sidearms arrive via the secondary position and the
+ * blade via the fallback every loadout already carries.
  */
-export const BOT_WEAPON_IDS: readonly BotWeaponId[] =
-  ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife'];
+export const BOT_PRIMARY_IDS: readonly BotPrimaryId[] =
+  ['smg', 'sniper', 'shotgun'];
 
 /**
- * Turn a menu/URL bot-weapon setting into the weapon ONE bot carries.
- * `'mixed'` draws uniformly over BOT_WEAPON_IDS and spends one draw; a named
+ * Turn a menu/URL bot-primary setting into the weapon ONE bot carries.
+ * `'mixed'` draws uniformly over BOT_PRIMARY_IDS and spends one draw; a named
  * id spends none, so a forced-weapon match consumes no randomness at all and
  * a smoke phase pinning a weapon perturbs nothing else.
  */
-export function resolveBotWeapon(choice: BotWeaponChoice, rng: () => number): BotWeaponId {
+export function resolveBotWeapon(choice: BotWeaponChoice, rng: () => number): BotPrimaryId {
   if (choice !== 'mixed') return choice;
-  const i = Math.min(BOT_WEAPON_IDS.length - 1, Math.floor(rng() * BOT_WEAPON_IDS.length));
+  const i = Math.min(BOT_PRIMARY_IDS.length - 1, Math.floor(rng() * BOT_PRIMARY_IDS.length));
   // Bound-guarded read: i is clamped into range above, so the index cannot
   // miss (AGENTS.md's rule on dynamic index reads).
-  return BOT_WEAPON_IDS[i]!;
+  return BOT_PRIMARY_IDS[i]!;
 }
 
 /** One realized trigger pull, already resolved to damage. */
@@ -716,50 +716,44 @@ export class BotLoadout implements FireController {
 }
 
 /**
- * Every firearm a bot may be handed as a SECONDARY, in a stable order. Listed
- * rather than derived for the same reason as BOT_WEAPON_IDS: Object.keys
- * erases the union. The blade is not in the pool — it is already every
- * loadout's last position — and 'none' is not a weapon, so neither appears
- * here.
+ * Every SECONDARY a bot may be handed, in a stable order. Listed rather than
+ * derived for the same reason as BOT_PRIMARY_IDS: Object.keys erases the
+ * union. Primaries are not in the pool — they belong to the primary position
+ * — and neither is the blade, which is already every loadout's last position.
  */
-export const BOT_FIREARM_IDS: readonly BotFirearmId[] =
-  ['smg', 'sniper', 'shotgun', 'pistol', 'revolver'];
+export const BOT_SIDEARM_IDS: readonly BotSidearmId[] =
+  ['pistol', 'revolver'];
 
 /**
- * Turn a menu/URL secondary setting into the firearm ONE bot carries there,
- * or null for a bot that falls straight from its primary to the blade.
- * `'mixed'` draws uniformly over BOT_FIREARM_IDS and spends one draw; a named
- * id spends none, like resolveBotWeapon.
+ * Turn a menu/URL secondary setting into the sidearm ONE bot carries there.
+ * Every bot always carries one. `'mixed'` draws uniformly over
+ * BOT_SIDEARM_IDS and spends one draw; a named id spends none, like
+ * resolveBotWeapon.
  */
-export function resolveBotSecondary(choice: BotSecondaryChoice, rng: () => number): BotFirearmId | null {
-  if (choice === 'none') return null;
+export function resolveBotSecondary(choice: BotSecondaryChoice, rng: () => number): BotSidearmId {
   if (choice !== 'mixed') return choice;
-  const i = Math.min(BOT_FIREARM_IDS.length - 1, Math.floor(rng() * BOT_FIREARM_IDS.length));
+  const i = Math.min(BOT_SIDEARM_IDS.length - 1, Math.floor(rng() * BOT_SIDEARM_IDS.length));
   // Bound-guarded read: i is clamped into range above, so the index cannot
   // miss (AGENTS.md's rule on dynamic index reads).
-  return BOT_FIREARM_IDS[i]!;
+  return BOT_SIDEARM_IDS[i]!;
 }
 
 /**
- * Build one bot's loadout. The blade is ALWAYS the last position — it is the
- * one weapon that cannot run out, which is what makes the ladder terminate.
- *
- * A knife PRIMARY means a blade-only bot: the secondary is dropped rather than
- * placed above a knife it could never fall past. That is the playtest lever for
- * the melee path, reachable as ?tweap=knife.
+ * Build one bot's loadout: [primary, secondary, knife]. The blade is ALWAYS
+ * the last position — it is the one weapon that cannot run out, which is what
+ * makes the ladder terminate. The positions are disjoint by type (a primary
+ * can never equal a sidearm or the blade), so there is no dedupe to do.
  *
  * `defOf` is a lookup rather than a runtime import of core/state.ts's catalog —
  * the same seam WeaponFireController takes its WeaponDef through.
  */
 export function makeBotLoadout(
-  primary: BotWeaponId,
-  secondary: BotWeaponId | null,
+  primary: BotPrimaryId,
+  secondary: BotSidearmId,
   defOf: (id: BotWeaponId) => WeaponDef,
   rng: () => number,
 ): BotLoadout {
-  const ids: BotWeaponId[] = primary === 'knife'
-    ? ['knife']
-    : [primary, ...(secondary !== null && secondary !== 'knife' ? [secondary] : []), 'knife'];
+  const ids: BotWeaponId[] = [primary, secondary, 'knife'];
   const positions = ids.map(id => makeFireController(id, defOf(id), BOT_WEAPON_TUNING[id], rng));
   return new BotLoadout(positions, rng);
 }

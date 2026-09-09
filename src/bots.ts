@@ -53,6 +53,7 @@ import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
+import { shouldAbandonRoute } from './sim/routeFollow';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -877,13 +878,14 @@ export class Bot implements BotShape {
       this.leg = 0;
     }
     // Drop a path the bot is no longer on: it fell off an edge, got shoved,
-    // or respawned across the map still holding last life's route.
-    if (this.path.length > 0) {
-      const leg = this.path[Math.min(this.leg, this.path.length - 1)]!;
-      if (Math.hypot(leg.x - here.x, leg.z - here.z) > ROUTE_ABANDON) {
-        this.path = [];
-        this.leg = 0;
-      }
+    // or respawned across the map still holding last life's route. The
+    // decision consults the previous waypoint too — a leg just inherited by
+    // consuming its predecessor is not ground truth about where the bot
+    // should be, and abandoning against it livelocks on link-edge hops
+    // (docs/warehouse2-bot-playtest.md section 4). See sim/routeFollow.ts.
+    if (this.path.length > 0 && shouldAbandonRoute(this.path, this.leg, here, ROUTE_ABANDON)) {
+      this.path = [];
+      this.leg = 0;
     }
     const wantsRecompute = this.path.length === 0
       || (!patrolArrival && this.routeCooldown <= 0);

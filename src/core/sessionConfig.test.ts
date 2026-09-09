@@ -36,12 +36,12 @@ const CFG: SessionConfig = {
   botWeaponT: 'sniper',
   botSecondaryT: 'revolver',
   botWeaponCt: 'mixed',
-  botSecondaryCt: 'none',
+  botSecondaryCt: 'mixed',
 };
 
 // Each side's pair is adjacent, which is the order configToQuery writes.
 const CFG_QUERY =
-  '?map=range&tbots=10&ctbots=3&time=90&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=none';
+  '?map=range&tbots=10&ctbots=3&time=90&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=mixed';
 
 describe('parseSessionConfig', () => {
   it('empty source yields every default', () => {
@@ -146,17 +146,20 @@ describe('configsEqual', () => {
 });
 
 describe('asBotSecondary', () => {
-  it('accepts every firearm, plus mixed and none', () => {
-    for (const id of ['mixed', 'none', 'smg', 'sniper', 'shotgun', 'pistol', 'revolver'] as const) {
+  it('accepts both sidearms, plus mixed', () => {
+    for (const id of ['mixed', 'pistol', 'revolver'] as const) {
       expect(asBotSecondary(id, 'pistol')).toBe(id);
     }
   });
 
-  it('refuses the knife — the blade is already the last position', () => {
-    // Not the 7a exclusion returning: makeBotLoadout appends the blade to
-    // every loadout, so accepting it here would name a duplicate the loadout
-    // then drops, and a silently ignored setting is worse than a fallback.
-    expect(asBotSecondary('knife', 'pistol')).toBe('pistol');
+  it('refuses primaries, the blade, and none — none of them belong here', () => {
+    // Primaries belong to the primary position; the blade is already every
+    // loadout's last position, so accepting it would name a duplicate the
+    // loadout then drops; and 'none' is gone entirely — every bot always
+    // carries a sidearm. A silently ignored setting is worse than a fallback.
+    for (const id of ['smg', 'sniper', 'shotgun', 'knife', 'none']) {
+      expect(asBotSecondary(id, 'pistol')).toBe('pistol');
+    }
   });
 
   it('falls back for absent, empty and garbage values', () => {
@@ -171,8 +174,8 @@ describe('asBotSecondary', () => {
   });
 
   it('parses tsec and ctsec independently, each with its own fallback', () => {
-    const got = parseSessionConfig(src({ tsec: 'sniper', ctsec: 'nope' }));
-    expect(got.botSecondaryT).toBe('sniper');
+    const got = parseSessionConfig(src({ tsec: 'revolver', ctsec: 'nope' }));
+    expect(got.botSecondaryT).toBe('revolver');
     expect(got.botSecondaryCt).toBe(SESSION_DEFAULTS.botSecondaryCt);
   });
 
@@ -185,24 +188,26 @@ describe('asBotSecondary', () => {
 });
 
 describe('asBotWeapon', () => {
-  it('accepts every catalog weapon a bot may carry, knife included, and mixed', () => {
-    for (const id of ['mixed', 'smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife'] as const) {
+  it('accepts every primary firearm, and mixed', () => {
+    for (const id of ['mixed', 'smg', 'sniper', 'shotgun'] as const) {
       expect(asBotWeapon(id, 'smg')).toBe(id);
     }
   });
 
-  it('parses ?tweap=knife to a blade-only bot — the 7b widening', () => {
-    // The 7a boundary refused the knife (a bot had no way to swing one); 7b
-    // widened BotWeaponId to the whole catalog, so a blade is now a legal and
-    // deliberate setting.
-    expect(asBotWeapon('knife', 'mixed')).toBe('knife');
+  it('refuses sidearms and the blade — neither belongs in the primary position', () => {
+    // Sidearms arrive via the secondary position and the blade via every
+    // loadout's fallback; a stale ?tweap=knife bookmark from when the blade
+    // was a legal primary falls back rather than throwing.
+    for (const id of ['pistol', 'revolver', 'knife']) {
+      expect(asBotWeapon(id, 'mixed')).toBe('mixed');
+    }
   });
 
   it('falls back for absent, empty and garbage values', () => {
-    expect(asBotWeapon(null, 'revolver')).toBe('revolver');
-    expect(asBotWeapon(undefined, 'revolver')).toBe('revolver');
-    expect(asBotWeapon('', 'revolver')).toBe('revolver');
-    expect(asBotWeapon('bazooka', 'revolver')).toBe('revolver');
+    expect(asBotWeapon(null, 'smg')).toBe('smg');
+    expect(asBotWeapon(undefined, 'smg')).toBe('smg');
+    expect(asBotWeapon('', 'smg')).toBe('smg');
+    expect(asBotWeapon('bazooka', 'smg')).toBe('smg');
   });
 
   it('does not let a prototype key pass the guard', () => {
@@ -217,8 +222,8 @@ describe('asBotWeapon', () => {
     expect(parseSessionConfig(src({ tweap: 'shotgun' }))).toMatchObject({
       botWeaponT: 'shotgun', botWeaponCt: SESSION_DEFAULTS.botWeaponCt,
     });
-    expect(parseSessionConfig(src({ ctweap: 'pistol' }))).toMatchObject({
-      botWeaponT: SESSION_DEFAULTS.botWeaponT, botWeaponCt: 'pistol',
+    expect(parseSessionConfig(src({ ctweap: 'shotgun' }))).toMatchObject({
+      botWeaponT: SESSION_DEFAULTS.botWeaponT, botWeaponCt: 'shotgun',
     });
     expect(parseSessionConfig(src({ tweap: 'nope' })).botWeaponT).toBe(SESSION_DEFAULTS.botWeaponT);
   });

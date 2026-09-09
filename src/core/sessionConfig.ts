@@ -29,11 +29,11 @@ export interface SessionConfig {
   botsCt: number;
   /** Round length in seconds. */
   roundSeconds: number;
-  /** Weapon every T-side bot carries; 'mixed' draws independently per bot. */
+  /** Weapon every T-side bot carries in its PRIMARY position; 'mixed' draws independently per bot. */
   botWeaponT: BotWeaponChoice;
   /** Same for the CT side. */
   botWeaponCt: BotWeaponChoice;
-  /** Secondary firearm for T-side bot loadouts; 'mixed' draws per bot, 'none' skips it. */
+  /** Sidearm for T-side bot loadouts; 'mixed' draws pistol/revolver per bot. */
   botSecondaryT: BotSecondaryChoice;
   /** Same for the CT side. */
   botSecondaryCt: BotSecondaryChoice;
@@ -117,26 +117,25 @@ export function asMapName(raw: string | null | undefined): MapName {
 }
 
 /**
- * Narrow an untrusted string to a bot-weapon setting, falling back to
+ * Narrow an untrusted string to a bot-PRIMARY setting, falling back to
  * `fallback` for anything unrecognized.
  *
  * Exhaustive Record and hasOwn for exactly asMapName's reasons — widening the
- * weapon union must fail to compile HERE too, and a prototype key like
+ * primary union must fail to compile HERE too, and a prototype key like
  * 'toString' must not pass the guard and reach a Record lookup.
  *
- * 'knife' IS a key since tranche 7b widened the boundary: a knife bot is a
- * legal and deliberate setting (a blade-only bot, and in the 'mixed' pool),
- * where 7a's BotWeaponId exclusion kept blades away from a hit die they had
- * no meaning for. The exhaustive Record is still what forces a new weapon to
- * be considered here — what changed is the answer a blade gives, not whether
- * one is demanded.
+ * Only primary firearms are keys: sidearms belong to the secondary position
+ * and the blade is every loadout's fallback, so naming either here would ask
+ * for something the menu never offered. Stale values (a ?tweap=knife
+ * bookmark from when the blade was a legal primary) fall back rather than
+ * throwing — a hand-typed garbage URL must still boot a playable match.
  *
  * `fallback` is a parameter rather than SESSION_DEFAULTS, so the start menu
  * can keep the currently-applied value on garbage input exactly as numOr
  * does for the number fields.
  */
 const IS_BOT_WEAPON: Record<BotWeaponChoice, true> = {
-  mixed: true, smg: true, sniper: true, shotgun: true, pistol: true, revolver: true, knife: true,
+  mixed: true, smg: true, sniper: true, shotgun: true,
 };
 
 export function asBotWeapon(
@@ -152,14 +151,15 @@ export function asBotWeapon(
  * Narrow an untrusted string to a bot SECONDARY setting, falling back to
  * `fallback` for anything unrecognized.
  *
- * Exhaustive Record and hasOwn for exactly asMapName's reasons. The knife is
- * not a key: the blade is already the last position of every loadout
- * (sim/botWeapons.ts:makeBotLoadout), so naming it here would ask for a
+ * Exhaustive Record and hasOwn for exactly asMapName's reasons. Only the two
+ * sidearms are keys: primaries belong to the primary position, and the blade
+ * is already the last position of every loadout
+ * (sim/botWeapons.ts:makeBotLoadout), so naming either here would ask for a
  * duplicate the loadout then drops — a silently ignored setting is worse
  * than one that falls back.
  */
 const IS_BOT_SECONDARY: Record<BotSecondaryChoice, true> = {
-  mixed: true, none: true, smg: true, sniper: true, shotgun: true, pistol: true, revolver: true,
+  mixed: true, pistol: true, revolver: true,
 };
 
 export function asBotSecondary(

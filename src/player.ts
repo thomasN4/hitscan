@@ -36,6 +36,7 @@ import { speedFor, measuredMoveLerp, GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { approach, deadZone } from './sim/smoothing';
 import { FOOTSTEP_RUN_RADIUS_M, FOOTSTEP_WALK_RADIUS_M } from './sim/soundEvents';
+import { viewmodelTransform } from './sim/viewmodelTransform';
 
 /**
  * Least per-frame XZ displacement (m) that counts as a step for HEARING.
@@ -240,17 +241,26 @@ export function updateViewmodel(): void {
   // its own rest offset and sight height — see weapons.ts VIEWMODELS), not a
   // hardcoded shift: one global value centered the smg but left the pistols'
   // sight lines visibly off screen-center.
-  const aimOffset = viewmodelAimOffset();
-  gunGroup.position.x = aimOffset.x * wpn.adsLerp;
-  // Bob phase runs on game time so a pause doesn't snap the weapon to an
-  // arbitrary point of the cycle on resume.
-  gunGroup.position.y = aimOffset.y * wpn.adsLerp + Math.sin(gameTime.now() * 10) * motion.bobAmt;
-  // Accumulated recoil is reshaped only for this cosmetic transform. Raw
-  // recoil still drives the camera and bullets through currentAimPitch().
-  const visualRecoil = currentViewmodelRecoil();
-  gunGroup.position.z = visualRecoil * 0.012 + 0.06 * wpn.adsLerp; // ADS pulls gun slightly closer
-  gunGroup.rotation.x = visualRecoil * 0.015;
-  gunGroup.rotation.y = -wpn.recoilYaw * 0.01; // subtle sideways pull matching the walk
+  //
+  // The arithmetic lives in sim/viewmodelTransform.ts so the suite can prove the
+  // ADS gate: while aimed, bob and the rotational kick must not displace the
+  // sights from screen centre, because screen centre is where the crosshair
+  // claims the bullets go. Accumulated recoil is reshaped only for this cosmetic
+  // transform; raw recoil still drives the camera and bullets through
+  // currentAimPitch().
+  const offset = viewmodelTransform({
+    aimOffset: viewmodelAimOffset(),
+    ads: wpn.adsLerp,
+    visualRecoil: currentViewmodelRecoil(),
+    recoilYaw: wpn.recoilYaw,
+    bobAmt: motion.bobAmt,
+    // Bob phase runs on game time so a pause doesn't snap the weapon to an
+    // arbitrary point of the cycle on resume.
+    now: gameTime.now(),
+  });
+  gunGroup.position.set(offset.position.x, offset.position.y, offset.position.z);
+  gunGroup.rotation.x = offset.rotation.x;
+  gunGroup.rotation.y = offset.rotation.y;
 
   // Crosshair tightens/fades when aiming (sight picture takes over);
   // arm gap itself is driven by the accuracy model in weapons.ts

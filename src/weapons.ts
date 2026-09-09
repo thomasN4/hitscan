@@ -6,23 +6,26 @@
 // hitscan: a single ray from the camera; the NEAREST intersection across
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
-import { createCelMaterial } from './core/materials';
+import { poseWeapon } from './core/weaponPresentation';
+import { weaponPose, crossedCue } from './sim/weaponAnimation';
+import type { WeaponAssets } from './core/weaponAssets';
+import { createWeaponViewModel, type WeaponViewModel } from './core/weaponModels';
 import { scene, camera } from './core/engine';
 import { solids } from './world';
 import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTime,
          soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
-         equippedId, cancelPendingReloadSfx, effectiveCrouching,
+         equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
 import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
-         sfxReload, sfxShell, sfxSwitch } from './audio';
+         sfxReload, sfxShell, sfxMechanism, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
 import { GUNSHOT_RADIUS_M } from './sim/soundEvents';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
-import { roundInterval, roundTransfer, planReload } from './sim/ammo';
+import { roundInterval, roundTransfer, planReload, cancelsReload } from './sim/ammo';
 import {
   aimPitch,
   aimYaw,
@@ -67,11 +70,6 @@ function aimFovFor(def: WeaponDef): number {
   return fov;
 }
 
-/** The ONE read of `userData.baseY`, stamped on each viewmodel magazine below. */
-function magBaseY(mag: THREE.Mesh): number {
-  return mag.userData.baseY as number;
-}
-
 // ---------- Viewmodel ----------
 // First-person guns rendered as children of the camera so they inherit the
 // view transform. One group per catalog id; visibility follows
@@ -79,154 +77,13 @@ function magBaseY(mag: THREE.Mesh): number {
 // Position is animated each frame in
 // updateWeapon/updateViewmodel: x/y shift toward center when aiming (adsLerp),
 // z/x-rotation kick with recoil, y bobs while moving (bobAmt from player.ts).
-// The viewmodel meshes below are pure THREE objects, so they are built at
-// module scope; only ATTACHING them to the engine's camera/scene needs
-// initEngine() to have run first — see initWeaponViewmodels().
+// Geometry is built during explicit startup after the weapon assets load.
 export const gunGroup = new THREE.Group();
 
-const smgGroup = new THREE.Group();
-let smgMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x2b2b2b });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.5), dark);
-  body.position.set(0.25, -0.22, -0.45); // lower-right of the view
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
-  barrel.position.set(0.25, -0.19, -0.82);
-  smgMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), dark);
-  smgMag.position.set(0.25, -0.31, -0.42);
-  smgMag.userData.baseY = -0.31;
-  smgGroup.add(body, barrel, smgMag);
-}
-
-const sniperGroup = new THREE.Group();
-let sniperMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x24301f }); // green gunmetal
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.62), dark);
-  body.position.set(0.26, -0.21, -0.55);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.72), dark);
-  barrel.position.set(0.26, -0.18, -1.15); // long barrel reaching mid-screen
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.13, 0.22), dark);
-  stock.position.set(0.26, -0.24, -0.14);
-  // Scope: cylinder laid along the barrel (default axis is y -> rotate x)
-  const scopeMat = createCelMaterial({ color: 0x111111 });
-  const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.26, 12), scopeMat);
-  scope.rotation.x = Math.PI / 2;
-  scope.position.set(0.26, -0.12, -0.6);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.10, 0.10), dark);
-  mag.position.set(0.26, -0.29, -0.52);
-  mag.userData.baseY = -0.29;
-  sniperMag = mag;
-  sniperGroup.add(body, barrel, stock, scope, mag);
-}
-
-const pistolGroup = new THREE.Group();
-let pistolMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x33322f });
-  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.30), dark);
-  slide.position.set(0.24, -0.20, -0.38);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.15, 0.09), dark);
-  grip.position.set(0.24, -0.30, -0.27);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.13, 0.07), dark);
-  mag.position.set(0.24, -0.31, -0.28);
-  mag.userData.baseY = -0.31;
-  pistolMag = mag;
-  pistolGroup.add(slide, grip, mag);
-}
-
-const shotgunGroup = new THREE.Group();
-let shotgunMag: THREE.Mesh; // kept for the reload animation (mag drop/reseat)
-{
-  const wood = createCelMaterial({ color: 0x4a331f }); // oiled walnut
-  const steel = createCelMaterial({ color: 0x26262a });
-  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.34), steel);
-  receiver.position.set(0.25, -0.22, -0.5);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.62), steel);
-  barrel.position.set(0.25, -0.18, -0.95);
-  const tube = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.55), steel); // under-barrel shell tube
-  tube.position.set(0.25, -0.235, -0.9);
-  const pump = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.16), wood);
-  pump.position.set(0.25, -0.24, -0.78);
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.26), wood);
-  stock.position.set(0.25, -0.25, -0.1);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.12), steel); // loading gate/shell
-  mag.position.set(0.25, -0.29, -0.46);
-  mag.userData.baseY = -0.29;
-  shotgunMag = mag;
-  shotgunGroup.add(receiver, barrel, tube, pump, stock, mag);
-}
-
-const revolverGroup = new THREE.Group();
-let revolverMag: THREE.Mesh; // kept for the reload animation (cylinder drop/reseat)
-{
-  const dark = createCelMaterial({ color: 0x2e2e33 });
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.075, 0.34), dark);
-  frame.position.set(0.24, -0.2, -0.4);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.22), dark);
-  barrel.position.set(0.24, -0.185, -0.62);
-  // Cylinder: a short fat cylinder laid along the barrel (default axis is y
-  // -> rotate x), the visual signature of a revolver.
-  const cylinder = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.05, 0.09, 8), dark);
-  cylinder.rotation.x = Math.PI / 2;
-  cylinder.position.set(0.24, -0.2, -0.44);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.08),
-    createCelMaterial({ color: 0x4a331f })); // wood grips
-  grip.position.set(0.24, -0.3, -0.28);
-  const mag = cylinder; // the reload pose drops/swings the cylinder itself
-  mag.userData.baseY = -0.2;
-  revolverMag = mag;
-  revolverGroup.add(frame, barrel, cylinder, grip);
-}
-
-const knifeGroup = new THREE.Group();
-let knifeBlade: THREE.Mesh; // poseReload's target slot — never reloads, but keeps
-                            // the pose-reset path uniform with every viewmodel
-{
-  const steel = createCelMaterial({ color: 0xb9bdc6 }); // honed edge
-  const dark = createCelMaterial({ color: 0x1f1f22 });
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.16), dark);
-  grip.position.set(0.24, -0.24, -0.32);
-  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.03), dark);
-  guard.position.set(0.24, -0.235, -0.41);
-  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.055, 0.36), steel);
-  blade.position.set(0.24, -0.225, -0.6);
-  blade.userData.baseY = -0.225;
-  knifeBlade = blade;
-  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.055, 0.1), steel);
-  tip.position.set(0.24, -0.212, -0.82);
-  tip.rotation.x = 0.25; // clip-point lean toward the thrust line
-  knifeGroup.add(grip, guard, blade, tip);
-}
-
-gunGroup.add(smgGroup, sniperGroup, pistolGroup, shotgunGroup, revolverGroup, knifeGroup);
-
-/**
- * Per-weapon viewmodel: the animated group, the mesh poseReload() drops and
- * reseats during a reload, and the hip→ADS position delta that brings THIS
- * gun's sights onto the screen center at full adsLerp (each viewmodel rests
- * at its own offset/sight height — one hardcoded shift cannot center them
- * all; playtest round 1). Keyed by catalog id so a new weapon fails to
- * compile until it registers here.
- */
-interface ViewModel {
-  group: THREE.Group;
-  mag: THREE.Mesh;
-  /** Position delta applied at full ADS: x re-centers the rest offset,
-   *  y raises the sight line to eye height. Tuned against screenshots
-   *  (scripts/viewmodel-shots.mjs). */
-  aimOffset: { x: number; y: number };
-}
-
-const VIEWMODELS: Record<WeaponId, ViewModel> = {
-  smg:     { group: smgGroup,     mag: smgMag,     aimOffset: { x: -0.25, y: 0.14 } },  // the baseline every sight line matches
-  sniper:  { group: sniperGroup,  mag: sniperMag,  aimOffset: { x: -0.26, y: 0.12 } },  // scope tube centered (overlay takes over at full ADS)
-  shotgun: { group: shotgunGroup, mag: shotgunMag, aimOffset: { x: -0.25, y: 0.105 } },  // bead line rides ~30% lower than the others' sight lines (playtest round 2)
-  pistol:  { group: pistolGroup,  mag: pistolMag,  aimOffset: { x: -0.24, y: 0.15 } },  // slide-top sight line at the smg's height
-  revolver:{ group: revolverGroup,mag: revolverMag,aimOffset: { x: -0.24, y: 0.147 } }, // frame-top sight line at the smg's height
-  knife:   { group: knifeGroup,   mag: knifeBlade, aimOffset: { x: -0.24, y: 0.14 } },  // catalog-complete; RMB is inert while melee so the offset never blends in
-};
+// Models own geometry, sight lines and mechanism assemblies.
+// Gameplay continues to own selection, recoil, reload progress and shot aim.
+// Read only after initWeaponViewmodels(), like the engine bindings.
+let VIEWMODELS: Record<WeaponId, WeaponViewModel>;
 
 /**
  * The equipped weapon's hip→ADS viewmodel delta, for player.ts:updateViewmodel
@@ -263,7 +120,16 @@ const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
  * Requires initEngine() to have run; call once from main.ts before the loop.
  * `scene.add(camera)` is what makes the camera-parented gun render at all.
  */
-export function initWeaponViewmodels(): void {
+export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
+  VIEWMODELS = {
+    smg: createWeaponViewModel('smg'),
+    sniper: createWeaponViewModel('sniper'),
+    shotgun: createWeaponViewModel('shotgun', weaponAssets),
+    pistol: createWeaponViewModel('pistol', weaponAssets),
+    revolver: createWeaponViewModel('revolver', weaponAssets),
+    knife: createWeaponViewModel('knife'),
+  };
+  for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
   camera.add(gunGroup);
   scene.add(camera);
   scene.add(muzzleFlashLight);
@@ -294,39 +160,13 @@ export function currentAimYaw(): number {
 }
 
 // ---------- Reload animation ----------
-// Procedural viewmodel reload: the gun dips away from the camera and tilts
-// while the magazine drops out and slides back in. Everything is driven by
-// reload progress (0..1 over weapon.reloadTime — or over ONE shell/chamber
-// interval for perRound weapons, which loop this cycle per round), so calling
-// with t = 0 restores the rest pose — offsets self-reset when `weapon.reloading`
-// clears.
-const MAG_TRAVEL = 0.22; // how far the magazine drops, view units
-
-/** Smooth 0→1→0 hold envelope: eases in over [0,inFrac], out over [1-outFrac,1]. */
-function holdEnv(t: number, inFrac: number, outFrac: number): number {
-  return THREE.MathUtils.smoothstep(t, 0, inFrac) *
-    (1 - THREE.MathUtils.smoothstep(t, 1 - outFrac, 1));
-}
-
-/**
- * Pose one weapon group for reload progress `t`. Applied to the per-slot
- * group (not gunGroup, whose transform player.ts owns every frame).
- */
-function poseReload(group: THREE.Group, mag: THREE.Mesh, t: number): void {
-  const dip = holdEnv(t, 0.2, 0.25);
-  // Negative x-rotation tips the muzzle down; z rolls it toward center
-  group.position.y = -0.15 * dip;
-  group.rotation.x = -0.32 * dip;
-  group.rotation.z = 0.15 * dip;
-  // Mag falls out early (8%..38%), seats home late (55%..88%)
-  const drop = THREE.MathUtils.smoothstep(t, 0.08, 0.38);
-  const seat = THREE.MathUtils.smoothstep(t, 0.55, 0.88);
-  mag.position.y = magBaseY(mag) - MAG_TRAVEL * drop * (1 - seat);
-}
-
 /** Cancel reload state and any whole-mag completion clicks still pending. */
 function cancelReload(): void {
   cancelPendingReloadSfx();
+  if (weapon.reloading) {
+    wpn.animation.closeAt = gameTime.now();
+    wpn.animation.closeBlend = wpn.animation.reloadBlend;
+  }
   weapon.reloading = false;
   weapon.reloadEnd = 0;
   weapon.nextRoundAt = 0;
@@ -343,7 +183,9 @@ function cancelReload(): void {
  * sights are up DROPS them (dropAim): one motion at a time, and like
  * unscopeOnShot, clearing input.aiming means a fresh RMB press is needed to
  * re-raise even if the button is still held. A REFUSED reload leaves the aim
- * exactly as it was.
+ * exactly as it was. The opposite order — sights raised DURING a reload —
+ * belongs to sim/ammo.ts:cancelsReload, applied per frame in updateWeapon;
+ * that fresh RMB press is what cancels.
  *
  * Whole-mag weapons (no `perRound`): one timer, the mag refills once at
  * reloadEnd. Per-round weapons (shotgun/revolver): reloadTime is spread
@@ -368,13 +210,16 @@ export function tryReload(): void {
   if (!d.start) return;
   if (d.dropAim) input.aiming = false; // one motion at a time; fresh RMB to re-raise
   cancelPendingReloadSfx();
+  wpn.animation.reloadStartedAt = gameTime.now();
+  wpn.animation.emptyReload = weapon.mag === 0;
+  wpn.animation.closeAt = -Infinity;
   weapon.reloading = true;
   if (currentDef().perRound) {
     weapon.nextRoundAt = gameTime.now() + roundInterval(weapon.reloadTime, weapon.magSize);
     sfxShell(); // tactile feedback on the keypress; each transfer clicks too
   } else {
     weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
-    wpn.reloadSfxHandle = sfxReload();
+    wpn.reloadSfxHandle = sfxReload(weapon.reloadTime);
   }
 }
 
@@ -397,6 +242,9 @@ export function switchWeapon(slot: WeaponSlot): void {
   // that completion check against the INCOMING weapon's stats with the stale
   // reloadEnd — an instant free reload.
   cancelReload();
+  wpn.animation = freshWeaponAnimation();
+  wpn.animation.switchedAt = gameTime.now();
+  wpn.animation.outgoingId = equippedId(wpn.slot);
   const saved = ammoStore[wpn.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;
@@ -464,12 +312,14 @@ export function switchToLast(): void {
  * through sim/melee.ts's range+arc test against every live enemy part
  * (nearest wins; allies are neither struck nor blocking — a stronger cut
  * than the bullets' "allies stop the ray", and deliberate). The kick rides
- * the normal recoil channel, which is what animates the lunge in
- * player.ts:updateViewmodel — one kick per pull, tiny values, so the camera
- * barely nods while the viewmodel lunges.
+ * the normal recoil channel for a small camera nod; the successful-shot
+ * timestamp separately drives the hand/blade follow-through.
  */
 function swingMelee(def: WeaponDef): void {
   weapon.lastShot = gameTime.now();
+  wpn.animation.shotAt = weapon.lastShot;
+  wpn.animation.previousShotAge = -1;
+  wpn.animation.closeAt = -Infinity;
   SHOT_SFX[equippedId(wpn.slot)]();
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
@@ -540,6 +390,9 @@ export function shoot(): void {
   }
   weapon.mag--;
   weapon.lastShot = gameTime.now();
+  wpn.animation.shotAt = weapon.lastShot;
+  wpn.animation.previousShotAge = -1;
+  wpn.animation.closeAt = -Infinity;
   const pellets = def.pellets ?? 1; // documented default: a single hitscan ray
 
   muzzleFlashLight.intensity = 3;
@@ -665,11 +518,17 @@ export function updateWeapon(dt: number): void {
 
   const def = currentDef();
 
-  // Sprint wins when it begins during a reload. Run this before animation or
+  // Sprinting or raising the sights wins when it begins during a reload — the
+  // mirror of tryReload's dropAim, and the same one-motion-at-a-time rule seen
+  // from the order where nothing presses R. Run this before animation or
   // transfer/completion so the cancel frame cannot sneak in one last round.
   // Rounds already moved by a per-round reload remain live; whole-mag reloads
   // have not moved anything yet.
-  if (weapon.reloading && currentSprintActive(effectiveCrouching())) {
+  if (cancelsReload({
+    reloading: weapon.reloading,
+    sprinting: currentSprintActive(effectiveCrouching()),
+    aiming: input.aiming,
+  })) {
     cancelReload();
   }
 
@@ -708,22 +567,6 @@ export function updateWeapon(dt: number): void {
   // Scope reticle is DOM (hud.ts); only touch it on state flips.
   setScopeOverlay(def.scopedOverlay && wpn.adsLerp > 0.85);
 
-  // Reload animation: progress through the active reload (0 when idle so
-  // the pose resets). Uses game time to match weapon.reloadEnd / the per-round
-  // transfer schedule, so a paused reload freezes mid-animation instead of
-  // finishing behind the menu. Per-round weapons loop the SAME drop/seat cycle
-  // once per shell/chamber — the phase runs 0..1 between transfers rather than
-  // once across the whole mag.
-  const now = gameTime.now();
-  let reloadT = 0;
-  if (weapon.reloading) {
-    reloadT = def.perRound
-      ? 1 - THREE.MathUtils.clamp((weapon.nextRoundAt - now) / roundInterval(weapon.reloadTime, weapon.magSize), 0, 1)
-      : THREE.MathUtils.clamp(1 - (weapon.reloadEnd - now) / weapon.reloadTime, 0, 1);
-  }
-  const liveVm = VIEWMODELS[liveId];
-  poseReload(liveVm.group, liveVm.mag, reloadT);
-
   // Reload progress. Whole-mag: nothing moves until reloadEnd, then the mag
   // tops up at once (partial reloads allowed). Per-round: one transfer per
   // interval until full or dry — every landed round is immediately live ammo,
@@ -737,7 +580,7 @@ export function updateWeapon(dt: number): void {
     const pool = session.map === 'range' ? Number.MAX_SAFE_INTEGER : weapon.reserve;
     let transferred = false;
     let done = false;
-    while (!done && now >= weapon.nextRoundAt) {
+    while (!done && gameTime.now() >= weapon.nextRoundAt) {
       const t = roundTransfer(weapon.mag, weapon.magSize, pool);
       weapon.mag = t.mag;
       if (session.map !== 'range') weapon.reserve = t.reserve;
@@ -759,7 +602,7 @@ export function updateWeapon(dt: number): void {
     wpn.reloadSfxHandle = undefined;
   }
 
-  // Trigger: the smg is full-auto while LMB held; semi-autos (sniper) fire
+  // Trigger: the smg is full-auto while LMB held; single-press weapons fire
   // once per press — the latch blocks repeats until the button is released.
   if (!input.shooting) {
     wpn.triggerLatch = false;
@@ -771,6 +614,8 @@ export function updateWeapon(dt: number): void {
       if (def.semiAuto) wpn.triggerLatch = true;
     }
   }
+
+  updateWeaponPresentation();
 
   // ---- Accuracy model -------------------------------------------------
   // The model itself (and its tuning constants) lives in sim/accuracy.ts;
@@ -794,4 +639,35 @@ export function updateWeapon(dt: number): void {
   // per-axis sum is the true outer bound of a pellet's deflection.
   const displaySpread = wpn.spread + (def.pelletCone ?? 0); // documented default: no pattern
   setCrosshairGap(crosshairGapPx(displaySpread, camera.fov, window.innerHeight, def.crosshairGain));
+}
+
+/** Render after this frame's transfers and trigger, preserving the main stage order. */
+function updateWeaponPresentation(): void {
+  const def = currentDef();
+  const id = equippedId(wpn.slot);
+  const now = gameTime.now();
+  const animation = wpn.animation;
+  const interval = def.perRound ? roundInterval(weapon.reloadTime, weapon.magSize) : weapon.reloadTime;
+  const reloadT = weapon.reloading
+    ? 1 - THREE.MathUtils.clamp(((def.perRound ? weapon.nextRoundAt : weapon.reloadEnd) - now) / interval, 0, 1) : 0;
+  const pose = weaponPose({ id, now, shotAt: animation.shotAt, fireInterval: weapon.fireRate,
+    switchedAt: animation.switchedAt, hasOutgoing: animation.outgoingId !== null, aiming: input.aiming || wpn.adsLerp > 0.01,
+    reloading: weapon.reloading, reloadStartedAt: animation.reloadStartedAt, reloadT,
+    roundInterval: interval, lastRound: weapon.mag + 1 >= weapon.magSize || session.map !== 'range' && weapon.reserve === 1,
+    emptyReload: animation.emptyReload, closeAt: animation.closeAt, closeBlend: animation.closeBlend });
+  animation.reloadBlend = pose.reload;
+  poseWeapon(VIEWMODELS[id], id, pose, now, wpn.adsLerp, motion.runLerp);
+  if (pose.holster && animation.outgoingId !== null && animation.outgoingId !== id) {
+    VIEWMODELS[id].group.visible = false;
+    const outgoing = VIEWMODELS[animation.outgoingId];
+    outgoing.group.visible = true;
+    poseWeapon(outgoing, animation.outgoingId, { ...pose, draw: pose.holsterDrop }, now, 0, motion.runLerp);
+  }
+  const shotAge = now - animation.shotAt;
+  if (!weapon.reloading && (id === 'shotgun' || id === 'sniper')) {
+    for (const threshold of [0.30, 0.76]) {
+      if (crossedCue(animation.previousShotAge, shotAge, weapon.fireRate * threshold)) sfxMechanism();
+    }
+  }
+  animation.previousShotAge = shotAge;
 }

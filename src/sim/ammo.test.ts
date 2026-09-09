@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { isLowAmmo, roundInterval, roundTransfer, planReload } from './ammo';
+import { cancelsReload, isLowAmmo, roundInterval, roundTransfer, planReload } from './ammo';
 import { WEAPONS, type WeaponId } from '../core/state';
 
 /** Catalog weapons with real ammo semantics (the knife's mag holds nothing). */
@@ -71,6 +71,33 @@ describe('planReload', () => {
   test('the drop rides the START decision, not the button', () => {
     // Same held RMB, but nothing to reload: aim stays exactly as it was.
     expect(planReload({ ...live, aiming: true, mag: live.magSize })).toEqual({ start: false, dropAim: false });
+  });
+});
+
+describe('cancelsReload', () => {
+  // A per-round reload two shells in: the baseline every stance flips. mag/reserve
+  // are irrelevant here — cancelReload clears the schedule, never the magazine.
+  const loading = { reloading: true, sprinting: false, aiming: false };
+
+  test.each([
+    ['sprinting', { sprinting: true }],
+    ['aiming', { aiming: true }],
+    ['both at once', { sprinting: true, aiming: true }],
+  ])('%s cancels a running reload', (_name, stance) => {
+    expect(cancelsReload({ ...loading, ...stance })).toBe(true);
+  });
+
+  test('a settled stance leaves the reload alone', () => {
+    expect(cancelsReload(loading)).toBe(false);
+  });
+
+  test.each([
+    ['sprinting', { sprinting: true }],
+    ['aiming', { aiming: true }],
+  ])('%s with no reload running cancels nothing', (_name, stance) => {
+    // The caller guards on this too, but the rule owns it: a stance is not an
+    // event, so a level-triggered check must be inert on an idle weapon.
+    expect(cancelsReload({ ...loading, reloading: false, ...stance })).toBe(false);
   });
 });
 

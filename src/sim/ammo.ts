@@ -90,3 +90,31 @@ export function planReload(r: ReloadRequest): ReloadDecision {
     !r.sprinting && r.mag < r.magSize && r.reserve > 0;
   return { start, dropAim: start && r.aiming };
 }
+
+/** Everything the per-frame stance cancel weighs, in the shape of the live slices. */
+export interface StanceCancelRequest {
+  reloading: boolean;
+  /** Shift sprint is active with a net movement direction. */
+  sprinting: boolean;
+  /** RMB held: iron sights / scope raised right now. */
+  aiming: boolean;
+}
+
+/**
+ * Whether this frame's stance cancels a running reload.
+ *
+ * Both stances win, for the same reason planReload's dropAim drops the sights
+ * when a reload STARTS: one motion at a time, and the newer input is the one
+ * the player just asked for. The two halves are mirrors — this is the order
+ * planReload cannot see, because nothing presses R. Rounds a per-round reload
+ * has already moved stay live; weapons.ts:cancelReload clears the schedule, not
+ * the magazine.
+ *
+ * Level-triggered rather than edge-triggered, and it cannot fight dropAim:
+ * starting a reload while aiming zeroes input.aiming, so `aiming` is already
+ * false on the very next frame. A fresh RMB press is what both re-raises the
+ * sights and cancels, so there is no held-button loop to break.
+ */
+export function cancelsReload(r: StanceCancelRequest): boolean {
+  return r.reloading && (r.sprinting || r.aiming);
+}

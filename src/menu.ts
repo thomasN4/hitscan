@@ -350,3 +350,12 @@ export function hideAllMenus(): void {
 export function showPauseMenu(show: boolean): void {
   pauseMenu.style.display = show ? 'flex' : 'none';
 }
+
+/** Startup gate lives in the menu even before its event handlers initialize. */
+export function setAssetStatus(status: 'loading' | 'ready' | 'error'): void {
+  const button = requireEl('playBtn');
+  if (!(button instanceof HTMLButtonElement)) throw new Error('playBtn must be a button');
+  button.disabled = status !== 'ready';
+  requireEl('assetStatus').textContent = status === 'loading' ? 'Loading weapon assets…'
+    : status === 'error' ? 'Could not load weapon assets. Reload to retry; if this continues, check the deployed assets.' : '';
+}

@@ -11,6 +11,7 @@
 // whose geometry matches what the executor's acquisition would produce.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import type { BotWeaponId } from '../core/state';
 import type { FireController, ShotOutcome } from './botWeapons';
 import {
   DEFAULT_BRAIN_PARAMS,
@@ -55,7 +56,9 @@ const calmRng = () => 0.9;
  * the brain no longer owns (lesson 28, at the unit layer).
  */
 class StubFire implements FireController {
-  readonly weapon = 'smg';
+  /** Mutable so a test can stand in for a dry swap under the brain. */
+  weapon: BotWeaponId = 'smg';
+  readonly resolution = 'ranged' as const;
   readonly magSize = 30;
   mag = 30;
   reserve = 90;
@@ -67,6 +70,8 @@ class StubFire implements FireController {
   resolves: number[] = [];
   /** Every tick this brain took, in order: the once-per-frame contract. */
   ticks: { dt: number; engaged: boolean }[] = [];
+  /** How many times the brain re-derived its policy from this stub. */
+  paramCalls: BrainParams[] = [];
 
   constructor(private readonly rng: () => number = calmRng) {}
 
@@ -79,6 +84,7 @@ class StubFire implements FireController {
     return { damage: 0, zone: null, rays: 1, hits: 0 };
   }
   hitChance(): number { return 0; }
+  params(base: BrainParams): BrainParams { this.paramCalls.push(base); return base; }
 }
 
 /**
@@ -764,6 +770,32 @@ describe('DefaultBrain trigger', () => {
     expect(fire.resolves).toEqual([12.5]);
     expect(brain.weapon).toBe('smg');
     expect(brain.magSize).toBe(30);
+  });
+
+  it('re-derives its bands when the loadout swaps weapons under it', () => {
+    // The dry swap happens inside fire.tick(), so the brain learns about it by
+    // watching `weapon` — a bot that fell back to its sidearm must fight at the
+    // SIDEARM's range, not the rifle's it no longer holds.
+    const fire = new StubFire();
+    const brain = brainOf({ ...DEFAULT_BRAIN_PARAMS, engageRange: 45 }, calmRng, fire);
+    expect(brain.inRange(44.9)).toBe(true);
+    // The stub answers params() with a narrower engage range once it is the
+    // pistol, exactly as botBrainParams would over the real tuning.
+    fire.weapon = 'pistol';
+    fire.params = (base) => ({ ...base, engageRange: 30 });
+    brain.decide(view(), DT);
+    expect(brain.inRange(44.9)).toBe(false);
+    expect(brain.inRange(29.9)).toBe(true);
+  });
+
+  it('re-derives nothing while the weapon holds still', () => {
+    // The resync is a change detector, not a per-frame allocation.
+    const fire = new StubFire();
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    const afterConstruction = fire.paramCalls.length;
+    expect(afterConstruction).toBe(1);
+    for (let i = 0; i < 10; i++) brain.decide(view(), DT);
+    expect(fire.paramCalls.length).toBe(afterConstruction);
   });
 
   it('inRange mirrors the trigger\'s exclusive engageRange comparison', () => {

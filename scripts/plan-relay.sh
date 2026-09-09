@@ -25,8 +25,8 @@ if ! command -v "$opencode_bin" >/dev/null 2>&1; then
   echo "Plan Relay: OpenCode executable not found: $opencode_bin" >&2
   exit 2
 fi
-if test "$($opencode_bin --version)" != "1.18.25"; then
-  echo "Plan Relay: OpenCode 1.18.25 is required" >&2
+if test "$($opencode_bin --version)" != "1.18.28"; then
+  echo "Plan Relay: OpenCode 1.18.28 is required" >&2
   exit 2
 fi
 if test -z "${OPENROUTER_API_KEY:-}"; then

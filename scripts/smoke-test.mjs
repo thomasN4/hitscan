@@ -5,6 +5,7 @@
 //
 // Requires Brave (Flatpak path below is machine-specific).
 import puppeteer from 'puppeteer-core';
+import { checkElevators } from './elevator-smoke.mjs';
 
 const BRAVE = '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave';
 // Parallel worktrees run parallel dev servers on distinct ports (see
@@ -20,6 +21,7 @@ function mapUrl(path) {
 
 const browser = await puppeteer.launch({
   executablePath: BRAVE,
+  protocolTimeout: 300000, // complete elevator rides can span several cycles
   headless: 'new',
   args: ['--no-sandbox', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });
@@ -96,7 +98,10 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
 
     // 1) Reload works
     await page.keyboard.press('KeyR');
-    await new Promise(r => setTimeout(r, 2600));
+    // Reload deadlines use game time; slow rendered frames must not turn
+    // a correct reload into a wall-clock timing failure (review lesson 26).
+    await page.waitForFunction(() => !window.__cs.weapon.reloading && window.__cs.weapon.mag === 30,
+      { timeout: 15000 });
     const reload = await page.evaluate(() => ({ ...window.__cs.weapon }));
     if (reload.mag !== 30 || reload.reloading) throw new Error(`reload incomplete: ${JSON.stringify(reload)}`);
 
@@ -203,69 +208,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       console.log(`[stairs-down] OK`, JSON.stringify(down));
     }
 
-    // 2d) Cargo lift (maps/warehouse2.ts). The map's second way up, and the
-    //     only mechanic in the game that moves a body without the body asking:
-    //     world.ts:addLiftPad registers a pad, sim/lift.ts decides it fires,
-    //     and player.ts/bots.ts apply it after their vertical resolve.
-    //
-    //     Three claims, and the third is the one that actually breaks. Apex
-    //     alone is easy to hit; what matters is that the arc leaves enough
-    //     time ABOVE the deck to travel onto it, because until a body clears
-    //     the slab its head is underneath and slideMoveXZ refuses to let it
-    //     move over. A pad tuned to just beat DECK_Y drops you back in the
-    //     void, which looks exactly like a broken pad rather than a changed
-    //     constant.
-    if (liftCheck) {
-      const lift = await page.evaluate(async (spec) => {
-        const cs = window.__cs;
-        cs.player.hp = 100000;
-        cs.game.pitch = 0;
-        const feet = () => cs.player.pos.y - cs.player.eyeHeight;
-
-        // Beside the pad on open floor: must just stand there AND must rest
-        // at feet 0. The two guards below prove it together — the launch
-        // guard alone can never trip, because REST_TOLERANCE (0.05) is
-        // measured against a 0.25 m pad top, so a sample sitting on geometry
-        // would read as a pass. The pad fires on FOOTPRINT OVERLAP, and the
-        // exact edge cases for that live in sim/lift.test.ts; what this phase
-        // is for is the wiring — that the registry player.ts consults is the
-        // map's and not every solid in it.
-        cs.player.pos.set(spec.beside[0], cs.player.eyeHeight, spec.beside[1]);
-        cs.player.vel.set(0, 0, 0);
-        for (let i = 0; i < 30; i++) await new Promise(r => requestAnimationFrame(r));
-        const besideFeet = +feet().toFixed(2);
-
-        // On the pad, walking toward the band it serves.
-        cs.player.pos.set(spec.pad[0], spec.padTop + cs.player.eyeHeight, spec.pad[1]);
-        cs.player.vel.set(0, 0, 0);
-        cs.game.yaw = spec.rideYaw;
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
-        let apex = -1;
-        const t0 = performance.now();
-        while (performance.now() - t0 < 6000) {
-          await new Promise(r => requestAnimationFrame(r));
-          apex = Math.max(apex, feet());
-          if (apex > spec.deckFeet && cs.player.onGround && feet() >= spec.deckFeet - 0.05) break;
-        }
-        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
-        for (let i = 0; i < 20; i++) await new Promise(r => requestAnimationFrame(r));
-        const result = {
-          besideFeet,
-          apex: +apex.toFixed(2),
-          restFeet: +feet().toFixed(2),
-          onGround: cs.player.onGround,
-        };
-        cs.player.hp = 100;
-        return result;
-      }, liftCheck);
-      if (lift.besideFeet > liftCheck.padTop) throw new Error(`standing beside the pad launched the player: ${JSON.stringify(lift)}`);
-      // The control's premise: the sample really rested on open floor, not
-      // inside or on top of something — otherwise the guard above is vacuous.
-      if (Math.abs(lift.besideFeet) > 0.01) throw new Error(`lift control sample did not rest on open floor: ${JSON.stringify(lift)}`);
-      if (lift.apex <= liftCheck.deckFeet) throw new Error(`lift arc never cleared the deck it serves: ${JSON.stringify(lift)}`);
-      if (!lift.onGround || Math.abs(lift.restFeet - liftCheck.deckFeet) > 0.05) throw new Error(`lift did not put the player down on the catwalk: ${JSON.stringify(lift)}`);
-      console.log(`[lift] OK`, JSON.stringify(lift));
-    }
+    if (liftCheck) console.log('[elevators] OK', JSON.stringify(await checkElevators(page)));
 
     let sprint = null;
     // 3) Hold-Shift sprint (range only — on arena, bot fire during earlier
@@ -825,7 +768,7 @@ async function runConfigCheck() {
   const mapErrors = [];
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
   try {
-    await page.goto(mapUrl('/?map=arena&tbots=10&ctbots=3&time=90&tweap=smg&ctweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.goto(mapUrl('/?map=arena&tbots=10&ctbots=3&time=90&tweap=smg&tsec=pistol&ctweap=smg&ctsec=pistol'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
 
     const applied = await page.evaluate(() => ({
@@ -834,6 +777,8 @@ async function runConfigCheck() {
       roundSeconds: window.__cs.game.roundSeconds,
       botCount: window.__cs.bots.length,
       botWeaponT: window.__cs.game.botWeaponT,
+      botSecondaryT: window.__cs.game.botSecondaryT,
+      botSecondaryCt: window.__cs.game.botSecondaryCt,
       weapons: window.__cs.bots.map(b => b.weapon),
       form: {
         map: document.getElementById('cfgMap').value,
@@ -842,6 +787,8 @@ async function runConfigCheck() {
         timeMin: document.getElementById('cfgTimeMin').value,
         weaponT: document.getElementById('cfgWeaponT').value,
         weaponCt: document.getElementById('cfgWeaponCt').value,
+        secondaryT: document.getElementById('cfgSecondaryT').value,
+        secondaryCt: document.getElementById('cfgSecondaryCt').value,
       },
     }));
     if (applied.botsT !== 10 || applied.botsCt !== 3 || applied.roundSeconds !== 90) {
@@ -857,6 +804,10 @@ async function runConfigCheck() {
     // bot phase now relies on to hold its fixture still.
     if (applied.botWeaponT !== 'smg' || applied.form.weaponT !== 'smg' || applied.form.weaponCt !== 'smg') {
       throw new Error(`bot weapon not applied: ${JSON.stringify(applied)}`);
+    }
+    if (applied.botSecondaryT !== 'pistol' || applied.botSecondaryCt !== 'pistol'
+        || applied.form.secondaryT !== 'pistol' || applied.form.secondaryCt !== 'pistol') {
+      throw new Error(`bot secondary not applied: ${JSON.stringify(applied)}`);
     }
     if (!applied.weapons.every(w => w === 'smg')) {
       throw new Error(`forced weapon did not arm every bot: ${JSON.stringify(applied.weapons)}`);
@@ -874,6 +825,7 @@ async function runConfigCheck() {
     const committedParams = new URL(url).searchParams;
     if (committedParams.get('tbots') !== '12' || committedParams.get('time') !== '90'
       || committedParams.get('ctweap') !== 'smg'
+      || committedParams.get('tsec') !== 'pistol' || committedParams.get('ctsec') !== 'pistol'
       || (STYLE === 'ligne-claire' && committedParams.get('style') !== STYLE)) {
       throw new Error(`Play with changed settings navigated wrong: ${url}`);
     }
@@ -2686,7 +2638,7 @@ async function runBotWeaponsCheck() {
   const mapErrors = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
-  const FIREARMS = ['smg', 'sniper', 'shotgun', 'pistol', 'revolver'];
+  const CATALOG = ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife'];
   // Zone damage each weapon can deal, from WEAPONS: torso, legs (x0.75), head
   // (x headshotMult). A shotgun pull sums pellets, so it is excluded from the
   // membership claim and gets the range claim instead.
@@ -2695,7 +2647,7 @@ async function runBotWeaponsCheck() {
     revolver: [55, 41.25, 220],
   };
   try {
-    // ---- A. 'mixed' arms a varied field, and never with a knife.
+    // ---- A. 'mixed' arms a varied field, and may include a blade bot.
     await page.goto(mapUrl('/?map=arena&tbots=8&ctbots=0&time=120&tweap=mixed'), { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise(r => setTimeout(r, 1200));
     const mixed = await page.evaluate(() => {
@@ -2707,8 +2659,10 @@ async function runBotWeaponsCheck() {
       cs.bots.forEach(b => b.respawn());
       return { before, after: cs.bots.map(b => b.weapon), mags: cs.bots.map(b => `${b.mag}/${b.magSize}`) };
     });
-    const unknown = mixed.before.filter(w => !FIREARMS.includes(w));
-    if (unknown.length) throw new Error(`mixed drew a non-firearm: ${JSON.stringify(mixed.before)}`);
+    // A mixed wave may contain a blade bot (tranche 7b): membership is over
+    // the whole catalog, not the firearms alone.
+    const unknown = mixed.before.filter(w => !CATALOG.includes(w));
+    if (unknown.length) throw new Error(`mixed drew an unknown weapon: ${JSON.stringify(mixed.before)}`);
     if (String(mixed.after) !== String(mixed.before)) {
       throw new Error(`respawn re-rolled weapons: ${JSON.stringify(mixed)}`);
     }
@@ -2830,7 +2784,131 @@ async function runBotWeaponsCheck() {
   await page.close();
 }
 
+// [botKnife] — a bot's blade is GEOMETRY, and it holds no rounds.
+//
+// The knife is the one bot weapon whose hit is not a die roll: sim/melee.ts
+// tests the blade's real reach and arc against the target's zone points, so
+// the two claims here are decided by geometry alone and neither can flake on
+// an unlucky draw.
+//
+//   - Reach. engageRange is 1.8 m, so at 60 m a knife bot SEES the player,
+//     grades out of range and never touches them. Same fixture the sniper
+//     clears at the same distance.
+//   - Contact. Left unpinned, a knife bot's bands walk it ONTO the player and
+//     the player bleeds. Every damage value it can deal comes from the
+//     catalog knife (55 / 41.25 anywhere on the body, x3 for a backstab), and
+//     it deals them while holding a weapon with NO magazine and NO reserve —
+//     which is the claim that separates the melee path from every ranged one,
+//     since a firearm bot dealing damage always has rounds to spend.
+async function runBotKnifeCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  // Knife zone damage from WEAPONS.knife: 55 anywhere on the body (its
+  // headshotMult is 1 — a blade cuts the same at any height), legs x0.75, and
+  // each x3 from within 60 degrees of directly behind (sim/melee.ts:isBackstab).
+  const KNIFE_ZONES = [55, 41.25, 165, 123.75];
+  try {
+    await page.goto(BASE + '/?map=arena&tbots=1&ctbots=0&time=600&tweap=knife', { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1200));
+
+    // ---- A. Reach: 60 m of clear sight line, and nothing happens.
+    const far = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const LANE_X = 12;
+      cs.game.started = true;
+      cs.game.locked = true;
+      if (cs.bots.length !== 1) return { fail: `expected exactly one bot, got ${cs.bots.length}` };
+      const bot = cs.bots[0];
+      if (bot.weapon !== 'knife') return { fail: `expected a knife bot, got ${bot.weapon}` };
+      cs.player.pos.set(LANE_X, cs.player.eyeHeight, 45);
+      cs.player.alive = true;
+      let seen = false, inRange = false, hurt = 0;
+      const t0 = cs.gameTime.now();
+      const wall = performance.now();
+      while (performance.now() - wall < 60000 && cs.gameTime.now() - t0 < 12) {
+        // Pinned, exactly as the sniper/shotgun reach claim pins its bot: the
+        // bands would otherwise close the very distance the claim is about.
+        bot.mesh.position.set(LANE_X, 0, -15);
+        bot.vy = 0; bot.onGround = true;
+        const hpBefore = cs.player.hp;
+        await frame();
+        hurt += hpBefore - cs.player.hp;
+        cs.player.hp = 100000;
+        if (bot.targetLOS === true) seen = true;
+        if (bot.targetInRange) inRange = true;
+      }
+      return { seen, inRange, hurt: +hurt.toFixed(2), magSize: bot.magSize, reserve: bot.reserve };
+    });
+    if (far.fail) throw new Error(far.fail);
+    if (!far.seen) throw new Error(`knife bot never saw the player at 60 m: ${JSON.stringify(far)}`);
+    if (far.inRange) throw new Error(`knife bot claimed 60 m as in range: ${JSON.stringify(far)}`);
+    if (far.hurt !== 0) throw new Error(`knife bot reached 60 m: ${JSON.stringify(far)}`);
+    if (far.magSize !== 0 || far.reserve !== 0) {
+      throw new Error(`a blade reported rounds: ${JSON.stringify(far)}`);
+    }
+
+    // ---- B. Contact: unpinned, it closes and cuts.
+    const near = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const frame = () => new Promise(r => requestAnimationFrame(r));
+      const LANE_X = 12;
+      const bot = cs.bots[0];
+      cs.player.pos.set(LANE_X, cs.player.eyeHeight, -4);
+      cs.player.alive = true;
+      // Placed once, then left alone: closing the distance is the behaviour
+      // under test, not something the fixture may do for it.
+      bot.mesh.position.set(LANE_X, 0, -12);
+      bot.vy = 0; bot.onGround = true;
+      let minDist = Infinity, sawReload = false;
+      const deltas = new Set();
+      const t0 = cs.gameTime.now();
+      const wall = performance.now();
+      while (performance.now() - wall < 90000 && cs.gameTime.now() - t0 < 20) {
+        const hpBefore = cs.player.hp;
+        await frame();
+        const lost = +(hpBefore - cs.player.hp).toFixed(2);
+        if (lost > 0) deltas.add(lost);
+        cs.player.hp = 100000; // never dies: a death frees the pointer lock
+        if (bot.reloading) sawReload = true;
+        const d = Math.hypot(
+          bot.mesh.position.x - cs.player.pos.x, bot.mesh.position.z - cs.player.pos.z);
+        if (d < minDist) minDist = d;
+      }
+      return {
+        minDist: +minDist.toFixed(2), sawReload, deltas: [...deltas], mode: bot.mode,
+        mag: bot.mag, magSize: bot.magSize, reserve: bot.reserve,
+        simS: +(cs.gameTime.now() - t0).toFixed(1),
+      };
+    });
+    if (near.minDist > 2.2) throw new Error(`knife bot never closed to contact: ${JSON.stringify(near)}`);
+    if (!near.deltas.length) throw new Error(`knife bot reached the player and did nothing: ${JSON.stringify(near)}`);
+    const bad = near.deltas.filter(d => !KNIFE_ZONES.includes(d));
+    if (bad.length) {
+      throw new Error(`blade dealt damage no knife zone can produce (${bad}): ${JSON.stringify(near)}`);
+    }
+    if (near.mag !== 0 || near.magSize !== 0 || near.reserve !== 0 || near.sawReload) {
+      throw new Error(`a blade spent or held rounds: ${JSON.stringify(near)}`);
+    }
+
+    console.log('[botKnife] OK', JSON.stringify({ far, near }));
+  } catch (e) {
+    failures++;
+    console.log(`[botKnife] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[botKnife] ${e}`));
+  await page.close();
+}
+
 try {
+  await runMap('warehouse2', '/?map=warehouse2&tweap=smg&ctweap=smg', {
+    botCheck: true,
+    stairsCheck: STAIRS.warehouse2,
+    liftCheck: true,
+  });
   await runMap('arena', '/?tweap=smg&ctweap=smg', { configCheck: true, botCheck: true, stairsCheck: STAIRS.arena });
   await runConfigCheck();
   await runAllyCheck();
@@ -2838,6 +2916,7 @@ try {
   await runVisionAwarenessCheck();
   await runPatrolCheck();
   await runBotWeaponsCheck();
+  await runBotKnifeCheck();
   await runHearingCheck();
   await runMap('elevation', '/?map=elevation&tweap=smg&ctweap=smg', { configCheck: true, botCheck: true, stairsCheck: STAIRS.elevation });
   await runBotClimbCheck();
@@ -2845,16 +2924,6 @@ try {
   await runWedgeCheck();
   await runDebugViewCheck();
   await runMap('warehouse1', '/?map=warehouse1&tweap=smg&ctweap=smg', { botCheck: true, stairsCheck: STAIRS.warehouse1 });
-  await runMap('warehouse2', '/?map=warehouse2&tweap=smg&ctweap=smg', {
-    botCheck: true,
-    stairsCheck: STAIRS.warehouse2,
-    // Pad A at (8, -9), which serves the -z band; yaw 0 faces -z, so holding
-    // W through the arc carries the player onto it. The control stands at
-    // (0, -6) — genuinely open floor: the central racks are z [-4, -2] / [2, 4]
-    // and the pallet block is z [-11, -7], so a 0.45 m footprint at z = -6
-    // spans [-6.45, -5.55] and touches neither.
-    liftCheck: { pad: [8, -9], beside: [0, -6], padTop: 0.25, deckFeet: 5.1, rideYaw: 0 },
-  });
 
   await runMap('range', '/?map=range', { sprintCheck: true });
   await runShotgunCheck();

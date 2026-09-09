@@ -32,23 +32,27 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
-import { solids, colliders, liftPads } from './world';
-import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn } from './collision';
+import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotSecondaryChoice, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
+import { elevatorSupports } from './sim/elevator';
+import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, HEAD_HEIGHT } from './collision';
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
-import { sfxEnemyShoot } from './audio';
+import { sfxEnemyAttack } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, botKillTag, updateScore } from './hud';
 import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode } from './sim/botBrains';
 import {
-  BOT_WEAPON_TUNING, WeaponFireController, botBrainParams, resolveBotWeapon,
+  makeBotLoadout, resolveBotSecondary, resolveBotWeapon,
 } from './sim/botWeapons';
+import { meleeSwing, isBackstab, type MeleeCandidate } from './sim/melee';
+import { damageForPart } from './sim/damage';
 import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
-import { NAV_RADIUS, route, navGrid } from './nav';
-import { nearestNode, navNode, pickPatrolNode } from './sim/navGrid';
+import { NAV_RADIUS, transportRoute, navGrid } from './nav';
+import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -110,6 +114,17 @@ const ROUTE_INTERVAL = 1;
 const ROUTE_ABANDON = 6;
 
 /**
+ * Zone fractions of the eye height for a target with no part meshes: the
+ * player's eye IS their head (1.0), and torso/legs mirror the bot mesh's own
+ * 2.0 / 1.35 / 0.45 offsets over its 1.9 m eye.
+ */
+const PLAYER_ZONE_FRACTION: Record<HitZone, number> = {
+  head: 1.0,
+  torso: 0.71,
+  legs: 0.24,
+};
+
+/**
  * At most one A* per frame across ALL bots.
  *
  * A route costs ~4 ms on the elevation map's 17k-node graph, so a dozen bots
@@ -169,6 +184,8 @@ const wpnGeo = {
   pistolGrip: new THREE.BoxGeometry(0.06, 0.14, 0.07),
   revolverBody: new THREE.BoxGeometry(0.07, 0.07, 0.34),
   revolverCylinder: new THREE.CylinderGeometry(0.06, 0.06, 0.11, 8),
+  knifeBlade: new THREE.BoxGeometry(0.025, 0.05, 0.22),
+  knifeGrip: new THREE.BoxGeometry(0.04, 0.06, 0.12),
 };
 // The scope and the cylinder are lathe shapes lying ALONG the barrel, so both
 // need the x-quarter-turn weapons.ts gives its viewmodel scope. Baking it into
@@ -223,6 +240,15 @@ const BOT_WEAPON_MODELS: Record<BotWeaponId, BotWeaponModel> = {
       { geo: wpnGeo.revolverCylinder, pos: [0, -0.01, 0.04], mat: matBarrel },
     ],
     muzzle: 0.34,
+  },
+  // A blade, not a gun: markedly shorter and thinner than every barrel above,
+  // because length and bulk are the two cues that read at 20 m (lesson 25).
+  knife: {
+    parts: [
+      { geo: wpnGeo.knifeBlade, pos: [0, 0, 0.17], mat: matBarrel },
+      { geo: wpnGeo.knifeGrip, pos: [0, -0.01, 0.0], mat: matStock },
+    ],
+    muzzle: 0.28,
   },
 };
 const palettes: Record<Team, { body: THREE.MeshToonMaterial; head: THREE.MeshToonMaterial; legs: THREE.MeshToonMaterial }> = {
@@ -286,24 +312,31 @@ export class Bot implements BotShape {
   speed = 3.2 + Math.random() * 1.4;
   respawnPoint = new THREE.Vector3();
   /**
-   * The catalog weapon this bot carries for the whole match. Drawn once at
-   * construction and never re-drawn — a stable "T-3 is the sniper" is what
-   * lets a playtest attribute a behavior to a weapon rather than guess at it.
+   * The catalog weapon this bot is holding RIGHT NOW, which changes within a
+   * life as positions run dry. Written here alone: resynced from the brain's
+   * weapon after decide() returns, so a swap inside decide() is reflected in
+   * this frame's attack, audio and silhouette.
    */
-  readonly weapon: BotWeaponId;
+  weapon: BotWeaponId;
   /**
    * This bot's policy and the weapon it fights with. Both are per-bot state;
    * the brain's whole stimulus ladder is weapon-independent, and everything
    * that differs between an smg bot and a sniper bot is either a BrainParams
-   * number or something the composed FireController owns.
+   * number or something the composed loadout owns.
    */
   private readonly brain: DefaultBrain;
   /**
    * Barrel-tip offset along the aim hinge's local +z. Per weapon, so a
    * sniper's muzzle flash leaves the end of its longer barrel rather than
-   * hanging in the middle of it.
+   * hanging in the middle of it. Mutable because a dry swap changes weapons
+   * mid-life.
+   *
+   * Initialized here rather than in the constructor body because
+   * rebuildAimGroup() is what actually sets it, and a method assignment is
+   * invisible to strictPropertyInitialization. The zero never reaches a
+   * frame: the constructor calls that helper before anything can read it.
    */
-  private readonly muzzleZ: number;
+  private muzzleZ = 0;
   /**
    * Fair-rotation cursor for the per-frame visual acquisition: the index the
    * next scan starts from when the brain's tracked identity is not cheaply
@@ -344,6 +377,9 @@ export class Bot implements BotShape {
   mode: BrainMode = 'hold';
   /** Waypoints the bot is currently walking, nav-graph order; empty when none. */
   private path: THREE.Vector3[] = [];
+  private transportPath: RouteWaypoint[] = [];
+  private elevatorTrip: ElevatorTrip | null = null;
+  private elevatorRequested = false;
   /** How far along `path` the bot has got. */
   private leg = 0;
   /**
@@ -390,7 +426,7 @@ export class Bot implements BotShape {
    */
   private patrolGoal: THREE.Vector3 | null = null;
 
-  constructor(team: Team = 'T', weapon: BotWeaponId = 'smg') {
+  constructor(team: Team = 'T', weapon: BotWeaponId = 'smg', secondary: BotWeaponId | null = 'pistol') {
     // Plain assignments, not parameter properties: the `name` derivation must
     // see the team, and field initializers run before constructor-body
     // parameter-property writes would. The brain is the same case for a
@@ -399,11 +435,10 @@ export class Bot implements BotShape {
     this.team = team;
     this.name = `${team}-${++teamSerials[team]}`;
     this.weapon = weapon;
-    const tuning = BOT_WEAPON_TUNING[weapon];
     this.brain = new DefaultBrain(
-      botBrainParams(tuning, DEFAULT_BRAIN_PARAMS),
+      DEFAULT_BRAIN_PARAMS,
       Math.random,
-      new WeaponFireController(weapon, WEAPONS[weapon], tuning, Math.random),
+      makeBotLoadout(weapon, secondary, id => WEAPONS[id], Math.random),
     );
 
     // Build the ragdoll-ish stack: legs / torso / head as separate meshes so
@@ -435,14 +470,9 @@ export class Bot implements BotShape {
     // reached that list would silently become a torso hit rather than error.
     // Bot LOS rays against `solids` only, so it never blocks sight either.
     this.aim.position.set(0.16, 1.5, 0);
-    const model = BOT_WEAPON_MODELS[weapon];
-    this.muzzleZ = model.muzzle;
-    for (const part of model.parts) {
-      const mesh = new THREE.Mesh(part.geo, part.mat);
-      mesh.position.set(part.pos[0], part.pos[1], part.pos[2]);
-      mesh.castShadow = true;
-      this.aim.add(mesh);
-    }
+    // The silhouette itself goes through the same helper a dry swap uses, so
+    // the barrel layout has ONE definition rather than two that drift.
+    this.rebuildAimGroup();
     this.mesh.add(this.aim);
 
     this.spawnAtRandom();
@@ -461,6 +491,8 @@ export class Bot implements BotShape {
    * reject the good draws and keep the bad ones.
    */
   spawnAtRandom(): void {
+    this.elevatorTrip = null;
+    this.clearRouteCache();
     const zone = BOT_SPAWNS[session.map][this.team];
     const p = findFreeSpawn(
       () => new THREE.Vector3(
@@ -511,6 +543,16 @@ export class Bot implements BotShape {
     // The brain outlived the body: re-arm its spawn stagger and drop the
     // corpse's attention, memory and reactions — a new life inherits nothing.
     this.brain.onRespawn();
+    // arm() put the loadout back on its primary, so the BODY must follow in
+    // this same call rather than at the next frame's resync in update(). A
+    // respawn is a full-life reset, and a bot that stands up carrying the
+    // silhouette — and the killfeed name — of the weapon it died holding is
+    // exactly the stale display this method exists to clear. It also cannot
+    // wait for a frame that may not come: the loop only simulates under
+    // pointer lock, so a respawn scheduled across a pause would otherwise
+    // show the wrong barrel for as long as the menu is up.
+    this.weapon = this.brain.weapon;
+    this.rebuildAimGroup();
     this.perceptionCursor = 0;
     // The present, not zero: six seconds of combat happened while this bot
     // was a corpse and none of it is news.
@@ -534,6 +576,16 @@ export class Bot implements BotShape {
    */
   update(dt: number, player: PlayerState): void {
     if (!this.alive) return;
+    this.mesh.position.y += elevatorCarry({ x: this.mesh.position.x, z: this.mesh.position.z,
+      feetY: this.mesh.position.y, radius: BOT_RADIUS, height: HEAD_HEIGHT, grounded: this.onGround });
+    // Input on the previous frame can have crossed onto the deck. Commit
+    // that actual support before this frame's brain can interrupt the route.
+    if (this.elevatorTrip?.phase === 'board') {
+      const deck = elevators.find(e => e.spec.id === this.elevatorTrip?.id);
+      if (deck && elevatorSupports({ x: this.mesh.position.x, z: this.mesh.position.z,
+        feetY: this.mesh.position.y, radius: BOT_RADIUS, height: HEAD_HEIGHT, grounded: this.onGround },
+      deck.collider, colliders)) this.elevatorTrip.phase = 'ride';
+    }
 
     // Opposing entities as STABLE CANDIDATES — no positional selection here.
     // Perception owns acquisition; the brain only ever learns about the one
@@ -592,6 +644,7 @@ export class Bot implements BotShape {
     // first request after a lull should fire immediately either way.
     this.routeCooldown = Math.max(0, this.routeCooldown - dt);
 
+    this.elevatorRequested = false;
     const intent = this.brain.decide(
       {
         selfFeet: this.mesh.position,
@@ -625,12 +678,43 @@ export class Bot implements BotShape {
     if (intent.mode === 'search' || intent.mode === 'hold') this.clearRouteCache();
     if (intent.mode !== 'patrol') this.clearPatrolGoal();
 
+    // A swap that happened inside decide() is reflected in this frame's
+    // attack, audio and silhouette — resync before the shot is realized.
+    if (this.brain.weapon !== this.weapon) {
+      this.weapon = this.brain.weapon;
+      this.rebuildAimGroup();
+    }
+
+    // Transport is movement execution: the brain can still aim and fire.
+    // An unboarded trip is cancelled when its route is no longer requested.
+    if (this.elevatorTrip && !committedTrip(this.elevatorTrip) && !this.elevatorRequested) this.elevatorTrip = null;
+    let movementStep = intent.step;
+    if (this.elevatorTrip) {
+      const elevator = elevators.find(e => e.spec.id === this.elevatorTrip?.id);
+      if (!elevator) this.elevatorTrip = null;
+      else {
+        const spec = elevator.spec;
+        const result = elevatorTravel(this.elevatorTrip, {
+          feet: this.mesh.position, grounded: this.onGround,
+          supported: elevatorSupports({ x: this.mesh.position.x, z: this.mesh.position.z,
+            feetY: this.mesh.position.y, radius: BOT_RADIUS, height: HEAD_HEIGHT, grounded: this.onGround },
+          elevator.collider, colliders),
+          dock: elevator.dock, lowerLanding: spec.lowerLanding, upperLanding: spec.upperLanding,
+          center: new THREE.Vector3(spec.x, elevator.collider.max.y, spec.z),
+          lowerY: spec.lowerY, upperY: spec.upperY,
+        }, this.speed * dt);
+        this.elevatorTrip = result.trip;
+        movementStep = result.step;
+        if (!result.trip) this.clearRouteCache();
+      }
+    }
+
     // Horizontal gate: the SAME axis-separated slide the player uses, with
     // feet-aware blocking — risers within STEP_HEIGHT don't stop a bot.
     const prevFeet = this.mesh.position.y;
     const preX = this.mesh.position.x, preZ = this.mesh.position.z;
-    const intended = intent.step.length();
-    slideMoveXZ(this.mesh.position, intent.step.x, intent.step.z, BOT_RADIUS, prevFeet, colliders);
+    const intended = movementStep.length();
+    slideMoveXZ(this.mesh.position, movementStep.x, movementStep.z, BOT_RADIUS, prevFeet, colliders);
     // Report rejection for NEXT frame's brain. DefaultBrain consumes the
     // contact's leading edge to reverse once; sustained rejection preserves
     // that committed drift until the bot clears the geometry.
@@ -646,7 +730,7 @@ export class Bot implements BotShape {
     this.vy = vert.velY;
     this.onGround = vert.onGround;
 
-    // Cargo lift. AFTER the resolve, because it keys off the grounded state
+    // Launch pad. AFTER the resolve, because it keys off the grounded state
     // this frame actually produced, and it overwrites that state rather than
     // feeding into it. The launch begins after this frame's resolve; later
     // rising frames still pass through resolveVertical's ceiling sweep.
@@ -778,6 +862,15 @@ export class Bot implements BotShape {
     patrolArrival: boolean,
   ): THREE.Vector3 | undefined | null {
     const here = this.mesh.position;
+    if (this.elevatorTrip) {
+      if (!committedTrip(this.elevatorTrip) && this.routeKey !== key) {
+        this.elevatorTrip = null;
+        this.clearRouteCache();
+      } else {
+        this.elevatorRequested = true;
+        return undefined;
+      }
+    }
     if (this.routeKey !== key) {
       this.routeKey = key;
       this.path = [];
@@ -801,9 +894,10 @@ export class Bot implements BotShape {
       routeBudget--;
       recomputed = true;
       this.routeCooldown = ROUTE_INTERVAL;
-      const found = route(here, goal);
+      const found = transportRoute(here, goal);
       if (found) {
-        this.path = found;
+        this.transportPath = found;
+        this.path = found.map(w => w.point);
         this.leg = 0;
       } else {
         // A failed recompute must not keep walking a stale path.
@@ -820,10 +914,21 @@ export class Bot implements BotShape {
     // Consume waypoints already stood on, planar — the step is planar too.
     while (this.leg < this.path.length - 1) {
       const w = this.path[this.leg]!;
+      if (this.transportPath[this.leg]?.elevatorId) break;
       if (Math.hypot(w.x - here.x, w.z - here.z) >= WAYPOINT_REACHED) break;
       this.leg++;
     }
     const w = this.path[this.leg]!;
+    const elevatorId = this.transportPath[this.leg]?.elevatorId;
+    if (elevatorId) {
+      const elevator = elevators.find(e => e.spec.id === elevatorId);
+      if (elevator) {
+        this.elevatorTrip = { id: elevatorId,
+          destination: Math.abs(w.y - elevator.spec.upperY) < 0.3 ? 'upper' : 'lower', phase: 'approach' };
+        this.elevatorRequested = true;
+        return undefined;
+      }
+    }
     const to = new THREE.Vector3(w.x - here.x, 0, w.z - here.z);
     // A patrol's FINAL node within the one-metre threshold IS the arrival:
     // the leg is over, the goal and route die, and the brain stands down.
@@ -837,6 +942,7 @@ export class Bot implements BotShape {
   /** Drop the cached route: path, leg and goal key. */
   private clearRouteCache(): void {
     this.path = [];
+    this.transportPath = [];
     this.leg = 0;
     this.routeKey = null;
   }
@@ -869,6 +975,7 @@ export class Bot implements BotShape {
    */
   get mag(): number { return this.brain.mag; }
   get magSize(): number { return this.brain.magSize; }
+  get reserve(): number { return this.brain.reserve; }
   get reloading(): boolean { return this.brain.reloading; }
 
   /** World-space eye position used for LOS checks (~head height). */
@@ -903,14 +1010,24 @@ export class Bot implements BotShape {
    * (per-ray hit, per-landed-ray zone) comes from the brain's rng stream.
    */
   private shoot(dist: number, target: Target): void {
+    // Audible either way — a swing that misses is exactly as loud as one that
+    // lands, like every other attack on this path.
+    sfxEnemyAttack(this.mesh.position, this.weapon);
+    if (this.brain.resolution === 'melee') {
+      this.swing(target);
+      return;
+    }
     const muzzle = this.muzzlePos();
-    sfxEnemyShoot(this.mesh.position, this.weapon);
     spawnImpact(muzzle); // cheap muzzle flash, from the barrel tip
     // Emitted BEFORE the hit die, so a miss is exactly as audible as a hit —
     // hearing reports that a trigger was pulled, not that it landed. At the
     // FEET rather than the muzzle, for the reason weapons.ts states: a heard
     // position is a routing goal, and nearestNode's height weighting would
     // send a listener to the deck overhead.
+    //
+    // A blade stays BELOW this emit: it is SILENT to 6b's hearing, so a knife
+    // bot cannot summon investigators by attacking. That mirrors the player's
+    // own melee path, which returns from weapons.ts:shoot before its emit.
     soundEvents.emit({
       kind: 'gunshot',
       sourceId: this.id,
@@ -933,6 +1050,74 @@ export class Bot implements BotShape {
   }
 
   /**
+   * Realize a melee swing the brain ordered.
+   *
+   * Unlike a bot's gunfire, this is not probabilistic: sim/melee.ts tests the
+   * blade's real reach and arc against the target's own zone points, the nearest
+   * part wins, and a strike from behind multiplies by the catalog's backstab
+   * bonus. The brain already chose WHO; this decides whether the swing connects
+   * and where — so a bot that has not finished turning genuinely whiffs.
+   */
+  private swing(target: Target): void {
+    // The bot's ACTUAL aim pose: flush with the same updateMatrixWorld the
+    // muzzle path pays, for the same reason — the frame's yaw and pitch are
+    // written but not composed. The aim group's world +Z is the barrel axis.
+    // The eye→target vector is NOT used: it is always perfectly aligned and
+    // would make the arc test meaningless.
+    this.mesh.updateMatrixWorld(true);
+    const dir = this.aim.getWorldDirection(new THREE.Vector3());
+    const origin = this.eyePos();
+    const def = WEAPONS[this.weapon];
+    // Documented pairing (validateWeapons): range/arcRad exist exactly when melee.
+    const range = def.range ?? 0;
+    const arcRad = def.arcRad ?? 0;
+    // Candidates are the ONE focused target's three zone points, not the
+    // field. For a bot: the world positions of its own part meshes. For the
+    // player, who has no part meshes: synthesized from the target's own feet
+    // and eye at fractions of the eye height.
+    const candidates: MeleeCandidate<Target>[] = [];
+    if (target.kind === 'bot') {
+      const b = target.bot;
+      candidates.push(
+        { payload: target, zone: 'head', at: b.head.getWorldPosition(new THREE.Vector3()) },
+        { payload: target, zone: 'torso', at: b.torso.getWorldPosition(new THREE.Vector3()) },
+        { payload: target, zone: 'legs', at: b.legs.getWorldPosition(new THREE.Vector3()) },
+      );
+    } else {
+      const eyeH = target.eye.y - target.feet.y;
+      for (const zone of ['head', 'torso', 'legs'] as const) {
+        candidates.push({
+          payload: target,
+          zone,
+          at: new THREE.Vector3(
+            target.feet.x, target.feet.y + eyeH * PLAYER_ZONE_FRACTION[zone], target.feet.z),
+        });
+      }
+    }
+    const hit = meleeSwing(origin, dir, range, arcRad, candidates);
+    if (!hit) return;
+    // Backstab is classified only AFTER the range/arc winner is chosen — it
+    // scales that hit, it never steers selection (the same ordering
+    // weapons.ts:swingMelee documents).
+    //
+    // The two victims report their facing differently and neither may be
+    // open-coded: a bot's is its group's local +Z (Bot.update maintains that
+    // invariant), and the player's is the camera's −Z view direction, which is
+    // the convention every shot is built from in sim/ballistics.ts:directed.
+    // Rebuilding the player's from aim.yaw by hand is how the sign gets
+    // inverted and backstabs land on the wrong side.
+    const victimPos = target.kind === 'bot' ? target.bot.mesh.position : target.feet;
+    const victimForward = target.kind === 'bot'
+      ? target.bot.mesh.getWorldDirection(new THREE.Vector3())
+      : camera.getWorldDirection(new THREE.Vector3());
+    let dmg = damageForPart(def, hit.part);
+    if (isBackstab(origin, victimPos, victimForward)) dmg *= def.backstabMult ?? 1;
+    // ONE damage call per swing, routed exactly as the ranged path does.
+    if (target.kind === 'player') damagePlayer(dmg, this.name);
+    else damageBot(target.bot, dmg, hit.part, this.name);
+  }
+
+  /**
    * Death: hide, attribute the kill, then self-respawn after 6 s of GAME
    * time — a paused match doesn't respawn bots behind the menu.
    * @param killerPart zone that landed the kill
@@ -941,6 +1126,7 @@ export class Bot implements BotShape {
    */
   die(killerPart: HitZone, killerName?: string): void {
     this.alive = false;
+    this.elevatorTrip = null;
     this.mesh.visible = false;
     this.deaths++;
     // Team scores: scoreKills is the CT score (player kills and CT allies
@@ -976,20 +1162,46 @@ export class Bot implements BotShape {
       debugLog(`${this.name} respawned t=${gameTime.now().toFixed(1)}s`);
     });
   }
+
+  /**
+   * Rebuild the aim group's silhouette for the current weapon. Removing and
+   * re-adding the shared meshes — never disposing their geometry or
+   * materials, which are module-level and shared by every bot carrying that
+   * weapon, so disposing them would blank the barrels of the whole field —
+   * and re-reading the muzzle offset.
+   */
+  private rebuildAimGroup(): void {
+    this.aim.clear();
+    const model = BOT_WEAPON_MODELS[this.weapon];
+    this.muzzleZ = model.muzzle;
+    for (const part of model.parts) {
+      const mesh = new THREE.Mesh(part.geo, part.mat);
+      mesh.position.set(part.pos[0], part.pos[1], part.pos[2]);
+      mesh.castShadow = true;
+      this.aim.add(mesh);
+    }
+  }
 }
 
 /**
  * Create a starting wave of one team. Called from main.ts with the
- * menu-configured counts (the parser clamps Ts to >= 1, CTs to >= 0) and that
- * team's weapon setting.
+ * menu-configured counts (the parser clamps Ts to >= 1, CTs to >= 0) and
+ * that team's weapon settings.
  *
- * `choice` is resolved PER BOT, so 'mixed' gives a varied wave while a named
- * weapon arms every bot on the side identically — which is what lets a smoke
- * phase or a playtest hold the weapon still and vary something else.
+ * Both choices are resolved PER BOT, so 'mixed' gives a varied wave in
+ * either position while a named weapon arms every bot on the side
+ * identically — which is what lets a smoke phase or a playtest hold the
+ * weapon still and vary something else. The primary draws over
+ * BOT_WEAPON_IDS (blade included); the secondary draws over the firearms
+ * and 'none' yields null.
  */
-export function spawnBots(count: number, team: Team, choice: BotWeaponChoice = 'smg'): void {
+export function spawnBots(count: number, team: Team, choice: BotWeaponChoice = 'smg', secondaryChoice: BotSecondaryChoice = 'pistol'): void {
   for (let i = 0; i < count; i++) {
-    bots.push(new Bot(team, resolveBotWeapon(choice, Math.random)));
+    bots.push(new Bot(
+      team,
+      resolveBotWeapon(choice, Math.random),
+      resolveBotSecondary(secondaryChoice, Math.random),
+    ));
   }
 }
 

@@ -475,7 +475,7 @@ export function shoot(): void {
       // object-space and level geometry is rotated (ground plane, etc.)
       if (hit.face) {
         const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-        spawnBulletHole(hit.point, worldNormal);
+        spawnBulletHole(hit.point, worldNormal, hit.object);
       }
     }
   };

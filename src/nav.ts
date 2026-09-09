@@ -11,9 +11,9 @@
 // import: nothing in sim/ has one, and a navmesh is not a good enough reason
 // to be the first.
 import * as THREE from 'three';
-import { colliders, navLinks } from './world';
+import { colliders, navLinks, elevators } from './world';
 import { collidesAt, STEP_HEIGHT } from './collision';
-import { buildNavGrid, findPath, type NavGrid, type NavProbe } from './sim/navGrid';
+import { buildNavGrid, findPath, findTransportPath, type RouteWaypoint, type NavGrid, type NavProbe } from './sim/navGrid';
 
 /**
  * Footprint half-width every walkable test is built against (m).
@@ -109,8 +109,9 @@ function boundsOf(boxes: readonly THREE.Box3[]): Bounds {
  * exactly once per session.
  */
 export function buildNav(): NavGrid {
-  const bounds = boundsOf(colliders);
-  const index = indexColliders(colliders, bounds);
+  const staticBoxes = colliders.filter(c => !elevators.some(e => e.collider === c));
+  const bounds = boundsOf(staticBoxes);
+  const index = indexColliders(staticBoxes, bounds);
   const probe: NavProbe = {
     canStand: (x, z, feetY) =>
       !collidesAt(new THREE.Vector3(x, 0, z), NAV_RADIUS, feetY, near(index, x, z)),
@@ -151,3 +152,8 @@ export function route(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] |
   return grid ? findPath(grid, from, to) : null;
 }
 
+
+/** Route with explicit transport legs; the position-only API remains intact. */
+export function transportRoute(from: THREE.Vector3, to: THREE.Vector3): RouteWaypoint[] | null {
+  return grid ? findTransportPath(grid, from, to) : null;
+}

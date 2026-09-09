@@ -20,8 +20,8 @@
 import * as THREE from 'three';
 import { camera } from './core/engine';
 import { player, input, aim, wpn, motion, keyHeld, effectiveCrouching, gameTime, soundEvents, playerFeet } from './core/state';
-import { slideMoveXZ, resolveVertical } from './collision';
-import { colliders, liftPads } from './world';
+import { slideMoveXZ, resolveVertical, HEAD_HEIGHT } from './collision';
+import { colliders, liftPads, elevatorCarry } from './world';
 import { sfxFootstep } from './audio';
 import {
   gunGroup,
@@ -78,6 +78,10 @@ const GROUND_BLEND_RATE = 12;
  */
 export function updateMovement(dt: number): void {
   if (!player.alive) return;
+  const carry = elevatorCarry({ x: player.pos.x, z: player.pos.z, feetY: player.pos.y - player.eyeHeight,
+    radius: player.radius, height: HEAD_HEIGHT, grounded: player.onGround });
+  player.pos.y += carry;
+  motion.groundSmoothY += carry;
 
   // Speed tiers: crouch < aim < normal < run. Crouch and aim take precedence
   // over sprint (no sprint-scoping). Crouch requires ground contact so you
@@ -128,7 +132,7 @@ export function updateMovement(dt: number): void {
   player.vel.y = vert.velY;
   player.onGround = vert.onGround;
 
-  // Cargo lift. AFTER the resolve, because it keys off the grounded state
+  // Launch pad. AFTER the resolve, because it keys off the grounded state
   // this frame actually produced, and it overwrites that state rather than
   // feeding into it. The launch begins after this frame's resolve; later
   // rising frames still pass through resolveVertical's ceiling sweep.
@@ -183,7 +187,7 @@ export function updateMovement(dt: number): void {
       // player's ears (sfxFootstep above is unchanged) but must not hand bots
       // a position they could not otherwise have. Crouched and airborne
       // movement never reaches here at all, which covers jumps and
-      // warehouse2's lift launches with no special case.
+      // launch-pad impulses with no special case.
       if (movedXZ > MIN_AUDIBLE_STEP) {
         soundEvents.emit({
           kind: 'footstep',

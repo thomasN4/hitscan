@@ -9,7 +9,7 @@
 // missing id is a named startup error via hud.ts:requireEl.
 //
 // Commit model: match settings ride ONE query string
-// (?map=&tbots=&ctbots=&time=&tweap=&ctweap=).
+// (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=).
 // Play compares the form against the applied session config — equal means the
 // page already matches, so it opens the loadout picker; different means
 // navigate-and-reload (map switching is a full reload, and pointer lock needs
@@ -26,6 +26,7 @@ import {
   TIME_LIMITS_S,
   asMapName,
   clampTo,
+  asBotSecondary,
   asBotWeapon,
   configsEqual,
   configToQuery,
@@ -69,6 +70,7 @@ let startMenu: HTMLElement, pauseMenu: HTMLElement, loadoutScreen: HTMLElement, 
   endTitle: HTMLElement, endScoreCT: HTMLElement, endScoreT: HTMLElement, scoreboardBody: HTMLElement;
 let deployBtn: HTMLButtonElement;
 let mapSel: HTMLSelectElement, weaponTSel: HTMLSelectElement, weaponCtSel: HTMLSelectElement,
+  secondaryTSel: HTMLSelectElement, secondaryCtSel: HTMLSelectElement,
   botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
   timeMinIn: HTMLInputElement;
 
@@ -239,10 +241,14 @@ export function initMenus(handlers: MenuHandlers): void {
   timeMinIn = requireEl('cfgTimeMin') as HTMLInputElement;
   weaponTSel = requireEl('cfgWeaponT') as HTMLSelectElement;
   weaponCtSel = requireEl('cfgWeaponCt') as HTMLSelectElement;
+  secondaryTSel = requireEl('cfgSecondaryT') as HTMLSelectElement;
+  secondaryCtSel = requireEl('cfgSecondaryCt') as HTMLSelectElement;
 
   mapSel.value = session.map;
   weaponTSel.value = session.botWeaponT;
   weaponCtSel.value = session.botWeaponCt;
+  secondaryTSel.value = session.botSecondaryT;
+  secondaryCtSel.value = session.botSecondaryCt;
   botsTIn.value = String(session.botsT);
   botsCtIn.value = String(session.botsCt);
   timeMinIn.value = secondsToMinutesLabel(session.roundSeconds);
@@ -297,6 +303,8 @@ function applyMapUi(): void {
   // No bots on the range, so nothing to arm.
   weaponTSel.disabled = isRange;
   weaponCtSel.disabled = isRange;
+  secondaryTSel.disabled = isRange;
+  secondaryCtSel.disabled = isRange;
 }
 
 /** Field-by-field view of what the page was loaded with. */
@@ -305,6 +313,7 @@ function appliedConfig(): SessionConfig {
     map: session.map, botsT: session.botsT, botsCt: session.botsCt,
     roundSeconds: session.roundSeconds,
     botWeaponT: session.botWeaponT, botWeaponCt: session.botWeaponCt,
+    botSecondaryT: session.botSecondaryT, botSecondaryCt: session.botSecondaryCt,
   };
 }
 
@@ -324,6 +333,8 @@ function candidateConfig(): SessionConfig {
     // parser drift apart the next time the weapon catalog widens.
     botWeaponT: asBotWeapon(weaponTSel.value, session.botWeaponT),
     botWeaponCt: asBotWeapon(weaponCtSel.value, session.botWeaponCt),
+    botSecondaryT: asBotSecondary(secondaryTSel.value, session.botSecondaryT),
+    botSecondaryCt: asBotSecondary(secondaryCtSel.value, session.botSecondaryCt),
   };
 }
 

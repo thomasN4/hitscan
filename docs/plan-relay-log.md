@@ -35,6 +35,7 @@ Rules:
 | v2 | 2026-08-30 | Count a newly written file's lines. Only `edit` carries a `filediff`; a `write` reports content and `exists: false`, so v1 recorded every created file as +0/-0. A write over an existing file stays unattributed, since its deletions are not in the stream. |
 | v3 | 2026-08-30 | Emit runner timestamps in UTC even under a non-UTC `TZ`, and count a newly written file containing one blank line as one addition. Clarify that every run attempts a summary, while summary failure preserves the executor status and retained event stream. |
 | v4 | 2026-09-04 | Switch the pinned executor to Muse Spark 1.3 Contributor at `xhigh` reasoning and stamp that model/variant into every run summary. |
+| v5 | 2026-09-04 | Accept OpenCode 1.18.28. The pin is an exact match on purpose — a relay run has to be attributable to one client build — but the client auto-updates itself, so the pinned build stopped being the installed one between two waves on the same day. Moving the number is the maintenance that design implies; widening it to a range would trade the attribution for never doing this again. Note that the version is written in THREE places that nothing checks against each other: the gate in `plan-relay.sh`, the stamp in `planRelaySummary.mjs`, and the fake binary in `planRelay.test.mjs`. Bumping only the first two shipped one run (`04f5bf3c3ebe.WZoGb4`) whose `summary.json` claims 1.18.25 for an executor the gate had just verified as 1.18.28 — read that run's version from this row, not from its file. |
 
 ## Waves
 
@@ -140,3 +141,97 @@ plan's separate-command instruction; it did not obscure a failure, but the
 repetition shows that prose alone is not reliably enforcing this convention.
 The relay was still worth using: it produced a minimal correction for both
 review findings and passed its liveness gate in under two minutes.
+
+### 2026-09-04 — wave `04f5bf3c3ebe.WZoGb4` — 1 executor
+
+Relay v5, plan schema v1. Baseline `04f5bf3c3ebe`. A wave of one for tranche 7b
+part A (a bot may hold the knife); wall clock 25m 09s against 25m 04s of
+executor event time.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/bot-loadouts` | `04f5bf3c3ebe.WZoGb4` | 1 | 25m 04s | $0.1198 | 12 (+576/-147) | pass |
+
+Verdict: merged as `f3e2622`. Muse Spark 1.3 Contributor at `xhigh` implemented
+the whole of part A inside its twelve owned files and touched nothing else, in
+124 steps, 141 tool calls and 69 edits, reporting 18,139,722 total tokens
+including 17,365,451 cache reads. It passed 692 tests, lint, typecheck and
+build, and the planner reran all four independently. Note the run's own
+`summary.json` records `opencode: 1.18.25` — that field was a third, unbumped
+copy of the version pin and is wrong; the executor ran under 1.18.28, as the v5
+row above now explains.
+
+Splitting the tranche at the type boundary was the decision that made this run
+tractable. Widening `BotWeaponId` breaks every `Record` over it at once, so part
+A had to land the blade whole; the loadout and the dry swap are a second plan
+against this commit as their baseline, and neither half ever left the tree
+uncompilable.
+
+Three planner corrections afterwards, none behavioural: the melee controller
+silenced its unused parameters with `void x;` where omitting them is what the
+repository's own stub does (and the test helper's return type then had to be
+the interface rather than the class, which is the surface those tests should
+hold anyway); `makeFireController` shipped undocumented; and the backstab
+branch was written twice, once per victim kind, where one pair of ternaries
+says the same thing and puts the two facing conventions side by side. The
+planner also wrote the `[botKnife]` browser phase, which the plan had reserved
+rather than delegated — the executor cannot run a browser, so a phase it wrote
+blind would be the planner's to debug anyway.
+
+One denied call, and the same one as the last three waves: a reconnaissance
+`rg … | head -n 120`. The allowlist takes one command per call, and the plan
+said so in its Test Plan in bold. Prose is now demonstrably not fixing this;
+the next relay change worth making is an allowlist entry for a bounded `rg`
+rather than another sentence.
+
+The relay was worth using: 25 minutes and twelve cents for a twelve-file
+type-widening that compiled, passed its own new pins, and needed only comment-
+level correction.
+
+### 2026-09-04 — wave `d78f09828e52.2lSRdF` — 1 executor
+
+Relay v5, plan schema v1. Baseline `d78f09828e52`. A wave of one for tranche 7b
+part B (the loadout and the dry swap); wall clock 45m 01s — the watchdog
+ceiling — against 42m 35s of executor event time.
+
+| # | Branch | Run | Turns | Duration | Cost | Files | Outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | `feat/bot-loadouts` | `d78f09828e52.2lSRdF` | 1 | 42m 35s | $0.7140 | 10 (+428/-71) | fail — watchdog timeout at 2700 s |
+
+Verdict: **killed, and kept.** `OPENCODE_TIMEOUT` fired at 45 minutes with exit
+124 and a skipped liveness gate, after 82 steps, 95 tool calls, 51 edits and 0
+denied calls, reporting 13,229,548 total tokens for $0.71 — six times part A's
+cost for a comparable diff. The planner finished the work by hand rather than
+re-running: the expensive half was already on disk, and a second run would have
+spent another 45 minutes re-deriving it.
+
+What the kill left behind is the useful record here. Ten of the plan's twelve
+files were complete and correct — `BotLoadout`, the one-draw `arm()`, the dry
+swap, the brain's params resync, the silhouette rebuild, `tsec`/`ctsec` through
+the parser, menu, facade and smoke config phase. What was missing or damaged:
+
+- **`src/bots.ts` was left syntactically invalid.** The class's closing brace
+  landed above `rebuildAimGroup()`, orphaning the method and re-indenting
+  `spawnBots` as though it were a member. An edit interrupted between its two
+  halves is the failure mode a watchdog produces, and it is not visible in the
+  file list — only `npm run typecheck` names it.
+- **A JSDoc line and a header comment were truncated mid-sentence**, one of them
+  ending on an unclosed parenthesis.
+- **Neither test file was reached.** `botWeapons.test.ts` and
+  `sessionConfig.test.ts` got zero edits, so the tranche's new pins — the
+  one-draw contract, the swap conditions, `makeBotLoadout`'s cases, the
+  `tsec`/`ctsec` matrix — did not exist, while three EXISTING sessionConfig
+  tests failed against the widened config. A run that dies before its tests is
+  strictly worse than one that dies before its implementation: the code looks
+  finished and nothing pins it.
+
+The planner wrote all of that (25 new pins, 717 tests total), repaired the four
+damaged sites, and reverted one unrelated comment rewrite the executor had made
+outside the plan.
+
+Two lessons for the next wave. **The timeout is the plan's problem, not the
+runner's**: part A took 25 minutes for twelve files, so a twelve-file part B at
+the same rate had no headroom, and the plan should either have been split again
+or launched with a raised `OPENCODE_TIMEOUT`. **Order the Implementation section
+so tests come before the last of the wiring** — the plan listed them last, which
+is exactly the order that loses them to a kill.

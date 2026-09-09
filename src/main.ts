@@ -13,13 +13,15 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
                LoadoutState,
-               MapName, WeaponSlot, WeaponId, BotWeaponChoice, LiveWeapon, PlayerState } from './core/state';
+               MapName, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
 import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
-import { colliders } from './world';
+import { colliders, elevators, updateElevators } from './world';
+import { HEAD_HEIGHT } from './collision';
+import { NAV_RADIUS } from './nav';
 import { BUILDERS } from './maps';
-import { buildNav, route, navGrid } from './nav';
+import { buildNav, route, transportRoute, navGrid } from './nav';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
 import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
@@ -40,7 +42,7 @@ import { initLigneClaire } from './core/ligneClaire';
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
 // core/state.ts stays free of browser globals, so the committed match-config
-// query (?map=&tbots=&ctbots=&time=&tweap=&ctweap=) is parsed here and written
+// query (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) is parsed here and written
 // into the shared state before anything reads session — initMenus initializes
 // the form from it.
 type DebugGame = SessionState & InputState & AimState & Omit<WeaponDynamics, 'reloadSfxHandle' | 'animation'> & MotionState & ScoreState & LoadoutState;
@@ -83,8 +85,8 @@ async function start(): Promise<void> {
   // this runs once per session.
   buildNav();
   if (!RANGE) {
-    spawnBots(session.botsT, 'T', session.botWeaponT);
-    if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt);
+    spawnBots(session.botsT, 'T', session.botWeaponT, session.botSecondaryT);
+    if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt, session.botSecondaryCt);
   }
   respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
   const illustration = ligneClaire ? initLigneClaire(scene, renderer) : null;
@@ -243,6 +245,12 @@ async function start(): Promise<void> {
       // already clamped, so a tab-switch spike can't fast-forward the
       // scheduler.
       gameTime.advance(dt);
+      updateElevators(dt, [
+        ...(player.alive ? [{ x: player.pos.x, z: player.pos.z, feetY: player.pos.y - player.eyeHeight,
+          radius: player.radius, height: HEAD_HEIGHT, grounded: player.onGround }] : []),
+        ...bots.filter(b => b.alive).map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z,
+          feetY: b.mesh.position.y, radius: NAV_RADIUS, height: HEAD_HEIGHT, grounded: b.onGround })),
+      ]);
 
       // Stage order is load-bearing, which is why it lives here rather than
       // nested inside updateMovement. It is pinned from both sides:
@@ -309,6 +317,8 @@ async function start(): Promise<void> {
     get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
     get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
     get botWeaponCt() { return session.botWeaponCt; }, set botWeaponCt(v: BotWeaponChoice) { session.botWeaponCt = v; },
+    get botSecondaryT() { return session.botSecondaryT; }, set botSecondaryT(v: BotSecondaryChoice) { session.botSecondaryT = v; },
+    get botSecondaryCt() { return session.botSecondaryCt; }, set botSecondaryCt(v: BotSecondaryChoice) { session.botSecondaryCt = v; },
     get locked() { return session.locked; }, set locked(v: boolean) { session.locked = v; },
     get started() { return session.started; }, set started(v: boolean) { session.started = v; },
     get debugView() { return session.debugView; }, set debugView(v: boolean) { session.debugView = v; },
@@ -344,7 +354,7 @@ async function start(): Promise<void> {
     get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
   };
 
-  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, gameTime, nav: { route, grid: navGrid } };
+  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, nav: { route, transportRoute, grid: navGrid } };
 }
 
 void start().catch((error: unknown) => {
@@ -361,6 +371,7 @@ declare global {
       bots: typeof bots;
       bulletHoles: typeof bulletHoles;
       colliders: typeof colliders;
+      elevators: typeof elevators;
       /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */
       gameTime: typeof gameTime;
       /**
@@ -368,7 +379,7 @@ declare global {
        * correctness can be checked without watching a bot move, so the smoke
        * test asks it directly whether the deck is reachable from the floor.
        */
-      nav: { route: typeof route; grid: typeof navGrid };
+      nav: { route: typeof route; transportRoute: typeof transportRoute; grid: typeof navGrid };
     };
   }
 }

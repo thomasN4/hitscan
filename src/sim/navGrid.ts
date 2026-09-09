@@ -41,6 +41,8 @@ export interface NavLinkSpec {
   halfWidth: number;
   /** Upward only. Omitted means both ways, which is what a flight of stairs is. */
   oneWay?: boolean;
+  elevatorId?: string;
+  extraCost?: number;
 }
 
 /** Rectangular XZ extent the graph covers. */
@@ -81,6 +83,8 @@ export interface NavGrid {
   readonly edgeTo: Int32Array;
   /** Traversal cost per entry, parallel to edgeTo. */
   readonly edgeCost: Float32Array;
+  /** Directed node-pair keys for transport edges, retained through A*. */
+  readonly elevatorEdges?: ReadonlyMap<string, string>;
 }
 
 /** Read node `i` back out as a point. For tests, DEV overlays and callers. */
@@ -187,17 +191,19 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     }
   }
 
+  const elevatorEdges = new Map<string, string>();
   for (const spec of opts.links ?? []) {
     const a = nearestOf(nodes, spec.bottom);
     const b = nearestOf(nodes, spec.top);
     if (a < 0 || b < 0 || a === b) continue;
     // One DIRECTED edge, charged its true 3D length (see edgeLength).
     const edge = (i: number, j: number): void => {
-      const cost = edgeLength(nodes[i]!, nodes[j]!);
+      const cost = edgeLength(nodes[i]!, nodes[j]!) + (spec.extraCost ?? 0);
+      if (spec.elevatorId) elevatorEdges.set(`${i}:${j}`, spec.elevatorId);
       edges[i]!.push(j); costs[i]!.push(cost);
     };
     // Stairs are as walkable down as up, so a flight joins BOTH ways — but a
-    // one-way link must not: a cargo lift throws a body upward and offers
+    // one-way launch link must not: a pad throws a body upward and offers
     // nothing on the way back, and an edge claiming otherwise routes bots off
     // the deck and onto the pad, which launches them again.
     const join = (i: number, j: number): void => {
@@ -206,6 +212,8 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
       edge(j, i);
     };
     join(a, b);
+    // Elevators have no permanent intermediate walking surfaces.
+    if (spec.elevatorId) continue;
 
     // …and every node ON the flight joins both ends, because a staircase is
     // traversable from anywhere along it, not only from its mouth.
@@ -238,7 +246,7 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     }
   }
 
-  return compact(cell, nodes, edges, costs);
+  return { ...compact(cell, nodes, edges, costs), elevatorEdges };
 }
 
 /** Pack the build-time arrays-of-arrays into the flat CSR form. */
@@ -365,15 +373,25 @@ function nearestOf(nodes: readonly NavNode[], to: THREE.Vector3): number {
  * still gets a path; the returned list starts at the first node and ends at
  * the one nearest `to`, and does NOT include the caller's own position.
  */
+export interface RouteWaypoint {
+  point: THREE.Vector3;
+  /** Travel from the preceding point to this point using this elevator. */
+  elevatorId?: string;
+}
+
 export function findPath(grid: NavGrid, from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] | null {
+  return findTransportPath(grid, from, to)?.map(w => w.point) ?? null;
+}
+
+export function findTransportPath(grid: NavGrid, from: THREE.Vector3, to: THREE.Vector3): RouteWaypoint[] | null {
   const start = nearestNode(grid, from);
   const goal = nearestNode(grid, to);
   if (start < 0 || goal < 0) return null;
-  if (start === goal) return [nodeVec(grid, goal)];
+  if (start === goal) return [{ point: nodeVec(grid, goal) }];
 
   const tx = grid.xs[goal]!, ty = grid.ys[goal]!, tz = grid.zs[goal]!;
-  // Straight-line 3D distance, which is admissible because every edge costs
-  // its own 3D length (see edgeLength). Keep the two in step: an edge cheaper
+  // Straight-line 3D distance stays admissible: edges cost at least their
+  // 3D length; elevator waits add nonnegative cost. Keep the two in step: an edge cheaper
   // than the distance it covers, or a heuristic charging for something edges
   // do not, silently turns A* into "finds a path" instead of "finds the
   // shortest path", with nothing anywhere reporting it.
@@ -414,9 +432,10 @@ export function findPath(grid: NavGrid, from: THREE.Vector3, to: THREE.Vector3):
 
   if (cameFrom[goal] === -1 && start !== goal) return null;
 
-  const path: THREE.Vector3[] = [];
+  const path: RouteWaypoint[] = [];
   for (let at = goal; at !== -1; at = cameFrom[at]!) {
-    path.push(nodeVec(grid, at));
+    const elevatorId = grid.elevatorEdges?.get(`${cameFrom[at]!}:${at}`);
+    path.push({ point: nodeVec(grid, at), ...(elevatorId ? { elevatorId } : {}) });
     if (at === start) break;
   }
   path.reverse();

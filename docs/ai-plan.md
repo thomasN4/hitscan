@@ -1401,6 +1401,17 @@ walk.
   counts all T-side kills, not just player deaths — review finding, fixed
   in-tranche); renaming the field pair to team-named counters is HUD/state
   churn beyond this tranche.
+- **Segmenting flight link edges** (warehouse2 patrol stair livelock, follow-up
+  1a): a `NavLink` flight enters the graph as one mouth-to-landing edge
+  (`sim/navGrid.ts`, `src/world.ts:NavLink`), so a path can hold an 11 m hop
+  the follower must walk in one leg. The livelock itself is fixed at the
+  follower — abandonment now requires both the current and previous waypoint
+  beyond `ROUTE_ABANDON` (`sim/routeFollow.ts`, wired through
+  `bots.ts:waypointOnRoute`) — but the graph still emits hops no single step
+  can close. Splitting flight edges so no hop exceeds the abandon distance
+  would fix that at the source; deferred as graph/cost-model surgery (direct
+  edge vs. intermediates, admissibility, elevator-edge carve-out) beyond the
+  follower fix.
 
 ## Review lessons (AI tranche)
 

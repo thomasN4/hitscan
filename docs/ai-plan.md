@@ -1010,8 +1010,12 @@ real table through a parameter, but separately runtime-imports the shared
   and all three of those routes CAN hand a bot a blade — `?tweap=knife`, the
   menu's Knife option, and the `mixed` draw. The claim was true when written
   and the boundary did its job: widening the alias is what made every Record
-  over it demand an answer for a knife. The old exclusion survives as
-  `BotFirearmId`, which is what the secondary position is drawn from.)*
+   over it demand an answer for a knife. The old exclusion survives as
+   `BotFirearmId`, which is what the secondary position is drawn from.)*
+   *(Annotation, PR #98: `BotFirearmId` is deleted by this change. The
+   positions are now disjoint by type — `BotPrimaryId` (smg/sniper/shotgun)
+   vs `BotSidearmId` (pistol/revolver) in `src/core/state.ts:48/55`, drawn
+   via `BOT_PRIMARY_IDS`/`BOT_SIDEARM_IDS` in `src/sim/botWeapons.ts:210/724`.)*
 - One damage call per trigger pull, however many rays land, with the zone the
   best any ray struck. `damagePlayer` flashes the vignette and plays `sfxHurt`
   per CALL, so eight pellets routed separately would be eight grunts in a
@@ -1199,7 +1203,12 @@ unedited. That file's only change is one added stub member.
 **Selection and presentation.** `?tweap=knife` is a legal setting and the blade
 is in the `mixed` pool — roughly one bot in six of a mixed wave carries one,
 which inverts the `[botWeapons]` phase's old "mixed never draws a knife"
-assertion into its opposite. `ENEMY_ATTACK_TONE` gains a `voice` discriminator
+assertion into its opposite. *(Annotation, PR #98: reversed by the
+primary/secondary split — `?tweap=knife` now falls back via
+`IS_BOT_WEAPON` in `src/core/sessionConfig.ts:137` (mixed/smg/sniper/shotgun
+only) and `mixed` draws primaries only via `BOT_PRIMARY_IDS` in
+`src/sim/botWeapons.ts:210`. Stale bookmarks fall back rather than arming a
+blade.)* `ENEMY_ATTACK_TONE` gains a `voice` discriminator
 beside the five reports rather than routing a blade through `playGunshot`, and
 the DEV readout's ammo cell shows the reserve and a dash for a weapon that holds
 no rounds.
@@ -1208,6 +1217,11 @@ no rounds.
 
 **A `BotLoadout` is an ordered list of POSITIONS** — `[primary, secondary?,
 knife]` — delegating the whole `FireController` surface to whichever is active.
+*(Annotation, PR #98: the secondary is now mandatory — `[primary, secondary,
+knife]` built unconditionally by `makeBotLoadout(primary: BotPrimaryId,
+secondary: BotSidearmId, …)` in `src/sim/botWeapons.ts:750`. The
+`BotWeaponId | null` secondary and the `null`/`'knife'`-dropping branches are
+deleted; positions are disjoint by type so there is no dedupe.)*
 Both controllers grew a `FirePosition` surface for it: `tuning`, `dry`, and the
 draw-free `load()` / `waitFor()`.
 
@@ -1247,8 +1261,13 @@ is. Both sides default to `pistol`, so the dry swap exists in a default match
 rather than only when someone goes looking for it. `'knife'` is deliberately
 NOT a legal secondary: the blade is already every loadout's last position, so
 accepting it would name a duplicate `makeBotLoadout` then drops, and a silently
-ignored setting is worse than one that falls back. A knife PRIMARY, by contrast,
-means a blade-only bot — the playtest lever for the melee path.
+ ignored setting is worse than one that falls back. A knife PRIMARY, by contrast,
+ means a blade-only bot — the playtest lever for the melee path.
+ *(Annotation, PR #98: reversed when the menu split into primary/secondary —
+ a knife primary is no longer accepted (`primary: BotPrimaryId` in
+ `src/sim/botWeapons.ts:750`, rejected by `IS_BOT_WEAPON`), the blade-only
+ test was deleted from `src/sim/botWeapons.test.ts`, and the blade survives
+ only as every loadout's fallback terminator.)*
 
 #### Coverage
 
@@ -1257,12 +1276,16 @@ draw discipline and empty magazine, `makeFireController`'s dispatch, the
 loadout's one-draw `arm()`, the stagger reaching every position, the swap firing
 on a spent reserve and NOT on an empty magazine, `SWAP_DELAY` costing no draw,
 every delegated member reporting the new position, the ladder terminating on the
-blade, and `makeBotLoadout`'s knife-primary / null-secondary / dropped-knife /
-doubled-weapon cases. `botBrains.test.ts` pins that the bands follow a swap and
-that nothing is re-derived while the weapon holds still — and, more importantly,
-that **every pre-existing scripted sequence passes unedited**, which is the
-evidence that awareness and cadence did not move. `sessionConfig.test.ts` pins
-the `tsec`/`ctsec` matrix including the knife's refusal.
+ blade, and `makeBotLoadout`'s knife-primary / null-secondary / dropped-knife /
+ doubled-weapon cases. `botBrains.test.ts` pins that the bands follow a swap and
+ that nothing is re-derived while the weapon holds still — and, more importantly,
+ that **every pre-existing scripted sequence passes unedited**, which is the
+ evidence that awareness and cadence did not move. `sessionConfig.test.ts` pins
+ the `tsec`/`ctsec` matrix including the knife's refusal.
+ *(Annotation, PR #98: the `makeBotLoadout` knife-primary / null-secondary /
+ dropped-knife block is deleted by the primary/secondary split — positions are
+ disjoint by type so there is nothing to drop or dedupe. Melee stays covered by
+ `sim/melee.test.ts` and the ladder tests.)*
 
 Browser: the `[botWeapons]` phase's "mixed never draws a knife" assertion
 inverted, the `[config]` phase carries `tsec`/`ctsec` end to end, and a new
@@ -1271,6 +1294,10 @@ pinned at 60 m it sees the player, grades out of range and touches nothing;
 released, it closes to ~1.1 m and deals 55 and 165 while holding no rounds at
 all. Damage is asserted as membership in the knife's zone set, which no firearm
 can produce in full.
+*(Annotation, PR #98: `[botKnife]` (`runBotKnifeCheck`) is deleted with the
+knife primary — there is no blade-only bot to pin a lane to. The mixed wave
+now draws primaries only; the dry swap end to end is proved by the revolver
+leg draining a shotgun primary.)*
 
 **The dry swap has no browser phase**, deliberately: draining 30 + 90 rounds
 takes minutes of real time, so it is pinned at the unit layer where it can be
@@ -1288,6 +1315,11 @@ driven directly.
   may occupy either position. `setLoadout`'s primary/secondary validation is the
   player's rule, and extending it to bots would buy nothing but a second place to
   keep the catalog's classes in sync.
+  *(Annotation, PR #98: reversed — the positions are now disjoint by type
+  (`BotPrimaryId` smg/sniper/shotgun vs `BotSidearmId` pistol/revolver),
+  enforced by `IS_BOT_WEAPON`/`IS_BOT_SECONDARY` and `makeBotLoadout`'s
+  signature. This is exactly the class restriction the note says does not
+  exist.)*
 
 ### Tranche 6b follow-up — nearest gunshot, and who may be interrupted
 

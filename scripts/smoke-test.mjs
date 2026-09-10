@@ -473,7 +473,13 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const cs = window.__cs;
         const wait = ms => new Promise(r => setTimeout(r, ms));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
-        await wait(150);
+        // Issue #15: the swap opens a 0.4 s GAME-TIME deploy window that
+        // refuses scope entry. Headless frames run slower than wall clock
+        // (dt clamp), so wait it out on the game clock rather than a fixed
+        // real-time sleep — 150 ms tested the old instant swap and now
+        // correctly scopes nothing.
+        const swapT = cs.gameTime.now();
+        while (cs.gameTime.now() - swapT < 0.6) await wait(50);
         const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag };
         // Issue #10: a FULL sniper mag (10) must not advertise a reload
         const hintFull = {
@@ -547,7 +553,13 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const cs = window.__cs;
         const wait = ms => new Promise(r => setTimeout(r, ms));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
-        await wait(150);
+        // Issue #15: the swap opens a 0.4 s GAME-TIME deploy window that
+        // refuses firing. Headless frames run slower than wall clock
+        // (dt clamp), so wait it out on the game clock rather than a fixed
+        // real-time sleep — 150 ms tested the old instant swap and the first
+        // trigger pull below would fall inside the window.
+        const swapT = cs.gameTime.now();
+        while (cs.gameTime.now() - swapT < 0.6) await wait(50);
         const switched = { slot: cs.game.slot, name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize };
         cs.game.pitch = -1.2; // into the floor so shots land somewhere safe
         // Semi-auto: holding LMB must fire exactly once (trigger latch),
@@ -615,6 +627,11 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       const qcancel = await page.evaluate(async () => {
         const cs = window.__cs;
         const wait = ms => new Promise(r => setTimeout(r, ms));
+        // Issue #15: qswap's closing Digit1 may be less than a deploy window
+        // behind us — the RMB/R below are refused inside it. Wait it out on
+        // the game clock first (dt clamp makes wall-clock waits under-run).
+        const evalT = cs.gameTime.now();
+        while (cs.gameTime.now() - evalT < 0.6) await wait(50);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
         const partialMag = 8; // room below magSize (sniper 10) so a free refill can't hide
@@ -634,6 +651,11 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         // Back to the primary: same partial mag, NOT topped up by the cancel...
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
         await wait(150);
+        // Issue #15: the R/RMB below are refused inside this swap's deploy
+        // window — wait it out on the game clock (150 ms only covered the
+        // instant swap).
+        const backT = cs.gameTime.now();
+        while (cs.gameTime.now() - backT < 0.6) await wait(50);
         const restored = { slot: cs.game.slot, mag: cs.weapon.mag, reloading: cs.weapon.reloading };
         // The mirror of the drop rule above: reload FIRST with no button held,
         // then raise the sights. The fresh RMB press must cancel the reload and
@@ -2162,7 +2184,12 @@ async function runKnifeCheck() {
 
       // Key 3 takes the always-carried third position.
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit3' }));
-      await wait(150);
+      // Issue #15: R/RMB/swings are all refused inside the deploy window —
+      // wait it out on the game clock so the checks below pin the knife's
+      // own inert behavior rather than the window (150 ms only covered the
+      // instant swap).
+      const swapT = cs.gameTime.now();
+      while (cs.gameTime.now() - swapT < 0.6) await wait(50);
       const swapped = {
         slot: cs.game.slot,
         name: cs.weapon.name,

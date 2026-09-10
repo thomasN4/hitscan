@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { crossedCue, weaponPose, type WeaponAnimationInput } from './weaponAnimation';
+import { SWAP_DELAY } from './weaponSwap';
 import { freshWeaponAnimation, WEAPONS, type WeaponId } from '../core/state';
 
 const idle: WeaponAnimationInput = {
@@ -66,12 +67,28 @@ describe('weapon presentation timelines', () => {
     expect(weaponPose({ ...drawing, shotAt: 10 }).draw).toBe(0);
   });
 
-  test('cosmetic holster yields to an immediate shot or aim, with no readiness gate', () => {
+  test('cosmetic holster yields to an immediate shot or aim; the fire gate lives outside the pose', () => {
+    // weaponPose stays purely cosmetic: firing/aiming flags still suppress the
+    // draw art. The actual readiness gate is gameplay-side (issue #15 —
+    // shoot/tryReload/the scope gate read SWAP_DELAY via isDeploying), so a
+    // shot timestamp dated after the swap still clears the pose here.
     const input = { ...idle, hasOutgoing: true, switchedAt: 9.96 };
     expect(weaponPose(input).holster).toBe(true);
     expect(weaponPose({ ...input, shotAt: 10 }).holster).toBe(false);
     expect(weaponPose({ ...input, aiming: true }).holster).toBe(false);
-    expect(weaponPose({ ...input, now: 10.3 }).draw).toBe(0);
+    // The draw now runs to SWAP_DELAY (0.4 s), not the old 0.24 s cosmetics.
+    expect(weaponPose({ ...input, now: 10.3 }).draw).toBeGreaterThan(0);
+    expect(weaponPose({ ...input, now: 10.5 }).draw).toBe(0);
+  });
+
+  test('the draw run matches the shared deploy window', () => {
+    // Art and gate share one constant (issue #15): the viewmodel must still
+    // be rising for as long as the weapon refuses to fire.
+    const drawing = { ...idle, hasOutgoing: true, switchedAt: 10 };
+    expect(weaponPose({ ...drawing, now: 10 }).draw).toBe(1);
+    expect(weaponPose({ ...drawing, now: 10 + SWAP_DELAY - 0.01 }).draw).toBeGreaterThan(0);
+    expect(weaponPose({ ...drawing, now: 10 + SWAP_DELAY }).draw).toBe(0);
+    expect(weaponPose({ ...drawing, now: 10 + SWAP_DELAY + 0.1 }).draw).toBe(0);
   });
 
   test('cancellation closes from the current opening amount instead of snapping fully open', () => {

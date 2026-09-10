@@ -441,6 +441,9 @@ ordered roughly by how easy they are to repeat.
 remains tracked OUTSIDE it as deliberate behavior work, not refactoring:
 issue #15 (weapon switching should cost time; pinned as behavior in
 `sim/recoil.test.ts`).
+*(Annotation, feat/swap-delay: fixed — a shared 0.4 s SWAP_DELAY in
+`sim/weaponSwap.ts` now gates firing/scoping/reloading and freezes
+recoil/spray decay through the deploy window.)*
 
 Issue #17 (bot-respawn observability) was also listed here until PR #24 closed
 it; see the resolution note in the PR 8 section.

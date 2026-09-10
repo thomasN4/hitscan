@@ -15,6 +15,7 @@
 // from the brain's own rng stream, which is why the controller is handed it
 // rather than reaching for Math.random.
 import type { BotPrimaryId, BotSecondaryChoice, BotSidearmId, BotWeaponChoice, BotWeaponId, HitZone, WeaponDef } from '../core/state';
+import { SWAP_DELAY } from './weaponSwap';
 import { isLowAmmo, planReload, roundInterval, roundTransfer } from './ammo';
 import { damageForPart } from './damage';
 import type { BrainParams } from './botBrains';
@@ -633,16 +634,18 @@ export function makeFireController(
 }
 
 /**
- * Seconds a bot spends switching to the next position after the current one
- * runs out. Fixed, and it takes NO draw: every random draw a bot makes is
- * positionally scripted by botBrains.test.ts.
+ * Seconds a swap costs before the next position can fire — bots AND the
+ * player (sim/weaponSwap.ts:SWAP_DELAY, issue #15). Fixed, and it takes NO
+ * draw: every random draw a bot makes is positionally scripted by
+ * botBrains.test.ts.
  *
- * The player's own switch is still instant (issue #15) — this is not that fix,
- * and must not become it. It exists because a swap that cost nothing would let
- * a bot fire its sidearm in the same frame its rifle ran out, which reads as a
- * second weapon appearing rather than as a bot reaching for one.
+ * Re-exported here so existing importers keep working; the constant lives in
+ * weaponSwap.ts because the player's switchWeapon/main.ts gates read it too.
+ * It exists because a swap that cost nothing would let a bot fire its sidearm
+ * in the same frame its rifle ran out, which reads as a second weapon
+ * appearing rather than as a bot reaching for one.
  */
-export const SWAP_DELAY = 0.5;
+export { SWAP_DELAY } from './weaponSwap';
 
 /**
  * One bot's whole weapon ladder: an ordered list of POSITIONS that delegates

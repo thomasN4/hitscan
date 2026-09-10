@@ -9,6 +9,7 @@ import {
   viewmodelRecoil,
 } from './recoil';
 import { WEAPONS, RECOIL_CAP, RECOIL_YAW_CAP } from '../core/state';
+import { SWAP_DELAY } from './weaponSwap';
 import type { WeaponDef } from '../core/state';
 
 describe('aimPitch', () => {
@@ -382,6 +383,23 @@ function roundTripRecoil(hold: number, startRecoil = RECOIL_CAP): number {
   return convertOnSwap(s, sniperDef, smgDef, CAPS).recoil;
 }
 
+/**
+ * The same 1-2-1 with the deploy freeze applied (issue #15): no decay runs
+ * while the incoming weapon is still being drawn, so only the hold time PAST
+ * SWAP_DELAY drains at the sniper's rate. This mirrors what
+ * weapons.ts:updateWeapon now does — freeze, then decay — where
+ * roundTripRecoil above models the drain alone.
+ */
+function roundTripRecoilWithDeploy(hold: number, startRecoil = RECOIL_CAP): number {
+  let s = convertOnSwap({ recoil: startRecoil, recoilYaw: 0, spray: 1 }, smgDef, sniperDef, CAPS);
+  const decayedFor = Math.max(0, hold - SWAP_DELAY);
+  const dt = 1 / 60;
+  for (let t = 0; t < decayedFor; t += dt) {
+    s = { ...s, recoil: decayRecoil(s.recoil, dt, sniperDef.recoilRecover) };
+  }
+  return convertOnSwap(s, sniperDef, smgDef, CAPS).recoil;
+}
+
 const smgDef = WEAPONS.smg;
 const sniperDef = WEAPONS.sniper;
 
@@ -404,25 +422,29 @@ describe('convertOnSwap — what a swap actually returns once decay runs', () =>
     expect(elapsed).toBeCloseTo(expected, 1);
   });
 
-  test('that drain outruns any human swap, so 1-2-1 IS a free recoil cancel', () => {
-    // KNOWN GAP, pinned as behavior rather than fixed: see issue #15. The fix
-    // is for switching to cost time, which is a gameplay change and does not
-    // belong in the TypeScript migration. Pre-existing on main — the inverted
-    // ratio shipped in PR #14 actually MASKED it slightly, inflating the
-    // carried units to the cap so they took 0.46 s to drain instead of 0.28 s.
-    //
-    // This test is the tripwire: when a draw/holster delay lands, it fails and
-    // whoever adds it has to decide about this deliberately.
+  test('the deploy freeze keeps a 1-2-1 from refunding the climb (issue #15)', () => {
+    // The drain ALONE still erases everything inside a human swap — the
+    // sniper's 13/s clears the converted 3.6 units in 0.277 s, which is what
+    // the old version of this test pinned as the free cancel. The fix is not
+    // in the conversion but around it: updateWeapon freezes decay through
+    // SWAP_DELAY, so a real swap inside the window carries the climb home.
     expect(roundTripRecoil(0.5)).toBe(0);
     expect(roundTripRecoil(0.3)).toBe(0);
+    expect(roundTripRecoilWithDeploy(0.3)).toBeCloseTo(RECOIL_CAP, 12);
+    expect(roundTripRecoilWithDeploy(SWAP_DELAY)).toBeCloseTo(RECOIL_CAP, 12);
+    // Past the window the drain resumes at the incoming rate — the delay
+    // makes the swap cost time, it does not make recoil permanent.
+    const past = roundTripRecoilWithDeploy(0.5);
+    expect(past).toBeGreaterThan(0);
+    expect(past).toBeLessThan(RECOIL_CAP);
   });
 
-  test('only an inhumanly fast tap keeps any of it', () => {
-    // The boundary, so the numbers in issue #15 stay honest: a 100 ms swap
-    // retains a bit over half the climb, 200 ms about a fifth.
+  test('short swaps keep all of it; the drain starts only after the window', () => {
+    // The old boundary (100 ms keeps half, 200 ms keeps a fifth) described
+    // the drain running THROUGH the swap. With the freeze, anything inside
+    // the window round-trips exactly.
     const full = RECOIL_CAP;
-    expect(roundTripRecoil(0.1) / full).toBeGreaterThan(0.5);
-    expect(roundTripRecoil(0.2) / full).toBeLessThan(0.25);
-    expect(roundTripRecoil(0.2)).toBeGreaterThan(0);
+    expect(roundTripRecoilWithDeploy(0.1) / full).toBeCloseTo(1, 12);
+    expect(roundTripRecoilWithDeploy(0.2) / full).toBeCloseTo(1, 12);
   });
 });

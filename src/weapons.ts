@@ -39,6 +39,7 @@ import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
 import { isSprintActive } from './sim/movement';
+import { isDeploying } from './sim/weaponSwap';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -197,6 +198,10 @@ export function tryReload(): void {
   // A blade holds no rounds — R is inert while knifing, before any of the
   // mag guards below could misfire on the knife's zeroed magSize.
   if (currentDef().melee) return;
+  // A fresh swap owns the hands for SWAP_DELAY (issue #15): R during the
+  // deploy window is ignored rather than starting a reload on the incoming
+  // weapon, which would stack two timers' worth of downtime into one.
+  if (isDeploying(gameTime.now(), wpn.animation.switchedAt)) return;
   const d = planReload({
     started: session.started,
     alive: player.alive,
@@ -230,6 +235,12 @@ export function tryReload(): void {
  * weapon's stats into the live `weapon` object, converts the live recoil/
  * spray state to the incoming weapon's terms, and resets scope zoom. Cancels
  * an in-progress reload CS-style rather than being blocked by one (see below).
+ *
+ * The swap costs SWAP_DELAY (issue #15): the incoming weapon cannot fire,
+ * scope or reload until the deploy window closes, and recoil/spray do not
+ * decay while it is not in the hands. A re-swap re-arms the window — the
+ * latest press wins, so spamming 1-2-1-Q delays readiness instead of
+ * queueing it.
  */
 export function switchWeapon(slot: WeaponSlot): void {
   if (slot === wpn.slot || !session.started || !player.alive) return;
@@ -245,6 +256,10 @@ export function switchWeapon(slot: WeaponSlot): void {
   wpn.animation = freshWeaponAnimation();
   wpn.animation.switchedAt = gameTime.now();
   wpn.animation.outgoingId = equippedId(wpn.slot);
+  // One motion at a time: a swap drops the sights like a reload start does,
+  // so a held RMB cannot carry a scope through the deploy window — a fresh
+  // press is needed once the weapon is ready (see the main.ts RMB gate).
+  input.aiming = false;
   const saved = ammoStore[wpn.slot];
   const loaded = ammoStore[slot];
   saved.mag = weapon.mag;
@@ -264,8 +279,10 @@ export function switchWeapon(slot: WeaponSlot): void {
   // recoilRecover into `weapon`, and the decay does the reset regardless. The
   // sniper drains a full smg climb (3.6 units after conversion) at 13 units/s,
   // so it is gone in 0.277 s, well inside a human swap. Same for the scopeGate
-  // half of the old claim. The real fix is for switching to cost time; tracked
-  // as issue #15, and NOT a regression — main behaves identically.
+  // half of the old claim. The fix is the deploy window around this swap
+  // (issue #15): firing, scoping and reloading are blocked for SWAP_DELAY,
+  // and updateWeapon freezes recoil/spray decay until it closes — without the
+  // freeze a longer window would drain MORE, not less.
   //
   // The arithmetic itself lives in sim/recoil.ts. It is pure, and leaving it
   // inline here put it behind sfxSwitch()'s AudioContext where the Node test
@@ -364,6 +381,10 @@ function swingMelee(def: WeaponDef): void {
  * ray's outcome — bot hit -> damage by zone, wall hit -> impact puff only.
  */
 export function shoot(): void {
+  // Deploying hands hold no weapon to fire (issue #15): a trigger pull inside
+  // the swap window is dropped, not queued — the updateWeapon trigger gate
+  // keeps pacing it every frame until the window closes.
+  if (isDeploying(gameTime.now(), wpn.animation.switchedAt)) return;
   const def = currentDef();
   // A blade swings instead of firing: nothing to spend, nothing to cancel,
   // nothing to flash. updateWeapon's trigger gate already paced this against
@@ -537,15 +558,25 @@ export function updateWeapon(dt: number): void {
   // The horizontal walk drains at its OWN, much slower rate: it is mean-zero, so
   // a drain sized against the vertical climb outruns it and zeroes the wander
   // before the next shot leaves.
-  wpn.recoil = decayRecoil(wpn.recoil, dt, weapon.recoilRecover);
-  wpn.recoilYaw = decayToward(wpn.recoilYaw, dt, def.yawRecover);
+  //
+  // Frozen while deploying (issue #15): the incoming weapon is not in the
+  // hands yet, so nothing about it may settle. This is the half of the 1-2-1
+  // fix the fire gate alone cannot do — the sniper drains a converted smg
+  // climb in 0.277 s, inside SWAP_DELAY, so decaying through the window would
+  // still refund the climb, only slower-looking.
+  const deploying = isDeploying(gameTime.now(), wpn.animation.switchedAt);
+  if (!deploying) {
+    wpn.recoil = decayRecoil(wpn.recoil, dt, weapon.recoilRecover);
+    wpn.recoilYaw = decayToward(wpn.recoilYaw, dt, def.yawRecover);
+  }
 
   // Aiming: blend FOV with adsLerp toward the weapon's current zoom target —
   // the smg has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules). RMB is inert while
-  // a melee def is held — there is no sight line to raise.
-  const aiming = input.aiming && !def.melee;
+  // a melee def is held — there is no sight line to raise — and while
+  // deploying, so the sights cannot rise out of the draw animation.
+  const aiming = input.aiming && !def.melee && !deploying;
   if (!aiming) wpn.zoomLevel = 0; // every re-scope starts at lowest zoom
   const aimFov = aimFovFor(def);
   wpn.adsLerp = approach(wpn.adsLerp, aiming ? 1 : 0, dt, ADS_RATE);
@@ -633,7 +664,10 @@ export function updateWeapon(dt: number): void {
     inherent: def.inherent,
     adsMul: aiming ? def.spreadMul : 1,
   });
-  wpn.spray = decaySpray(wpn.spray, dt, def.sprayRecover);
+  // Same freeze as the recoil decay above: spray is carried across the swap by
+  // convertOnSwap, and draining it through the window would re-clamp the cone
+  // for free (issue #15).
+  if (!deploying) wpn.spray = decaySpray(wpn.spray, dt, def.sprayRecover);
   // The crosshair must be honest about where shots land: for pellet weapons
   // that is the situational cone PLUS the fixed pattern (pelletCone) — their
   // per-axis sum is the true outer bound of a pellet's deflection.

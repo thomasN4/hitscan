@@ -562,6 +562,6 @@ Three rules govern them, enforced by `scripts/lessonNumbering.test.mjs` in
 
 Deferred to a later tranche:
 
-- Making weapon switching cost time (a draw/holster delay, ideally with a viewmodel animation on `poseWeapon`'s model). Switching is instant today, so `1-2-1` is a free recoil cancel — the conversion in `switchWeapon` is lossless, but the incoming weapon's `recoilRecover` then drains the carried units, and the sniper's 13/s clears a full smg climb in 0.277 s. The same zero-cost window also lets a swap dodge `scopeGate` and re-clamp `spray`. Tracked as **issue #15**; pre-existing behavior, pinned in `sim/recoil.test.ts` so a fix has to update the test deliberately.
+- ~~Making weapon switching cost time~~ **Done (feat/swap-delay, closes issue #15):** a shared 0.4 s `SWAP_DELAY` (`sim/weaponSwap.ts`) gates firing, scoping and reload starts and freezes recoil/spray decay through the deploy window; the viewmodel draw tracks the same constant. The `sim/recoil.test.ts` tripwire now pins the frozen behavior.
 
 Dropped: unifying Bot and the player under a shared entity base class. It addresses none of the regression classes this codebase has actually hit, and would couple a probabilistic AI to a physics-driven controller.

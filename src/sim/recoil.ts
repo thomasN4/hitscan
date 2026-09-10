@@ -117,8 +117,8 @@ export interface SwapState {
 }
 
 /**
- * Convert recoil/spray state onto an incoming weapon's terms, for a swap that
- * costs no time.
+ * Convert recoil/spray state onto an incoming weapon's terms, for a swap
+ * whose deploy window (sim/weaponSwap.ts:SWAP_DELAY) freezes decay.
  *
  * INVARIANT: the rendered view punch — `recoil × punchRad`, the angle
  * aimPitch/aimYaw actually apply — comes out unchanged. That invariant is what
@@ -133,8 +133,11 @@ export interface SwapState {
  * INSTANT effect only. It does not and cannot stop 1-2-1 being a recoil
  * cancel — once converted, the units decay at the incoming weapon's
  * recoilRecover, and the sniper's 13/s clears a full smg climb in 0.277 s.
- * A lossless conversion followed by a fast drain still nets a reset. Fixing
- * that needs switching to cost time (issue #15); it is not fixable here.
+ * A lossless conversion followed by a fast drain still nets a reset. That
+ * half is fixed OUTSIDE this function (issue #15): switchWeapon opens a
+ * SWAP_DELAY deploy window during which updateWeapon freezes recoil/spray
+ * decay and shoot/tryReload/the scope gate refuse — so the converted state
+ * survives the swap instead of draining through it.
  *
  * The caps still bite by design: converting onto a weapon with a SMALLER
  * punchRad scales recoil up, and clipping there is a real loss of state, not

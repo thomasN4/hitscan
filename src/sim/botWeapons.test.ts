@@ -809,7 +809,7 @@ describe('BotLoadout', () => {
     // stagger, but tick() advances only the active one — so an untouched
     // secondary's cooldown sat frozen at its spawn value. With waitFor taking
     // the max of the two, a late swap then waited out a stale 1-3 s stagger
-    // instead of the documented half second.
+    // instead of the shared SWAP_DELAY (0.4 s).
     const stagger = FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN;   // the longest
     const fire = loadout('smg', 'pistol', queueRng([1 - 1e-9]));
     fire.arm();

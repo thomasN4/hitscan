@@ -32,6 +32,7 @@ import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, addKillfeed } fro
 import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout, setAssetStatus } from './menu';
 import { sfxZoom } from './audio';
 import { decideWinner } from './sim/match';
+import { isDeploying } from './sim/weaponSwap';
 import { validateWeapons } from './sim/validateWeapons';
 import { loadWeaponAssets } from './core/weaponAssets';
 import { initLigneClaire } from './core/ligneClaire';
@@ -186,10 +187,12 @@ async function start(): Promise<void> {
   addEventListener('mousedown', e => {
     if (e.button === 0 && session.locked && player.alive) input.shooting = true;
     // A fresh RMB press can't enter the scope while recoil is still settling
-    // (sniper bolt-action feel); a press already held is unaffected.
+    // (sniper bolt-action feel) or while the swapped weapon is still being
+    // drawn (issue #15 deploy window); a press already held is unaffected.
     if (e.button === 2 && session.locked && player.alive) {
       const gate = WEAPONS[equippedId(wpn.slot)].scopeGate; // undefined = no gate (smg)
-      if (gate === undefined || wpn.recoil < gate) input.aiming = true;
+      if ((gate === undefined || wpn.recoil < gate) &&
+        !isDeploying(gameTime.now(), wpn.animation.switchedAt)) input.aiming = true;
     }
   });
   addEventListener('mouseup', e => {

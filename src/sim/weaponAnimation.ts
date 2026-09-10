@@ -1,4 +1,5 @@
 import type { WeaponId } from '../core/state';
+import { SWAP_DELAY } from './weaponSwap';
 
 export interface WeaponAnimationInput {
   id: WeaponId;
@@ -58,7 +59,12 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
   const reload = reloading ? (perRound ? opening * finalClose : hold(t, 0, 0.12, 0.89, 1)) : closing;
   const swapAge = now - input.switchedAt;
   const swapping = !input.aiming && !reloading && !firing;
-  const holster = swapping && input.hasOutgoing && swapAge >= 0 && swapAge < 0.08;
+  // The cosmetic swap tracks the gameplay deploy window (issue #15): the
+  // outgoing viewmodel drops for the first 30% of SWAP_DELAY, then the
+  // incoming one rises until the weapon is ready to fire. Deriving both ends
+  // from the shared constant keeps art and gate from drifting apart.
+  const holsterEnd = SWAP_DELAY * 0.3;
+  const holster = swapping && input.hasOutgoing && swapAge >= 0 && swapAge < holsterEnd;
   return {
     reload,
     magazine: reloading && !perRound ? hold(t, 0.14, 0.36, 0.52, 0.77) : 0,
@@ -74,9 +80,9 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
     // turn is geometrically identical at the next round's zero phase.
     index: id === 'revolver' ? (reloading ? smooth(.84, .98, t) : firing ? smooth(0.05, 0.28, cycle) : 0) : 0,
     charge: reloading && input.emptyReload && !perRound ? hold(t, 0.79, 0.85, 0.89, 0.95) : 0,
-    draw: swapping ? 1 - smooth(input.hasOutgoing ? 0.08 : 0, 0.24, swapAge) : 0,
+    draw: swapping ? 1 - smooth(input.hasOutgoing ? holsterEnd : 0, SWAP_DELAY, swapAge) : 0,
     holster,
-    holsterDrop: holster ? smooth(0, 0.08, swapAge) : 0,
+    holsterDrop: holster ? smooth(0, holsterEnd, swapAge) : 0,
     // Contact occurs on the successful shot frame; this is the follow-through.
     swing: id === 'knife' && firing ? 1 - smooth(0, 0.85, cycle) : 0,
   };

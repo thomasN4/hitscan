@@ -1308,6 +1308,9 @@ driven directly.
 - A **draw/holster delay for the PLAYER** (issue #15) stays deferred. `SWAP_DELAY`
   is bot-side only and does not touch `switchWeapon`; the asymmetry is deliberate
   and recorded here so a later reader does not read it as the issue being fixed.
+  *(Annotation, feat/swap-delay: fixed — `SWAP_DELAY` moved to
+  `sim/weaponSwap.ts` at 0.4 s and now gates the player's
+  firing/scoping/reloading plus recoil/spray decay; the asymmetry is gone.)*
 - Everything 7a deferred is still deferred: per-weapon `soundRadius`, sound
   occlusion, bot spread/crouch/ADS state, and bot bullets ignoring intervening
   bodies.

@@ -1241,6 +1241,9 @@ test.ts` scripts ~1500 lines of rng positionally against the documented
 their own stagger would have shifted every one of those sequences by two.
 Applying the single drawn stagger to ALL positions also means a swap during the
 stagger cannot bypass it. `SWAP_DELAY` is 0.5 s and takes no draw either.
+*(Annotation, feat/swap-delay: `SWAP_DELAY` moved to `sim/weaponSwap.ts` at
+0.4 s, shared by bots and the player (closes issue #15) — the value above is
+stale, the no-draw half still holds.)*
 
 **The brain's params stop being a match-long constant.** `DefaultBrain` now
 takes the BASE params and re-derives the per-weapon bands through

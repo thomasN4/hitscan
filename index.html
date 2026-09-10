@@ -11,8 +11,10 @@
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
 
   /* Crosshair: arms pushed out from center by --gap (set per frame from
-     the weapon accuracy model in weapons.js) */
-  #crosshair { --gap: 5px; position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+     the weapon accuracy model in weapons.js). Hidden unless the DEV debug
+     overlay is up — hud.ts:applyCrosshairVisibility owns the flip, this
+     default just avoids a flash before initHUD runs. */
+  #crosshair { --gap: 5px; position: absolute; left: 50%; top: 50%; width: 0; height: 0; display: none; }
   #crosshair div { position: absolute; background: #00ff41; box-shadow: 0 0 2px #000; }
   .ch-v { width: 2px; height: 7px; left: -1px; }
   .ch-t { bottom: var(--gap); }

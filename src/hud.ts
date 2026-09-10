@@ -46,6 +46,7 @@ export let vignette: HTMLElement;
 export function initHUD(): void {
   hudEl = el('hud');
   crosshair = el('crosshair');
+  applyCrosshairVisibility();
   hitmarkerEl = el('hitmarker');
   vignette = el('vignette');
   killfeedEl = el('killfeed');
@@ -140,12 +141,28 @@ export function setScopeOverlay(on: boolean): void {
   if (on === scopeShown) return;
   scopeShown = on;
   scopeOverlay.style.display = on ? 'block' : 'none';
-  crosshair.style.visibility = on ? 'hidden' : 'visible';
+  applyCrosshairVisibility();
+}
+
+/**
+ * Crosshair gating: the arms show only in DEV while the V debug overlay is up
+ * (and never under the sniper scope reticle, which replaces them). Normal play
+ * aims down the viewmodel sights instead. Synced every frame from updateHUD so
+ * debugView.ts's toggle needs no import back into this module; the cached flip
+ * avoids DOM churn like scopeShown above.
+ */
+let crosshairShown = false;
+function applyCrosshairVisibility(): void {
+  const want = import.meta.env.DEV && session.debugView && !scopeShown;
+  if (want === crosshairShown) return;
+  crosshairShown = want;
+  crosshair.style.display = want ? '' : 'none';
 }
 
 let lastName = '';
 let lastZoomLabel = '';
 export function updateHUD(): void {
+  applyCrosshairVisibility();
   hpText.textContent = String(Math.max(0, Math.round(player.hp)));
   healthFill.style.width = Math.max(0, player.hp) + '%';
   // Color shifts green -> orange -> red as HP drops.

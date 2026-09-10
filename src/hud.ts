@@ -156,7 +156,10 @@ function applyCrosshairVisibility(): void {
   const want = import.meta.env.DEV && session.debugView && !scopeShown;
   if (want === crosshairShown) return;
   crosshairShown = want;
-  crosshair.style.display = want ? '' : 'none';
+  // Explicit 'block' on show, not '' — the stylesheet defaults #crosshair to
+  // display:none (no pre-init flash), so clearing the inline style would just
+  // fall back to hidden again.
+  crosshair.style.display = want ? 'block' : 'none';
 }
 
 let lastName = '';

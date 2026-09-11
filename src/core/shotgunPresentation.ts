@@ -26,7 +26,7 @@ export function poseShotgunReload(vm: WeaponViewModel, pose: WeaponPose): void {
   vm.group.position.copy(receiver).sub(receiverLocal.applyQuaternion(vm.group.quaternion));
 
   const rig = vm.authored;
-  if (!rig) throw new Error('Shotgun is missing its authored grip rig');
+  if (!rig.port) throw new Error('Shotgun is missing its authored grip rig');
   const shell = vm.mechanisms.shell;
   if (!shell) throw new Error('Shotgun viewmodel is missing its loading shell');
   // The visible shell travels nose-first along the tube axis, starting just

@@ -39,3 +39,6 @@ These are stylized game proportions, not dimensionally faithful replicas.
 Pistol: fitted magazine and open well, animated along the grip slope; independent
 slide cycling and empty-reload charging. Its dedicated generator and clearance
 checks are documented in `pistol-model.md`.
+
+SMG, sniper and knife sources complete the first-person catalog. Their generator,
+mechanisms and clearance checks are documented in `remaining-weapons.md`.

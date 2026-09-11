@@ -31,7 +31,7 @@ async function asset(id) {
   new Uint8Array(buffer).set(bytes);
   return (await new GLTFLoader().parseAsync(buffer, '')).scene;
 }
-const assets = { shotgun: await asset('shotgun'), revolver: await asset('revolver'), pistol: await asset('pistol') };
+const assets = Object.fromEntries(await Promise.all(['smg','sniper','shotgun','pistol','revolver','knife'].map(async id => [id, await asset(id)])));
 
 function poseFor(id, cycle) {
   return weaponPose({

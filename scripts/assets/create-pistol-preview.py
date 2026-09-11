@@ -273,5 +273,6 @@ def pistol():
     bpy.context.view_layer.objects.active=slide
 
 
-pistol()
-save_and_render('pistol',(0,-.124,-.002),.49)
+if __name__ == '__main__':
+    pistol()
+    save_and_render('pistol',(0,-.124,-.002),.49)

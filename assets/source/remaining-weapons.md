@@ -9,7 +9,8 @@ recesses and separate moving assemblies. Runtime GLBs use the existing cel palet
   neck fitted inside an open well; its curved section starts below the collar.
 - Sniper: olive composite stock with cheek pad and recoil pad, long open barrel,
   tapered scope with recessed lenses, magazine well and bolt raceway. The bolt
-  handle's receiver slot clears its lift before the rearward pull.
+  handle's receiver slot clears its lift before the rearward pull. The bolt body
+  uses the receiver's blued-steel finish so it retains contrast in the cel palette.
 - Knife: clip-point blade with broad ground bevel facets, guard, steel tang,
   ribbed rubber grip and a pommel with a lanyard opening.
 

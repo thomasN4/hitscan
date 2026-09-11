@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "blender": "5.2.0 LTS",
+  "blender": "5.2.1 LTS",
   "exporter": "scripts/assets/export-weapons.py",
   "exporterSha256": "685de8c5afd70c8622b1bf061b58794f44579cc0c747003a494c79777682fe95",
   "settings": {
@@ -63,12 +63,12 @@
       "id": "sniper",
       "source": "assets/source/sniper.blend",
       "output": "public/assets/sniper.glb",
-      "sourceSha256": "1a6ba414b4a2b661385af0ef841cfdb3c286853a68048815044487796e0e4dc7",
-      "outputSha256": "61e990443232b7e5bbba3c3d25aa604c2a0ab78bb19efc8c3d476504c54e4367",
+      "sourceSha256": "8f848ef4ae3892216260f8fa3f2701960069a7c094d0ba057332becbfb39890d",
+      "outputSha256": "cb41e01c283da1788182cbe2e98140671c09c5ea611fe486daf8a5e47b67a490",
       "stats": {
         "vertices": 35436,
-        "meshes": 9,
-        "bytes": 1003512
+        "meshes": 8,
+        "bytes": 1007440
       }
     },
     {

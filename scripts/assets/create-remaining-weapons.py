@@ -200,7 +200,7 @@ def sniper():
     # Keep the side dial outside the existing ADS transition cone.
     dial=cyl('Windage turret',.011,.023,(.029,0,.005),dark)
     dial.rotation_euler.y=math.pi/2
-    bolt=cyl('Polished bolt',.017,.12,(0,-.072,.080),silver)
+    bolt=cyl('Blued steel bolt',.017,.12,(0,-.072,.080),steel)
     shaft=cyl('Bolt handle stem',.005,.043,(.036,-.072,.120),steel)
     shaft.rotation_euler.y=math.pi/2
     bpy.ops.mesh.primitive_uv_sphere_add(segments=24,ring_count=12,radius=.013,location=(.063,-.077,.120))

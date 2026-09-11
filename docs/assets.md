@@ -1,8 +1,9 @@
 # First-person weapon assets
 
-Editable sources: `assets/source/shotgun.blend`, `revolver.blend`, and `pistol.blend`.
+Editable sources under `assets/source/`: `shotgun.blend`, `revolver.blend`,
+`pistol.blend`, `smg.blend`, `sniper.blend`, and `knife.blend`.
 Runtime exports live under `public/assets/` with the matching `.glb` names. The
-game retains procedural maps, the other three weapons and synthesized audio. Blender is an
+game retains procedural maps, bot weapon silhouettes and synthesized audio. Blender is an
 asset-authoring dependency, never a requirement for normal builds or deployment.
 
 ## Headless workflow
@@ -17,7 +18,7 @@ npm run build
 edited sources, preserves them, writes GLB, validates the result, then records
 source/output/export-script SHA-256 hashes and settings in
 `assets/weapons-manifest.json`. Commit sources, GLBs and manifest together.
-`assets:check` verifies both committed GLBs without Blender.
+`assets:check` verifies all six committed GLBs without Blender.
 The exporter disables audio via `ALSOFT_DRIVERS=null` for headless Linux machines.
 
 The sources are modeled in game coordinates: metres, Y up, -Z forward. Blender's
@@ -125,3 +126,43 @@ raycast through the revolver notch to its front blade throughout firing. The
 revolver's expected near geometry in the upper aim cone is now its aligned rear
 shoulders, rather than the old low sights. The old obstructing hammer mutation
 still fails the check. Sky-background ADS captures verify the visible result.
+
+## SMG, sniper rifle and knife
+
+All six first-person weapons now load authored GLBs. The SMG and sniper use
+fixed well/extraction markers for their detachable magazines, with independent
+SMG action and sniper bolt assemblies. The knife uses grip and blade-tip markers
+without firearm-only loading markers. See
+[`remaining-weapons.md`](../assets/source/remaining-weapons.md) for modeling,
+rebuild commands and geometry-clearance checks.
+
+The first-person procedural weapon builders have been removed. Loose reload
+cartridges remain procedural effects. Weapon stats, shot/reload clocks, scope
+overlay behavior, sounds and bot-held silhouettes retain their existing behavior.
+
+Run all-weapon animation checks (default when no IDs are supplied):
+
+```sh
+CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-animation-check.mjs /tmp/weapon-review
+CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-assets-check.mjs
+```
+
+The asset checks cover missing/corrupt files and one-load startup for all six
+assets. Unit checks exercise exported contracts, independent clones, magazine
+paths, action restoration and aiming visibility. Runtime palette and framing
+are reviewed in the browser; the studio renders use Workbench material colors.
+
+### Runtime review captures
+
+Captured in the ligne-claire renderer at 1280 × 720. Regenerate with the browser
+animation check above when models or presentation change.
+
+| SMG | Sniper | Knife |
+| --- | --- | --- |
+| ![SMG](images/remaining-weapons/smg-hip.png) | ![Sniper](images/remaining-weapons/sniper-hip.png) | ![Knife](images/remaining-weapons/knife-hip.png) |
+
+The rifle reload roll keeps the extracted magazines visible:
+
+| SMG reload | Sniper reload |
+| --- | --- |
+| ![SMG magazine extraction](images/remaining-weapons/smg-reload-insert.png) | ![Sniper magazine extraction](images/remaining-weapons/sniper-reload-insert.png) |

@@ -151,6 +151,13 @@ try {
         assert.ok(finite(pose), `${id}: non-finite mechanism transform during reload`);
         if (label === 'insert' && perRound) assert.equal(pose.parts['weapon-mechanism-shell'].visible, true);
         if (label === 'insert' && id === 'revolver') assert.ok(pose.parts['weapon-mechanism-cylinder'].rotation[2] > idle.parts['weapon-mechanism-cylinder'].rotation[2] + 1.4);
+        if (id === 'smg' || id === 'sniper') {
+          const rest = idle.parts['weapon-mechanism-magazine'].position;
+          const mag = pose.parts['weapon-mechanism-magazine'].position;
+          assert.ok(Math.abs(mag[0]-rest[0]) < 1e-6 && Math.abs(mag[2]-rest[2]) < 1e-6, 'Rifle magazine must follow its vertical well');
+          if (label === 'insert') assert.ok(mag[1]-rest[1] < (id === 'smg' ? -.23 : -.17), 'Magazine must clear the well');
+          if (label === 'seat') assert.ok(Math.hypot(...mag.map((v,i)=>v-rest[i])) < 1e-6, 'Magazine must reseat');
+        }
         if (id === 'pistol') {
           const rest = idle.parts['weapon-mechanism-magazine'].position;
           const mag = pose.parts['weapon-mechanism-magazine'].position;
@@ -209,7 +216,7 @@ try {
       await runFor(page, 0.3);
       const swapped = await snapshot(page);
       assert.equal(swapped.reloading, false);
-      if (id === 'pistol') {
+      if (['pistol','smg','sniper'].includes(id)) {
         for (const action of ['aim', 'sprint']) {
           await page.keyboard.press('KeyR'); await runFor(page, .5);
           if (action === 'aim') await page.mouse.down({button:'right'});
@@ -217,7 +224,7 @@ try {
           await runFor(page, .4);
           const cancelled = await snapshot(page);
           assert.equal(cancelled.reloading, false);
-          for (const key of ['slide', 'magazine']) {
+          for (const key of [id === 'sniper' ? 'bolt' : 'slide', 'magazine']) {
             const rest = idle.parts[`weapon-mechanism-${key}`].position;
             const actual = cancelled.parts[`weapon-mechanism-${key}`].position;
             assert.ok(Math.hypot(...actual.map((v,i)=>v-rest[i])) < 1e-6, `${action} cancellation must restore ${key}`);

@@ -7,7 +7,7 @@ const browser = await puppeteer.launch({
   headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });
 try {
-  for (const asset of ['shotgun', 'revolver', 'pistol']) for (const failure of ['missing', 'corrupt', 'none']) {
+  for (const asset of ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife']) for (const failure of ['missing', 'corrupt', 'none']) {
     const page = await browser.newPage();
     let requests = 0;
     await page.setRequestInterception(true);

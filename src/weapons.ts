@@ -123,12 +123,12 @@ const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
  */
 export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
   VIEWMODELS = {
-    smg: createWeaponViewModel('smg'),
-    sniper: createWeaponViewModel('sniper'),
+    smg: createWeaponViewModel('smg', weaponAssets),
+    sniper: createWeaponViewModel('sniper', weaponAssets),
     shotgun: createWeaponViewModel('shotgun', weaponAssets),
     pistol: createWeaponViewModel('pistol', weaponAssets),
     revolver: createWeaponViewModel('revolver', weaponAssets),
-    knife: createWeaponViewModel('knife'),
+    knife: createWeaponViewModel('knife', weaponAssets),
   };
   for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
   camera.add(gunGroup);

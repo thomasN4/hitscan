@@ -4,12 +4,12 @@ import { viewmodelRecoil } from './recoil';
 import { WEAPONS, RECOIL_CAP, RECOIL_YAW_CAP } from '../core/state';
 
 // The smg's real hip -> ADS delta: core/weaponModels.ts builds it as
-// { x: -offset.x, y: offset.y - sightLine } from offset (0.25, 0.14) and a zero
+// { x: -offset.x, y: offset.y - sightLine } with z=0.10, from offset (0.25, 0.14) and a zero
 // sight line. now = 10 lands the bob mid-swing; the last case below pins that,
 // because a phase on a zero of Math.sin(now * 10) would make the ADS assertions
 // pass against the ungated code too.
 const still: ViewmodelInput = {
-  aimOffset: { x: -0.25, y: 0.14 },
+  aimOffset: { x: -0.25, y: 0.14, z: 0.10 },
   ads: 0, visualRecoil: 0, recoilYaw: 0, bobAmt: 0, now: 10,
 };
 
@@ -66,7 +66,7 @@ describe('viewmodelTransform', () => {
     // z moves the weapon ALONG the view axis. With x and y at their ADS values
     // the sight sits on that axis, and an on-axis point stays on it: the weapon
     // grows and shrinks, the sight picture does not shift.
-    expect(at(1).position.z).toBeCloseTo(moving.visualRecoil * 0.012 + 0.06, 12);
+    expect(at(1).position.z).toBeCloseTo(moving.visualRecoil * 0.012 + still.aimOffset.z, 12);
     expect(at(1).position.z).toBeGreaterThan(at(1, { visualRecoil: 0 }).position.z);
   });
 

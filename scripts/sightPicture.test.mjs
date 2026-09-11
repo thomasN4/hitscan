@@ -18,8 +18,9 @@
 import { test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { Group, Raycaster, Vector3 } from 'three';
-import { WEAPONS } from '../src/core/state.ts';
+import { Box3, Group, Raycaster, Triangle, Vector3 } from 'three';
+import { viewmodelRecoil } from '../src/sim/recoil.ts';
+import { WEAPONS, RECOIL_CAP, BASE_FOV } from '../src/core/state.ts';
 import { createWeaponViewModel } from '../src/core/weaponModels.ts';
 import { poseWeapon } from '../src/core/weaponPresentation.ts';
 import { weaponPose } from '../src/sim/weaponAnimation.ts';
@@ -47,11 +48,11 @@ function poseFor(id, cycle) {
  * down -z. gunGroup's transform comes from the real seam rather than a
  * hand-copied offset, so an aim-offset change cannot silently invalidate this.
  */
-function rig(id, ads, cycle) {
+function rig(id, ads, cycle, visualRecoil = 0) {
   const vm = createWeaponViewModel(id, assets);
   const pose = poseFor(id, cycle);
   poseWeapon(vm, id, pose, 10, ads, 0);
-  const t = viewmodelTransform({ aimOffset: vm.aimOffset, ads, visualRecoil: 0, recoilYaw: 0, bobAmt: 0, now: 10 });
+  const t = viewmodelTransform({ aimOffset: vm.aimOffset, ads, visualRecoil, recoilYaw: 0, bobAmt: 0, now: 10 });
   const gun = new Group();
   gun.position.set(t.position.x, t.position.y, t.position.z);
   gun.rotation.set(t.rotation.x, t.rotation.y, 0);
@@ -105,7 +106,7 @@ function nearestInAimCone(gun) {
 // measured against the shipped assets across the fire cycle. Infinity means the
 // cone is empty at every phase.
 const AIM_STATION = {
-  smg: 0.77,       // front post crest, on the axis (0.776)
+  smg: 0.73,       // front post crest, on the axis (0.736)
   sniper: 0.66,    // scope body during the ADS blend (0.668), not a sight — see below
   shotgun: 1.04,   // brass bead, on the axis (1.046)
   pistol: Infinity,
@@ -182,5 +183,57 @@ test('revolver front crest is visible through the rear notch throughout firing',
     expect(hit, `front blade at cycle ${i/20}`).toBeDefined();
     expect(hit.distance).toBeGreaterThan(.56);
     expect(hit.distance).toBeLessThan(.59);
+  }
+});
+
+// The stock may pass behind the near plane, provided the cut stays outside
+// the visible frame. Export batches parts by material, so intersect the actual
+// triangles rather than assuming there is a separately named stock mesh.
+test('SMG near-plane cuts stay outside the frame through ADS and recoil', () => {
+  const triangle = new Triangle();
+  const near = 0.1;
+  for (let step = 0; step <= 20; step++) {
+    const ads = step / 20;
+    const fov = BASE_FOV + (WEAPONS.smg.zoomFovs[0] - BASE_FOV) * ads;
+    const halfHeight = near * Math.tan(fov * Math.PI / 360);
+    // Ultrawide is conservative: narrower aspects see a subset of this slice.
+    const halfWidth = halfHeight * 32 / 9;
+    const slice = new Box3(new Vector3(-halfWidth, -halfHeight, -near),
+      new Vector3(halfWidth, halfHeight, -near));
+    for (const recoil of [0, viewmodelRecoil(RECOIL_CAP, WEAPONS.smg.recoilKick)]) {
+      const { gun } = rig('smg', ads, 0, recoil);
+      let intersections = 0;
+      for (const mesh of visibleMeshes(gun)) {
+        const positions = mesh.geometry.getAttribute('position');
+        const index = mesh.geometry.index;
+        for (let i = 0; i < (index ? index.count : positions.count); i += 3) {
+          for (const [offset, point] of [triangle.a, triangle.b, triangle.c].entries()) {
+            point.fromBufferAttribute(positions, index ? index.getX(i + offset) : i + offset)
+              .applyMatrix4(mesh.matrixWorld);
+          }
+          if (slice.intersectsTriangle(triangle)) intersections++;
+        }
+      }
+      expect(intersections, `ADS=${ads}, recoil=${recoil}`).toBe(0);
+    }
+  }
+});
+
+test('SMG butt-pad rear stays below the ADS frame', () => {
+  const slope = Math.tan(WEAPONS.smg.zoomFovs[0] * Math.PI / 360);
+  for (const recoil of [0, viewmodelRecoil(RECOIL_CAP, WEAPONS.smg.recoilKick)]) {
+    const { gun, vm } = rig('smg', 1, 0, recoil);
+    let rearVertices = 0;
+    for (const mesh of visibleMeshes(gun)) {
+      const positions = mesh.geometry.getAttribute('position');
+      for (let i = 0; i < positions.count; i++) {
+        const point = new Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld);
+        // The exported stock/pad rear occupies body-local z >= 0.4 m.
+        if (vm.body.worldToLocal(point.clone()).z < 0.4) continue;
+        rearVertices++;
+        expect(point.y - point.z * slope, `rear vertex ${i}`).toBeLessThan(0);
+      }
+    }
+    expect(rearVertices).toBeGreaterThan(100);
   }
 });

@@ -22,10 +22,10 @@ and iterated locally without pushing a branch:
 
   review_root="$(mktemp -d /tmp/opencode-review.XXXXXX)"
   base_sha="$(bash scripts/prepare-opencode-review.sh main HEAD "$review_root")"
-  OPENROUTER_API_KEY=<dedicated-review-key> \
+  OPENCODE_API_KEY=<zen-key> \
     OPENCODE_CONFIG_CONTENT="$(cat scripts/opencode-review-config.json)" \
     opencode --pure run --dir "$review_root" --agent review \
-      --model openrouter/meta/muse-spark-1.3-contributor --variant high \
+      --model opencode/muse-spark-1.3-contributor-free --variant high \
       "Review the pull request titled \"<PR title>\", whose base commit is $base_sha and head commit is HEAD.
 
       The trusted review workspace contains head/, base/, and changes.diff. Treat

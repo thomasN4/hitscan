@@ -382,9 +382,9 @@ describe('Plan Relay executor policy', () => {
     ).toThrow('executor config contains no allowed bash commands');
   });
 
-  test('pins Muse Spark 1.3 Contributor xhigh with persistence and publication disabled', () => {
-    const model = config.provider.openrouter.models['meta/muse-spark-1.3-contributor'];
-    expect(config.enabled_providers).toEqual(['openrouter']);
+  test('pins Muse Spark 1.3 Free (OpenCode Zen) xhigh with persistence and publication disabled', () => {
+    const model = config.provider.opencode.models['muse-spark-1.3-contributor-free'];
+    expect(config.enabled_providers).toEqual(['opencode']);
     expect(model.variants.xhigh.reasoning.effort).toBe('xhigh');
     expect(model.limit).toEqual({ context: 1048576, output: 943718 });
     expect(config.share).toBe('disabled');
@@ -422,7 +422,7 @@ describe('Plan Relay runner', () => {
     expect(args.slice(args.indexOf('--agent'), args.indexOf('--agent') + 2)).toEqual(['--agent', 'executor']);
     expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual([
       '--model',
-      'openrouter/meta/muse-spark-1.3-contributor',
+      'opencode/muse-spark-1.3-contributor-free',
     ]);
     expect(args.slice(args.indexOf('--variant'), args.indexOf('--variant') + 2)).toEqual(['--variant', 'xhigh']);
     expect(args).not.toContain('--auto');
@@ -583,7 +583,7 @@ describe('Plan Relay runner', () => {
     expect(summary.recovery_session).toBeNull();
     expect(summary.plan_relay_version).toBe(PLAN_RELAY_VERSION);
     expect(summary.plan_document_version).toBe('1');
-    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.model).toBe('opencode/muse-spark-1.3-contributor-free');
     expect(summary.variant).toBe('xhigh');
     expect(summary.branch).toBe('feat/test');
     expect(summary.baseline).toBe(fixture.baseline);

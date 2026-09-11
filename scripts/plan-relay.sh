@@ -29,13 +29,13 @@ if test "$($opencode_bin --version)" != "1.18.28"; then
   echo "Plan Relay: OpenCode 1.18.28 is required" >&2
   exit 2
 fi
-if test -z "${OPENROUTER_API_KEY:-}"; then
-  echo "Plan Relay: OPENROUTER_API_KEY is not set" >&2
+if test -z "${OPENCODE_API_KEY:-}" && test -z "${OPENROUTER_API_KEY:-}"; then
+  echo "Plan Relay: OPENCODE_API_KEY (or OPENROUTER_API_KEY as fallback) is not set" >&2
   exit 2
 fi
 
 # Watchdog ceiling for the whole executor session, in seconds, shared by the
-# initial turn and its one possible recovery. OpenRouter provider calls have
+# initial turn and its one possible recovery. Provider calls have
 # been observed to hang for 15+ minutes before dying with a 502, and a healthy
 # deep-reasoning session can legitimately take ~20 minutes; the default gives
 # that more than 2x headroom.
@@ -169,7 +169,7 @@ CI=true \
 timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
   --dir "$repo_root" \
   --agent executor \
-  --model openrouter/meta/muse-spark-1.3-contributor \
+  --model opencode/muse-spark-1.3-contributor-free \
   --variant xhigh \
   --file "$plan_copy" \
   --format json \
@@ -208,7 +208,7 @@ if test -n "$recovery_session"; then
     timeout --kill-after=30s "$recovery_timeout" "$opencode_bin" --pure run \
       --dir "$repo_root" \
       --agent executor \
-      --model openrouter/meta/muse-spark-1.3-contributor \
+      --model opencode/muse-spark-1.3-contributor-free \
       --variant xhigh \
       --session "$recovery_session" \
       --format json \

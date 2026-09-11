@@ -9,9 +9,9 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(readFileSync(join(scriptsDir, 'opencode-review-config.json'), 'utf8'));
 
 describe('OpenCode review policy', () => {
-  test('pins the OpenRouter model, high reasoning and non-persistent runtime', () => {
-    const model = config.provider.openrouter.models['meta/muse-spark-1.3-contributor'];
-    expect(config.enabled_providers).toEqual(['openrouter']);
+  test('pins the OpenCode Zen model, high reasoning and non-persistent runtime', () => {
+    const model = config.provider.opencode.models['muse-spark-1.3-contributor-free'];
+    expect(config.enabled_providers).toEqual(['opencode']);
     expect(model.variants.high.reasoning.effort).toBe('high');
     expect(model.limit).toEqual({ context: 1048576, output: 943718 });
     expect(config.share).toBe('disabled');

@@ -20,10 +20,10 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   group.name = `viewmodel-${id}`;
   const body = new THREE.Group();
   const offset = id === 'sniper' ? { x: 0.26, y: 0.12 }
-    : id === 'shotgun' ? { x: 0.25, y: 0.105 }
+    : id === 'shotgun' ? { x: 0.20, y: 0.105 }
       : id === 'smg' ? { x: 0.25, y: 0.14 } : { x: 0.24, y: 0.15 };
   const sightLine = id === 'pistol' ? -0.004 : id === 'revolver' ? 0.037 : id === 'shotgun' ? .034 : 0;
-  body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' ? -0.43 : id === 'shotgun' ? -.53 : -0.57);
+  body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' ? -0.50 : id === 'shotgun' ? -.46 : -0.57);
   group.add(body);
   const authored = createAuthoredWeaponRig(id, weaponAssets[id]);
   body.add(authored.root);

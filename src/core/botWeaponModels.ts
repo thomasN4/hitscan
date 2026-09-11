@@ -77,6 +77,21 @@ export function createBotWeaponRig(id: BotWeaponId): BotWeaponRig {
   mount.updateMatrixWorld(true);
   const gripLocal = tilt.worldToLocal(authored.grip.getWorldPosition(new THREE.Vector3()));
   authored.root.position.sub(gripLocal);
+  // Full-length stocks extend behind the grip and would poke out through the
+  // bot's back, so slide the seated gun forward until its rear clears the
+  // torso. Measured, not tabulated: the bounding box adapts per model, and
+  // short weapons (sidearms, blade) already clear the limit and stay exactly
+  // grip-seated. The mount is still detached and identity here, so the
+  // world-space box reads directly in mount coordinates.
+  mount.updateMatrixWorld(true);
+  const rear = new THREE.Box3().setFromObject(authored.root).min.z;
+  if (rear < STOCK_REAR_LIMIT) {
+    // Tilt-space -Z is mount-space +Z (the half-turn flips x and z), so
+    // decreasing the root's tilt-space z walks the gun forward. Markers
+    // (muzzle, magazine path) ride along as children, staying consistent.
+    authored.root.position.z -= STOCK_REAR_LIMIT - rear;
+    mount.updateMatrixWorld(true);
+  }
   authored.root.updateMatrixWorld(true);
   const mechanisms: BotWeaponRig['mechanisms'] = { ...authored.mechanisms };
   const rest: BotWeaponRig['rest'] = new Map();
@@ -95,6 +110,13 @@ export function createBotWeaponRig(id: BotWeaponId): BotWeaponRig {
 
 /** Decay rate (1/s) of the firing kick — snappy enough to read per shot. */
 const SHOT_KICK_RATE = 9;
+
+/**
+ * Rear-most mount-space z any held gun may occupy. The hinge sits at the
+ * torso's centre plane and the torso is 0.4 deep, so a stock ending here
+ * stays inside the body instead of poking out of the back.
+ */
+const STOCK_REAR_LIMIT = -0.05;
 
 /**
  * Firing-kick envelope for a shot `shotAge` seconds ago: 1 on the firing

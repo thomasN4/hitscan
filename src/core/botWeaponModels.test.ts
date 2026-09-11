@@ -27,6 +27,16 @@ function mockAsset(id: WeaponId): THREE.Object3D {
   const root = new THREE.Group();
   root.name = `mock-${id}`;
   marker('grip_right', [0.1, -0.05, 0.05], root);
+  // A body mesh standing in for the gun's bulk: Box3 (the stock-clearance
+  // slide) measures geometry, not bare markers. Primaries overhang behind
+  // the grip like real stocks; sidearms and the blade stay short of it.
+  const primary = id === 'smg' || id === 'sniper' || id === 'shotgun';
+  const bodyLength = id === 'sniper' ? 1.05 : id === 'shotgun' ? 0.8 : id === 'smg' ? 0.7 : 0.3;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, bodyLength));
+  // Span ends at one stock-overhang behind the grip (asset +z is rearward):
+  // primaries overhang 0.3 like real stocks, the rest 0.03.
+  body.position.set(0, 0, 0.05 + (primary ? 0.3 : 0.03) - bodyLength / 2);
+  root.add(body);
   if (id === 'knife') {
     marker('blade_tip', [0.1, -0.05, -0.3], root);
     return root;
@@ -77,22 +87,34 @@ describe('botWeaponModels', () => {
     expect(() => fresh.createBotWeaponRig('smg')).toThrow(/initBotWeaponModels/);
   });
 
-  test('every catalog weapon mounts with its grip seated on the hinge', () => {
+  test('grips seat on the hinge; long stocks slide forward to clear it', () => {
     initMocks();
     const hinge = new THREE.Group();
     hinge.position.set(1, 2, 3);
     hinge.rotation.y = 0.7;
     for (const id of IDS) {
       const rig = createBotWeaponRig(id);
+      // Rear clearance is baked at build time, so assert it while the mount
+      // is still detached and identity: world reads directly in mount space.
+      // (Under a rotated hinge only the component-wise world minimum exists,
+      // which is no single corner mapped back.)
+      expect(new THREE.Box3().setFromObject(rig.mount).min.z).toBeGreaterThanOrEqual(-0.05 - 1e-9);
       hinge.add(rig.mount);
     }
     hinge.updateMatrixWorld(true);
     for (const mount of [...hinge.children]) {
+      const id = mount.name.replace('bot-weapon-', '');
       const grip = mount.getObjectByName('grip_right');
       if (!grip) throw new Error('mock asset lost its grip_right');
-      const gripWorld = grip.getWorldPosition(new THREE.Vector3());
-      const mountWorld = mount.getWorldPosition(new THREE.Vector3());
-      expect(gripWorld.distanceTo(mountWorld)).toBeLessThan(1e-6);
+      // The clearance slide runs along the barrel only: lateral and vertical
+      // seating stays exact, and the grip never ends up behind the hinge.
+      const gripLocal = mount.worldToLocal(grip.getWorldPosition(new THREE.Vector3()));
+      expect(Math.hypot(gripLocal.x, gripLocal.y)).toBeLessThan(1e-6);
+      expect(gripLocal.z).toBeGreaterThanOrEqual(-1e-9);
+      // Primaries overhang the limit and ride forward; short weapons stay
+      // exactly grip-seated.
+      if (id === 'smg' || id === 'sniper' || id === 'shotgun') expect(gripLocal.z).toBeGreaterThan(0.1);
+      else expect(gripLocal.z).toBeLessThan(1e-9);
     }
   });
 

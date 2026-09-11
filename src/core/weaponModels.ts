@@ -11,7 +11,7 @@ export interface WeaponViewModel {
   body: THREE.Group;
   mechanisms: Partial<Record<'magazine' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'bolt' | 'slide' | 'shell', THREE.Object3D>>;
   rest: Map<THREE.Object3D, { position: THREE.Vector3; rotation: THREE.Euler }>;
-  aimOffset: { x: number; y: number };
+  aimOffset: { x: number; y: number; z: number };
 }
 
 /** Build a fresh model; caller owns it for the page's lifetime. */
@@ -53,5 +53,7 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
     rest.set(node, { position: node.position.clone(), rotation: node.rotation.clone() });
   }
   return { authored, group, body, mechanisms, rest,
-    aimOffset: { x: -offset.x, y: offset.y - sightLine } };
+    // The SMG stock reaches back to z=0.416 m. Move it away during ADS
+    // to clear the 0.1 m camera near plane, including the depth recoil kick.
+    aimOffset: { x: -offset.x, y: offset.y - sightLine, z: id === 'smg' ? -0.04 : 0.06 } };
 }

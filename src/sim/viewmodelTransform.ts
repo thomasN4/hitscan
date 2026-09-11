@@ -19,7 +19,7 @@
 /** Everything updateViewmodel reads, in the order it reads it. */
 export interface ViewmodelInput {
   /** Hip -> ADS delta for the equipped weapon (weapons.ts:viewmodelAimOffset). */
-  aimOffset: { x: number; y: number };
+  aimOffset: { x: number; y: number; z: number };
   /** 0 = hip, 1 = fully aimed (wpn.adsLerp). */
   ads: number;
   /** Reshaped cosmetic recoil (weapons.ts:currentViewmodelRecoil), NOT raw. */
@@ -48,7 +48,7 @@ export function viewmodelTransform(input: ViewmodelInput): ViewmodelTransform {
     position: {
       x: aimOffset.x * ads,
       y: aimOffset.y * ads + Math.sin(now * 10) * bobAmt * hip,
-      z: visualRecoil * 0.012 + 0.06 * ads, // ADS pulls the gun slightly closer
+      z: visualRecoil * 0.012 + aimOffset.z * ads, // per-weapon eye relief
     },
     rotation: {
       x: visualRecoil * 0.015 * hip,

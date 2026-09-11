@@ -90,7 +90,7 @@ let VIEWMODELS: Record<WeaponId, WeaponViewModel>;
  * The equipped weapon's hip→ADS viewmodel delta, for player.ts:updateViewmodel
  * to apply scaled by adsLerp. Same no-miss lookup contract as currentDef().
  */
-export function viewmodelAimOffset(): { x: number; y: number } {
+export function viewmodelAimOffset(): { x: number; y: number; z: number } {
   return VIEWMODELS[equippedId(wpn.slot)].aimOffset;
 }
 

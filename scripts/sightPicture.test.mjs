@@ -18,8 +18,9 @@
 import { test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { Group, Raycaster, Vector3 } from 'three';
-import { WEAPONS } from '../src/core/state.ts';
+import { Box3, Group, Raycaster, Vector3 } from 'three';
+import { viewmodelRecoil } from '../src/sim/recoil.ts';
+import { WEAPONS, RECOIL_CAP } from '../src/core/state.ts';
 import { createWeaponViewModel } from '../src/core/weaponModels.ts';
 import { poseWeapon } from '../src/core/weaponPresentation.ts';
 import { weaponPose } from '../src/sim/weaponAnimation.ts';
@@ -47,11 +48,11 @@ function poseFor(id, cycle) {
  * down -z. gunGroup's transform comes from the real seam rather than a
  * hand-copied offset, so an aim-offset change cannot silently invalidate this.
  */
-function rig(id, ads, cycle) {
+function rig(id, ads, cycle, visualRecoil = 0) {
   const vm = createWeaponViewModel(id, assets);
   const pose = poseFor(id, cycle);
   poseWeapon(vm, id, pose, 10, ads, 0);
-  const t = viewmodelTransform({ aimOffset: vm.aimOffset, ads, visualRecoil: 0, recoilYaw: 0, bobAmt: 0, now: 10 });
+  const t = viewmodelTransform({ aimOffset: vm.aimOffset, ads, visualRecoil, recoilYaw: 0, bobAmt: 0, now: 10 });
   const gun = new Group();
   gun.position.set(t.position.x, t.position.y, t.position.z);
   gun.rotation.set(t.rotation.x, t.rotation.y, 0);
@@ -182,5 +183,23 @@ test('revolver front crest is visible through the rear notch throughout firing',
     expect(hit, `front blade at cycle ${i/20}`).toBeDefined();
     expect(hit.distance).toBeGreaterThan(.56);
     expect(hit.distance).toBeLessThan(.59);
+  }
+});
+
+// Use the shipped geometry and real presentation transforms: the old +0.06 m
+// ADS pull put the butt pad through the camera's 0.1 m near plane.
+test('SMG stock clears the near plane through ADS and maximum recoil', () => {
+  for (const ads of [0, 0.25, 0.5, 0.75, 1]) {
+    for (const recoil of [0, viewmodelRecoil(RECOIL_CAP, WEAPONS.smg.recoilKick)]) {
+      const { gun } = rig('smg', ads, 0, recoil);
+      // Export batches static parts by material; check every visible mesh,
+      // including the stock, rather than relying on Blender part names.
+      const stock = visibleMeshes(gun);
+      expect(stock.length).toBeGreaterThan(0);
+      for (const mesh of stock) {
+        expect(new Box3().setFromObject(mesh).max.z,
+          `${mesh.name}, ADS=${ads}, recoil=${recoil}`).toBeLessThan(-0.11);
+      }
+    }
   }
 });

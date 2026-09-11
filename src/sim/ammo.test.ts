@@ -77,27 +77,20 @@ describe('planReload', () => {
 describe('cancelsReload', () => {
   // A per-round reload two shells in: the baseline every stance flips. mag/reserve
   // are irrelevant here — cancelReload clears the schedule, never the magazine.
-  const loading = { reloading: true, sprinting: false, aiming: false };
+  const loading = { reloading: true, sprinting: false };
 
-  test.each([
-    ['sprinting', { sprinting: true }],
-    ['aiming', { aiming: true }],
-    ['both at once', { sprinting: true, aiming: true }],
-  ])('%s cancels a running reload', (_name, stance) => {
-    expect(cancelsReload({ ...loading, ...stance })).toBe(true);
+  test('sprinting cancels a running reload', () => {
+    expect(cancelsReload({ ...loading, sprinting: true })).toBe(true);
   });
 
   test('a settled stance leaves the reload alone', () => {
     expect(cancelsReload(loading)).toBe(false);
   });
 
-  test.each([
-    ['sprinting', { sprinting: true }],
-    ['aiming', { aiming: true }],
-  ])('%s with no reload running cancels nothing', (_name, stance) => {
+  test('sprinting with no reload running cancels nothing', () => {
     // The caller guards on this too, but the rule owns it: a stance is not an
     // event, so a level-triggered check must be inert on an idle weapon.
-    expect(cancelsReload({ ...loading, reloading: false, ...stance })).toBe(false);
+    expect(cancelsReload({ ...loading, reloading: false, sprinting: true })).toBe(false);
   });
 });
 

@@ -187,12 +187,15 @@ async function start(): Promise<void> {
   addEventListener('mousedown', e => {
     if (e.button === 0 && session.locked && player.alive) input.shooting = true;
     // A fresh RMB press can't enter the scope while recoil is still settling
-    // (sniper bolt-action feel) or while the swapped weapon is still being
-    // drawn (issue #15 deploy window); a press already held is unaffected.
+    // (sniper bolt-action feel), while the swapped weapon is still being
+    // drawn (issue #15 deploy window), or while reloading — ADS is impossible
+    // until the reload finishes or is cancelled; a press already held is
+    // unaffected.
     if (e.button === 2 && session.locked && player.alive) {
       const gate = WEAPONS[equippedId(wpn.slot)].scopeGate; // undefined = no gate (smg)
       if ((gate === undefined || wpn.recoil < gate) &&
-        !isDeploying(gameTime.now(), wpn.animation.switchedAt)) input.aiming = true;
+        !isDeploying(gameTime.now(), wpn.animation.switchedAt) &&
+        !weapon.reloading) input.aiming = true;
     }
   });
   addEventListener('mouseup', e => {

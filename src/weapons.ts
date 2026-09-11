@@ -184,9 +184,10 @@ function cancelReload(): void {
  * sights are up DROPS them (dropAim): one motion at a time, and like
  * unscopeOnShot, clearing input.aiming means a fresh RMB press is needed to
  * re-raise even if the button is still held. A REFUSED reload leaves the aim
- * exactly as it was. The opposite order — sights raised DURING a reload —
- * belongs to sim/ammo.ts:cancelsReload, applied per frame in updateWeapon;
- * that fresh RMB press is what cancels.
+ * exactly as it was. The opposite order — sights raised DURING a reload — is
+ * refused instead: main.ts blocks the fresh RMB press and updateWeapon holds
+ * adsLerp at 0 while reloading, so ADS is impossible until the reload
+ * finishes or sprint/swap cancels it.
  *
  * Whole-mag weapons (no `perRound`): one timer, the mag refills once at
  * reloadEnd. Per-round weapons (shotgun/revolver): reloadTime is spread
@@ -539,16 +540,17 @@ export function updateWeapon(dt: number): void {
 
   const def = currentDef();
 
-  // Sprinting or raising the sights wins when it begins during a reload — the
-  // mirror of tryReload's dropAim, and the same one-motion-at-a-time rule seen
-  // from the order where nothing presses R. Run this before animation or
-  // transfer/completion so the cancel frame cannot sneak in one last round.
-  // Rounds already moved by a per-round reload remain live; whole-mag reloads
-  // have not moved anything yet.
+  // Sprinting wins when it begins during a reload — the mirror of tryReload's
+  // dropAim, and the same one-motion-at-a-time rule seen from the order where
+  // nothing presses R. Run this before animation or transfer/completion so the
+  // cancel frame cannot sneak in one last round. Rounds already moved by a
+  // per-round reload remain live; whole-mag reloads have not moved anything
+  // yet. Aiming is NOT a cancel: RMB is refused for the whole reload (see the
+  // main.ts gate and the aiming blend below), so the sights can never rise
+  // mid-reload to fight it.
   if (cancelsReload({
     reloading: weapon.reloading,
     sprinting: currentSprintActive(effectiveCrouching()),
-    aiming: input.aiming,
   })) {
     cancelReload();
   }
@@ -574,9 +576,10 @@ export function updateWeapon(dt: number): void {
   // the smg has a single iron-sights step; the sniper cycles its wheel-chosen
   // zoomFovs entry. Running adds a +5° speed-feel kick (run and aim are
   // mutually exclusive by the movement precedence rules). RMB is inert while
-  // a melee def is held — there is no sight line to raise — and while
-  // deploying, so the sights cannot rise out of the draw animation.
-  const aiming = input.aiming && !def.melee && !deploying;
+  // a melee def is held — there is no sight line to raise — while deploying,
+  // so the sights cannot rise out of the draw animation, and while reloading,
+  // so ADS is impossible until the reload finishes or is cancelled.
+  const aiming = input.aiming && !def.melee && !deploying && !weapon.reloading;
   if (!aiming) wpn.zoomLevel = 0; // every re-scope starts at lowest zoom
   const aimFov = aimFovFor(def);
   wpn.adsLerp = approach(wpn.adsLerp, aiming ? 1 : 0, dt, ADS_RATE);

@@ -77,8 +77,8 @@ export interface ReloadDecision {
   start: boolean;
   /**
    * A STARTED reload drops iron sights / the scope — one motion at a time,
-   * and a fresh RMB press re-raises afterwards (same semantics as
-   * unscopeOnShot: clearing input.aiming beats a still-held button). False
+   * and a fresh RMB press re-raises once the reload finishes (same semantics
+   * as unscopeOnShot: clearing input.aiming beats a still-held button). False
    * whenever `start` is false: a REFUSED reload must never touch the aim.
    */
   dropAim: boolean;
@@ -96,25 +96,19 @@ export interface StanceCancelRequest {
   reloading: boolean;
   /** Shift sprint is active with a net movement direction. */
   sprinting: boolean;
-  /** RMB held: iron sights / scope raised right now. */
-  aiming: boolean;
 }
 
 /**
  * Whether this frame's stance cancels a running reload.
  *
- * Both stances win, for the same reason planReload's dropAim drops the sights
- * when a reload STARTS: one motion at a time, and the newer input is the one
- * the player just asked for. The two halves are mirrors — this is the order
- * planReload cannot see, because nothing presses R. Rounds a per-round reload
- * has already moved stay live; weapons.ts:cancelReload clears the schedule, not
- * the magazine.
+ * Only sprint wins: raising the sights during a reload is refused instead
+ * (main.ts blocks the fresh RMB press and updateWeapon keeps adsLerp at 0
+ * while reloading), so aiming can never arrive mid-reload to cancel it.
+ * Rounds a per-round reload has already moved stay live;
+ * weapons.ts:cancelReload clears the schedule, not the magazine.
  *
- * Level-triggered rather than edge-triggered, and it cannot fight dropAim:
- * starting a reload while aiming zeroes input.aiming, so `aiming` is already
- * false on the very next frame. A fresh RMB press is what both re-raises the
- * sights and cancels, so there is no held-button loop to break.
+ * Level-triggered rather than edge-triggered.
  */
 export function cancelsReload(r: StanceCancelRequest): boolean {
-  return r.reloading && (r.sprinting || r.aiming);
+  return r.reloading && r.sprinting;
 }

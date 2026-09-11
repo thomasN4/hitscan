@@ -217,22 +217,28 @@ try {
       const swapped = await snapshot(page);
       assert.equal(swapped.reloading, false);
       if (['pistol','smg','sniper'].includes(id)) {
-        for (const action of ['aim', 'sprint']) {
-          await page.keyboard.press('KeyR'); await runFor(page, .5);
-          if (action === 'aim') await page.mouse.down({button:'right'});
-          else { await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyW'); }
-          await runFor(page, .4);
-          const cancelled = await snapshot(page);
-          assert.equal(cancelled.reloading, false);
-          for (const key of [id === 'sniper' ? 'bolt' : 'slide', 'magazine']) {
-            const rest = idle.parts[`weapon-mechanism-${key}`].position;
-            const actual = cancelled.parts[`weapon-mechanism-${key}`].position;
-            assert.ok(Math.hypot(...actual.map((v,i)=>v-rest[i])) < 1e-6, `${action} cancellation must restore ${key}`);
-          }
-          if (action === 'aim') await page.mouse.up({button:'right'});
-          else { await page.keyboard.up('ShiftLeft'); await page.keyboard.up('KeyW'); }
-          await runFor(page, .4);
+        // Sprint still cancels a running reload CS-style; ADS is refused
+        // instead — RMB mid-reload neither cancels it nor raises the sights.
+        await page.keyboard.press('KeyR'); await runFor(page, .5);
+        await page.mouse.down({button:'right'});
+        await runFor(page, .4);
+        const aimed = await snapshot(page);
+        assert.equal(aimed.reloading, true);
+        assert.equal(await page.evaluate(() => window.__cs.game.aiming), false);
+        await page.mouse.up({button:'right'});
+        await runFor(page, .4);
+        await page.keyboard.press('KeyR'); await runFor(page, .5);
+        await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyW');
+        await runFor(page, .4);
+        const cancelled = await snapshot(page);
+        assert.equal(cancelled.reloading, false);
+        for (const key of [id === 'sniper' ? 'bolt' : 'slide', 'magazine']) {
+          const rest = idle.parts[`weapon-mechanism-${key}`].position;
+          const actual = cancelled.parts[`weapon-mechanism-${key}`].position;
+          assert.ok(Math.hypot(...actual.map((v,i)=>v-rest[i])) < 1e-6, `sprint cancellation must restore ${key}`);
         }
+        await page.keyboard.up('ShiftLeft'); await page.keyboard.up('KeyW');
+        await runFor(page, .4);
       }
       if (swapped.parts['weapon-mechanism-shell']) assert.equal(swapped.parts['weapon-mechanism-shell'].visible, false);
     }

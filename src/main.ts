@@ -35,6 +35,7 @@ import { decideWinner } from './sim/match';
 import { isDeploying } from './sim/weaponSwap';
 import { validateWeapons } from './sim/validateWeapons';
 import { loadWeaponAssets } from './core/weaponAssets';
+import { initBotWeaponModels } from './core/botWeaponModels';
 import { initLigneClaire } from './core/ligneClaire';
 
 // ---------- Startup ----------
@@ -75,7 +76,11 @@ async function start(): Promise<void> {
   initEngine(session.map);
   initHUD();
   setAssetStatus('loading');
-  initWeaponViewmodels(await loadWeaponAssets(import.meta.env.BASE_URL));
+  const weaponAssets = await loadWeaponAssets(import.meta.env.BASE_URL);
+  initWeaponViewmodels(weaponAssets);
+  // Before the wave: bots clone their third-person mounts out of the same
+  // assets, so construction below throws loudly instead of holding nothing.
+  initBotWeaponModels(weaponAssets);
   setAssetStatus('ready');
   // Geometry first, then the wave. RANGE stays a separate flag from the builder
   // lookup because it means something narrower — "no bots, no round clock" — and

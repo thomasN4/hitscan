@@ -33,9 +33,10 @@ export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'k
  * 7a exclusion that kept blades away from a die it had no meaning for is gone.
  *
  * The alias survives the widening because its job survives it: every Record
- * over it — sim/botWeapons.ts's tuning, bots.ts's silhouettes, audio.ts's
- * attack tones — still fails to compile until a new weapon says how a bot uses
- * it. What changed is the answer a blade gives, not whether one is demanded.
+ * over it — sim/botWeapons.ts's tuning, core/weaponAssets.ts's mechanism
+ * table, audio.ts's attack tones — still fails to compile until a new weapon
+ * says how a bot uses it. What changed is the answer a blade gives, not
+ * whether one is demanded.
  */
 export type BotWeaponId = WeaponId;
 
@@ -1006,7 +1007,7 @@ export interface SessionState {
    * bot carries a loadout — sim/botWeapons.ts:BotLoadout descends
    * [primary, secondary, knife] as each position runs dry — so `Bot.weapon`
    * changes within a life, the brain re-derives its bands when it does, and
-   * the silhouette is rebuilt to match. Read this pair as configuration, never
+   * the held model is rebuilt to match. Read this pair as configuration, never
    * as what a given bot has in its hands right now.
    */
   botWeaponT: BotWeaponChoice;

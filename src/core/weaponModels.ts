@@ -53,7 +53,7 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
     rest.set(node, { position: node.position.clone(), rotation: node.rotation.clone() });
   }
   return { authored, group, body, mechanisms, rest,
-    // The SMG stock reaches back to z=0.416 m. Move it away during ADS
-    // to clear the 0.1 m camera near plane, including the depth recoil kick.
-    aimOffset: { x: -offset.x, y: offset.y - sightLine, z: id === 'smg' ? -0.04 : 0.06 } };
+    // Shoulder the SMG close enough that the butt pad falls below the frame.
+    // Keep the stock's near-plane intersection below the view even during recoil.
+    aimOffset: { x: -offset.x, y: offset.y - sightLine, z: id === 'smg' ? 0.10 : 0.06 } };
 }

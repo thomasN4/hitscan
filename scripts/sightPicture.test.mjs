@@ -78,6 +78,7 @@ function visibleMeshes(root) {
 const EYE = new Vector3(0, 0, 0);
 const CONE_MRAD = 20; // half-angle; the revolver hammer alone is 21.7 mrad wide
 const STEP_MRAD = 2;
+const FIRE_CYCLES = Array.from({ length: 21 }, (_, i) => i / 20);
 
 /** Nearest thing any ray in the upper aim cone touches, in metres from the eye. */
 function nearestInAimCone(gun) {
@@ -118,14 +119,13 @@ for (const id of ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife']) {
   // settled scope. The knife never reaches ADS at all (aiming is gated on
   // !def.melee), so it is checked at the hip through its swing.
   const ads = id === 'sniper' ? 0.85 : id === 'knife' ? 0 : 1;
-  test(`${id}: nothing occupies the aim cone through the fire cycle`, () => {
+  // Authored meshes make the full 21-pose sweep exceed one test's 5 s CI
+  // budget. Give each pose its own case while retaining every ray and station.
+  test.each(FIRE_CYCLES)(`${id}: aim cone stays clear at fire-cycle phase %s`, cycle => {
     if (id === 'sniper') expect(WEAPONS.sniper.scopedOverlay).toBe(true);
     if (id === 'knife') expect(WEAPONS.knife.melee).toBe(true);
-    for (let i = 0; i <= 20; i++) {
-      const cycle = i / 20;
-      const nearest = nearestInAimCone(rig(id, ads, cycle).gun);
-      expect(nearest, `${id} at cycle ${cycle}`).toBeGreaterThanOrEqual(AIM_STATION[id]);
-    }
+    const nearest = nearestInAimCone(rig(id, ads, cycle).gun);
+    expect(nearest, `${id} at cycle ${cycle}`).toBeGreaterThanOrEqual(AIM_STATION[id]);
   });
 }
 

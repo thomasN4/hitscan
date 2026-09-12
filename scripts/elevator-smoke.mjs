@@ -30,7 +30,7 @@ export const ELEVATOR_SMOKE_TOTAL_WALL_MS = SMOKE_PROTOCOL_TIMEOUT_MS - 30000;
 export function createElevatorWaiter({ wallNow, gameNow, requestFrame, cancelFrame,
   snapshot, totalWallMs }) {
   const suiteStart = wallNow();
-  return (predicate, label, observe = () => {}, { wallMs, gameSec = Infinity,
+  return (predicate, label, observe = () => {}, { wallMs = Infinity, gameSec = Infinity,
     detail = () => '' } = {}) => new Promise((resolve, reject) => {
     const wallStart = wallNow(), gameStart = gameNow();
     const remaining = totalWallMs - (wallStart - suiteStart);

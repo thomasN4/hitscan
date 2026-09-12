@@ -103,3 +103,17 @@ test('wall-only checks ignore game elapsed but propagate observer errors and cle
   await assertion;
   expect(vi.getTimerCount()).toBe(0);
 });
+
+test('omitted leg wall budget falls back to the total deadline, not an instant leg-wall failure', async () => {
+  const stalled = fixture({ totalWallMs: 5000, frames: false });
+  const pending = stalled.wait(() => false, 'no leg budget', undefined, {});
+  const assertion = expect(pending).rejects.toThrow(/no leg budget:.*timeout=total-wall/);
+  await vi.advanceTimersByTimeAsync(5000);
+  await assertion;
+  expect(vi.getTimerCount()).toBe(0);
+  const fresh = fixture({ totalWallMs: 5000 });
+  const omitted = fresh.wait(() => true, 'immediate success');
+  await vi.advanceTimersByTimeAsync(10);
+  await omitted;
+  expect(vi.getTimerCount()).toBe(0);
+});

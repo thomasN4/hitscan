@@ -72,6 +72,21 @@ standing over the sight line; see the sight-picture section in
 translation of the `Hammer` mesh, not a pipeline step — the `.blend` is the
 source of truth afterwards.
 
+The revolver's six chambers are bored straight through, so the cylinder used to
+read as an empty gun — six black holes, and daylight through the frame window.
+Each chamber now holds a seated cartridge: a brass case stopping 8 mm short of
+the chamber mouth, a rim standing 1.8 mm proud of the rotor's rear face, and a
+dark primer. This is static geometry, not an ammo display; the rounds never
+disappear as the cylinder empties. Added by the same one-off `bpy` route as the
+hammer drop, but unlike the hammer it is **also** in `create-weapon-previews.py`
+(`loaded_chambers()`, shared by both so they cannot drift), so re-running the
+design generator will not silently regress it. The parts are collected by their
+`Chamber ` name prefix into `mechanism_rotor` at export, which is what makes them
+index with the cylinder and swing out with the crane; `validateWeaponGlb` asserts
+the rotor still owns brass geometry so a future re-export cannot drop them. They
+reuse the existing `Brass` and `Recess / rubber` materials — a new material would
+collide when the exporter strips `.NNN` suffixes and fail the palette assertion.
+
 The ordinary build serves these files from Vite's configured base URL; startup
 loads each once before enabling Deploy. A missing or incompatible weapon asset
 is a visible startup error.

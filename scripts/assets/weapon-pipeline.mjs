@@ -41,6 +41,16 @@ export function validateWeaponGlb(bytes, id) {
     const owner = gltf.nodes[nodeIndex(id === 'shotgun' ? 'mechanism_pump' : 'mechanism_cylinder')];
     for (const name of id === 'shotgun' ? ['grip_left'] : ['mechanism_rotor', 'reload_port'])
       assert.ok(owner.children.includes(nodeIndex(name)), `Detached attachment ${name}`);
+    if (id === 'revolver') {
+      // The seated cartridges are the only brass under the rotor. Without them the
+      // bored-through chambers read as an empty gun, so guard against a re-export
+      // that drops them (they merge into one mesh, by material, under the rotor).
+      const rotor = gltf.nodes[nodeIndex('mechanism_rotor')];
+      const brass = gltf.materials.findIndex(m => m.name === 'Brass');
+      assert.ok((rotor.children ?? []).some(child => gltf.nodes[child]?.mesh !== undefined
+        && gltf.meshes[gltf.nodes[child].mesh].primitives.some(p => p.material === brass)),
+        'Revolver chambers carry no cartridges');
+    }
   } else {
     const roots = gltf.scenes[gltf.scene].nodes;
     for (const name of required) assert.ok(roots.includes(nodeIndex(name)), `${id} attachment must be fixed at root: ${name}`);

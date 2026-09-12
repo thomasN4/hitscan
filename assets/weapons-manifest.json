@@ -2,7 +2,7 @@
   "version": 1,
   "blender": "5.2.1 LTS",
   "exporter": "scripts/assets/export-weapons.py",
-  "exporterSha256": "685de8c5afd70c8622b1bf061b58794f44579cc0c747003a494c79777682fe95",
+  "exporterSha256": "f9d4366b8360d5fb22bbd9b3998c3fa38e04271e596c904e104370bf70cea801",
   "settings": {
     "format": "GLB",
     "export_yup": false,
@@ -16,7 +16,7 @@
       "source": "assets/source/shotgun.blend",
       "output": "public/assets/shotgun.glb",
       "sourceSha256": "0e8c3983d65eda7cc3b2d9b281b62f1375105aca27f43ed5cc801d03d25d7652",
-      "outputSha256": "446152fe2d91aef3f6d9290eeaee549904693803db3c31d83b0a948006ba720e",
+      "outputSha256": "82bf99972718faa7986092bffc2c280b386d57b26096b1d2259006789b95215d",
       "stats": {
         "vertices": 30098,
         "meshes": 9,
@@ -27,12 +27,12 @@
       "id": "revolver",
       "source": "assets/source/revolver.blend",
       "output": "public/assets/revolver.glb",
-      "sourceSha256": "48fa2a85641c0a62d07916c2a2a6380669462722c308f75c8de72126ed8b97ad",
-      "outputSha256": "d3f27392d0b792845e62ce1cfe13a897ff7c43f519c248a30c8f7b3e730aa3f8",
+      "sourceSha256": "914c68f2eb26bdac10c1b1228251e5e05444a30ec9dae95028e23ca1425fb951",
+      "outputSha256": "b5457051c47ac75a3844a68c34cfad6707c4926478c998486bc278303ed3e12d",
       "stats": {
-        "vertices": 16878,
-        "meshes": 11,
-        "bytes": 487160
+        "vertices": 25326,
+        "meshes": 13,
+        "bytes": 727844
       }
     },
     {
@@ -40,7 +40,7 @@
       "source": "assets/source/pistol.blend",
       "output": "public/assets/pistol.glb",
       "sourceSha256": "f8331cf053e7298fb11997754d6b50f173c32e6b5603232a583ee9765bee4e93",
-      "outputSha256": "12dcb5731adfbbc16184184c309705e506261932c375561c7a78385627047f00",
+      "outputSha256": "8d6394d01996cecc9be0649e9b011a677bc46ad58cce31285981c80a9497479d",
       "stats": {
         "vertices": 26322,
         "meshes": 9,
@@ -52,7 +52,7 @@
       "source": "assets/source/smg.blend",
       "output": "public/assets/smg.glb",
       "sourceSha256": "e1df6351fe74ce47d87c5f1c5e2cecbb52dc7670ec6e0e42482d78b02195123b",
-      "outputSha256": "2a98be9838677ffdcf8bfe83b2f173fd85278ba4924a214dadebfe6fb65fe1f1",
+      "outputSha256": "f574bf3e8061e8233cba0da5a713c4d87c186c3c86e68cef88912e5d7e71ee72",
       "stats": {
         "vertices": 28714,
         "meshes": 7,
@@ -76,7 +76,7 @@
       "source": "assets/source/knife.blend",
       "output": "public/assets/knife.glb",
       "sourceSha256": "091c34a1506486301d1d9caa9ff3b3e2153da192cbc2ad607f1f13fab3e35bbe",
-      "outputSha256": "6284eb793cb1228c51e11fe77055d09f22d20011468d174df15f200ca291e17e",
+      "outputSha256": "4511e1705bc3303f6f584e8b9c59af517e20cf2b28282bb8bcbbd393fda7f4cf",
       "stats": {
         "vertices": 5726,
         "meshes": 3,

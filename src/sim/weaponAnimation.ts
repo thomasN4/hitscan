@@ -46,6 +46,19 @@ function hold(t: number, start: number, peak: number, endStart: number, end: num
   return smooth(start, peak, t) * (1 - smooth(endStart, end, t));
 }
 
+/** Shared pump envelope for the mechanism and ADS recovery; never changes readiness. */
+export function shotgunPump(input: Pick<WeaponAnimationInput, 'id' | 'now' | 'shotAt' | 'fireInterval' | 'reloading'>): number {
+  const cycle = (input.now - input.shotAt) / input.fireInterval;
+  return input.id === 'shotgun' && !input.reloading && cycle >= 0 && cycle < 1
+    ? hold(cycle, 0.10, 0.36, 0.48, 0.78) : 0;
+}
+
+/** Keep the shot's initial punch, then let the pump stroke carry aimed recovery. */
+export function shotgunChambering(pump: number, ads: number): { dip: number; roll: number; recoilScale: number } {
+  const amount = pump * ads;
+  return { dip: -0.03 * amount, roll: Math.PI / 30 * amount, recoilScale: 1 - 0.75 * amount };
+}
+
 /** Absolute game-clock evaluation: no integration drift or pause-time catch-up. */
 export function weaponPose(input: WeaponAnimationInput): WeaponPose {
   const { id, now, shotAt, fireInterval, reloading, reloadT: t } = input;
@@ -71,7 +84,7 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
     shell: reloading && perRound && t >= 0.25 && t < 0.83,
     insert: smooth(0.35, 0.82, t),
     cylinder: id === 'revolver' ? reload : 0,
-    pump: id === 'shotgun' && firing && !reloading ? hold(cycle, 0.10, 0.36, 0.48, 0.78) : 0,
+    pump: shotgunPump(input),
     boltLift: id === 'sniper' && firing && !reloading ? hold(cycle, 0.12, 0.26, 0.76, 0.90) : 0,
     boltPull: id === 'sniper' && firing && !reloading ? hold(cycle, 0.27, 0.46, 0.54, 0.75) : 0,
     slide: (id === 'pistol' || id === 'smg') && firing && !reloading ? hold(shotAge, -0.001, 0.025, 0.035, 0.09) : 0,

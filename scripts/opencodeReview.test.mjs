@@ -11,12 +11,21 @@ const config = JSON.parse(readFileSync(join(scriptsDir, 'opencode-review-config.
 describe('OpenCode review policy', () => {
   test('pins the OpenCode Zen model, high reasoning and non-persistent runtime', () => {
     const model = config.provider.opencode.models['muse-spark-1.3-contributor-free'];
-    expect(config.enabled_providers).toEqual(['opencode']);
+    expect(config.enabled_providers).toEqual(['opencode', 'openrouter']);
     expect(model.variants.high.reasoning.effort).toBe('high');
     expect(model.limit).toEqual({ context: 1048576, output: 943718 });
     expect(config.share).toBe('disabled');
     expect(config.snapshot).toBe(false);
     expect(config.autoupdate).toBe(false);
+  });
+
+  test('pins the OpenRouter fallback at the same limits and reasoning', () => {
+    const fallback = config.provider.openrouter.models['meta/muse-spark-1.3-contributor'];
+    expect(fallback.name).toBe('Muse Spark 1.3 Contributor (OpenRouter)');
+    expect(fallback.reasoning).toBe(true);
+    expect(fallback.tool_call).toBe(true);
+    expect(fallback.variants.high.reasoning.effort).toBe('high');
+    expect(fallback.limit).toEqual({ context: 1048576, output: 943718 });
   });
 
   test('allows repository reads while denying every unlisted capability', () => {

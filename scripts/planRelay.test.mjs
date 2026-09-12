@@ -123,6 +123,21 @@ length_stream() {
       '{"type":"step_start","sessionID":"ses_fixture","part":{}}' \\
       '{"type":"step_finish","sessionID":"ses_fixture","part":{"reason":"length"}}'
 }
+# Provider failures: record the invocation, then exit before emitting a
+# stream, so the runner's retry has nothing to inherit. "slow" sleeps first,
+# so the retry's remaining-budget arithmetic has something to observe. "edit"
+# writes to a tracked file first, which is the one failure a retry cannot undo.
+if test "$call_index" -eq 1; then
+  case "\${PLAN_RELAY_TEST_FAIL_FIRST:-}" in
+    1) exit 1 ;;
+    slow) sleep 3; exit 1 ;;
+    edit)
+      printf '%s\\n' '{"type":"step_start","sessionID":"ses_dirty","timestamp":1700000000000,"part":{}}'
+      printf 'half done\\n' >> "$worktree/tracked.txt"
+      exit 1
+      ;;
+  esac
+fi
 case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
   healthy)
     healthy_stream
@@ -148,6 +163,19 @@ case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
     if test "$call_index" -eq 1; then
       sleep 1
       length_stream
+    else
+      healthy_stream
+    fi
+    ;;
+  recovery_fail_then_healthy)
+    if test "$call_index" -eq 1; then
+      length_stream
+    elif test "$call_index" -eq 2; then
+      # An abandoned recovery attempt: partial bytes, then a fast failure.
+      # The ses_recovery_fail session is unique to this fragment, so the test
+      # can prove the judged stream no longer contains it.
+      printf '%s' '{"type":"step_start","sessionID":"ses_recovery_fail","part":{"tool":"edit"'
+      exit 1
     else
       healthy_stream
     fi
@@ -206,6 +234,7 @@ exec ${JSON.stringify(realTimeout)} "$@"
   };
   const env = {
     ...process.env,
+    OPENCODE_API_KEY: 'test-only',
     OPENROUTER_API_KEY: 'test-only',
     OPENCODE_BIN: fake,
     PLAN_RELAY_TEST_ARGS: capture.args,
@@ -384,12 +413,21 @@ describe('Plan Relay executor policy', () => {
 
   test('pins Muse Spark 1.3 Free (OpenCode Zen) xhigh with persistence and publication disabled', () => {
     const model = config.provider.opencode.models['muse-spark-1.3-contributor-free'];
-    expect(config.enabled_providers).toEqual(['opencode']);
+    expect(config.enabled_providers).toEqual(['opencode', 'openrouter']);
     expect(model.variants.xhigh.reasoning.effort).toBe('xhigh');
     expect(model.limit).toEqual({ context: 1048576, output: 943718 });
     expect(config.share).toBe('disabled');
     expect(config.snapshot).toBe(false);
     expect(config.autoupdate).toBe(false);
+  });
+
+  test('pins the OpenRouter fallback at the same limits and reasoning', () => {
+    const fallback = config.provider.openrouter.models['meta/muse-spark-1.3-contributor'];
+    expect(fallback.name).toBe('Muse Spark 1.3 Contributor (OpenRouter)');
+    expect(fallback.reasoning).toBe(true);
+    expect(fallback.tool_call).toBe(true);
+    expect(fallback.variants.xhigh.reasoning.effort).toBe('xhigh');
+    expect(fallback.limit).toEqual({ context: 1048576, output: 943718 });
   });
 
   test('allows rg and validation while denying unlisted shell commands', () => {
@@ -467,15 +505,186 @@ describe('Plan Relay runner', () => {
     expect(run(drifted).stderr).toContain('baseline mismatch');
   });
 
-  test('propagates the executor exit status', () => {
+  test('propagates the fallback exit status when both models fail', () => {
     const fixture = createFixture();
     const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_EXIT: '17' });
+    expect(result.status).toBe(17);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+    const summary = summaryOf(fixture);
+    expect(summary.exit_status).toBe(17);
+    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.gate).toBe('skipped');
+    expect(summary.turns_launched).toBe(1);
+  });
+
+  test('propagates without retry when no fallback key exists', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_EXIT: '17', OPENROUTER_API_KEY: '' });
     expect(result.status).toBe(17);
     expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
     const summary = summaryOf(fixture);
     expect(summary.exit_status).toBe(17);
+    expect(summary.model).toBe('opencode/muse-spark-1.3-contributor-free');
     expect(summary.gate).toBe('skipped');
     expect(summary.turns_launched).toBe(1);
+  });
+
+  test('retries a failed primary on the OpenRouter fallback and stamps it', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_FAIL_FIRST: '1' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('retrying on openrouter/meta/muse-spark-1.3-contributor');
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+
+    const firstArgs = readFileSync(`${fixture.capture.args}.1`, 'utf8').trim().split('\n');
+    expect(firstArgs.slice(firstArgs.indexOf('--model'), firstArgs.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'opencode/muse-spark-1.3-contributor-free',
+    ]);
+    const secondArgs = readFileSync(`${fixture.capture.args}.2`, 'utf8').trim().split('\n');
+    expect(secondArgs.slice(secondArgs.indexOf('--model'), secondArgs.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(secondArgs.slice(secondArgs.indexOf('--variant'), secondArgs.indexOf('--variant') + 2)).toEqual([
+      '--variant',
+      'xhigh',
+    ]);
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const kept = readdirSync(join(fixture.linked, '.plan-relay', runDir));
+    expect(kept).toContain('attempt1-primary.jsonl');
+    expect(kept).toContain('attempt1-fallback.jsonl');
+    expect(readFileSync(join(fixture.linked, '.plan-relay', runDir, 'events.jsonl'), 'utf8')).toContain(
+      'Implementation complete.',
+    );
+
+    const summary = summaryOf(fixture);
+    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.fallback_model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.gate).toBe('pass');
+  });
+
+  test('starts on the fallback without a Zen key', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { OPENCODE_API_KEY: '' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
+    const args = readFileSync(fixture.capture.args, 'utf8').trim().split('\n');
+    expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(summaryOf(fixture).model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+  });
+
+  test('gives the retry only the turn remaining watchdog budget', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { OPENCODE_TIMEOUT: '10', PLAN_RELAY_TEST_FAIL_FIRST: 'slow' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+    expect(result.stderr).toContain('of watchdog budget left');
+    const timeouts = readFileSync(fixture.capture.timeouts, 'utf8')
+      .trim()
+      .split('\n')
+      .map(Number);
+    expect(timeouts).toHaveLength(2);
+    expect(timeouts[0]).toBe(10);
+    expect(timeouts[1]).toBeGreaterThan(0);
+    expect(timeouts[1]).toBeLessThan(10);
+    expect(summaryOf(fixture).model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+  });
+
+  test('cuts an abandoned recovery attempt out of the judged stream', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_STREAM: 'recovery_fail_then_healthy' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('3');
+
+    const thirdArgs = readFileSync(`${fixture.capture.args}.3`, 'utf8').trim().split('\n');
+    expect(thirdArgs.slice(thirdArgs.indexOf('--model'), thirdArgs.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(thirdArgs).toContain('--session');
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const runPath = join(fixture.linked, '.plan-relay', runDir);
+    // The abandoned bytes survive only in their attempt file, never in the
+    // stream the gate judged.
+    expect(readFileSync(join(runPath, 'attempt2-primary.jsonl'), 'utf8')).toContain('ses_recovery_fail');
+    const events = readFileSync(join(runPath, 'events.jsonl'), 'utf8');
+    expect(events).not.toContain('ses_recovery_fail');
+    expect(events).toContain('Implementation complete.');
+
+    const summary = summaryOf(fixture);
+    expect(summary.gate).toBe('pass');
+    expect(summary.recovery).toBe('taken');
+    expect(summary.turns_launched).toBe(2);
+    expect(summary.totals.unparsable_lines).toBe(0);
+
+    // Turn 1 ran on Zen and only the recovery changed provider, so crediting
+    // the whole run to OpenRouter would misattribute turn 1's spend.
+    expect(summary.turns.map((turn) => turn.model)).toEqual([
+      'opencode/muse-spark-1.3-contributor-free',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+
+    // The abandoned attempt is out of the totals but not out of the record.
+    expect(summary.discarded_attempts).toEqual([
+      {
+        attempt: 'attempt2-primary.jsonl',
+        model: 'opencode/muse-spark-1.3-contributor-free',
+        exit_status: 1,
+      },
+    ]);
+  });
+
+  test('records an overwrite-mode discard once the retry has overwritten it', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_FAIL_FIRST: '1' });
+    expect(result.status, result.stderr).toBe(0);
+    const summary = summaryOf(fixture);
+    expect(summary.discarded_attempts).toEqual([
+      {
+        attempt: 'attempt1-primary.jsonl',
+        model: 'opencode/muse-spark-1.3-contributor-free',
+        exit_status: 1,
+      },
+    ]);
+    // One launched turn, run end to end on the model that retried it.
+    expect(summary.turns.map((turn) => turn.model)).toEqual([
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+  });
+
+  test('refuses to retry an attempt that changed the worktree', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_FAIL_FIRST: 'edit' });
+    expect(result.status).toBe(1);
+    // One invocation: the fallback never ran, because the edit the primary left
+    // on disk would have been its starting state and nobody's plan.
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
+    expect(result.stderr).toContain('changed the worktree before failing');
+    expect(readFileSync(join(fixture.linked, 'tracked.txt'), 'utf8')).toContain('half done');
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const runPath = join(fixture.linked, '.plan-relay', runDir);
+    // Nothing replaced the attempt, so its bytes stay where the summary can
+    // describe the worktree the planner is about to look at.
+    expect(readFileSync(join(runPath, 'events.jsonl'), 'utf8')).toContain('ses_dirty');
+    expect(summaryOf(fixture).discarded_attempts).toEqual([]);
+  });
+
+  test('records no discard when the primary succeeds outright', () => {
+    const fixture = createFixture();
+    expect(run(fixture, fixture.linked).status).toBe(0);
+    const summary = summaryOf(fixture);
+    expect(summary.discarded_attempts).toEqual([]);
+    expect(summary.turns.map((turn) => turn.model)).toEqual([
+      'opencode/muse-spark-1.3-contributor-free',
+    ]);
   });
 
   test('continues a no-edit length-truncated session once and gates the combined stream', () => {
@@ -893,6 +1102,13 @@ describe('Plan Relay summary', () => {
       gate: 'pass',
       duration_s: 4,
       node_modules_shared: true,
+    });
+    expect(parseOptions(['--turn_models=a,b', '--discarded_attempts=f.jsonl:a:1'])).toEqual({
+      turn_models: 'a,b',
+      discarded_attempts: 'f.jsonl:a:1',
+    });
+    expect(parseOptions(['--model_used=openrouter/meta/muse-spark-1.3-contributor'])).toEqual({
+      model_used: 'openrouter/meta/muse-spark-1.3-contributor',
     });
   });
 });

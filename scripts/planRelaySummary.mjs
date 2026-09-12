@@ -32,9 +32,21 @@ const COMMAND_LIMIT = 200;
 const FINAL_TEXT_LIMIT = 2000;
 
 // The pins live here rather than in bash so a record cannot outlive the values
-// that produced it.
+// that produced them. PRIMARY_MODEL is what the runner tries first;
+// FALLBACK_MODEL is the one-shot retry on the same invocation. The runner
+// reports which one actually ran as --model_used, and the summary stamps that —
+// a record claiming the primary when the fallback did the work would lie to the
+// wave entry that cites it.
+//
+// A run can change provider between turns, so --model_used alone would credit
+// every turn to whichever model finished last. --turn_models carries one model
+// per launched turn, in order, and each lands on its own turn; the top-level
+// `model` stays the model the run ENDED on, which is what a wave entry citing a
+// single number wants. Read turns[].model when they disagree.
 const OPENCODE_VERSION = '1.18.28';
-const MODEL = 'opencode/muse-spark-1.3-contributor-free';
+const PRIMARY_MODEL = 'opencode/muse-spark-1.3-contributor-free';
+const FALLBACK_MODEL = 'openrouter/meta/muse-spark-1.3-contributor';
+const MODEL = PRIMARY_MODEL;
 const VARIANT = 'xhigh';
 
 /** Sum a provider-reported field, staying null when NO step carried it. */
@@ -309,6 +321,9 @@ const STRING_KEYS = [
   'worktree',
   'branch',
   'baseline',
+  'model_used',
+  'turn_models',
+  'discarded_attempts',
   'started_at',
   'ended_at',
   'recovery',
@@ -333,12 +348,50 @@ export function parseOptions(argv) {
   return options;
 }
 
+/** Split a comma-joined runner list, tolerating the empty string. */
+function splitList(value) {
+  return typeof value === 'string' && value.length > 0 ? value.split(',') : [];
+}
+
+/**
+ * Parse `--discarded_attempts=file:model:status,...` into records. The runner
+ * joins on `,` and separates on `:`; neither character occurs in a model id or
+ * an attempt filename, and the model is rejoined so a future id containing `:`
+ * degrades to a wrong model rather than a dropped record.
+ */
+function parseDiscarded(value) {
+  return splitList(value).map((entry) => {
+    const parts = entry.split(':');
+    const attempt = parts.shift() ?? null;
+    const exitStatus = Number(parts.pop());
+    return {
+      attempt,
+      model: parts.join(':') || null,
+      exit_status: Number.isFinite(exitStatus) ? exitStatus : null,
+    };
+  });
+}
+
 export function buildSummary(jsonl, options) {
-  const { turn1_lines: turn1Lines, ...supplied } = options;
+  const {
+    turn1_lines: turn1Lines,
+    model_used: modelUsed,
+    turn_models: turnModels,
+    discarded_attempts: discardedAttempts,
+    ...supplied
+  } = options;
   const derived = summarizeEvents(jsonl, {
     worktree: supplied.worktree ?? '',
     boundaries: Number.isFinite(turn1Lines) && turn1Lines > 0 ? [turn1Lines] : [],
   });
+  // Positional: turn_models[i] is the model whose bytes turns[i] retained. A
+  // turn the runner could not attribute falls back to the run-level stamp
+  // rather than claiming a model that never ran.
+  const perTurn = splitList(turnModels);
+  const turns = derived.turns.map((turn, index) => ({
+    ...turn,
+    model: perTurn[index] || modelUsed || derived.model,
+  }));
   return {
     plan_relay_version: PLAN_RELAY_VERSION,
     plan_document_version: supplied.plan_document_version ?? null,
@@ -358,6 +411,12 @@ export function buildSummary(jsonl, options) {
     exit_status: supplied.exit_status ?? null,
     gate: supplied.gate ?? null,
     ...derived,
+    turns,
+    model: modelUsed ?? derived.model,
+    fallback_model: FALLBACK_MODEL,
+    // Attempts whose bytes were cut out of the judged stream. Their cost is
+    // absent from `totals` on purpose and readable in the named file.
+    discarded_attempts: parseDiscarded(discardedAttempts),
   };
 }
 

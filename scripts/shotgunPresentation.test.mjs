@@ -85,3 +85,24 @@ test('the reload pose keeps the muzzle and port in frame at the narrowest fov', 
     expect(ndc(vm, port, fov).y, `port at reload ${amount}`).toBeGreaterThan(-.9);
   }
 });
+
+
+test('ADS chambering resets absolutely and preserves the authored pump travel', async () => {
+  const vm = await model();
+  const rest = pose(false);
+  poseWeapon(vm, 'shotgun', rest, 10, 1, 0);
+  const position = vm.group.position.clone();
+  const rotation = vm.group.rotation.clone();
+  const pumpZ = vm.mechanisms.pump.position.z;
+  const chambering = { ...rest, pump: 1 };
+  for (let i = 0; i < 3; i++) {
+    poseWeapon(vm, 'shotgun', chambering, 10, 1, 0);
+    expect(vm.group.position.y - position.y).toBeCloseTo(-.03);
+    expect(vm.group.rotation.z - rotation.z).toBeCloseTo(Math.PI / 30);
+    expect(vm.mechanisms.pump.position.z - pumpZ).toBeCloseTo(.095);
+  }
+  poseWeapon(vm, 'shotgun', rest, 10, 1, 0);
+  expect(vm.group.position.distanceTo(position)).toBe(0);
+  expect(vm.group.rotation.toArray()).toEqual(rotation.toArray());
+  expect(vm.mechanisms.pump.position.z).toBe(pumpZ);
+});

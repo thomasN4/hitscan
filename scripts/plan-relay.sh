@@ -156,27 +156,197 @@ The bash tool is restricted. Allowed commands are: $allowed_commands. All unlist
 
 relay_started_at=$SECONDS
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Executor models: OpenCode Zen is primary, OpenRouter's copy of the same Muse
+# Spark contributor tier is the one-shot fallback. Without a Zen key the
+# primary cannot authenticate, so start on the fallback instead of spending an
+# invocation learning that.
+primary_model="opencode/muse-spark-1.3-contributor-free"
+fallback_model="openrouter/meta/muse-spark-1.3-contributor"
+model_variant="xhigh"
+active_model="$primary_model"
+if test -z "${OPENCODE_API_KEY:-}"; then
+  active_model="$fallback_model"
+fi
+model_used="$active_model"
+
+# Whether an executor attempt touched the worktree. The runner refuses a dirty
+# worktree at startup, so anything this reports came from an attempt: `diff HEAD`
+# covers tracked content whether staged or not, hashing what `ls-files --others`
+# reports covers untracked content that no diff would show, and the status line
+# catches renames and deletions, which are not content at all.
+worktree_fingerprint() {
+  {
+    git -C "$repo_root" status --porcelain --untracked-files=all
+    git -C "$repo_root" diff HEAD --
+    git -C "$repo_root" ls-files --others --exclude-standard -z | xargs -0 -r sha256sum --
+  } 2>/dev/null | sha256sum
+}
+
+turn_model=""
+turn_models=""
+discarded_attempts=""
+attempt_seq=0
+
+# Run one executor turn on the active model, retrying once on the other model.
+# Three conditions gate that retry, and none of them is how quickly the attempt
+# died — an earlier draft of this comment claimed "fails fast", which the code
+# has never checked:
+#
+#   1. the failure is not a watchdog kill (124), whose budget is already spent;
+#   2. some of the turn's budget remains, and the retry gets only that, never a
+#      fresh one, so a run stays inside the documented watchdog ceiling;
+#   3. the attempt left the worktree byte-identical. An attempt that edited
+#      files cannot be retried away: the edits stay on disk, so the retry would
+#      start from a state the approved plan never described and the record would
+#      omit changes the final diff still shows. That run stops instead, keeping
+#      its edits and its events for the planner to read.
+#
+# Every attempt is retained beside the events file as evidence. The events file
+# holds one attempt's bytes per turn: an attempt is cut back out of it only when
+# a retry is about to replace it, so a failure nothing follows keeps its bytes
+# where the summary can describe what is actually on disk.
+#
+# A replaced attempt's cost and edits are therefore absent from the summary's
+# totals, which is deliberate: merging two attempts would produce turn totals
+# describing no single session, and a mid-write final line would swallow the
+# retry's first event. The spend was still real, so each discarded attempt is
+# named in `discarded_attempts` — its file, model and exit status — and the
+# bytes stay readable in that file. Excluded from the totals, never unrecorded.
+#
+# turn_model names the model whose bytes the turn retained, so a run that
+# changed provider mid-flight can be attributed per turn instead of wholly to
+# whichever model happened to finish it.
+# Usage: invoke_executor <events-file> <overwrite|append> <budget-secs> <opencode args...>
+invoke_executor() {
+  local events_file="$1"
+  local append_mode="$2"
+  local budget="$3"
+  shift 3
+  attempt_seq=$((attempt_seq + 1))
+  local turn_start=$SECONDS
+  local tried=""
+  local status=2
+  local candidate role attempt_file attempts=0
+  # A failed attempt is discarded by the NEXT attempt, not at the moment it
+  # fails, so its record and its events file size wait here until that attempt
+  # actually runs. A failure no retry follows is never discarded at all.
+  local pending_discard=""
+  local pending_bytes=0
+  # Global on purpose: the caller reads it after this turn returns.
+  turn_model=""
+  # A scalar, not an array: "${empty_array[@]}" is an unbound-variable error
+  # under `set -u` on bash older than 4.4, while an unquoted-but-set scalar
+  # expands to zero words everywhere.
+  local tee_flag=""
+  if test "$append_mode" = "append"; then
+    tee_flag="-a"
+  fi
+  for candidate in "$active_model" "$primary_model" "$fallback_model"; do
+    case "$tried" in
+      *"|$candidate|"*) continue ;;
+    esac
+    tried="$tried|$candidate|"
+    case "$candidate" in
+      "$primary_model")
+        if test -z "${OPENCODE_API_KEY:-}"; then
+          continue
+        fi
+        role="primary"
+        ;;
+      *)
+        if test -z "${OPENROUTER_API_KEY:-}"; then
+          continue
+        fi
+        role="fallback"
+        ;;
+    esac
+    attempt_file="$run_dir/attempt${attempt_seq}-${role}.jsonl"
+    attempts=$((attempts + 1))
+    if test -n "$pending_discard"; then
+      # This attempt replaces the last one, so now its bytes leave the stream.
+      # Overwrite mode's tee truncates by itself; append mode needs the cut.
+      if test "$append_mode" = "append"; then
+        head -c "$pending_bytes" "$events_file" > "$events_file.trunc" && mv -- "$events_file.trunc" "$events_file"
+      fi
+      discarded_attempts="${discarded_attempts:+$discarded_attempts,}$pending_discard"
+      pending_discard=""
+    fi
+    if test "$attempts" -gt 1; then
+      echo "Plan Relay: retrying on $candidate with ${budget}s of watchdog budget left" >&2
+    fi
+    # In append mode the attempt below would linger in the events file and a
+    # retry would concatenate after it, so remember the pre-attempt size for the
+    # cut-back. Overwrite mode truncates by itself and needs no size.
+    local events_bytes=0
+    if test "$append_mode" = "append"; then
+      events_bytes=$(wc -c < "$events_file" 2>/dev/null || echo 0)
+    fi
+    local pre_fingerprint
+    pre_fingerprint="$(worktree_fingerprint)"
+    set +e
+    OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
+    XDG_CONFIG_HOME="$runtime/config" \
+    XDG_DATA_HOME="$runtime/data" \
+    XDG_CACHE_HOME="$runtime/cache" \
+    XDG_STATE_HOME="$runtime/state" \
+    OPENCODE_CONFIG_DIR="$runtime/config" \
+    OPENCODE_DISABLE_AUTOUPDATE=true \
+    NO_COLOR=1 \
+    CI=true \
+    timeout --kill-after=30s "$budget" "$opencode_bin" --pure run \
+      --model "$candidate" \
+      --variant "$model_variant" \
+      "$@" | tee $tee_flag "$events_file" "$attempt_file"
+    status="${PIPESTATUS[0]}"
+    # No `set -e` here: the caller invokes this function under `set +e` and
+    # that mode must survive the return, because a nonzero status below is a
+    # retry-or-propagate value rather than a script failure.
+    active_model="$candidate"
+    model_used="$candidate"
+    turn_model="$candidate"
+    if test "$status" -eq 0; then
+      return 0
+    fi
+    if test "$status" -eq 124; then
+      echo "Plan Relay: executor hung and was killed by the watchdog on $candidate; not retrying" >&2
+      return "$status"
+    fi
+    echo "Plan Relay: executor failed on $candidate (exit $status)" >&2
+    # Edits already on disk outlive the attempt that made them, so a retry here
+    # would run the plan again over a worktree neither model was given. Stop
+    # with the evidence intact instead; reverting the edits is the only other
+    # way to make a retry honest, and a runner that silently throws work away is
+    # worse than one that hands the planner a failed run it can read.
+    if test "$(worktree_fingerprint)" != "$pre_fingerprint"; then
+      echo "Plan Relay: executor changed the worktree before failing on $candidate; not retrying" >&2
+      return "$status"
+    fi
+    budget=$((budget - (SECONDS - turn_start)))
+    if test "$budget" -le 0; then
+      echo "Plan Relay: no watchdog budget remains for a retry" >&2
+      return "$status"
+    fi
+    # Stage the discard rather than apply it: the loop may still find no other
+    # model configured and end without retrying, and an unflushed stage leaves
+    # this attempt's bytes in the stream, which is what that run wants.
+    pending_discard="$(basename "$attempt_file"):$candidate:$status"
+    pending_bytes="$events_bytes"
+  done
+  return "$status"
+}
+
 set +e
-OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
-XDG_CONFIG_HOME="$runtime/config" \
-XDG_DATA_HOME="$runtime/data" \
-XDG_CACHE_HOME="$runtime/cache" \
-XDG_STATE_HOME="$runtime/state" \
-OPENCODE_CONFIG_DIR="$runtime/config" \
-OPENCODE_DISABLE_AUTOUPDATE=true \
-NO_COLOR=1 \
-CI=true \
-timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
+invoke_executor "$events" overwrite "$timeout_secs" \
   --dir "$repo_root" \
   --agent executor \
-  --model opencode/muse-spark-1.3-contributor-free \
-  --variant xhigh \
   --file "$plan_copy" \
   --format json \
   --title "Plan Relay: ${branch#*/}" \
-  "$executor_prompt" | tee "$events"
-status="${PIPESTATUS[0]}"
+  "$executor_prompt"
+status="$?"
 turns_launched=1
+turn_models="$turn_model"
 # The summary splits the concatenated stream at this line. wc -l under-counts by
 # one when the final line lacks a newline, which happens only on a kill — and a
 # killed turn never gets a turn 2, so the boundary is not consulted then.
@@ -196,25 +366,15 @@ if test -n "$recovery_session"; then
   if test "$recovery_timeout" -gt 0; then
     echo "Plan Relay: continuing no-edit length-truncated session once with ${recovery_timeout}s remaining: $recovery_session" >&2
     recovery_prompt="Your previous turn ended before implementation. Repository inspection is complete. Do not reread files already inspected. Begin with the smallest edit required by the attached approved plan now, then continue its implementation and validation. The same plan remains binding. If blocked, report the blocker."
-    OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
-    XDG_CONFIG_HOME="$runtime/config" \
-    XDG_DATA_HOME="$runtime/data" \
-    XDG_CACHE_HOME="$runtime/cache" \
-    XDG_STATE_HOME="$runtime/state" \
-    OPENCODE_CONFIG_DIR="$runtime/config" \
-    OPENCODE_DISABLE_AUTOUPDATE=true \
-    NO_COLOR=1 \
-    CI=true \
-    timeout --kill-after=30s "$recovery_timeout" "$opencode_bin" --pure run \
+    invoke_executor "$events" append "$recovery_timeout" \
       --dir "$repo_root" \
       --agent executor \
-      --model opencode/muse-spark-1.3-contributor-free \
-      --variant xhigh \
       --session "$recovery_session" \
       --format json \
-      "$recovery_prompt" | tee -a "$events"
-    status="${PIPESTATUS[0]}"
+      "$recovery_prompt"
+    status="$?"
     turns_launched=2
+    turn_models="${turn_models},${turn_model}"
     recovery="taken"
   else
     echo "Plan Relay: no watchdog budget remains for recovery" >&2
@@ -256,6 +416,9 @@ if node "$summary_script" "$events" "$summary" \
   --worktree="$repo_root" \
   --branch="$branch" \
   --baseline="$baseline" \
+  --model_used="$model_used" \
+  --turn_models="$turn_models" \
+  --discarded_attempts="$discarded_attempts" \
   --node_modules_shared="$node_modules_shared" \
   --started_at="$started_at" \
   --ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

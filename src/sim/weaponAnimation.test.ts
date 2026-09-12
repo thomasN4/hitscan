@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { crossedCue, weaponPose, type WeaponAnimationInput } from './weaponAnimation';
+import { crossedCue, weaponPose, shotgunPump, shotgunChambering, type WeaponAnimationInput } from './weaponAnimation';
 import { SWAP_DELAY } from './weaponSwap';
 import { freshWeaponAnimation, WEAPONS, type WeaponId } from '../core/state';
 
@@ -112,4 +112,38 @@ test('revolver advances the cylinder only after the cartridge hand withdraws', (
   expect(weaponPose({...loading, reloadT: .8}).index).toBe(0);
   expect(weaponPose({...loading, reloadT: .91}).index).toBeGreaterThan(0);
   expect(weaponPose({...loading, reloadT: .99}).index).toBe(1);
+});
+
+
+describe('shotgun ADS chambering', () => {
+  const at = (cycle: number, ads = 1, extra: Partial<WeaponAnimationInput> = {}) =>
+    shotgunChambering(shotgunPump({ ...idle, shotAt: 10, now: 10 + cycle * .9, ...extra }), ads);
+
+  test('idle, the initial kick and completed cycles retain their unmodified pose', () => {
+    const rest = { dip: -0, roll: 0, recoilScale: 1 };
+    expect(shotgunChambering(shotgunPump(idle), 1)).toEqual(rest);
+    for (const cycle of [-1, 0, .1, .78, 1, 20]) expect(at(cycle)).toEqual(rest);
+  });
+
+  test('the rearward stroke dips 3 cm, rolls 6 degrees and leaves a quarter of cosmetic recoil', () => {
+    const peak = at(.4);
+    expect(peak.dip).toBeCloseTo(-.03);
+    expect(peak.roll).toBeCloseTo(Math.PI / 30);
+    expect(peak.recoilScale).toBeCloseTo(.25);
+    expect(Math.abs(at(.65).dip)).toBeLessThan(Math.abs(peak.dip));
+  });
+
+  test('ADS transitions blend continuously and hip fire remains unchanged', () => {
+    expect(at(.4, 0)).toEqual({ dip: -0, roll: 0, recoilScale: 1 });
+    expect(at(.4, .5).dip).toBeCloseTo(at(.4).dip / 2);
+    expect(at(.4, .5).roll).toBeCloseTo(at(.4).roll / 2);
+    expect(at(.4, .5).recoilScale).toBeCloseTo(.625);
+  });
+
+  test('reloads, fresh animation state and other weapons cannot chamber', () => {
+    for (const extra of [{ reloading: true }, { shotAt: -Infinity },
+      ...(['smg', 'sniper', 'pistol', 'revolver', 'knife'] as const).map(id => ({ id }))]) {
+      expect(at(.4, 1, extra)).toEqual({ dip: -0, roll: 0, recoilScale: 1 });
+    }
+  });
 });

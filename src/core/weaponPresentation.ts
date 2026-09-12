@@ -1,6 +1,6 @@
 import type { WeaponId } from './state';
 import type { WeaponViewModel } from './weaponModels';
-import type { WeaponPose } from '../sim/weaponAnimation';
+import { shotgunChambering, type WeaponPose } from '../sim/weaponAnimation';
 import { posePistolReload } from './pistolPresentation';
 import { poseRifleReload } from './riflePresentation';
 import { poseMagazine } from './magazinePresentation';
@@ -26,6 +26,13 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   group.rotation.set(0.10 * pose.reload - 0.22 * pose.draw + 0.16 * running - 0.6 * pose.swing,
     0.1 * pose.swing,
     0.28 * pose.reload - 0.22 * running - 0.45 * pose.swing);
+  if (id === 'shotgun') {
+    // A brief, intentional sight departure during the pump cycle only. The
+    // outer gunGroup still preserves its aimed alignment and ballistic recoil.
+    const chambering = shotgunChambering(pose.pump, ads);
+    group.position.y += chambering.dip;
+    group.rotation.z += chambering.roll;
+  }
   if (m.magazine) poseMagazine(vm, pose);
   if (m.pump) m.pump.position.z += 0.095 * pose.pump;
   if (m.bolt) {

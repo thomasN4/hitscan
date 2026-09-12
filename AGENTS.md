@@ -349,7 +349,8 @@ holds the user's key.
 6. **The planner waits** — arm a background watcher, then leave the PR alone
    until it fires. The watcher must exit on the failure paths too, not only on
    the review landing: a reviewer that dies posts nothing at all, and silence
-   looks exactly like a slow review.
+   looks exactly like a slow review. Judge liveness by the test in Gotchas
+   below — a missing `post`-job row means still live, never dead.
 7. **The planner reads the review** — it is a pull-request review rather than an
    issue comment (Gitea has no commit-comment API), so it is the body under
    `/pulls/{index}/reviews` carrying this head commit's
@@ -396,7 +397,19 @@ and a planner waiting on it cannot tell the difference from the outside:
   skips everything after it; the export step's empty-file check is the narrower
   case where the command exited 0 having written nothing. Either way the `post`
   job's condition goes unsatisfied, no comment appears, and none ever will. A watcher that greps only for the comment therefore hangs forever;
-  watch the workflow run's terminal status alongside it, and give the wait a
+  watch the workflow run's terminal status alongside it — and count only run
+  rows that exist for this head: **absence of a run row is not evidence of
+  completion.** `review.yml` runs `prepare` → reviewer → `post` in sequence, so
+  between the reviewer job succeeding and the `post` job being created there is
+  a window with no live reviewer row and no `post` row at all, which a naive
+  "nothing is running, so it must be over" test reads as a dead reviewer at
+  exactly the moment a healthy review is about to post (issue #87: `Select AI
+  reviewer` and the reviewer both green, `Post AI review` not yet created, the
+  review landing moments later). Treat the reviewer as **still live while the
+  `post` job has no run row for this head**, and conclude it died only on
+  positive evidence — the `prepare` or reviewer job itself failed or was
+  cancelled, or the `post` job exists and reached a terminal status with no
+  `<!-- ai-review:<sha> -->` marker comment for this head. Give the wait a
   deadline past the sum of the jobs it waits on. Those run in sequence and cap
   at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
   `timeout-minutes: 25` can fire during a healthy run. `timeout-minutes` bounds

@@ -350,7 +350,7 @@ holds the user's key.
    until it fires. The watcher must exit on the failure paths too, not only on
    the review landing: a reviewer that dies posts nothing at all, and silence
    looks exactly like a slow review. Judge liveness by the test in Gotchas
-   below — a missing `post`-job row means still live, never dead.
+   below — a missing `post`-job row on its own never means dead.
 7. **The planner reads the review** — it is a pull-request review rather than an
    issue comment (Gitea has no commit-comment API), so it is the body under
    `/pulls/{index}/reviews` carrying this head commit's
@@ -397,20 +397,28 @@ and a planner waiting on it cannot tell the difference from the outside:
   skips everything after it; the export step's empty-file check is the narrower
   case where the command exited 0 having written nothing. Either way the `post`
   job's condition goes unsatisfied, no comment appears, and none ever will. A watcher that greps only for the comment therefore hangs forever;
-  watch the workflow run's terminal status alongside it — and count only run
-  rows that exist for this head: **absence of a run row is not evidence of
-  completion.** `review.yml` runs `prepare` → reviewer → `post` in sequence, so
-  between the reviewer job succeeding and the `post` job being created there is
-  a window with no live reviewer row and no `post` row at all, which a naive
-  "nothing is running, so it must be over" test reads as a dead reviewer at
-  exactly the moment a healthy review is about to post (issue #87: `Select AI
-  reviewer` and the reviewer both green, `Post AI review` not yet created, the
-  review landing moments later). Treat the reviewer as **still live while the
-  `post` job has no run row for this head**, and conclude it died only on
-  positive evidence — the `prepare` or reviewer job itself failed or was
-  cancelled, or the `post` job exists and reached a terminal status with no
-  `<!-- ai-review:<sha> -->` marker comment for this head. Give the wait a
-  deadline past the sum of the jobs it waits on. Those run in sequence and cap
+  watch the workflow run's terminal status alongside it — scoped to the latest
+  run for this head, never to the head alone: **absence of a run row is not
+  evidence of completion, and neither is a row from a run that is no longer
+  current.** The concurrency group cancels a run when a newer `edited` event
+  lands, so one head can own several runs, and a cancelled reviewer row in a
+  superseded run means "a newer event landed", not "the reviewer died". If a
+  newer run for this head appears mid-watch, follow it and stop reading the old
+  one. Poll the marker first on every pass and only consult the run rows while
+  it is absent; a skipped reviewer or `post` row is the dedupe path (this head
+  was already reviewed), which sends you back to the marker that is already
+  there. Within the latest run, `review.yml` runs `prepare` → reviewer → `post`
+  in sequence, so between the reviewer job succeeding and the `post` job being
+  created there is a window with no live reviewer row and no `post` row at all,
+  which a naive "nothing is running, so it must be over" test reads as a dead
+  reviewer at exactly the moment a healthy review is about to post (issue #87:
+  `Select AI reviewer` and the reviewer both green, `Post AI review` not yet
+  created, the review landing moments later). Treat the reviewer as **still
+  live while the latest run's `post` job has no row**, and conclude it died
+  only on positive evidence from that run — its `prepare` or reviewer job
+  itself failed or was cancelled, or its `post` job reached a terminal status
+  with no `<!-- ai-review:<sha> -->` marker comment for this head. Give the
+  wait a deadline past the sum of the jobs it waits on. Those run in sequence and cap
   at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
   `timeout-minutes: 25` can fire during a healthy run. `timeout-minutes` bounds
   execution and not the wait for a free runner, and the Codex route queues for

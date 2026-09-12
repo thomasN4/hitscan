@@ -15,9 +15,10 @@
 // neither is here: BrainParams / brain classes for policy, and
 // sim/botWeapons.ts:BOT_WEAPON_TUNING for everything a WEAPON decides — its
 // accuracy curve, cadence, burst discipline and the chase bands it wants to
-// fight at. This file holds no policy numbers; the per-weapon geometry below
-// is presentation, and the muzzle offset it carries is a model dimension
-// rather than a tunable.
+// fight at. This file holds no policy numbers; the held weapon is
+// presentation — a third-person mount of the same authored model the player
+// holds (core/botWeaponModels.ts), whose muzzle marker positions the flash —
+// and aiming it at the intent's lookAt is execution, not tuning.
 //
 // Shot gating contract (realized by the default brain): fire only when a
 // cooldown expires AND the bot currently SEES its focus — the observation is
@@ -54,6 +55,8 @@ import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEve
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
 import { shouldAbandonRoute } from './sim/routeFollow';
+import { approach } from './sim/smoothing';
+import { botShotKick, createBotWeaponRig, pickBotShoulderOffset, poseBotWeaponRig, type BotWeaponRig } from './core/botWeaponModels';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -64,31 +67,12 @@ import { shouldAbandonRoute } from './sim/routeFollow';
 const BOT_RADIUS = NAV_RADIUS;
 
 /**
- * One bot weapon's silhouette, in the aim hinge's local space.
- *
- * Only LENGTH and BULK vary between weapons, because those are the two cues
- * that survive at combat distance — a bot is a stack of untextured boxes seen
- * at 20 m, and anything finer than a silhouette is invisible there (lesson
- * 25: a cosmetic cue that cannot read is not a cue).
- *
- * Built here rather than cloned from weapons.ts's viewmodels, for four
- * separate reasons any one of which is decisive: those meshes are positioned
- * in CAMERA space with baked first-person offsets; there is one instance of
- * each and an Object3D has exactly one parent; weapons.ts already imports
- * this module (botFor), so importing back would be the module cycle the
- * architecture rules ban outright; and their parts carry reload-pose userData
- * a bot has no use for.
+ * What each weapon looks like in a bot's hands: the SAME authored GLB model
+ * the player holds, mounted third-person on the aim hinge
+ * (core/botWeaponModels.ts). There is deliberately no per-weapon table here:
+ * widening the catalog fails to compile in the asset seam's own mechanism
+ * table instead, which is the one place that must say how a new model moves.
  */
-interface BotWeaponModel {
-  /** Parts to hang on the aim hinge: shared geometry, local offset, material. */
-  readonly parts: readonly {
-    geo: THREE.BufferGeometry;
-    pos: readonly [number, number, number];
-    mat: THREE.Material;
-  }[];
-  /** Local +z of the barrel tip — where muzzlePos() puts the flash. */
-  readonly muzzle: number;
-}
 
 /**
  * Ceiling on how far a bot's aim tips to track a target (rad, ~69°).
@@ -97,6 +81,20 @@ interface BotWeaponModel {
  * vertical so the barrel never disappears into the bot's own silhouette.
  */
 const MAX_AIM_PITCH = 1.2;
+
+/**
+ * Blend rate (1/s) toward the reload displacement — ~6 closes most of the gap
+ * in a quarter second, so the magazine seats promptly when the brain's fire
+ * controller reports reloading and returns without lagging behind a cancel.
+ */
+const RELOAD_BLEND_RATE = 6;
+
+/**
+ * Forward thrust (m) of the knife mount on a swing. The blade has no firing
+ * mechanism to kick, so the swing itself is the motion: a quick jab along the
+ * hinge's forward axis that decays with the same envelope as the gun kicks.
+ */
+const KNIFE_JAB = 0.18;
 
 /**
  * How close (m) a bot must get to a waypoint before the next one is offered.
@@ -167,91 +165,6 @@ const botGeo = {
   head:   new THREE.BoxGeometry(0.34, 0.34, 0.34),
   legs:   new THREE.BoxGeometry(0.6, 0.9, 0.35),
 };
-/** Gunmetal, shared by both teams — a weapon reads as a weapon, not as a side. */
-const matBarrel = createCelMaterial({ color: 0x23262b });
-/** Walnut, for the shotgun's furniture — the one weapon that isn't all steel. */
-const matStock = createCelMaterial({ color: 0x4a331f });
-
-/** Shared weapon geometry: one allocation per shape, for every bot carrying it. */
-const wpnGeo = {
-  smgBody:   new THREE.BoxGeometry(0.08, 0.08, 0.60),
-  smgMag:    new THREE.BoxGeometry(0.05, 0.16, 0.07),
-  sniperBody: new THREE.BoxGeometry(0.06, 0.06, 1.05),
-  sniperScope: new THREE.CylinderGeometry(0.05, 0.05, 0.26, 10),
-  shotgunBody: new THREE.BoxGeometry(0.12, 0.12, 0.70),
-  shotgunTube: new THREE.BoxGeometry(0.07, 0.07, 0.52),
-  shotgunStock: new THREE.BoxGeometry(0.09, 0.13, 0.26),
-  pistolBody: new THREE.BoxGeometry(0.07, 0.07, 0.28),
-  pistolGrip: new THREE.BoxGeometry(0.06, 0.14, 0.07),
-  revolverBody: new THREE.BoxGeometry(0.07, 0.07, 0.34),
-  revolverCylinder: new THREE.CylinderGeometry(0.06, 0.06, 0.11, 8),
-  knifeBlade: new THREE.BoxGeometry(0.025, 0.05, 0.22),
-  knifeGrip: new THREE.BoxGeometry(0.04, 0.06, 0.12),
-};
-// The scope and the cylinder are lathe shapes lying ALONG the barrel, so both
-// need the x-quarter-turn weapons.ts gives its viewmodel scope. Baking it into
-// the geometry keeps the model table a flat list of positions.
-wpnGeo.sniperScope.rotateX(Math.PI / 2);
-wpnGeo.revolverCylinder.rotateX(Math.PI / 2);
-
-/**
- * What each weapon looks like on a bot. A full Record over BotWeaponId, like
- * every other per-weapon table in the repo: widening the union fails to
- * compile here until the new weapon has a silhouette.
- */
-const BOT_WEAPON_MODELS: Record<BotWeaponId, BotWeaponModel> = {
-  // The shipped bot barrel, unchanged — this is the shape every existing
-  // playtest impression was formed against.
-  smg: {
-    parts: [
-      { geo: wpnGeo.smgBody, pos: [0, 0, 0.30], mat: matBarrel },
-      { geo: wpnGeo.smgMag, pos: [0, -0.10, 0.18], mat: matBarrel },
-    ],
-    muzzle: 0.60,
-  },
-  // Nearly twice the smg's length plus a scope: the one that has to read as
-  // "that thing outranges me" from across the map.
-  sniper: {
-    parts: [
-      { geo: wpnGeo.sniperBody, pos: [0, 0, 0.53], mat: matBarrel },
-      { geo: wpnGeo.sniperScope, pos: [0, 0.08, 0.30], mat: matBarrel },
-    ],
-    muzzle: 1.05,
-  },
-  // Short and THICK, with wood: bulk is the cue here, not length.
-  shotgun: {
-    parts: [
-      { geo: wpnGeo.shotgunBody, pos: [0, 0, 0.35], mat: matBarrel },
-      { geo: wpnGeo.shotgunTube, pos: [0, -0.09, 0.28], mat: matBarrel },
-      { geo: wpnGeo.shotgunStock, pos: [0, -0.02, -0.13], mat: matStock },
-    ],
-    muzzle: 0.70,
-  },
-  // Visibly the smallest thing on the field.
-  pistol: {
-    parts: [
-      { geo: wpnGeo.pistolBody, pos: [0, 0, 0.14], mat: matBarrel },
-      { geo: wpnGeo.pistolGrip, pos: [0, -0.10, 0.02], mat: matBarrel },
-    ],
-    muzzle: 0.28,
-  },
-  revolver: {
-    parts: [
-      { geo: wpnGeo.revolverBody, pos: [0, 0, 0.17], mat: matBarrel },
-      { geo: wpnGeo.revolverCylinder, pos: [0, -0.01, 0.04], mat: matBarrel },
-    ],
-    muzzle: 0.34,
-  },
-  // A blade, not a gun: markedly shorter and thinner than every barrel above,
-  // because length and bulk are the two cues that read at 20 m (lesson 25).
-  knife: {
-    parts: [
-      { geo: wpnGeo.knifeBlade, pos: [0, 0, 0.17], mat: matBarrel },
-      { geo: wpnGeo.knifeGrip, pos: [0, -0.01, 0.0], mat: matStock },
-    ],
-    muzzle: 0.28,
-  },
-};
 const palettes: Record<Team, { body: THREE.MeshToonMaterial; head: THREE.MeshToonMaterial; legs: THREE.MeshToonMaterial }> = {
   T: {
     body: createCelMaterial({ color: 0x8a6b2e }),
@@ -316,7 +229,7 @@ export class Bot implements BotShape {
    * The catalog weapon this bot is holding RIGHT NOW, which changes within a
    * life as positions run dry. Written here alone: resynced from the brain's
    * weapon after decide() returns, so a swap inside decide() is reflected in
-   * this frame's attack, audio and silhouette.
+   * this frame's attack, audio and held model.
    */
   weapon: BotWeaponId;
   /**
@@ -327,17 +240,17 @@ export class Bot implements BotShape {
    */
   private readonly brain: DefaultBrain;
   /**
-   * Barrel-tip offset along the aim hinge's local +z. Per weapon, so a
-   * sniper's muzzle flash leaves the end of its longer barrel rather than
-   * hanging in the middle of it. Mutable because a dry swap changes weapons
-   * mid-life.
-   *
-   * Initialized here rather than in the constructor body because
-   * rebuildAimGroup() is what actually sets it, and a method assignment is
-   * invisible to strictPropertyInitialization. The zero never reaches a
-   * frame: the constructor calls that helper before anything can read it.
+   * The authored-model mount hanging on the aim hinge, for the weapon held
+   * RIGHT NOW. Rebuilt by rebuildAimGroup() on construction, respawn and dry
+   * swap — never mutated across weapons, so a swap cannot leak one model's
+   * pose into another's. Null only before the constructor's rebuild runs;
+   * every reader narrows rather than asserting.
    */
-  private muzzleZ = 0;
+  private rig: BotWeaponRig | null = null;
+  /** Game time of the last attack, for the firing kick / knife jab envelope. */
+  private lastShotAt = -Infinity;
+  /** Smoothed reload displacement, driven toward the brain's reloading flag. */
+  private reloadBlend = 0;
   /**
    * Fair-rotation cursor for the per-frame visual acquisition: the index the
    * next scan starts from when the brain's tracked identity is not cheaply
@@ -458,21 +371,25 @@ export class Bot implements BotShape {
     // Tag every part with its owner so bullet raycasts can attribute hits.
     for (const part of Object.values(parts)) part.userData.bot = this;
 
-    // Aim pivot: a barrel on a shoulder-height hinge, so PITCH is visible.
-    // Rotating the head cube in place was not — a featureless box turning
-    // about its own centre shows nothing, which a playtest confirmed
+    // Aim pivot: the held model on a shoulder-height hinge, so PITCH is
+    // visible. Rotating the head cube in place was not — a featureless box
+    // turning about its own centre shows nothing, which a playtest confirmed
     // (docs/ai-plan.md, lesson 25). A barrel that swings has a direction.
     //
     // Deliberately NOT tagged with userData.bot, and deliberately not a field
     // weapons.ts knows about: its raycast targets are an explicit allowlist
     // (`bot.head, bot.torso, bot.legs`), so this stays decorative by
     // construction. It has to — sim/damage.ts:partForMesh falls through to
-    // 'torso' for any mesh it does not recognize, so a barrel that ever
+    // 'torso' for any mesh it does not recognize, so a model that ever
     // reached that list would silently become a torso hit rather than error.
     // Bot LOS rays against `solids` only, so it never blocks sight either.
-    this.aim.position.set(0.16, 1.5, 0);
-    // The silhouette itself goes through the same helper a dry swap uses, so
-    // the barrel layout has ONE definition rather than two that drift.
+    // Handedness is per-bot identity, rolled once here so it survives
+    // respawn: ~9:1 right-shoulder (-X; the bot faces +Z) to left (+X).
+    // Pure pick in core/botWeaponModels.ts; Math.random matches the speed
+    // roll and brain rng stream already drawn directly in this constructor.
+    this.aim.position.set(pickBotShoulderOffset(Math.random), 1.5, 0);
+    // The held model itself goes through the same helper a dry swap uses, so
+    // construction and swapping share ONE definition rather than two that drift.
     this.rebuildAimGroup();
     this.mesh.add(this.aim);
 
@@ -547,7 +464,7 @@ export class Bot implements BotShape {
     // arm() put the loadout back on its primary, so the BODY must follow in
     // this same call rather than at the next frame's resync in update(). A
     // respawn is a full-life reset, and a bot that stands up carrying the
-    // silhouette — and the killfeed name — of the weapon it died holding is
+    // model — and the killfeed name — of the weapon it died holding is
     // exactly the stale display this method exists to clear. It also cannot
     // wait for a frame that may not come: the loop only simulates under
     // pointer lock, so a respawn scheduled across a pause would otherwise
@@ -680,7 +597,7 @@ export class Bot implements BotShape {
     if (intent.mode !== 'patrol') this.clearPatrolGoal();
 
     // A swap that happened inside decide() is reflected in this frame's
-    // attack, audio and silhouette — resync before the shot is realized.
+    // attack, audio and held model — resync before the shot is realized.
     if (this.brain.weapon !== this.weapon) {
       this.weapon = this.brain.weapon;
       this.rebuildAimGroup();
@@ -783,6 +700,20 @@ export class Bot implements BotShape {
       const target = enemies.find(e => e.id === obs.id);
       if (target) this.shoot(this.eyePos().distanceTo(obs.eye), target);
     }
+
+    // Third-person weapon presentation, every living frame: the mount answers
+    // the same fire/reload signals the first-person viewmodel does — a kick
+    // on each shot, the magazine seating while the fire controller reloads —
+    // while the aim hinge above already carries this frame's yaw and pitch,
+    // so the matrices the pose reads through are this frame's.
+    const rig = this.rig;
+    if (!rig) throw new Error(`Bot ${this.name}: weapon mount missing for ${this.weapon}`);
+    this.reloadBlend = approach(this.reloadBlend, this.brain.reloading ? 1 : 0, dt, RELOAD_BLEND_RATE);
+    const shotAge = gameTime.now() - this.lastShotAt;
+    poseBotWeaponRig(rig, { shotAge, reloadBlend: this.reloadBlend });
+    // The blade has no mechanism to kick, so the swing is the motion: a quick
+    // forward jab of the whole mount on the attack envelope.
+    rig.mount.position.z = this.weapon === 'knife' ? KNIFE_JAB * botShotKick(shotAge) : 0;
   }
 
   /**
@@ -986,16 +917,22 @@ export class Bot implements BotShape {
   }
 
   /**
-   * World-space barrel tip, for the muzzle flash.
+   * World-space muzzle, for the muzzle flash: the authored Muzzle marker's
+   * composed position, so the flash leaves the model's own barrel tip
+   * whatever the weapon's length.
    *
    * Flushes the group's world matrix first: update() has already written this
    * frame's yaw and pitch, but nothing has composed them yet — the renderer
    * does that later. Called only on firing frames, so the flush is paid at
-   * the bot's cooldown rate rather than per frame.
+   * the bot's cooldown rate rather than per frame. The knife never reaches
+   * here — the melee path returns before the flash — so a missing marker is
+   * corrupted state and throws rather than inventing a position.
    */
   private muzzlePos(): THREE.Vector3 {
     this.mesh.updateMatrixWorld(true);
-    return this.aim.localToWorld(new THREE.Vector3(0, 0, this.muzzleZ));
+    const muzzle = this.rig?.muzzle;
+    if (!muzzle) throw new Error(`Bot ${this.name}: no muzzle marker for ${this.weapon}`);
+    return muzzle.getWorldPosition(new THREE.Vector3());
   }
 
   /**
@@ -1013,8 +950,10 @@ export class Bot implements BotShape {
    */
   private shoot(dist: number, target: Target): void {
     // Audible either way — a swing that misses is exactly as loud as one that
-    // lands, like every other attack on this path.
+    // lands, like every other attack on this path. Stamps the attack time for
+    // the model's firing kick (or the knife's jab) either way.
     sfxEnemyAttack(this.mesh.position, this.weapon);
+    this.lastShotAt = gameTime.now();
     if (this.brain.resolution === 'melee') {
       this.swing(target);
       return;
@@ -1166,22 +1105,20 @@ export class Bot implements BotShape {
   }
 
   /**
-   * Rebuild the aim group's silhouette for the current weapon. Removing and
-   * re-adding the shared meshes — never disposing their geometry or
-   * materials, which are module-level and shared by every bot carrying that
-   * weapon, so disposing them would blank the barrels of the whole field —
-   * and re-reading the muzzle offset.
+   * Rebuild the aim group's held model for the current weapon: a fresh clone
+   * of the authored asset, so per-bot posing never moves another bot's
+   * mechanisms. Clearing drops the old mount without disposing anything —
+   * geometry and materials are shared with the loaded asset (clone shares
+   * them), so disposing would blank the whole field. Also resets the
+   * presentation envelopes, so a swap or respawn never inherits a kick or a
+   * half-seated magazine from the previous weapon/life.
    */
   private rebuildAimGroup(): void {
     this.aim.clear();
-    const model = BOT_WEAPON_MODELS[this.weapon];
-    this.muzzleZ = model.muzzle;
-    for (const part of model.parts) {
-      const mesh = new THREE.Mesh(part.geo, part.mat);
-      mesh.position.set(part.pos[0], part.pos[1], part.pos[2]);
-      mesh.castShadow = true;
-      this.aim.add(mesh);
-    }
+    this.rig = createBotWeaponRig(this.weapon);
+    this.aim.add(this.rig.mount);
+    this.lastShotAt = -Infinity;
+    this.reloadBlend = 0;
   }
 }
 

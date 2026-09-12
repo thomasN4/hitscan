@@ -23,6 +23,11 @@ import { showLoadoutPicker, showEndScreen } from './menu';
  *   'Bot killed You' wording
  */
 export function damagePlayer(dmg: number, attackerName: string): void {
+  // Debug-view god-mode: with the V overlay up the player is observing, not
+  // playing, so incoming fire is dropped before it touches HP, the vignette,
+  // the hurt sfx or the death screen. Bots still acquire and shoot normally —
+  // only the damage landing is suppressed.
+  if (session.debugView) return;
   // A finished match's scores are final: bots may still loose a shot in the
   // same frame the match ended, and it must not touch the scoreboard.
   if (!player.alive || session.matchOver) return;

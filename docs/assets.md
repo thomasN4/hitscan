@@ -3,7 +3,9 @@
 Editable sources under `assets/source/`: `shotgun.blend`, `revolver.blend`,
 `pistol.blend`, `smg.blend`, `sniper.blend`, and `knife.blend`.
 Runtime exports live under `public/assets/` with the matching `.glb` names. The
-game retains procedural maps, bot weapon silhouettes and synthesized audio. Blender is an
+game retains procedural maps and synthesized audio — bots hold the same
+authored weapon models as the player, mounted third-person on their aim
+hinge (core/botWeaponModels.ts). Blender is an
 asset-authoring dependency, never a requirement for normal builds or deployment.
 
 ## Headless workflow
@@ -138,7 +140,9 @@ rebuild commands and geometry-clearance checks.
 
 The first-person procedural weapon builders have been removed. Loose reload
 cartridges remain procedural effects. Weapon stats, shot/reload clocks, scope
-overlay behavior, sounds and bot-held silhouettes retain their existing behavior.
+overlay behavior and sounds retain their existing behavior; bot-held models
+are the same authored assets, with third-person firing-kick and reload
+motion.
 
 Run all-weapon animation checks (default when no IDs are supplied):
 

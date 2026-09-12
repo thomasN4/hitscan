@@ -31,7 +31,7 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 | `Ctrl` / `C` | Crouch (tap to toggle; slower, silent — no footsteps) |
 | `Space` | Jump |
 | `Esc` | Pause / release mouse |
-| `V` | **Dev builds only** — bot debug view: wireframes the level and draws each bot's nav route and current target (`src/debugView.ts`). Stripped from production builds. |
+| `V` | **Dev builds only** — bot debug view: wireframes the level, draws each bot's nav route and current target, and makes the player unkillable (`src/debugView.ts`). Stripped from production builds. |
 
 ## Gameplay
 

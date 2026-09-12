@@ -12,7 +12,8 @@
 // so it leaves production builds entirely (same idiom as bots.ts:debugLog).
 // On/off lives in session.debugView, and hud.ts:updateBotDebug — the per-bot
 // y/G/blk/mode text block — rides that flag, so the numbers and the routes
-// appear and vanish together.
+// appear and vanish together. While up, combat.ts:damagePlayer drops incoming
+// fire, so the observer cannot be killed mid-watch.
 //
 // This is the one place that adds meshes to the scene without going through
 // world.ts, deliberately: world.ts owns LEVEL GEOMETRY, and the point of these

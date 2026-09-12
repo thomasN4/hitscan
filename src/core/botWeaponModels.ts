@@ -124,6 +124,25 @@ const SHOT_KICK_RATE = 9;
 const STOCK_REAR_LIMIT = -0.05;
 
 /**
+ * Lateral magnitude (m) of the aim-hinge offset from the torso centre.
+ * The bot faces local +Z, so in right-handed Y-up coordinates its right
+ * shoulder sits at -X: a right-handed bot holds its gun at -OFFSET.
+ */
+export const BOT_SHOULDER_OFFSET = 0.16;
+
+/** Probability a bot holds its weapon on the right shoulder (~9:1 split). */
+export const BOT_RIGHT_HANDED_PROBABILITY = 0.9;
+
+/**
+ * Pick this bot's hinge-side offset. Rolled once per bot at construction —
+ * handedness is identity, not per-life state — with the rng passed in so
+ * the Node suite can pin the boundary without touching Math.random.
+ */
+export function pickBotShoulderOffset(rng: () => number): number {
+  return rng() < BOT_RIGHT_HANDED_PROBABILITY ? -BOT_SHOULDER_OFFSET : BOT_SHOULDER_OFFSET;
+}
+
+/**
  * Firing-kick envelope for a shot `shotAge` seconds ago: 1 on the firing
  * frame, decaying to ~0 within half a second. Non-finite ages (no shot yet)
  * kick nothing.

@@ -56,7 +56,7 @@ import { NAV_RADIUS, transportRoute, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
 import { shouldAbandonRoute } from './sim/routeFollow';
 import { approach } from './sim/smoothing';
-import { botShotKick, createBotWeaponRig, poseBotWeaponRig, type BotWeaponRig } from './core/botWeaponModels';
+import { botShotKick, createBotWeaponRig, pickBotShoulderOffset, poseBotWeaponRig, type BotWeaponRig } from './core/botWeaponModels';
 
 /**
  * Half-width of a bot's collision box — shared by the move gate and spawn
@@ -383,7 +383,11 @@ export class Bot implements BotShape {
     // 'torso' for any mesh it does not recognize, so a model that ever
     // reached that list would silently become a torso hit rather than error.
     // Bot LOS rays against `solids` only, so it never blocks sight either.
-    this.aim.position.set(0.16, 1.5, 0);
+    // Handedness is per-bot identity, rolled once here so it survives
+    // respawn: ~9:1 right-shoulder (-X; the bot faces +Z) to left (+X).
+    // Pure pick in core/botWeaponModels.ts; Math.random matches the speed
+    // roll and brain rng stream already drawn directly in this constructor.
+    this.aim.position.set(pickBotShoulderOffset(Math.random), 1.5, 0);
     // The held model itself goes through the same helper a dry swap uses, so
     // construction and swapping share ONE definition rather than two that drift.
     this.rebuildAimGroup();

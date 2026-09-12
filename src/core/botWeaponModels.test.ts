@@ -5,9 +5,12 @@
 import { describe, expect, test, vi } from 'vitest';
 import * as THREE from 'three';
 import {
+  BOT_RIGHT_HANDED_PROBABILITY,
+  BOT_SHOULDER_OFFSET,
   botShotKick,
   createBotWeaponRig,
   initBotWeaponModels,
+  pickBotShoulderOffset,
   poseBotWeaponRig,
   type BotWeaponRig,
 } from './botWeaponModels';
@@ -186,6 +189,16 @@ describe('botWeaponModels', () => {
     initMocks();
     const rig = createBotWeaponRig('knife');
     expect(() => poseBotWeaponRig(rig, { shotAge: 0, reloadBlend: 1 })).not.toThrow();
+  });
+
+  test('shoulder pick splits ~9:1 right (-X) to left (+X)', () => {
+    expect(BOT_RIGHT_HANDED_PROBABILITY).toBe(0.9);
+    // Boundary pinned with stub dice, not Math.random: below the threshold
+    // seats on the right shoulder (-X, the bot faces +Z), at/above on the left.
+    expect(pickBotShoulderOffset(() => 0)).toBe(-BOT_SHOULDER_OFFSET);
+    expect(pickBotShoulderOffset(() => 0.899)).toBe(-BOT_SHOULDER_OFFSET);
+    expect(pickBotShoulderOffset(() => 0.9)).toBe(BOT_SHOULDER_OFFSET);
+    expect(pickBotShoulderOffset(() => 0.999)).toBe(BOT_SHOULDER_OFFSET);
   });
 
   test('gripOf helper reaches the hinge-seated grip', () => {

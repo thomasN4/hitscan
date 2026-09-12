@@ -672,7 +672,9 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const afterAimCancel = { reloading: cs.weapon.reloading, aiming: cs.game.aiming, mag: cs.weapon.mag };
         window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
         await wait(50);
-        // ...and R starts a fresh reload; let it run out so the phases below
+        // ...and the R below is a refused no-op: the RMB above never cancelled,
+        // so the reload is still running and planReload declines a second
+        // start while reloading is true. Let it drain so the phases below
         // see a full mag again.
         //
         // POLLED, not slept. The reload deadline is GAME time (weapons.ts sets
@@ -700,7 +702,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (qcancel.started.reloading !== true) throw new Error(`R did not start a reload: ${JSON.stringify(qcancel.started)}`);
       if (qcancel.cancelled.slot !== 1 || qcancel.cancelled.reloading !== false) throw new Error(`switching during a reload must cancel it: ${JSON.stringify(qcancel.cancelled)}`);
       if (qcancel.restored.slot !== 0 || qcancel.restored.mag !== 8 || qcancel.restored.reloading !== false) throw new Error(`interrupted weapon must keep its partial mag: ${JSON.stringify(qcancel.restored)}`);
-      if (qcancel.refilled.reloading !== false || qcancel.refilled.mag !== 10) throw new Error(`a fresh reload after re-switching must still complete: ${JSON.stringify(qcancel.refilled)}`);
+      if (qcancel.refilled.reloading !== false || qcancel.refilled.mag !== 10) throw new Error(`the still-running reload must drain to a full mag: ${JSON.stringify(qcancel.refilled)}`);
       if (qcancel.beforeAimCancel.reloading !== true || qcancel.beforeAimCancel.aiming !== false) throw new Error(`R with no button held must start a reload with the sights down: ${JSON.stringify(qcancel.beforeAimCancel)}`);
       if (qcancel.afterAimCancel.reloading !== true || qcancel.afterAimCancel.aiming !== false) throw new Error(`RMB during a reload must neither cancel it nor raise the sights: ${JSON.stringify(qcancel.afterAimCancel)}`);
       console.log(`[qcancel] OK`, JSON.stringify(qcancel));

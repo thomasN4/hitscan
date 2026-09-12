@@ -7,12 +7,47 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const exporter = 'scripts/assets/export-weapons.py';
 const manifestPath = 'assets/weapons-manifest.json';
 const hash = path => createHash('sha256').update(readFileSync(root + path)).digest('hex');
+// The glTF add-on version (e.g. v5.2.39 vs v5.2.40) is embedded in every GLB's
+// asset.generator, so re-exporting untouched sources still rewrote all six
+// binaries (issue #112). Export strips the version tail to this canonical
+// string before hashing, while the manifest records the actual add-on version
+// as provenance beside blender.
+export const CANONICAL_GENERATOR = 'Khronos glTF Blender I/O';
+export function readGlbGenerator(bytes) {
+  const length = bytes.readUInt32LE(12);
+  return JSON.parse(bytes.subarray(20, 20 + length).toString()).asset?.generator;
+}
+// Replace only the generator value, leaving every other JSON byte untouched,
+// then re-pad the chunk with spaces to 4-byte alignment and fix both length
+// fields. The pre-existing padding is stripped first: without that, inputs
+// whose version tails differ in length keep different amounts of old padding
+// and never converge. Inputs differing only by exporter version then normalize
+// byte-identical; anything without a Khronos generator is returned unchanged
+// for the validator to reject with a named error instead.
+export function normalizeWeaponGlb(bytes) {
+  const jsonLength = bytes.readUInt32LE(12);
+  const stripped = bytes.subarray(20, 20 + jsonLength).toString()
+    .replace(/("generator"\s*:\s*")Khronos glTF Blender I\/O[^"]*(")/, `$1${CANONICAL_GENERATOR}$2`)
+    .replace(/ +$/, '');
+  const padded = stripped + ' '.repeat((4 - Buffer.byteLength(stripped) % 4) % 4);
+  const out = Buffer.alloc(20 + Buffer.byteLength(padded) + (bytes.length - 20 - jsonLength));
+  out.writeUInt32LE(0x46546c67, 0);
+  out.writeUInt32LE(2, 4);
+  out.writeUInt32LE(out.length, 8);
+  out.writeUInt32LE(Buffer.byteLength(padded), 12);
+  out.writeUInt32LE(0x4e4f534a, 16);
+  out.write(padded, 20);
+  bytes.subarray(20 + jsonLength).copy(out, 20 + Buffer.byteLength(padded));
+  return out;
+}
 export function validateWeaponGlb(bytes, id) {
   assert.equal(bytes.readUInt32LE(0), 0x46546c67, 'Invalid weapon GLB');
   assert.equal(bytes.readUInt32LE(4), 2);
   assert.equal(bytes.readUInt32LE(8), bytes.length, 'Truncated weapon GLB');
   const length = bytes.readUInt32LE(12);
   const gltf = JSON.parse(bytes.subarray(20, 20 + length).toString());
+  assert.equal(gltf.asset?.generator, CANONICAL_GENERATOR,
+    `Unnormalized asset.generator ${gltf.asset?.generator}: run assets:export`);
   assert.equal(bytes.readUInt32LE(24 + length), 0x004e4942);
   assert.equal(gltf.buffers.length, 1);
   assert.ok(!gltf.buffers[0].uri && gltf.buffers[0].byteLength <= bytes.length - length - 28);
@@ -79,21 +114,32 @@ export function weaponPipeline(mode) {
     const result = spawnSync(process.env.BLENDER || 'blender', ['--background','--factory-startup','--python-exit-code','1','--python',exporter],
       {cwd:root, encoding:'utf8', env:{...process.env,ALSOFT_DRIVERS:'null'}});
     if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr + result.stdout);
-    const blender = result.stdout.match(/ASSET_BLENDER_VERSION=(.+)/)?.[1];
+    const blender = result.stdout.match(/ASSET_BLENDER_VERSION=(.+)/)?.[1]?.trim();
     assert.ok(blender);
+    const gltfAddon = result.stdout.match(/ASSET_GLTF_ADDON_VERSION=(.+)/)?.[1]?.trim();
+    assert.match(gltfAddon ?? '', /^\d+\.\d+\.\d+$/, 'Exporter did not report a glTF add-on version');
+    const previous = JSON.parse(readFileSync(root + manifestPath)).gltfAddon;
+    if (previous && previous !== gltfAddon)
+      console.warn(`glTF add-on moved ${previous} -> ${gltfAddon}; normalized output should be unaffected`);
     const assets = ['shotgun','revolver','pistol','smg','sniper','knife'].map(id => {
       const source=`assets/source/${id}.blend`, output=`public/assets/${id}.glb`;
+      const normalized = normalizeWeaponGlb(readFileSync(root+output));
+      writeFileSync(root+output, normalized);
       return {id,source,output,sourceSha256:hash(source),outputSha256:hash(output),stats:validateWeaponGlb(readFileSync(root+output),id)};
     });
-    writeFileSync(root+manifestPath,JSON.stringify({version:1,blender,exporter,exporterSha256:hash(exporter),settings:{format:'GLB',export_yup:false,export_texcoords:false,animations:false,coordinates:'metres, Y-up, forward -Z'},assets},null,2)+'\n');
+    writeFileSync(root+manifestPath,JSON.stringify({version:1,blender,gltfAddon,exporter,exporterSha256:hash(exporter),settings:{format:'GLB',export_yup:false,export_texcoords:false,animations:false,coordinates:'metres, Y-up, forward -Z'},assets},null,2)+'\n');
   } else {
     const manifest=JSON.parse(readFileSync(root+manifestPath));
     assert.equal(manifest.exporterSha256,hash(exporter),'Weapon exporter changed: run assets:export');
+    assert.match(manifest.gltfAddon ?? '', /^\d+\.\d+\.\d+$/, 'Weapon manifest lacks gltfAddon: run assets:export');
     assert.deepEqual(manifest.assets.map(asset => asset.id).sort(), ['knife','pistol','revolver','shotgun','smg','sniper']);
+    const seen = manifest.assets.map(asset => readGlbGenerator(readFileSync(root + asset.output)));
+    assert.equal(new Set(seen).size, 1, `Mixed exporter versions across GLBs ${[...new Set(seen)]}: run assets:export`);
     for(const asset of manifest.assets) {
+      const bytes = readFileSync(root+asset.output);
       assert.equal(asset.sourceSha256,hash(asset.source),'Weapon source changed: run assets:export');
       assert.equal(asset.outputSha256,hash(asset.output),'Weapon output changed: run assets:export');
-      assert.deepEqual(validateWeaponGlb(readFileSync(root+asset.output),asset.id),asset.stats);
+      assert.deepEqual(validateWeaponGlb(bytes,asset.id),asset.stats);
     }
   }
   console.log(`Weapon assets ${mode} verified`);

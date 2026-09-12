@@ -1,8 +1,15 @@
 """Export approved edited weapon sources with named mechanism pivots and grips."""
+import addon_utils
 import bpy
 import re
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
+
+def gltf_addon_version():
+    for mod in addon_utils.modules():
+        if mod.__name__ == 'io_scene_gltf2':
+            return '.'.join(str(part) for part in addon_utils.module_bl_info(mod)['version'])
+    raise ValueError('Missing glTF exporter add-on: io_scene_gltf2')
 
 def group(name, names, pivot):
     node=bpy.data.objects.new(name,None)
@@ -77,3 +84,4 @@ for weapon in ('shotgun','revolver','pistol','smg','sniper','knife'):
     bpy.ops.export_scene.gltf(filepath=str(ROOT/f'public/assets/{weapon}.glb'),export_format='GLB',export_yup=False,
         export_animations=False,export_texcoords=False,export_cameras=False,export_lights=False,export_extras=False)
 print('ASSET_BLENDER_VERSION='+bpy.app.version_string)
+print('ASSET_GLTF_ADDON_VERSION='+gltf_addon_version())

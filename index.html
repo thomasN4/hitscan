@@ -93,8 +93,13 @@
   #endScore { font-size: 30px; font-weight: bold; margin-bottom: 26px; }
   #endScore .ct { color: #66b2ff; }
   #endScore .t { color: #ffcc66; }
-  #scoreboard { border-collapse: collapse; font-size: 16px; margin-bottom: 34px; }
-  #scoreboard th { font-size: 12px; color: #aaa; letter-spacing: 2px; text-transform: uppercase; padding: 6px 20px; border-bottom: 1px solid #333a44; }
+  /* Match-end score screen: the wrapper bounds the table so a full 25-row
+     roster scrolls internally while the title, score and buttons stay on
+     screen. overflow-y:auto (not scroll) keeps small rosters exactly as
+     today with no scrollbar chrome when the table fits. */
+  #scoreboardWrap { max-height: 40vh; overflow-y: auto; margin-bottom: 34px; min-height: 0; overscroll-behavior: contain; }
+  #scoreboard { border-collapse: collapse; font-size: 16px; margin-bottom: 0; }
+  #scoreboard th { font-size: 12px; color: #aaa; letter-spacing: 2px; text-transform: uppercase; padding: 6px 20px; border-bottom: 1px solid #333a44; position: sticky; top: 0; background: #0a0c10; z-index: 1; }
   #scoreboard th:first-child { text-align: left; }
   #scoreboard td { padding: 7px 20px; text-align: center; border-bottom: 1px solid #22272f; }
   #scoreboard td.name { text-align: left; font-weight: bold; letter-spacing: 1px; }
@@ -251,12 +256,14 @@
 <div class="menu" id="endScreen" style="display:none">
   <h1 id="endTitle">Draw</h1>
   <div id="endScore"><span class="ct" id="endScoreCT">CT 0</span> &mdash; <span class="t" id="endScoreT">0 T</span></div>
+  <div id="scoreboardWrap">
   <table id="scoreboard">
     <thead>
       <tr><th>Player</th><th>K</th><th>D</th></tr>
     </thead>
     <tbody id="scoreboardBody"></tbody>
   </table>
+  </div>
   <div style="display:flex;gap:14px">
     <button id="rematchBtn">Rematch</button>
     <button id="endMenuBtn" style="background:#9db8d9">Back to Menu</button>

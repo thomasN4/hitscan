@@ -338,3 +338,127 @@ describe('pickPatrolNode', () => {
     expect(pickPatrolNode(empty, self, -1, () => 0.5)).toBe(-1);
   });
 });
+
+describe('navGrid components', () => {
+  test('open ground is a single component', () => {
+    const grid = build(world());
+    expect(grid.component.length).toBe(grid.count);
+    for (let i = 1; i < grid.count; i++) expect(grid.component[i]).toBe(grid.component[0]);
+  });
+
+  test('a wall across the map labels each side separately', () => {
+    const grid = build(world([{ minX: 0, maxX: 10, minZ: 4.4, maxZ: 5.6 }]));
+    const south = nearestNode(grid, at(5, 1));
+    const north = nearestNode(grid, at(5, 9));
+    expect(south).toBeGreaterThanOrEqual(0);
+    expect(north).toBeGreaterThanOrEqual(0);
+    expect(grid.component[south]).not.toBe(grid.component[north]);
+  });
+
+  test('a doorway in that wall rejoins the components', () => {
+    const grid = build(world([
+      { minX: 0, maxX: 5, minZ: 4.4, maxZ: 5.6 },
+      { minX: 6, maxX: 10, minZ: 4.4, maxZ: 5.6 },
+    ]));
+    const south = nearestNode(grid, at(5, 1));
+    const north = nearestNode(grid, at(5, 9));
+    expect(grid.component[south]).toBe(grid.component[north]);
+  });
+
+  test('a link joins levels the sampled grid cannot', () => {
+    const twoLevels = () => world(
+      [{ minX: 0, maxX: 10, minZ: 6, maxZ: 6.9 }],
+      [{ minX: 0, maxX: 10, minZ: 7, maxZ: 10, y: 3, bottom: 2.8 }],
+    );
+    const link = { bottom: at(1.5, 5.5), top: at(1.5, 7.5, 3), halfWidth: 1 };
+    const split = build(twoLevels());
+    expect(gridComponent(split, at(5, 1))).not.toBe(gridComponent(split, at(8, 8, 3)));
+    const joined = build(twoLevels(), [link]);
+    expect(gridComponent(joined, at(5, 1))).toBe(gridComponent(joined, at(8, 8, 3)));
+  });
+
+  test('a one-way link shares its component both ways', () => {
+    // Weak labelling is deliberate: a directed edge joins both ends, so a
+    // lift pad and its landing share a component even though the return leg
+    // has no route. The filter therefore never discards a routable candidate,
+    // at the cost of occasionally keeping an unroutable downhill one.
+    const twoLevels = () => world(
+      [{ minX: 0, maxX: 10, minZ: 6, maxZ: 6.9 }],
+      [{ minX: 0, maxX: 10, minZ: 7, maxZ: 10, y: 3, bottom: 2.8 }],
+    );
+    const oneWay = { bottom: at(1.5, 5.5), top: at(1.5, 7.5, 3), halfWidth: 1, oneWay: true };
+    const grid = build(twoLevels(), [oneWay]);
+    expect(gridComponent(grid, at(5, 1))).toBe(gridComponent(grid, at(8, 8, 3)));
+  });
+
+  /** Component id of the node nearest a world point. */
+  function gridComponent(grid: NavGrid, p: THREE.Vector3): number {
+    return grid.component[nearestNode(grid, p)]!;
+  }
+});
+
+describe('pickPatrolNode reachability filter', () => {
+  // A 20x10 map split by a wall band: each side keeps far (≥ 12 m) nodes, so
+  // a same-component early win exists to take the place of a skipped
+  // cross-component one.
+  const wideBounds = { minX: 0, maxX: 20, minZ: 0, maxZ: 10 };
+  const splitWide = () => buildNavGrid({
+    bounds: wideBounds, cell: 1, stepHeight: STEP,
+    probe: world([{ minX: 0, maxX: 20, minZ: 4.4, maxZ: 5.6 }]),
+  });
+  /** An rng value sampling exactly node `idx`. */
+  const sample = (idx: number, count: number): number => (idx + 0.5) / count;
+  /** An rng consuming a scripted sequence, then repeating its last value forever. */
+  function queue(values: number[]): { rng: () => number; draws: () => number } {
+    let i = 0;
+    return {
+      rng: () => {
+        const v = i < values.length ? values[i]! : values[values.length - 1] ?? 0;
+        i++;
+        return v;
+      },
+      draws: () => i,
+    };
+  }
+
+  test('skips a cross-component early winner and takes the next same-component one', () => {
+    const grid = splitWide();
+    const self = new THREE.Vector3(0.5, 0, 0.5);
+    const current = nearestNode(grid, self);
+    const cross = nearestNode(grid, at(19.5, 9.5)); // north side, ~21 m away
+    const same = nearestNode(grid, at(19.5, 0.5));  // south side, 19 m away
+    expect(grid.component[cross]).not.toBe(grid.component[current]);
+    expect(grid.component[same]).toBe(grid.component[current]);
+    // Without the filter the first draw would win immediately with one draw;
+    // filtered, it is skipped and the second draw wins instead.
+    const { rng, draws } = queue([sample(cross, grid.count), sample(same, grid.count)]);
+    expect(pickPatrolNode(grid, self, current, rng)).toBe(same);
+    expect(draws()).toBe(2);
+  });
+
+  test('returns -1 when every sample is cross-component', () => {
+    const grid = splitWide();
+    const self = new THREE.Vector3(0.5, 0, 0.5);
+    const current = nearestNode(grid, self);
+    const cross = nearestNode(grid, at(19.5, 9.5));
+    const { rng, draws } = queue([sample(cross, grid.count)]);
+    expect(pickPatrolNode(grid, self, current, rng)).toBe(-1);
+    expect(draws()).toBeLessThanOrEqual(8);
+  });
+
+  test('never returns a cross-component node, sampling every index first', () => {
+    const grid = splitWide();
+    const self = new THREE.Vector3(0.5, 0, 0.5);
+    const current = nearestNode(grid, self);
+    const own = grid.component[current]!;
+    for (let idx = 0; idx < grid.count; idx++) {
+      // First draw samples idx, the rest re-sample the bot's own node
+      // (skipped): the result is idx iff idx is a same-component candidate.
+      const { rng } = queue([sample(idx, grid.count), sample(current, grid.count)]);
+      const got = pickPatrolNode(grid, self, current, rng);
+      if (got >= 0) expect(grid.component[got]).toBe(own);
+      if (grid.component[idx] === own && idx !== current) expect(got).toBe(idx);
+      else expect(got).toBe(-1);
+    }
+  });
+});

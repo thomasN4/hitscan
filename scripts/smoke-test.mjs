@@ -2479,20 +2479,18 @@ async function runPatrolCheck() {
       bot.leg = 0;
       let firstMode = null, sawPatrol = false, patrolAt = null, patrolDrift = 0, gradesOk = true;
       let anchor = null;
-      // Budget, measured rather than guessed. A patrol candidate is drawn
-      // uniformly from the WHOLE nav graph, and on arena 3663 of 16155 nodes
-      // sit at y >= 3 — the tops of the walls and blocks (968 at y=8, 576 at
-      // y=10, 400 at y=12). A ground bot cannot route to those, so ~28% of
-      // candidates are rejected (300 sampled selections from this very spot:
-      // 27% on main, 31% here — the same population), and EACH rejection
-      // costs a fresh one-second patrolPause before the next draw.
+      // Budget, measured rather than guessed. A patrol candidate is drawn from
+      // the bot's own nav-graph connected component (sim/navGrid.ts labels
+      // components at build time and pickPatrolNode skips cross-component
+      // samples), so wall tops and enclosed pockets — ~30% of the whole
+      // graph on arena, issue #95 — never cost a one-second patrolPause
+      // rejection. A rejection is now only a one-way downhill edge, which is
+      // rare, so the first candidate is effectively always routable.
       //
-      // So "an idle bot patrols" is the invariant; "within one second" is a
-      // property of the selector's luck, and the old 5 s / 25 s budget was
-      // tight enough that a slow machine or an unlucky draw failed a phase
-      // with nothing wrong (which is the load-sensitive flake docs/ai-plan.md
-      // already recorded once and left alone). The wall clock is the give-up
-      // bound only — lesson 26.
+      // So "an idle bot patrols" is the invariant; the 8 s bound below is
+      // headroom rather than luck (it once covered the 2.5%-per-run flake of
+      // drawing unroutable candidates, which the component filter removes as
+      // a consequence). The wall clock is the give-up bound only — lesson 26.
       const tA = performance.now();
       while (performance.now() - tA < 60000 && cs.gameTime.now() - simA0 < 8) {
         await frame();

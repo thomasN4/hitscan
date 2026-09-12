@@ -1,20 +1,72 @@
 // Browser integration for the two cargo elevators. The fixture controls goals
 // and isolates actors; actual navigation, transport, collision and input run.
+
+// Budgets for the bot-transport legs (issue #101). The 45 s wall clock that
+// until() uses everywhere else flakes under full-suite headless load: the sim
+// advances on GAME time clamped at 0.05 s/frame (main.ts), so game time can
+// only ever lag wall time — the same wall-vs-game class the smoke test's
+// [qcancel] phase documents. A bot that needs ~20 game-seconds of
+// wait/board/ride/exit can exceed a 45 s wall budget on a slow run with
+// nothing wrong, stalling in phase wait past the deadline.
+//
+// The fix budgets those legs in GAME time and keeps wall time as a dead-man
+// failsafe only. Worst case on warehouse2 (maps/warehouse2.ts: PAD_H 0.25,
+// DECK_Y 5.1, LIFT_SPEED 1.5, LIFT_DWELL 2): travel = 4.85/1.5 ≈ 3.23 s;
+// arriving just as the deck departs the source costs 2*travel + dwell ≈
+// 8.47 s for the next source dock, plus the ≈3.23 s ride and the walk to the
+// landing plus board/exit steps — ≈20 s all told. 30 s keeps ~1.5x headroom
+// in the clock the sim actually runs on.
+export const ELEVATOR_SMOKE_WALL_BUDGET_MS = 45000;
+export const BOT_TRANSPORT_WALL_BUDGET_MS = 120000;
+export const BOT_TRANSPORT_GAME_BUDGET_SEC = 30;
+
+/**
+ * Dual-clock exhaustion for a bot-transport wait: fail when the GAME budget
+ * is spent (the real assertion) OR the wall failsafe trips (a dead sim must
+ * not hang the suite). Load lag — the wall running long while the game clock
+ * still advances — keeps waiting until one of the two trips. Mirrors
+ * untilTransport's loop condition inside checkElevators; keep the two in sync.
+ */
+export function transportWaitExhausted(wallElapsedMs, gameElapsedSec, wallMs, gameSec) {
+  return wallElapsedMs >= wallMs || gameElapsedSec >= gameSec;
+}
+
 export async function checkElevators(page, { playerChecks = true } = {}) {
-  return page.evaluate(async (playerChecks) => {
+  const budgets = { wallMs: ELEVATOR_SMOKE_WALL_BUDGET_MS,
+    transportWallMs: BOT_TRANSPORT_WALL_BUDGET_MS, transportGameSec: BOT_TRANSPORT_GAME_BUDGET_SEC };
+  return page.evaluate(async (playerChecks, budgets) => {
     const cs = window.__cs;
     const { transportRoute } = cs.nav;
     const frame = () => new Promise(r => requestAnimationFrame(r));
     const feet = () => cs.player.pos.y - cs.player.eyeHeight;
     const check = (ok, message) => { if (!ok) throw new Error(message); };
-    const until = async (predicate, label, observe = () => {}) => {
-      const deadline = performance.now() + 45000;
+    const snapshot = () => `bots=${JSON.stringify(cs.bots.filter(b => b.alive).map(b => ({ pos: b.mesh.position.toArray(), trip: b.elevatorTrip })))}, player=${cs.player.pos.toArray()}, elevators=${JSON.stringify(cs.elevators.map(e => ({ id: e.spec.id, y: e.collider.max.y, dock: e.dock, blocked: e.blocked })))}`;
+    const until = async (predicate, label, observe = () => {}, detail = null) => {
+      const deadline = performance.now() + budgets.wallMs;
       do {
         await frame();
         observe();
         if (predicate()) return;
       } while (performance.now() < deadline);
-      throw new Error(`${label}: bots=${JSON.stringify(cs.bots.filter(b => b.alive).map(b => ({ pos: b.mesh.position.toArray(), trip: b.elevatorTrip })))}, player=${cs.player.pos.toArray()}, elevators=${JSON.stringify(cs.elevators.map(e => ({ id: e.spec.id, y: e.collider.max.y, dock: e.dock, blocked: e.blocked })))}`);
+      throw new Error(`${label}: ${snapshot()}${detail ? ` ${detail()}` : ''}`);
+    };
+    // Game-clock wait for the bot-transport legs (issue #101): the budget is
+    // spent in cs.gameTime seconds so loaded headless frames cannot flake it,
+    // with wall time as a dead-man failsafe for a sim that stopped advancing.
+    const untilTransport = async (predicate, label, observe = () => {}, detail = null) => {
+      const wallStart = performance.now();
+      const gameStart = cs.gameTime.now();
+      for (;;) {
+        await frame();
+        observe();
+        if (predicate()) return;
+        const wallElapsedMs = performance.now() - wallStart;
+        const gameElapsedSec = cs.gameTime.now() - gameStart;
+        // Mirrors transportWaitExhausted() at module top level — keep in sync.
+        if (wallElapsedMs >= budgets.transportWallMs || gameElapsedSec >= budgets.transportGameSec) {
+          throw new Error(`${label}: ${snapshot()}${detail ? ` ${detail()}` : ''} wallElapsedMs=${Math.round(wallElapsedMs)} gameElapsedSec=${gameElapsedSec.toFixed(2)}`);
+        }
+      }
     };
     const key = (code, down) => window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code }));
     const place = (x, y, z) => {
@@ -126,10 +178,10 @@ export async function checkElevators(page, { playerChecks = true } = {}) {
               const step = toward?.clone().clampLength(0, view.selfSpeed * dt) ?? goal.clone().set(0, 0, 0);
               return { mode: 'route', step, wantShoot: false, focusId: null, lookAt: null, facing: view.facing };
             };
-            await until(() => bot.mesh.position.distanceTo(goal) < 0.3 && bot.elevatorTrip === null,
+            await untilTransport(() => bot.mesh.position.distanceTo(goal) < 0.3 && bot.elevatorTrip === null,
               `bot ${spec.id} ${destination}`, () => {
                 if (bot.elevatorTrip) phases.add(bot.elevatorTrip.phase);
-              });
+              }, () => `phases=[${[...phases].join(',')}]`);
             check(phases.has('ride') && phases.has('exit'), 'bot reached floor without completing transport');
             result.push({ id: spec.id, bot: destination, phases: [...phases] });
           }
@@ -198,5 +250,5 @@ export async function checkElevators(page, { playerChecks = true } = {}) {
       cs.game.roundTime = oldRound;
       for (const { b, alive, visible } of actorState) { b.alive = alive; b.mesh.visible = visible; }
     }
-  }, playerChecks);
+  }, playerChecks, budgets);
 }

@@ -83,6 +83,16 @@ export interface NavGrid {
   readonly edgeTo: Int32Array;
   /** Traversal cost per entry, parallel to edgeTo. */
   readonly edgeCost: Float32Array;
+  /**
+   * Connected-component id per node, over UNDIRECTED edges (a directed link
+   * joins both ends). Labelled once at build time: any directed route implies
+   * an undirected one, so nodes in different components have no route either
+   * way — which is what lets the patrol selector discard cross-component
+   * candidates without ever discarding a routable one. The converse is not
+   * exact: a one-way link shares its component both ways, so a filtered pick
+   * can still be unroutable downhill off a lift pad. Length `count`.
+   */
+  readonly component: Int32Array;
   /** Directed node-pair keys for transport edges, retained through A*. */
   readonly elevatorEdges?: ReadonlyMap<string, string>;
 }
@@ -246,7 +256,39 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     }
   }
 
-  return { ...compact(cell, nodes, edges, costs), elevatorEdges };
+  return { ...compact(cell, nodes, edges, costs, labelComponents(nodes.length, edges)), elevatorEdges };
+}
+
+/**
+ * Label the graph's weakly connected components: one BFS over the undirected
+ * closure of the edge lists, so a link joins both ends regardless of its
+ * direction. Runs once at build time (~16k nodes); the patrol selector then
+ * filters in O(1) per sample instead of routing per candidate.
+ */
+function labelComponents(count: number, edges: readonly (readonly number[])[]): Int32Array {
+  const component = new Int32Array(count).fill(-1);
+  const reverse: number[][] = Array.from({ length: count }, () => []);
+  for (let a = 0; a < count; a++) {
+    for (const b of edges[a]!) reverse[b]!.push(a);
+  }
+  let next = 0;
+  const stack: number[] = [];
+  for (let s = 0; s < count; s++) {
+    if (component[s]! !== -1) continue;
+    component[s] = next;
+    stack.push(s);
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      for (const nb of edges[cur]!) {
+        if (component[nb]! === -1) { component[nb] = next; stack.push(nb); }
+      }
+      for (const nb of reverse[cur]!) {
+        if (component[nb]! === -1) { component[nb] = next; stack.push(nb); }
+      }
+    }
+    next++;
+  }
+  return component;
 }
 
 /** Pack the build-time arrays-of-arrays into the flat CSR form. */
@@ -255,6 +297,7 @@ function compact(
   nodes: readonly NavNode[],
   edges: readonly (readonly number[])[],
   costs: readonly (readonly number[])[],
+  component: Int32Array,
 ): NavGrid {
   const count = nodes.length;
   const xs = new Float32Array(count);
@@ -280,7 +323,7 @@ function compact(
       edgeCost[at] = cost[k]!;
     }
   }
-  return { cell, count, xs, ys, zs, edgeStart, edgeTo, edgeCost };
+  return { cell, count, xs, ys, zs, edgeStart, edgeTo, edgeCost, component };
 }
 
 /**
@@ -461,10 +504,14 @@ export const PATROL_MIN_DISTANCE_M = 12;
  * under the injected `rng`, so selection policy stays out of engine/DOM code.
  *
  * At most `PATROL_SAMPLE_COUNT` nodes are drawn uniformly (fewer when the
- * graph is smaller). The FIRST sampled node at least `PATROL_MIN_DISTANCE_M`
- * away wins immediately; otherwise the farthest sampled node that is not the
- * bot's own does. `-1` means no different node could be selected — an empty
- * graph, or a sample that never left the bot's own node.
+ * graph is smaller). Samples outside the bot's own connected component are
+ * skipped — the graph holds no route to them, so accepting one costs an idle
+ * bot a fresh one-second pause standing still. The FIRST same-component
+ * sampled node at least `PATROL_MIN_DISTANCE_M` away wins immediately;
+ * otherwise the farthest same-component sampled node that is not the bot's
+ * own does. `-1` means no different reachable node could be selected — an
+ * empty graph, an isolated bot node, or a sample that never left the bot's
+ * own node or component.
  */
 export function pickPatrolNode(
   grid: NavGrid,
@@ -473,12 +520,18 @@ export function pickPatrolNode(
   rng: () => number,
 ): number {
   if (grid.count === 0) return -1;
+  const own = currentIndex >= 0 && currentIndex < grid.count
+    ? grid.component[currentIndex]!
+    : -1;
   let best = -1;
   let bestDist = -1;
   const samples = Math.min(PATROL_SAMPLE_COUNT, grid.count);
   for (let s = 0; s < samples; s++) {
     const i = Math.floor(rng() * grid.count);
     if (i === currentIndex) continue;
+    // A cross-component candidate is a guaranteed routing rejection, so it
+    // is not a candidate at all — neither an early win nor the fallback.
+    if (own !== -1 && grid.component[i]! !== own) continue;
     const d = Math.hypot(grid.xs[i]! - selfFeet.x, grid.zs[i]! - selfFeet.z);
     if (d >= PATROL_MIN_DISTANCE_M) return i;
     if (d > bestDist) {

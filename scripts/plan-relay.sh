@@ -172,11 +172,13 @@ model_used="$active_model"
 attempt_seq=0
 
 # Run one executor turn on the active model, retrying once on the other model
-# when the attempt fails fast. A watchdog kill (124) is never retried: the
-# budget it consumed is gone, so a second full-budget attempt would double the
-# worst-case wall clock. Every attempt is retained beside the events file as
-# evidence; the events file itself always holds the latest attempt's bytes, so
-# the gate and the summary below keep judging one stream.
+# when the attempt fails fast. The retry gets only the turn's remaining budget
+# — never a fresh one — and a watchdog kill (124) is never retried at all:
+# both rules keep a run inside the documented watchdog ceiling. Every attempt
+# is retained beside the events file as evidence; the events file itself always
+# holds the latest attempt's bytes — an abandoned append-mode attempt is cut
+# back to the pre-attempt size first — so the gate and the summary below keep
+# judging one stream.
 # Usage: invoke_executor <events-file> <overwrite|append> <budget-secs> <opencode args...>
 invoke_executor() {
   local events_file="$1"
@@ -184,6 +186,7 @@ invoke_executor() {
   local budget="$3"
   shift 3
   attempt_seq=$((attempt_seq + 1))
+  local turn_start=$SECONDS
   local tried=""
   local status=2
   local candidate role attempt_file attempts=0
@@ -216,7 +219,14 @@ invoke_executor() {
     attempt_file="$run_dir/attempt${attempt_seq}-${role}.jsonl"
     attempts=$((attempts + 1))
     if test "$attempts" -gt 1; then
-      echo "Plan Relay: retrying on $candidate" >&2
+      echo "Plan Relay: retrying on $candidate with ${budget}s of watchdog budget left" >&2
+    fi
+    # In append mode the failed attempt below would linger in the events file
+    # and the retry would concatenate after it, so remember the pre-attempt
+    # size for the cut-back afterwards. Overwrite mode truncates by itself.
+    local events_bytes=0
+    if test "$append_mode" = "append"; then
+      events_bytes=$(wc -c < "$events_file" 2>/dev/null || echo 0)
     fi
     set +e
     OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
@@ -245,7 +255,18 @@ invoke_executor() {
       echo "Plan Relay: executor hung and was killed by the watchdog on $candidate; not retrying" >&2
       return "$status"
     fi
+    if test "$append_mode" = "append"; then
+      # Cut the abandoned attempt back out so the retry appends onto the
+      # pre-attempt stream. The attempt file beside the events file keeps the
+      # removed bytes as evidence.
+      head -c "$events_bytes" "$events_file" > "$events_file.trunc" && mv -- "$events_file.trunc" "$events_file"
+    fi
     echo "Plan Relay: executor failed on $candidate (exit $status)" >&2
+    budget=$((budget - (SECONDS - turn_start)))
+    if test "$budget" -le 0; then
+      echo "Plan Relay: no watchdog budget remains for a retry" >&2
+      return "$status"
+    fi
   done
   return "$status"
 }

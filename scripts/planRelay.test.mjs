@@ -123,10 +123,14 @@ length_stream() {
       '{"type":"step_start","sessionID":"ses_fixture","part":{}}' \\
       '{"type":"step_finish","sessionID":"ses_fixture","part":{"reason":"length"}}'
 }
-# A fast provider failure (bad key, quota, 5xx): record the invocation, then
-# exit before emitting a stream, so the runner's retry has nothing to inherit.
-if test "\${PLAN_RELAY_TEST_FAIL_FIRST:-}" = "1" && test "$call_index" -eq 1; then
-  exit 1
+# Provider failures: record the invocation, then exit before emitting a
+# stream, so the runner's retry has nothing to inherit. "slow" sleeps first,
+# so the retry's remaining-budget arithmetic has something to observe.
+if test "$call_index" -eq 1; then
+  case "\${PLAN_RELAY_TEST_FAIL_FIRST:-}" in
+    1) exit 1 ;;
+    slow) sleep 3; exit 1 ;;
+  esac
 fi
 case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
   healthy)
@@ -153,6 +157,19 @@ case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
     if test "$call_index" -eq 1; then
       sleep 1
       length_stream
+    else
+      healthy_stream
+    fi
+    ;;
+  recovery_fail_then_healthy)
+    if test "$call_index" -eq 1; then
+      length_stream
+    elif test "$call_index" -eq 2; then
+      # An abandoned recovery attempt: partial bytes, then a fast failure.
+      # The ses_recovery_fail session is unique to this fragment, so the test
+      # can prove the judged stream no longer contains it.
+      printf '%s' '{"type":"step_start","sessionID":"ses_recovery_fail","part":{"tool":"edit"'
+      exit 1
     else
       healthy_stream
     fi
@@ -553,6 +570,52 @@ describe('Plan Relay runner', () => {
       'openrouter/meta/muse-spark-1.3-contributor',
     ]);
     expect(summaryOf(fixture).model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+  });
+
+  test('gives the retry only the turn remaining watchdog budget', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { OPENCODE_TIMEOUT: '10', PLAN_RELAY_TEST_FAIL_FIRST: 'slow' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+    expect(result.stderr).toContain('of watchdog budget left');
+    const timeouts = readFileSync(fixture.capture.timeouts, 'utf8')
+      .trim()
+      .split('\n')
+      .map(Number);
+    expect(timeouts).toHaveLength(2);
+    expect(timeouts[0]).toBe(10);
+    expect(timeouts[1]).toBeGreaterThan(0);
+    expect(timeouts[1]).toBeLessThan(10);
+    expect(summaryOf(fixture).model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+  });
+
+  test('cuts an abandoned recovery attempt out of the judged stream', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_STREAM: 'recovery_fail_then_healthy' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('3');
+
+    const thirdArgs = readFileSync(`${fixture.capture.args}.3`, 'utf8').trim().split('\n');
+    expect(thirdArgs.slice(thirdArgs.indexOf('--model'), thirdArgs.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(thirdArgs).toContain('--session');
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const runPath = join(fixture.linked, '.plan-relay', runDir);
+    // The abandoned bytes survive only in their attempt file, never in the
+    // stream the gate judged.
+    expect(readFileSync(join(runPath, 'attempt2-primary.jsonl'), 'utf8')).toContain('ses_recovery_fail');
+    const events = readFileSync(join(runPath, 'events.jsonl'), 'utf8');
+    expect(events).not.toContain('ses_recovery_fail');
+    expect(events).toContain('Implementation complete.');
+
+    const summary = summaryOf(fixture);
+    expect(summary.gate).toBe('pass');
+    expect(summary.recovery).toBe('taken');
+    expect(summary.turns_launched).toBe(2);
+    expect(summary.totals.unparsable_lines).toBe(0);
   });
 
   test('continues a no-edit length-truncated session once and gates the combined stream', () => {

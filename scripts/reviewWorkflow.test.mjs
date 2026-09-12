@@ -33,4 +33,12 @@ describe('AI review workflow', () => {
     expect(opencodeJob).toContain('retrying once on the OpenRouter fallback');
     expect(opencodeJob).toContain('Muse Spark OpenRouter fallback did not resolve');
   });
+
+  test('reports a skipped primary and missing keys honestly', () => {
+    expect(opencodeJob).toContain('No Zen API key is set; running the OpenRouter fallback directly.');
+    expect(opencodeJob).toContain('No review API key is set; configure OPENCODE_API_KEY or OPENROUTER_API_KEY.');
+    // The failure warning must interpolate the live status, never a sentinel.
+    expect(opencodeJob).toContain('Primary review model failed (exit $status)');
+    expect(opencodeJob).not.toContain('failed (exit 2)');
+  });
 });

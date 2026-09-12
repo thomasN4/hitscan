@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const PLAN_RELAY_VERSION = 7;
+export const PLAN_RELAY_VERSION = 8;
 
 // Sorted, and asserted sorted, so the digest's input order is reviewable rather
 // than incidental. planRelayVersion.mjs is absent on purpose: a file cannot
@@ -35,7 +35,7 @@ export const SOURCE_FILES = [
 
 export const DIGEST_LENGTH = 16;
 
-export const SOURCE_DIGEST = '2fbfee7e8b563f1f';
+export const SOURCE_DIGEST = 'b24a0fe9db5c0b3d';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 

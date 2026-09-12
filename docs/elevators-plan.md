@@ -41,3 +41,13 @@ real bot route execution, plus pause/resume, jump release, moving decals,
 interruption disposition, and respawn cleanup. It polls behavior with bounded
 wall-clock deadlines. Visual inspection checks the orange deck's flush join and
 rail opening at the catwalk dock.
+
+**PR #115 timeout update:** player checks retain a 45 s wall limit; bot transport
+and interruption checks allow 30 game seconds with a 120 s wall failsafe. All
+elevator waits share a 270 s total wall deadline, leaving 30 s before Puppeteer's 300 s
+protocol timeout for cleanup and diagnostic delivery. Late legs receive only
+the remaining total budget. A timer bounds missing animation frames while
+browser JavaScript remains responsive; a blocked event loop still requires the
+protocol timeout. Timeout failures report the active check, actor/elevator
+snapshot, elapsed clocks and exhausted budget; the four complete bot legs also
+report observed transport phases.

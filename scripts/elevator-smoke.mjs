@@ -20,54 +20,65 @@ export const ELEVATOR_SMOKE_WALL_BUDGET_MS = 45000;
 export const BOT_TRANSPORT_WALL_BUDGET_MS = 120000;
 export const BOT_TRANSPORT_GAME_BUDGET_SEC = 30;
 
-/**
- * Dual-clock exhaustion for a bot-transport wait: fail when the GAME budget
- * is spent (the real assertion) OR the wall failsafe trips (a dead sim must
- * not hang the suite). Load lag — the wall running long while the game clock
- * still advances — keeps waiting until one of the two trips. Mirrors
- * untilTransport's loop condition inside checkElevators; keep the two in sync.
- */
-export function transportWaitExhausted(wallElapsedMs, gameElapsedSec, wallMs, gameSec) {
-  return wallElapsedMs >= wallMs || gameElapsedSec >= gameSec;
+// Reserve time for fixture cleanup and protocol delivery after a labelled failure.
+export const SMOKE_PROTOCOL_TIMEOUT_MS = 300000;
+export const ELEVATOR_SMOKE_TOTAL_WALL_MS = SMOKE_PROTOCOL_TIMEOUT_MS - 30000;
+
+// Self-contained so the exact tested waiter can be serialized into the page.
+// A timer also bounds a stopped requestAnimationFrame stream (while JS remains
+// responsive). A blocked browser event loop still needs the protocol timeout.
+export function createElevatorWaiter({ wallNow, gameNow, requestFrame, cancelFrame,
+  snapshot, totalWallMs }) {
+  const suiteStart = wallNow();
+  return (predicate, label, observe = () => {}, { wallMs, gameSec = Infinity,
+    detail = () => '' } = {}) => new Promise((resolve, reject) => {
+    const wallStart = wallNow(), gameStart = gameNow();
+    const remaining = totalWallMs - (wallStart - suiteStart);
+    let frameId, timer;
+    const finish = error => {
+      cancelFrame(frameId);
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    const fail = reason => {
+      try {
+        finish(new Error(`${label}: ${snapshot()} ${detail()} timeout=${reason} wallElapsedMs=${Math.round(wallNow() - wallStart)} gameElapsedSec=${(gameNow() - gameStart).toFixed(2)}`));
+      } catch (error) { finish(error); }
+    };
+    const tick = () => {
+      try {
+        if (wallNow() - suiteStart >= totalWallMs) return fail('total-wall');
+        if (wallNow() - wallStart >= wallMs) return fail('leg-wall');
+        observe();
+        if (predicate()) return finish();
+        if (gameNow() - gameStart >= gameSec) return fail('game');
+        frameId = requestFrame(tick);
+      } catch (error) { finish(error); }
+    };
+    if (remaining <= 0) return fail('total-wall');
+    timer = setTimeout(() => fail(remaining <= wallMs ? 'total-wall' : 'leg-wall'),
+      Math.min(wallMs, remaining));
+    frameId = requestFrame(tick);
+  });
 }
 
 export async function checkElevators(page, { playerChecks = true } = {}) {
   const budgets = { wallMs: ELEVATOR_SMOKE_WALL_BUDGET_MS,
-    transportWallMs: BOT_TRANSPORT_WALL_BUDGET_MS, transportGameSec: BOT_TRANSPORT_GAME_BUDGET_SEC };
-  return page.evaluate(async (playerChecks, budgets) => {
+    transportWallMs: BOT_TRANSPORT_WALL_BUDGET_MS, transportGameSec: BOT_TRANSPORT_GAME_BUDGET_SEC, totalWallMs: ELEVATOR_SMOKE_TOTAL_WALL_MS };
+  return page.evaluate(async (playerChecks, budgets, waiterSource) => {
     const cs = window.__cs;
     const { transportRoute } = cs.nav;
-    const frame = () => new Promise(r => requestAnimationFrame(r));
     const feet = () => cs.player.pos.y - cs.player.eyeHeight;
     const check = (ok, message) => { if (!ok) throw new Error(message); };
     const snapshot = () => `bots=${JSON.stringify(cs.bots.filter(b => b.alive).map(b => ({ pos: b.mesh.position.toArray(), trip: b.elevatorTrip })))}, player=${cs.player.pos.toArray()}, elevators=${JSON.stringify(cs.elevators.map(e => ({ id: e.spec.id, y: e.collider.max.y, dock: e.dock, blocked: e.blocked })))}`;
-    const until = async (predicate, label, observe = () => {}, detail = null) => {
-      const deadline = performance.now() + budgets.wallMs;
-      do {
-        await frame();
-        observe();
-        if (predicate()) return;
-      } while (performance.now() < deadline);
-      throw new Error(`${label}: ${snapshot()}${detail ? ` ${detail()}` : ''}`);
-    };
-    // Game-clock wait for the bot-transport legs (issue #101): the budget is
-    // spent in cs.gameTime seconds so loaded headless frames cannot flake it,
-    // with wall time as a dead-man failsafe for a sim that stopped advancing.
-    const untilTransport = async (predicate, label, observe = () => {}, detail = null) => {
-      const wallStart = performance.now();
-      const gameStart = cs.gameTime.now();
-      for (;;) {
-        await frame();
-        observe();
-        if (predicate()) return;
-        const wallElapsedMs = performance.now() - wallStart;
-        const gameElapsedSec = cs.gameTime.now() - gameStart;
-        // Mirrors transportWaitExhausted() at module top level — keep in sync.
-        if (wallElapsedMs >= budgets.transportWallMs || gameElapsedSec >= budgets.transportGameSec) {
-          throw new Error(`${label}: ${snapshot()}${detail ? ` ${detail()}` : ''} wallElapsedMs=${Math.round(wallElapsedMs)} gameElapsedSec=${gameElapsedSec.toFixed(2)}`);
-        }
-      }
-    };
+    const makeWaiter = new Function(`return (${waiterSource})`)();
+    const wait = makeWaiter({ wallNow: () => performance.now(), gameNow: () => cs.gameTime.now(),
+      requestFrame: cb => requestAnimationFrame(cb), cancelFrame: id => cancelAnimationFrame(id),
+      snapshot, totalWallMs: budgets.totalWallMs });
+    const until = (predicate, label, observe) => wait(predicate, label, observe, { wallMs: budgets.wallMs });
+    const untilTransport = (predicate, label, observe, detail) => wait(predicate, label, observe,
+      { wallMs: budgets.transportWallMs, gameSec: budgets.transportGameSec, detail });
     const key = (code, down) => window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code }));
     const place = (x, y, z) => {
       cs.player.pos.set(x, y + cs.player.eyeHeight, z);
@@ -132,7 +143,8 @@ export async function checkElevators(page, { playerChecks = true } = {}) {
         await until(() => e.deltaY > 0 && e.collider.max.y > 1, 'moving jump fixture');
         cs.game.locked = false;
         const paused = e.elapsed, pausedFeet = feet();
-        for (let i = 0; i < 20; i++) await frame();
+        let pausedFrames = 0;
+        await until(() => ++pausedFrames >= 20, 'pause samples');
         check(e.elapsed === paused && feet() === pausedFeet, 'pause moved elevator or rider');
         cs.game.locked = true;
         key('Space', true);
@@ -201,16 +213,16 @@ export async function checkElevators(page, { playerChecks = true } = {}) {
         bot.clearRouteCache();
         bot.elevatorTrip = null;
         bot.brain.decide = hold;
-        await until(() => elevator.dock === 'upper', 'interruption fixture');
+        await untilTransport(() => elevator.dock === 'upper', 'interruption fixture');
         bot.brain.decide = routeUp;
-        await until(() => bot.elevatorTrip?.phase === 'wait', 'bot waiting');
+        await untilTransport(() => bot.elevatorTrip?.phase === 'wait', 'bot waiting');
         bot.brain.decide = hold;
-        await frame();
+        await untilTransport(() => true, 'interruption frame');
         check(bot.elevatorTrip === null, 'interrupted unboarded trip survived');
         bot.brain.decide = routeUp;
-        await until(() => bot.elevatorTrip?.phase === 'ride', 'bot committed ride');
+        await untilTransport(() => bot.elevatorTrip?.phase === 'ride', 'bot committed ride');
         bot.brain.decide = hold;
-        await until(() => bot.elevatorTrip === null && bot.mesh.position.distanceTo(spec.upperLanding) < 0.3,
+        await untilTransport(() => bot.elevatorTrip === null && bot.mesh.position.distanceTo(spec.upperLanding) < 0.3,
           'interrupted ride did not finish');
         // Interrupt on the frame just after input first establishes support,
         // before the next transport transition has had a chance to run.
@@ -220,13 +232,13 @@ export async function checkElevators(page, { playerChecks = true } = {}) {
         bot.clearRouteCache();
         bot.elevatorTrip = null;
         bot.brain.decide = routeUp;
-        await until(() => bot.elevatorTrip?.phase === 'board' && bot.onGround
+        await untilTransport(() => bot.elevatorTrip?.phase === 'board' && bot.onGround
           && Math.abs(bot.mesh.position.y - elevator.collider.max.y) < 0.01,
           'first boarding support');
         bot.brain.decide = hold;
-        await frame();
+        await untilTransport(() => true, 'interruption frame');
         check(bot.elevatorTrip?.phase === 'ride', 'first supported boarding frame was cancelled');
-        await until(() => bot.elevatorTrip === null && bot.mesh.position.distanceTo(spec.upperLanding) < 0.3,
+        await untilTransport(() => bot.elevatorTrip === null && bot.mesh.position.distanceTo(spec.upperLanding) < 0.3,
           'boarding interruption did not finish');
         // Respawn owns transport cleanup along with all other per-life state.
         bot.elevatorTrip = { id: spec.id, destination: 'lower', phase: 'ride' };
@@ -250,5 +262,5 @@ export async function checkElevators(page, { playerChecks = true } = {}) {
       cs.game.roundTime = oldRound;
       for (const { b, alive, visible } of actorState) { b.alive = alive; b.mesh.visible = visible; }
     }
-  }, playerChecks, budgets);
+  }, playerChecks, budgets, createElevatorWaiter.toString());
 }

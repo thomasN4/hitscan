@@ -5,7 +5,7 @@
 //
 // Requires Brave (Flatpak path below is machine-specific).
 import puppeteer from 'puppeteer-core';
-import { checkElevators } from './elevator-smoke.mjs';
+import { checkElevators, SMOKE_PROTOCOL_TIMEOUT_MS } from './elevator-smoke.mjs';
 
 const BRAVE = '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave';
 // Parallel worktrees run parallel dev servers on distinct ports (see
@@ -21,7 +21,7 @@ function mapUrl(path) {
 
 const browser = await puppeteer.launch({
   executablePath: BRAVE,
-  protocolTimeout: 300000, // complete elevator rides can span several cycles
+  protocolTimeout: SMOKE_PROTOCOL_TIMEOUT_MS, // elevator waits reserve cleanup/diagnostic headroom
   headless: 'new',
   args: ['--no-sandbox', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });

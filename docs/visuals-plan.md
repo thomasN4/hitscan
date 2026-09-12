@@ -100,7 +100,7 @@ style to other maps.
 Replace all six first-person box assemblies with procedural models in
 `core/weaponModels.ts`. This geometry improvement applies on every map;
 the illustrated palette and ink remain exclusive to the arena study URL.
-Bot-held models remain the earlier simple silhouettes.
+Bot-held models remain the earlier simple silhouettes. (Superseded: bots now mount the same authored rigs as the player, third-person — `src/core/botWeaponModels.ts`; see `docs/assets.md`.)
 
 - SMG: tubular receiver, ribbed fore-end, curved magazine, shaped grip/stock,
   aperture sight and recessed muzzle.

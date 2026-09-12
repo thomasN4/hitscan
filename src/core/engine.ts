@@ -23,8 +23,34 @@ export let renderer: THREE.WebGLRenderer;
 export let scene: THREE.Scene;
 export let camera: THREE.PerspectiveCamera;
 export let clock: THREE.Clock;
+/**
+ * Reduced-fidelity rendering for GPU-less contexts (see initEngine). Read
+ * only after initEngine(), like the bindings above.
+ */
+export let lowFx = false;
 
 let initialized = false;
+
+/**
+ * Whether the WebGL implementation is software-rasterized (SwiftShader,
+ * llvmpipe and kin), where every triangle, texel and MSAA sample is CPU
+ * work. Sniffed on a throwaway 1x1 context BEFORE the real renderer is
+ * created, because multisampling is a context-creation attribute: by the
+ * time the real context exists it is too late to turn it off. A missing
+ * context or debug extension fails closed toward full quality, so a software
+ * user misdetected as hardware only gets today's behavior while no hardware
+ * user is ever degraded.
+ */
+function isSoftwareRenderer(): boolean {
+  const probe = document.createElement('canvas');
+  const gl = probe.getContext('webgl2') ?? probe.getContext('webgl');
+  if (!gl) return false;
+  const raw = gl.getExtension('WEBGL_debug_renderer_info') as unknown;
+  if (raw === null || typeof raw !== 'object' || !('UNMASKED_RENDERER_WEBGL' in raw)) return false;
+  const token = (raw as { UNMASKED_RENDERER_WEBGL: number }).UNMASKED_RENDERER_WEBGL;
+  const name: unknown = gl.getParameter(token);
+  return typeof name === 'string' && /swiftshader|llvmpipe|softpipe|software/i.test(name);
+}
 
 /**
  * Build the renderer/scene/camera/lights and attach the canvas to the page.
@@ -36,16 +62,29 @@ let initialized = false;
  *        palette from `state.ts:AMBIENCE`. Passed in rather than read from
  *        `session` so this module keeps no opinion about where config comes
  *        from; main.ts has already parsed the query by the time it calls here.
+ * @param opts.lowFx force the reduced-fidelity path (pixel ratio 1, no
+ *        shadow pass) even on hardware GL. Deliberately NOT part of the
+ *        committed match-config query — it is a local rendering concern, not
+ *        match rules, so main.ts reads `?lowfx=1` itself rather than routing
+ *        it through sessionConfig. Otherwise the path arms itself by
+ *        detecting a software rasterizer.
  */
-export function initEngine(map: MapName): void {
+export function initEngine(map: MapName, opts?: { lowFx?: boolean }): void {
   if (initialized) throw new Error('initEngine() called twice');
 
   const amb = AMBIENCE[map];
 
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  // Decided before the context exists: multisampling is baked in at
+  // creation, so the probe above is what lets a software rasterizer skip it.
+  lowFx = opts?.lowFx === true || isSoftwareRenderer();
+  renderer = new THREE.WebGLRenderer({ antialias: !lowFx });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
+  // Software rasterizers pay per texel, per sample and per shadow-caster on
+  // the CPU; the authored bot guns tripled that bill. Full quality is
+  // untouched — this branch only ever runs where there is no GPU to begin
+  // with (or under an explicit `?lowfx=1`).
+  renderer.setPixelRatio(lowFx ? 1 : Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = !lowFx;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 

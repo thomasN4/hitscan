@@ -32,9 +32,12 @@ const reviewLogic = reviewRun.slice(reviewRun.indexOf('review_with() {'));
 // one file, and the two absolute /tmp reads are redirected into the case's own
 // directory. Neither rewrites a branch; the decision bytes run verbatim.
 const HARNESS = `
-# The step's 10-minute warning subshell outlives the kill that targets it (the
-# kill reaps the subshell, not the sleep it forked), and an orphan holding an
-# inherited pipe would hang the reader. Annotations go to a file instead.
+# The step's 10-minute warning exists to be reaped, not observed: the kill that
+# targets it reaps the subshell, not the sleep it forked, so a real sleep would
+# outlive every case by ten minutes and an orphan holding the inherited pipe
+# would hang the reader too. Exiting from the stub ends that subshell at once,
+# where returning from it would fire the warning immediately instead.
+sleep() { exit 0; }
 exec > "$STUB_OUTPUT" 2>&1
 REVIEW_PROMPT="review the pull request"
 opencode() {

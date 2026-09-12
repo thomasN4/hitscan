@@ -169,21 +169,45 @@ if test -z "${OPENCODE_API_KEY:-}"; then
   active_model="$fallback_model"
 fi
 model_used="$active_model"
+
+# Whether an executor attempt touched the worktree. The runner refuses a dirty
+# worktree at startup, so anything this reports came from an attempt: `diff HEAD`
+# covers tracked content whether staged or not, hashing what `ls-files --others`
+# reports covers untracked content that no diff would show, and the status line
+# catches renames and deletions, which are not content at all.
+worktree_fingerprint() {
+  {
+    git -C "$repo_root" status --porcelain --untracked-files=all
+    git -C "$repo_root" diff HEAD --
+    git -C "$repo_root" ls-files --others --exclude-standard -z | xargs -0 -r sha256sum --
+  } 2>/dev/null | sha256sum
+}
+
 turn_model=""
 turn_models=""
 discarded_attempts=""
 attempt_seq=0
 
-# Run one executor turn on the active model, retrying once on the other model
-# when the attempt fails fast. The retry gets only the turn's remaining budget
-# — never a fresh one — and a watchdog kill (124) is never retried at all:
-# both rules keep a run inside the documented watchdog ceiling. Every attempt
-# is retained beside the events file as evidence; the events file itself always
-# holds the latest attempt's bytes — an abandoned append-mode attempt is cut
-# back to the pre-attempt size first — so the gate and the summary below keep
-# judging one stream.
+# Run one executor turn on the active model, retrying once on the other model.
+# Three conditions gate that retry, and none of them is how quickly the attempt
+# died — an earlier draft of this comment claimed "fails fast", which the code
+# has never checked:
 #
-# An abandoned attempt's cost and edits are therefore absent from the summary's
+#   1. the failure is not a watchdog kill (124), whose budget is already spent;
+#   2. some of the turn's budget remains, and the retry gets only that, never a
+#      fresh one, so a run stays inside the documented watchdog ceiling;
+#   3. the attempt left the worktree byte-identical. An attempt that edited
+#      files cannot be retried away: the edits stay on disk, so the retry would
+#      start from a state the approved plan never described and the record would
+#      omit changes the final diff still shows. That run stops instead, keeping
+#      its edits and its events for the planner to read.
+#
+# Every attempt is retained beside the events file as evidence. The events file
+# holds one attempt's bytes per turn: an attempt is cut back out of it only when
+# a retry is about to replace it, so a failure nothing follows keeps its bytes
+# where the summary can describe what is actually on disk.
+#
+# A replaced attempt's cost and edits are therefore absent from the summary's
 # totals, which is deliberate: merging two attempts would produce turn totals
 # describing no single session, and a mid-write final line would swallow the
 # retry's first event. The spend was still real, so each discarded attempt is
@@ -204,10 +228,11 @@ invoke_executor() {
   local tried=""
   local status=2
   local candidate role attempt_file attempts=0
-  # An overwrite-mode failure is discarded by the NEXT attempt's tee, not at the
-  # moment it fails, so its record waits here until that attempt actually runs.
-  # A last failed attempt in overwrite mode keeps its bytes and is not discarded.
+  # A failed attempt is discarded by the NEXT attempt, not at the moment it
+  # fails, so its record and its events file size wait here until that attempt
+  # actually runs. A failure no retry follows is never discarded at all.
   local pending_discard=""
+  local pending_bytes=0
   # Global on purpose: the caller reads it after this turn returns.
   turn_model=""
   # A scalar, not an array: "${empty_array[@]}" is an unbound-variable error
@@ -239,19 +264,26 @@ invoke_executor() {
     attempt_file="$run_dir/attempt${attempt_seq}-${role}.jsonl"
     attempts=$((attempts + 1))
     if test -n "$pending_discard"; then
+      # This attempt replaces the last one, so now its bytes leave the stream.
+      # Overwrite mode's tee truncates by itself; append mode needs the cut.
+      if test "$append_mode" = "append"; then
+        head -c "$pending_bytes" "$events_file" > "$events_file.trunc" && mv -- "$events_file.trunc" "$events_file"
+      fi
       discarded_attempts="${discarded_attempts:+$discarded_attempts,}$pending_discard"
       pending_discard=""
     fi
     if test "$attempts" -gt 1; then
       echo "Plan Relay: retrying on $candidate with ${budget}s of watchdog budget left" >&2
     fi
-    # In append mode the failed attempt below would linger in the events file
-    # and the retry would concatenate after it, so remember the pre-attempt
-    # size for the cut-back afterwards. Overwrite mode truncates by itself.
+    # In append mode the attempt below would linger in the events file and a
+    # retry would concatenate after it, so remember the pre-attempt size for the
+    # cut-back. Overwrite mode truncates by itself and needs no size.
     local events_bytes=0
     if test "$append_mode" = "append"; then
       events_bytes=$(wc -c < "$events_file" 2>/dev/null || echo 0)
     fi
+    local pre_fingerprint
+    pre_fingerprint="$(worktree_fingerprint)"
     set +e
     OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
     XDG_CONFIG_HOME="$runtime/config" \
@@ -280,21 +312,26 @@ invoke_executor() {
       echo "Plan Relay: executor hung and was killed by the watchdog on $candidate; not retrying" >&2
       return "$status"
     fi
-    if test "$append_mode" = "append"; then
-      # Cut the abandoned attempt back out so the retry appends onto the
-      # pre-attempt stream. The attempt file beside the events file keeps the
-      # removed bytes as evidence.
-      head -c "$events_bytes" "$events_file" > "$events_file.trunc" && mv -- "$events_file.trunc" "$events_file"
-      discarded_attempts="${discarded_attempts:+$discarded_attempts,}$(basename "$attempt_file"):$candidate:$status"
-    else
-      pending_discard="$(basename "$attempt_file"):$candidate:$status"
-    fi
     echo "Plan Relay: executor failed on $candidate (exit $status)" >&2
+    # Edits already on disk outlive the attempt that made them, so a retry here
+    # would run the plan again over a worktree neither model was given. Stop
+    # with the evidence intact instead; reverting the edits is the only other
+    # way to make a retry honest, and a runner that silently throws work away is
+    # worse than one that hands the planner a failed run it can read.
+    if test "$(worktree_fingerprint)" != "$pre_fingerprint"; then
+      echo "Plan Relay: executor changed the worktree before failing on $candidate; not retrying" >&2
+      return "$status"
+    fi
     budget=$((budget - (SECONDS - turn_start)))
     if test "$budget" -le 0; then
       echo "Plan Relay: no watchdog budget remains for a retry" >&2
       return "$status"
     fi
+    # Stage the discard rather than apply it: the loop may still find no other
+    # model configured and end without retrying, and an unflushed stage leaves
+    # this attempt's bytes in the stream, which is what that run wants.
+    pending_discard="$(basename "$attempt_file"):$candidate:$status"
+    pending_bytes="$events_bytes"
   done
   return "$status"
 }

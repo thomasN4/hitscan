@@ -204,6 +204,12 @@ files touched, denied tool calls, gate verdict — for **every** run, including 
 ones the watchdog killed, because those are the runs whose cost you cannot
 otherwise account for. A summary failure is reported but does not replace the
 executor's exit status; use the retained `events.jsonl` as the fallback record.
+One exception to that pair: when a failed attempt is retried on the other model,
+the abandoned attempt is deliberately cut out of `events.jsonl` and the summary's
+`totals`, so that both describe a single session rather than a merge of two. It
+is not lost — `summary.json` names it under `discarded_attempts` with its model
+and exit status, and its full stream stays in the `attempt<N>-<role>.jsonl` file
+beside the events. Account for a retried run's real spend from all three.
 That directory stays local evidence and is routinely pruned; the committed
 record is the planner's short wave entry in
 [`docs/plan-relay-log.md`](docs/plan-relay-log.md), which cites the run and adds

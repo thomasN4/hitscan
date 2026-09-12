@@ -125,11 +125,17 @@ length_stream() {
 }
 # Provider failures: record the invocation, then exit before emitting a
 # stream, so the runner's retry has nothing to inherit. "slow" sleeps first,
-# so the retry's remaining-budget arithmetic has something to observe.
+# so the retry's remaining-budget arithmetic has something to observe. "edit"
+# writes to a tracked file first, which is the one failure a retry cannot undo.
 if test "$call_index" -eq 1; then
   case "\${PLAN_RELAY_TEST_FAIL_FIRST:-}" in
     1) exit 1 ;;
     slow) sleep 3; exit 1 ;;
+    edit)
+      printf '%s\\n' '{"type":"step_start","sessionID":"ses_dirty","timestamp":1700000000000,"part":{}}'
+      printf 'half done\\n' >> "$worktree/tracked.txt"
+      exit 1
+      ;;
   esac
 fi
 case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
@@ -651,6 +657,24 @@ describe('Plan Relay runner', () => {
     expect(summary.turns.map((turn) => turn.model)).toEqual([
       'openrouter/meta/muse-spark-1.3-contributor',
     ]);
+  });
+
+  test('refuses to retry an attempt that changed the worktree', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_FAIL_FIRST: 'edit' });
+    expect(result.status).toBe(1);
+    // One invocation: the fallback never ran, because the edit the primary left
+    // on disk would have been its starting state and nobody's plan.
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
+    expect(result.stderr).toContain('changed the worktree before failing');
+    expect(readFileSync(join(fixture.linked, 'tracked.txt'), 'utf8')).toContain('half done');
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const runPath = join(fixture.linked, '.plan-relay', runDir);
+    // Nothing replaced the attempt, so its bytes stay where the summary can
+    // describe the worktree the planner is about to look at.
+    expect(readFileSync(join(runPath, 'events.jsonl'), 'utf8')).toContain('ses_dirty');
+    expect(summaryOf(fixture).discarded_attempts).toEqual([]);
   });
 
   test('records no discard when the primary succeeds outright', () => {

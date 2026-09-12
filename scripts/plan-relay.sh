@@ -169,6 +169,9 @@ if test -z "${OPENCODE_API_KEY:-}"; then
   active_model="$fallback_model"
 fi
 model_used="$active_model"
+turn_model=""
+turn_models=""
+discarded_attempts=""
 attempt_seq=0
 
 # Run one executor turn on the active model, retrying once on the other model
@@ -179,6 +182,17 @@ attempt_seq=0
 # holds the latest attempt's bytes — an abandoned append-mode attempt is cut
 # back to the pre-attempt size first — so the gate and the summary below keep
 # judging one stream.
+#
+# An abandoned attempt's cost and edits are therefore absent from the summary's
+# totals, which is deliberate: merging two attempts would produce turn totals
+# describing no single session, and a mid-write final line would swallow the
+# retry's first event. The spend was still real, so each discarded attempt is
+# named in `discarded_attempts` — its file, model and exit status — and the
+# bytes stay readable in that file. Excluded from the totals, never unrecorded.
+#
+# turn_model names the model whose bytes the turn retained, so a run that
+# changed provider mid-flight can be attributed per turn instead of wholly to
+# whichever model happened to finish it.
 # Usage: invoke_executor <events-file> <overwrite|append> <budget-secs> <opencode args...>
 invoke_executor() {
   local events_file="$1"
@@ -190,6 +204,12 @@ invoke_executor() {
   local tried=""
   local status=2
   local candidate role attempt_file attempts=0
+  # An overwrite-mode failure is discarded by the NEXT attempt's tee, not at the
+  # moment it fails, so its record waits here until that attempt actually runs.
+  # A last failed attempt in overwrite mode keeps its bytes and is not discarded.
+  local pending_discard=""
+  # Global on purpose: the caller reads it after this turn returns.
+  turn_model=""
   # A scalar, not an array: "${empty_array[@]}" is an unbound-variable error
   # under `set -u` on bash older than 4.4, while an unquoted-but-set scalar
   # expands to zero words everywhere.
@@ -218,6 +238,10 @@ invoke_executor() {
     esac
     attempt_file="$run_dir/attempt${attempt_seq}-${role}.jsonl"
     attempts=$((attempts + 1))
+    if test -n "$pending_discard"; then
+      discarded_attempts="${discarded_attempts:+$discarded_attempts,}$pending_discard"
+      pending_discard=""
+    fi
     if test "$attempts" -gt 1; then
       echo "Plan Relay: retrying on $candidate with ${budget}s of watchdog budget left" >&2
     fi
@@ -248,6 +272,7 @@ invoke_executor() {
     # retry-or-propagate value rather than a script failure.
     active_model="$candidate"
     model_used="$candidate"
+    turn_model="$candidate"
     if test "$status" -eq 0; then
       return 0
     fi
@@ -260,6 +285,9 @@ invoke_executor() {
       # pre-attempt stream. The attempt file beside the events file keeps the
       # removed bytes as evidence.
       head -c "$events_bytes" "$events_file" > "$events_file.trunc" && mv -- "$events_file.trunc" "$events_file"
+      discarded_attempts="${discarded_attempts:+$discarded_attempts,}$(basename "$attempt_file"):$candidate:$status"
+    else
+      pending_discard="$(basename "$attempt_file"):$candidate:$status"
     fi
     echo "Plan Relay: executor failed on $candidate (exit $status)" >&2
     budget=$((budget - (SECONDS - turn_start)))
@@ -281,6 +309,7 @@ invoke_executor "$events" overwrite "$timeout_secs" \
   "$executor_prompt"
 status="$?"
 turns_launched=1
+turn_models="$turn_model"
 # The summary splits the concatenated stream at this line. wc -l under-counts by
 # one when the final line lacks a newline, which happens only on a kill — and a
 # killed turn never gets a turn 2, so the boundary is not consulted then.
@@ -308,6 +337,7 @@ if test -n "$recovery_session"; then
       "$recovery_prompt"
     status="$?"
     turns_launched=2
+    turn_models="${turn_models},${turn_model}"
     recovery="taken"
   else
     echo "Plan Relay: no watchdog budget remains for recovery" >&2
@@ -350,6 +380,8 @@ if node "$summary_script" "$events" "$summary" \
   --branch="$branch" \
   --baseline="$baseline" \
   --model_used="$model_used" \
+  --turn_models="$turn_models" \
+  --discarded_attempts="$discarded_attempts" \
   --node_modules_shared="$node_modules_shared" \
   --started_at="$started_at" \
   --ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

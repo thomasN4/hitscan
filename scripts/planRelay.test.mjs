@@ -616,6 +616,51 @@ describe('Plan Relay runner', () => {
     expect(summary.recovery).toBe('taken');
     expect(summary.turns_launched).toBe(2);
     expect(summary.totals.unparsable_lines).toBe(0);
+
+    // Turn 1 ran on Zen and only the recovery changed provider, so crediting
+    // the whole run to OpenRouter would misattribute turn 1's spend.
+    expect(summary.turns.map((turn) => turn.model)).toEqual([
+      'opencode/muse-spark-1.3-contributor-free',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+
+    // The abandoned attempt is out of the totals but not out of the record.
+    expect(summary.discarded_attempts).toEqual([
+      {
+        attempt: 'attempt2-primary.jsonl',
+        model: 'opencode/muse-spark-1.3-contributor-free',
+        exit_status: 1,
+      },
+    ]);
+  });
+
+  test('records an overwrite-mode discard once the retry has overwritten it', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_FAIL_FIRST: '1' });
+    expect(result.status, result.stderr).toBe(0);
+    const summary = summaryOf(fixture);
+    expect(summary.discarded_attempts).toEqual([
+      {
+        attempt: 'attempt1-primary.jsonl',
+        model: 'opencode/muse-spark-1.3-contributor-free',
+        exit_status: 1,
+      },
+    ]);
+    // One launched turn, run end to end on the model that retried it.
+    expect(summary.turns.map((turn) => turn.model)).toEqual([
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+  });
+
+  test('records no discard when the primary succeeds outright', () => {
+    const fixture = createFixture();
+    expect(run(fixture, fixture.linked).status).toBe(0);
+    const summary = summaryOf(fixture);
+    expect(summary.discarded_attempts).toEqual([]);
+    expect(summary.turns.map((turn) => turn.model)).toEqual([
+      'opencode/muse-spark-1.3-contributor-free',
+    ]);
   });
 
   test('continues a no-edit length-truncated session once and gates the combined stream', () => {
@@ -1033,6 +1078,10 @@ describe('Plan Relay summary', () => {
       gate: 'pass',
       duration_s: 4,
       node_modules_shared: true,
+    });
+    expect(parseOptions(['--turn_models=a,b', '--discarded_attempts=f.jsonl:a:1'])).toEqual({
+      turn_models: 'a,b',
+      discarded_attempts: 'f.jsonl:a:1',
     });
     expect(parseOptions(['--model_used=openrouter/meta/muse-spark-1.3-contributor'])).toEqual({
       model_used: 'openrouter/meta/muse-spark-1.3-contributor',

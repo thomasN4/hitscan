@@ -1569,6 +1569,14 @@ all plan documents, so a bare `lesson N` in a code comment is unambiguous.
     every idle bot's patrol picks are rooftop nodes it silently discards. That
     is a candidate follow-up (bias the selector toward reachable nodes), not a
     7a fix.
+    *(Annotation, PR #110: the follow-up landed. `NavGrid` now carries a
+    `component: Int32Array` labelled once at build time
+    (`sim/navGrid.ts:labelComponents`), and `pickPatrolNode` skips sampled
+    nodes outside the bot's own component. The "roughly a quarter" above no
+    longer holds — wall tops and enclosed pockets are never drawn, and the
+    `[patrol]` respawn claim's ~2.5%-per-run flake is gone as a consequence
+    rather than by moving a budget. The wording above stays as the record of
+    what the measurement showed when the selector was whole-graph.)*
 
 32. **A union widening is an atomic commit boundary; put the seam somewhere else.**
     7b's first plan was the obvious one: land the pure `sim/` half, wire it

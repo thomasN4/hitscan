@@ -35,7 +35,10 @@ for weapon in ('shotgun','revolver','pistol','smg','sniper','knife'):
                 ('Reload.MagazineOut','magazine_out')]:
             bpy.data.objects[source].name=target
     elif weapon=='revolver':
-        rotor=group('mechanism_rotor',['Cylinder / six chamber rotor','Extractor hub'],bpy.data.objects['Mechanism.CylinderAxis'].location)
+        # 'Chamber ' collects the seated cartridges; they have to index with the
+        # rotor and swing out with the crane, not sit behind in the frame.
+        chambers=sorted(o.name for o in bpy.context.scene.objects if o.name.startswith('Chamber '))
+        rotor=group('mechanism_rotor',['Cylinder / six chamber rotor','Extractor hub']+chambers,bpy.data.objects['Mechanism.CylinderAxis'].location)
         crane=group('mechanism_cylinder',[rotor.name,'Cylinder crane','Ejector rod'],bpy.data.objects['Mechanism.CranePivot'].location)
         group('mechanism_hammer',['Hammer'],bpy.data.objects['Mechanism.HammerPivot'].location)
         bpy.data.objects['Grip.Primary'].name='grip_right'

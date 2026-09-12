@@ -173,6 +173,29 @@ def shotgun():
     marker('Muzzle',(0,.001,-.62))
 
 
+def loaded_chambers(brass, dark):
+    """Seat a cartridge in every chamber so the rotor never reads as an empty gun.
+
+    The chambers are bored straight through, so without these the player sees six
+    black holes and daylight through the frame window. Static geometry: the rounds
+    do not track ammo, they only have to look present. Shared with the one-off
+    source edit that added them to the approved .blend, so both stay identical.
+    """
+    parts=[]
+    for i in range(6):
+        a=i*math.tau/6
+        x=math.sin(a)*.026
+        y=-.029+math.cos(a)*.026
+        # Case stops 8 mm short of the chamber mouth: a seated round is recessed,
+        # and the solid body is what kills the see-through.
+        parts.append(cyl(f'Chamber case {i}',.0084,.052,(x,y,-.011),brass,24))
+        # Rim stands proud of the rotor's rear face; .0105 against the .009 bore
+        # leaves a 1.5 mm lip, which is the case head you actually read.
+        parts.append(cyl(f'Chamber rim {i}',.0105,.0018,(x,y,.0159),brass,24))
+        parts.append(cyl(f'Chamber primer {i}',.0038,.0012,(x,y,.0174),dark,16))
+    return parts
+
+
 def revolver():
     steel,dark,wood,grain,silver,brass=setup()
     frame=profile('Frame', [(-.068,.025),(.041,.025),(.066,-.008),(.057,-.067),(.020,-.086),(-.065,-.081)],.040,steel,.003)
@@ -193,6 +216,7 @@ def revolver():
         y=-.029+math.cos(a)*.046
         cut(cylinder,cyl(f'Flute cutter {i}',.009,.039,(x,y,-.012),dark,24))
     cyl('Extractor hub',.010,.004,(0,-.029,.017),silver)
+    loaded_chambers(brass,dark)
     box('Cylinder crane',(.012,.012,.072),(-.021,-.057,-.022),steel)
     cyl('Ejector rod',.004,.095,(-.012,-.034,-.095),silver)
     profile('Grip steel backstrap',[(.033,-.052),(.065,-.049),(.105,-.147),(.081,-.162),(.033,-.133),(.026,-.090)],.035,steel,.005)
@@ -256,7 +280,10 @@ def save_and_render(name, target, scale):
         if view=='hero':
             bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/f'assets/source/{name}.blend'))
 
-shotgun()
-save_and_render('shotgun',(0,-.035,-.080),1.23)
-revolver()
-save_and_render('revolver',(0,-.053,-.060),.48)
+# Guarded so the chamber-loading helper above can be imported without rebuilding
+# (and overwriting) the approved sources. Blender's --python runs this as __main__.
+if __name__=='__main__':
+    shotgun()
+    save_and_render('shotgun',(0,-.035,-.080),1.23)
+    revolver()
+    save_and_render('revolver',(0,-.053,-.060),.48)

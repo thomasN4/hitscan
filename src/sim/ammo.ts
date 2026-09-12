@@ -76,10 +76,12 @@ export interface ReloadRequest {
 export interface ReloadDecision {
   start: boolean;
   /**
-   * A STARTED reload drops iron sights / the scope — one motion at a time,
-   * and a fresh RMB press re-raises afterwards (same semantics as
-   * unscopeOnShot: clearing input.aiming beats a still-held button). False
-   * whenever `start` is false: a REFUSED reload must never touch the aim.
+   * A STARTED reload drops iron sights / the scope — one motion at a time
+   * (same semantics as unscopeOnShot: clearing input.aiming beats a
+   * still-held button). What a fresh RMB press does next depends on the
+   * weapon: it cancels a gradual (perRound) reload and raises at once, while
+   * a whole-mag reload refuses it until the reload finishes. False whenever
+   * `start` is false: a REFUSED reload must never touch the aim.
    */
   dropAim: boolean;
 }
@@ -98,23 +100,23 @@ export interface StanceCancelRequest {
   sprinting: boolean;
   /** RMB held: iron sights / scope raised right now. */
   aiming: boolean;
+  /** The held weapon reloads shell-by-shell (shotgun, revolver). */
+  perRound: boolean;
 }
 
 /**
  * Whether this frame's stance cancels a running reload.
  *
- * Both stances win, for the same reason planReload's dropAim drops the sights
- * when a reload STARTS: one motion at a time, and the newer input is the one
- * the player just asked for. The two halves are mirrors — this is the order
- * planReload cannot see, because nothing presses R. Rounds a per-round reload
- * has already moved stay live; weapons.ts:cancelReload clears the schedule, not
- * the magazine.
+ * Sprint always wins. Aiming wins only for gradual (perRound) reloads, where
+ * interrupting keeps every landed shell — the rest of the budget is dropped,
+ * not the chambered rounds. For whole-mag reloads aiming is refused upstream
+ * instead (main.ts blocks the fresh RMB press and updateWeapon keeps adsLerp
+ * at 0 while reloading), so it can never arrive mid-reload to cancel one.
+ * Rounds a per-round reload has already moved stay live;
+ * weapons.ts:cancelReload clears the schedule, not the magazine.
  *
- * Level-triggered rather than edge-triggered, and it cannot fight dropAim:
- * starting a reload while aiming zeroes input.aiming, so `aiming` is already
- * false on the very next frame. A fresh RMB press is what both re-raises the
- * sights and cancels, so there is no held-button loop to break.
+ * Level-triggered rather than edge-triggered.
  */
 export function cancelsReload(r: StanceCancelRequest): boolean {
-  return r.reloading && (r.sprinting || r.aiming);
+  return r.reloading && (r.sprinting || (r.aiming && r.perRound));
 }

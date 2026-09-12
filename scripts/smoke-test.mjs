@@ -658,10 +658,12 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         while (cs.gameTime.now() - backT < 0.6) await wait(50);
         const restored = { slot: cs.game.slot, mag: cs.weapon.mag, reloading: cs.weapon.reloading };
         // The mirror of the drop rule above: reload FIRST with no button held,
-        // then raise the sights. The fresh RMB press must cancel the reload and
-        // still raise, so the reticle never comes up over a running reload.
-        // Released again immediately — input.aiming is raw button state, and a
-        // held RMB would cancel the closing refill below too.
+        // then raise the sights. The fresh RMB press is REFUSED while the
+        // reload runs — ADS is impossible until it finishes — so the reticle
+        // never comes up over a running reload and the reload is not cancelled.
+        // Released again immediately — input.aiming is raw button state only
+        // outside a reload, and a held RMB would ADS the moment the reload
+        // completes instead of staying hip for the closing refill below.
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
         await wait(150);
         const beforeAimCancel = { reloading: cs.weapon.reloading, aiming: cs.game.aiming };
@@ -670,7 +672,9 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const afterAimCancel = { reloading: cs.weapon.reloading, aiming: cs.game.aiming, mag: cs.weapon.mag };
         window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
         await wait(50);
-        // ...and R starts a fresh reload; let it run out so the phases below
+        // ...and the R below is a refused no-op: the RMB above never cancelled,
+        // so the reload is still running and planReload declines a second
+        // start while reloading is true. Let it drain so the phases below
         // see a full mag again.
         //
         // POLLED, not slept. The reload deadline is GAME time (weapons.ts sets
@@ -698,9 +702,9 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       if (qcancel.started.reloading !== true) throw new Error(`R did not start a reload: ${JSON.stringify(qcancel.started)}`);
       if (qcancel.cancelled.slot !== 1 || qcancel.cancelled.reloading !== false) throw new Error(`switching during a reload must cancel it: ${JSON.stringify(qcancel.cancelled)}`);
       if (qcancel.restored.slot !== 0 || qcancel.restored.mag !== 8 || qcancel.restored.reloading !== false) throw new Error(`interrupted weapon must keep its partial mag: ${JSON.stringify(qcancel.restored)}`);
-      if (qcancel.refilled.reloading !== false || qcancel.refilled.mag !== 10) throw new Error(`a fresh reload after re-switching must still complete: ${JSON.stringify(qcancel.refilled)}`);
+      if (qcancel.refilled.reloading !== false || qcancel.refilled.mag !== 10) throw new Error(`the still-running reload must drain to a full mag: ${JSON.stringify(qcancel.refilled)}`);
       if (qcancel.beforeAimCancel.reloading !== true || qcancel.beforeAimCancel.aiming !== false) throw new Error(`R with no button held must start a reload with the sights down: ${JSON.stringify(qcancel.beforeAimCancel)}`);
-      if (qcancel.afterAimCancel.reloading !== false || qcancel.afterAimCancel.aiming !== true) throw new Error(`RMB during a reload must cancel it AND raise the sights: ${JSON.stringify(qcancel.afterAimCancel)}`);
+      if (qcancel.afterAimCancel.reloading !== true || qcancel.afterAimCancel.aiming !== false) throw new Error(`RMB during a reload must neither cancel it nor raise the sights: ${JSON.stringify(qcancel.afterAimCancel)}`);
       console.log(`[qcancel] OK`, JSON.stringify(qcancel));
     }
 
@@ -2096,8 +2100,9 @@ async function runShotgunCheck() {
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
 
-      // Same shape for the sights: a per-round reload cancelled by raising them
-      // must keep every shell it had already chambered, exactly as sprint does.
+      // Same shape for the sights, opposite verdict from whole-mag weapons:
+      // a gradual reload is interrupted by raising them — the reload stops
+      // but every shell already chambered stays live, exactly as sprint does.
       cs.weapon.mag = 2;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
@@ -2105,7 +2110,7 @@ async function runShotgunCheck() {
       const beforeAimCancel = { mag: cs.weapon.mag, reloading: cs.weapon.reloading };
       window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
       await frame();
-      const afterAimCancel = { mag: cs.weapon.mag, reloading: cs.weapon.reloading };
+      const afterAimCancel = { mag: cs.weapon.mag, reloading: cs.weapon.reloading, aiming: cs.game.aiming };
       window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
       return {
         primary: cs.game.primary,
@@ -2136,7 +2141,7 @@ async function runShotgunCheck() {
     if (!result.beforeSprintCancel.reloading || result.beforeSprintCancel.mag <= 2) throw new Error(`per-round control did not load shells before sprint: ${JSON.stringify(result)}`);
     if (result.afterSprintCancel.reloading || result.afterSprintCancel.mag !== result.beforeSprintCancel.mag) throw new Error(`sprint did not preserve landed shells while cancelling reload: ${JSON.stringify(result)}`);
     if (!result.beforeAimCancel.reloading || result.beforeAimCancel.mag <= 2) throw new Error(`per-round control did not load shells before the aim cancel: ${JSON.stringify(result)}`);
-    if (result.afterAimCancel.reloading || result.afterAimCancel.mag !== result.beforeAimCancel.mag) throw new Error(`raising the sights did not preserve landed shells while cancelling reload: ${JSON.stringify(result)}`);
+    if (result.afterAimCancel.reloading || !result.afterAimCancel.aiming || result.afterAimCancel.mag !== result.beforeAimCancel.mag) throw new Error(`raising the sights must cancel the per-round reload, raise, and keep every landed shell: ${JSON.stringify(result)}`);
     console.log('[shotgun] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

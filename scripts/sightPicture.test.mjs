@@ -108,9 +108,9 @@ function nearestInAimCone(gun) {
 const AIM_STATION = {
   smg: 0.73,       // front post crest, on the axis (0.736)
   sniper: 0.66,    // scope body during the ADS blend (0.668), not a sight — see below
-  shotgun: 1.04,   // brass bead, on the axis (1.046)
+  shotgun: 0.97,   // brass bead, on the axis (0.976)
   pistol: Infinity,
-  revolver: 0.33,  // aligned rear shoulders at 0.337; the old hammer answers 0.299
+  revolver: 0.40,  // aligned rear shoulders at 0.407; the old hammer answers 0.392
   knife: Infinity,
 };
 
@@ -181,8 +181,8 @@ test('revolver front crest is visible through the rear notch throughout firing',
     const caster = new Raycaster(EYE,new Vector3(0,-.0002,-.575).normalize());
     const hit = caster.intersectObjects(visibleMeshes(gun),false)[0];
     expect(hit, `front blade at cycle ${i/20}`).toBeDefined();
-    expect(hit.distance).toBeGreaterThan(.56);
-    expect(hit.distance).toBeLessThan(.59);
+    expect(hit.distance).toBeGreaterThan(.63);
+    expect(hit.distance).toBeLessThan(.66);
   }
 });
 

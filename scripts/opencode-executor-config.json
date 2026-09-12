@@ -3,12 +3,32 @@
   "share": "disabled",
   "snapshot": false,
   "autoupdate": false,
-  "enabled_providers": ["opencode"],
+  "enabled_providers": ["opencode", "openrouter"],
   "provider": {
     "opencode": {
       "models": {
         "muse-spark-1.3-contributor-free": {
           "name": "Muse Spark 1.3 Free (OpenCode Zen)",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": {
+            "context": 1048576,
+            "output": 943718
+          },
+          "variants": {
+            "xhigh": {
+              "reasoning": {
+                "effort": "xhigh"
+              }
+            }
+          }
+        }
+      }
+    },
+    "openrouter": {
+      "models": {
+        "meta/muse-spark-1.3-contributor": {
+          "name": "Muse Spark 1.3 Contributor (OpenRouter)",
           "reasoning": true,
           "tool_call": true,
           "limit": {

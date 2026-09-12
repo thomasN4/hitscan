@@ -7,7 +7,7 @@
 // walls + bot parts wins, so cover always blocks damage.
 import * as THREE from 'three';
 import { poseWeapon } from './core/weaponPresentation';
-import { weaponPose, crossedCue } from './sim/weaponAnimation';
+import { weaponPose, crossedCue, shotgunPump, shotgunChambering } from './sim/weaponAnimation';
 import type { WeaponAssets } from './core/weaponAssets';
 import { createWeaponViewModel, type WeaponViewModel } from './core/weaponModels';
 import { scene, camera } from './core/engine';
@@ -100,7 +100,10 @@ export function viewmodelAimOffset(): { x: number; y: number; z: number } {
  * is reshaped; the camera and shot direction keep using raw recoil.
  */
 export function currentViewmodelRecoil(): number {
-  return viewmodelRecoil(wpn.recoil, currentDef().recoilKick);
+  const pump = shotgunPump({ id: equippedId(wpn.slot), now: gameTime.now(),
+    shotAt: wpn.animation.shotAt, fireInterval: weapon.fireRate, reloading: weapon.reloading });
+  return viewmodelRecoil(wpn.recoil, currentDef().recoilKick)
+    * shotgunChambering(pump, wpn.adsLerp).recoilScale;
 }
 
 // Per-weapon shot sound; keyed by WeaponId so no weapon can miss.

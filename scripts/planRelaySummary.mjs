@@ -32,9 +32,15 @@ const COMMAND_LIMIT = 200;
 const FINAL_TEXT_LIMIT = 2000;
 
 // The pins live here rather than in bash so a record cannot outlive the values
-// that produced it.
+// that produced them. PRIMARY_MODEL is what the runner tries first;
+// FALLBACK_MODEL is the one-shot retry on the same invocation. The runner
+// reports which one actually ran as --model_used, and the summary stamps that —
+// a record claiming the primary when the fallback did the work would lie to the
+// wave entry that cites it.
 const OPENCODE_VERSION = '1.18.28';
-const MODEL = 'opencode/muse-spark-1.3-contributor-free';
+const PRIMARY_MODEL = 'opencode/muse-spark-1.3-contributor-free';
+const FALLBACK_MODEL = 'openrouter/meta/muse-spark-1.3-contributor';
+const MODEL = PRIMARY_MODEL;
 const VARIANT = 'xhigh';
 
 /** Sum a provider-reported field, staying null when NO step carried it. */
@@ -309,6 +315,7 @@ const STRING_KEYS = [
   'worktree',
   'branch',
   'baseline',
+  'model_used',
   'started_at',
   'ended_at',
   'recovery',
@@ -334,7 +341,7 @@ export function parseOptions(argv) {
 }
 
 export function buildSummary(jsonl, options) {
-  const { turn1_lines: turn1Lines, ...supplied } = options;
+  const { turn1_lines: turn1Lines, model_used: modelUsed, ...supplied } = options;
   const derived = summarizeEvents(jsonl, {
     worktree: supplied.worktree ?? '',
     boundaries: Number.isFinite(turn1Lines) && turn1Lines > 0 ? [turn1Lines] : [],
@@ -358,6 +365,8 @@ export function buildSummary(jsonl, options) {
     exit_status: supplied.exit_status ?? null,
     gate: supplied.gate ?? null,
     ...derived,
+    model: modelUsed ?? derived.model,
+    fallback_model: FALLBACK_MODEL,
   };
 }
 

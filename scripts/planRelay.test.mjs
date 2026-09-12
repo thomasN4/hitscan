@@ -123,6 +123,11 @@ length_stream() {
       '{"type":"step_start","sessionID":"ses_fixture","part":{}}' \\
       '{"type":"step_finish","sessionID":"ses_fixture","part":{"reason":"length"}}'
 }
+# A fast provider failure (bad key, quota, 5xx): record the invocation, then
+# exit before emitting a stream, so the runner's retry has nothing to inherit.
+if test "\${PLAN_RELAY_TEST_FAIL_FIRST:-}" = "1" && test "$call_index" -eq 1; then
+  exit 1
+fi
 case "\${PLAN_RELAY_TEST_STREAM:-healthy}" in
   healthy)
     healthy_stream
@@ -206,6 +211,7 @@ exec ${JSON.stringify(realTimeout)} "$@"
   };
   const env = {
     ...process.env,
+    OPENCODE_API_KEY: 'test-only',
     OPENROUTER_API_KEY: 'test-only',
     OPENCODE_BIN: fake,
     PLAN_RELAY_TEST_ARGS: capture.args,
@@ -384,12 +390,21 @@ describe('Plan Relay executor policy', () => {
 
   test('pins Muse Spark 1.3 Free (OpenCode Zen) xhigh with persistence and publication disabled', () => {
     const model = config.provider.opencode.models['muse-spark-1.3-contributor-free'];
-    expect(config.enabled_providers).toEqual(['opencode']);
+    expect(config.enabled_providers).toEqual(['opencode', 'openrouter']);
     expect(model.variants.xhigh.reasoning.effort).toBe('xhigh');
     expect(model.limit).toEqual({ context: 1048576, output: 943718 });
     expect(config.share).toBe('disabled');
     expect(config.snapshot).toBe(false);
     expect(config.autoupdate).toBe(false);
+  });
+
+  test('pins the OpenRouter fallback at the same limits and reasoning', () => {
+    const fallback = config.provider.openrouter.models['meta/muse-spark-1.3-contributor'];
+    expect(fallback.name).toBe('Muse Spark 1.3 Contributor (OpenRouter)');
+    expect(fallback.reasoning).toBe(true);
+    expect(fallback.tool_call).toBe(true);
+    expect(fallback.variants.xhigh.reasoning.effort).toBe('xhigh');
+    expect(fallback.limit).toEqual({ context: 1048576, output: 943718 });
   });
 
   test('allows rg and validation while denying unlisted shell commands', () => {
@@ -467,15 +482,77 @@ describe('Plan Relay runner', () => {
     expect(run(drifted).stderr).toContain('baseline mismatch');
   });
 
-  test('propagates the executor exit status', () => {
+  test('propagates the fallback exit status when both models fail', () => {
     const fixture = createFixture();
     const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_EXIT: '17' });
+    expect(result.status).toBe(17);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+    const summary = summaryOf(fixture);
+    expect(summary.exit_status).toBe(17);
+    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.gate).toBe('skipped');
+    expect(summary.turns_launched).toBe(1);
+  });
+
+  test('propagates without retry when no fallback key exists', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_EXIT: '17', OPENROUTER_API_KEY: '' });
     expect(result.status).toBe(17);
     expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
     const summary = summaryOf(fixture);
     expect(summary.exit_status).toBe(17);
+    expect(summary.model).toBe('opencode/muse-spark-1.3-contributor-free');
     expect(summary.gate).toBe('skipped');
     expect(summary.turns_launched).toBe(1);
+  });
+
+  test('retries a failed primary on the OpenRouter fallback and stamps it', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { PLAN_RELAY_TEST_FAIL_FIRST: '1' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('retrying on openrouter/meta/muse-spark-1.3-contributor');
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('2');
+
+    const firstArgs = readFileSync(`${fixture.capture.args}.1`, 'utf8').trim().split('\n');
+    expect(firstArgs.slice(firstArgs.indexOf('--model'), firstArgs.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'opencode/muse-spark-1.3-contributor-free',
+    ]);
+    const secondArgs = readFileSync(`${fixture.capture.args}.2`, 'utf8').trim().split('\n');
+    expect(secondArgs.slice(secondArgs.indexOf('--model'), secondArgs.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(secondArgs.slice(secondArgs.indexOf('--variant'), secondArgs.indexOf('--variant') + 2)).toEqual([
+      '--variant',
+      'xhigh',
+    ]);
+
+    const [runDir] = readdirSync(join(fixture.linked, '.plan-relay'));
+    const kept = readdirSync(join(fixture.linked, '.plan-relay', runDir));
+    expect(kept).toContain('attempt1-primary.jsonl');
+    expect(kept).toContain('attempt1-fallback.jsonl');
+    expect(readFileSync(join(fixture.linked, '.plan-relay', runDir, 'events.jsonl'), 'utf8')).toContain(
+      'Implementation complete.',
+    );
+
+    const summary = summaryOf(fixture);
+    expect(summary.model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.fallback_model).toBe('openrouter/meta/muse-spark-1.3-contributor');
+    expect(summary.gate).toBe('pass');
+  });
+
+  test('starts on the fallback without a Zen key', () => {
+    const fixture = createFixture();
+    const result = run(fixture, fixture.linked, { OPENCODE_API_KEY: '' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.capture.count, 'utf8').trim()).toBe('1');
+    const args = readFileSync(fixture.capture.args, 'utf8').trim().split('\n');
+    expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'openrouter/meta/muse-spark-1.3-contributor',
+    ]);
+    expect(summaryOf(fixture).model).toBe('openrouter/meta/muse-spark-1.3-contributor');
   });
 
   test('continues a no-edit length-truncated session once and gates the combined stream', () => {
@@ -893,6 +970,9 @@ describe('Plan Relay summary', () => {
       gate: 'pass',
       duration_s: 4,
       node_modules_shared: true,
+    });
+    expect(parseOptions(['--model_used=openrouter/meta/muse-spark-1.3-contributor'])).toEqual({
+      model_used: 'openrouter/meta/muse-spark-1.3-contributor',
     });
   });
 });

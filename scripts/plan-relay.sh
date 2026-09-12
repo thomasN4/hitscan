@@ -156,26 +156,109 @@ The bash tool is restricted. Allowed commands are: $allowed_commands. All unlist
 
 relay_started_at=$SECONDS
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Executor models: OpenCode Zen is primary, OpenRouter's copy of the same Muse
+# Spark contributor tier is the one-shot fallback. Without a Zen key the
+# primary cannot authenticate, so start on the fallback instead of spending an
+# invocation learning that.
+primary_model="opencode/muse-spark-1.3-contributor-free"
+fallback_model="openrouter/meta/muse-spark-1.3-contributor"
+model_variant="xhigh"
+active_model="$primary_model"
+if test -z "${OPENCODE_API_KEY:-}"; then
+  active_model="$fallback_model"
+fi
+model_used="$active_model"
+attempt_seq=0
+
+# Run one executor turn on the active model, retrying once on the other model
+# when the attempt fails fast. A watchdog kill (124) is never retried: the
+# budget it consumed is gone, so a second full-budget attempt would double the
+# worst-case wall clock. Every attempt is retained beside the events file as
+# evidence; the events file itself always holds the latest attempt's bytes, so
+# the gate and the summary below keep judging one stream.
+# Usage: invoke_executor <events-file> <overwrite|append> <budget-secs> <opencode args...>
+invoke_executor() {
+  local events_file="$1"
+  local append_mode="$2"
+  local budget="$3"
+  shift 3
+  attempt_seq=$((attempt_seq + 1))
+  local tried=""
+  local status=2
+  local candidate role attempt_file attempts=0
+  # A scalar, not an array: "${empty_array[@]}" is an unbound-variable error
+  # under `set -u` on bash older than 4.4, while an unquoted-but-set scalar
+  # expands to zero words everywhere.
+  local tee_flag=""
+  if test "$append_mode" = "append"; then
+    tee_flag="-a"
+  fi
+  for candidate in "$active_model" "$primary_model" "$fallback_model"; do
+    case "$tried" in
+      *"|$candidate|"*) continue ;;
+    esac
+    tried="$tried|$candidate|"
+    case "$candidate" in
+      "$primary_model")
+        if test -z "${OPENCODE_API_KEY:-}"; then
+          continue
+        fi
+        role="primary"
+        ;;
+      *)
+        if test -z "${OPENROUTER_API_KEY:-}"; then
+          continue
+        fi
+        role="fallback"
+        ;;
+    esac
+    attempt_file="$run_dir/attempt${attempt_seq}-${role}.jsonl"
+    attempts=$((attempts + 1))
+    if test "$attempts" -gt 1; then
+      echo "Plan Relay: retrying on $candidate" >&2
+    fi
+    set +e
+    OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
+    XDG_CONFIG_HOME="$runtime/config" \
+    XDG_DATA_HOME="$runtime/data" \
+    XDG_CACHE_HOME="$runtime/cache" \
+    XDG_STATE_HOME="$runtime/state" \
+    OPENCODE_CONFIG_DIR="$runtime/config" \
+    OPENCODE_DISABLE_AUTOUPDATE=true \
+    NO_COLOR=1 \
+    CI=true \
+    timeout --kill-after=30s "$budget" "$opencode_bin" --pure run \
+      --model "$candidate" \
+      --variant "$model_variant" \
+      "$@" | tee $tee_flag "$events_file" "$attempt_file"
+    status="${PIPESTATUS[0]}"
+    # No `set -e` here: the caller invokes this function under `set +e` and
+    # that mode must survive the return, because a nonzero status below is a
+    # retry-or-propagate value rather than a script failure.
+    active_model="$candidate"
+    model_used="$candidate"
+    if test "$status" -eq 0; then
+      return 0
+    fi
+    if test "$status" -eq 124; then
+      echo "Plan Relay: executor hung and was killed by the watchdog on $candidate; not retrying" >&2
+      return "$status"
+    fi
+    echo "Plan Relay: executor failed on $candidate (exit $status)" >&2
+  done
+  return "$status"
+}
+
 set +e
-OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
-XDG_CONFIG_HOME="$runtime/config" \
-XDG_DATA_HOME="$runtime/data" \
-XDG_CACHE_HOME="$runtime/cache" \
-XDG_STATE_HOME="$runtime/state" \
-OPENCODE_CONFIG_DIR="$runtime/config" \
-OPENCODE_DISABLE_AUTOUPDATE=true \
-NO_COLOR=1 \
-CI=true \
-timeout --kill-after=30s "$timeout_secs" "$opencode_bin" --pure run \
+invoke_executor "$events" overwrite "$timeout_secs" \
   --dir "$repo_root" \
   --agent executor \
-  --model opencode/muse-spark-1.3-contributor-free \
-  --variant xhigh \
   --file "$plan_copy" \
   --format json \
   --title "Plan Relay: ${branch#*/}" \
-  "$executor_prompt" | tee "$events"
-status="${PIPESTATUS[0]}"
+  "$executor_prompt"
+status="$?"
 turns_launched=1
 # The summary splits the concatenated stream at this line. wc -l under-counts by
 # one when the final line lacks a newline, which happens only on a kill — and a
@@ -196,24 +279,13 @@ if test -n "$recovery_session"; then
   if test "$recovery_timeout" -gt 0; then
     echo "Plan Relay: continuing no-edit length-truncated session once with ${recovery_timeout}s remaining: $recovery_session" >&2
     recovery_prompt="Your previous turn ended before implementation. Repository inspection is complete. Do not reread files already inspected. Begin with the smallest edit required by the attached approved plan now, then continue its implementation and validation. The same plan remains binding. If blocked, report the blocker."
-    OPENCODE_CONFIG_CONTENT="$(< "$executor_config")" \
-    XDG_CONFIG_HOME="$runtime/config" \
-    XDG_DATA_HOME="$runtime/data" \
-    XDG_CACHE_HOME="$runtime/cache" \
-    XDG_STATE_HOME="$runtime/state" \
-    OPENCODE_CONFIG_DIR="$runtime/config" \
-    OPENCODE_DISABLE_AUTOUPDATE=true \
-    NO_COLOR=1 \
-    CI=true \
-    timeout --kill-after=30s "$recovery_timeout" "$opencode_bin" --pure run \
+    invoke_executor "$events" append "$recovery_timeout" \
       --dir "$repo_root" \
       --agent executor \
-      --model opencode/muse-spark-1.3-contributor-free \
-      --variant xhigh \
       --session "$recovery_session" \
       --format json \
-      "$recovery_prompt" | tee -a "$events"
-    status="${PIPESTATUS[0]}"
+      "$recovery_prompt"
+    status="$?"
     turns_launched=2
     recovery="taken"
   else
@@ -256,6 +328,7 @@ if node "$summary_script" "$events" "$summary" \
   --worktree="$repo_root" \
   --branch="$branch" \
   --baseline="$baseline" \
+  --model_used="$model_used" \
   --node_modules_shared="$node_modules_shared" \
   --started_at="$started_at" \
   --ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

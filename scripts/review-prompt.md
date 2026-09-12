@@ -23,6 +23,7 @@ and iterated locally without pushing a branch:
   review_root="$(mktemp -d /tmp/opencode-review.XXXXXX)"
   base_sha="$(bash scripts/prepare-opencode-review.sh main HEAD "$review_root")"
   OPENCODE_API_KEY=<zen-key> \
+  OPENROUTER_API_KEY=<openrouter-key> \
     OPENCODE_CONFIG_CONTENT="$(cat scripts/opencode-review-config.json)" \
     opencode --pure run --dir "$review_root" --agent review \
       --model opencode/muse-spark-1.3-contributor-free --variant high \
@@ -33,6 +34,13 @@ and iterated locally without pushing a branch:
       head-revision paths without the leading head/.
 
       $(cat scripts/review-prompt.md)"
+
+  # When the Zen model fails, retry the same prompt once on the OpenRouter
+  # fallback (this is what `.github/workflows/review.yml` does automatically):
+  #
+  #   opencode --pure run --dir "$review_root" --agent review \
+  #     --model openrouter/meta/muse-spark-1.3-contributor --variant high \
+  #     "<same prompt>"
 
 This comment is HTML so the file reads cleanly if it is ever posted verbatim.
 -->

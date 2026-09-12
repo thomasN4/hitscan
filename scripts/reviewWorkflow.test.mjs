@@ -26,4 +26,11 @@ describe('AI review workflow', () => {
     expect(opencodeJob).toContain('install -m 0755 "$rg_path" /usr/local/bin/rg');
     expect(opencodeJob).toContain('command -v rg');
   });
+
+  test('retries the OpenCode review once on the OpenRouter fallback', () => {
+    expect(opencodeJob).toContain('review_with opencode/muse-spark-1.3-contributor-free');
+    expect(opencodeJob).toContain('review_with openrouter/meta/muse-spark-1.3-contributor');
+    expect(opencodeJob).toContain('retrying once on the OpenRouter fallback');
+    expect(opencodeJob).toContain('Muse Spark OpenRouter fallback did not resolve');
+  });
 });

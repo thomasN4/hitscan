@@ -321,8 +321,9 @@ holds the user's key.
    **Push every commit of the
    round before step 5.** `review.yml`'s concurrency group is keyed by PR number
    with `cancel-in-progress`, so a push landing during an in-flight review kills
-   that review. Nothing is posted, but the run itself records the cancellation
-   as its terminal status, which is the state step 6's watcher reads.
+   that review. Nothing is posted, and the cancelled run is not a verdict the
+   watcher reads: a push moves the head, so under step 6 rules 1 and 3 the
+   watcher discards the old run's state and looks for the new head's run.
 5. **The planner arms the reviewer** — read `ENABLE_AI_REVIEW`, then strip the
    prefix. It is a repo Actions variable, not anything in the tree, and the
    Gitea SDK cannot list them, so read it by name. This

@@ -321,8 +321,9 @@ holds the user's key.
    **Push every commit of the
    round before step 5.** `review.yml`'s concurrency group is keyed by PR number
    with `cancel-in-progress`, so a push landing during an in-flight review kills
-   that review. Nothing is posted, but the run itself records the cancellation
-   as its terminal status, which is the state step 6's watcher reads.
+   that review. Nothing is posted, and the cancelled run is not a verdict the
+   watcher reads: a push moves the head, so under step 6 rules 1 and 3 the
+   watcher discards the old run's state and looks for the new head's run.
 5. **The planner arms the reviewer** — read `ENABLE_AI_REVIEW`, then strip the
    prefix. It is a repo Actions variable, not anything in the tree, and the
    Gitea SDK cannot list them, so read it by name. This
@@ -349,7 +350,8 @@ holds the user's key.
 6. **The planner waits** — arm a background watcher, then leave the PR alone
    until it fires. The watcher must exit on the failure paths too, not only on
    the review landing: a reviewer that dies posts nothing at all, and silence
-   looks exactly like a slow review.
+   looks exactly like a slow review. Judge liveness by the watcher rules
+   below — a missing `post`-job row on its own never means dead.
 7. **The planner reads the review** — it is a pull-request review rather than an
    issue comment (Gitea has no commit-comment API), so it is the body under
    `/pulls/{index}/reviews` carrying this head commit's
@@ -396,8 +398,57 @@ and a planner waiting on it cannot tell the difference from the outside:
   skips everything after it; the export step's empty-file check is the narrower
   case where the command exited 0 having written nothing. Either way the `post`
   job's condition goes unsatisfied, no comment appears, and none ever will. A watcher that greps only for the comment therefore hangs forever;
-  watch the workflow run's terminal status alongside it, and give the wait a
-  deadline past the sum of the jobs it waits on. Those run in sequence and cap
+  watch the workflow run's terminal status alongside it. Apply these checks in
+  order on every poll:
+
+  1. Re-read the PR's current head and title. A changed head supersedes the old
+     watch: discard its run/job state and look for the new head's review and
+     run. A `WIP:` title (matching the workflow's prefix check, with or without
+     a following space) or a closed PR ends the watch as **superseded**, not a
+     reviewer failure. Never use the old head's marker or cancelled run to
+     decide the new head's outcome.
+  2. Look for the current head's `<!-- ai-review:<sha> -->` marker under this
+     PR's `/pulls/{index}/reviews`, following pagination. A marker means the
+     review landed; inspect run rows only while it is absent. Failed API reads
+     are unknown state, never an empty list or evidence of death; retry them
+     within the wait budget and report an observation failure if they persist.
+  3. Select the latest **AI review (`review.yml`) run for this PR and current
+     head**, not a CI run or another PR's run sharing the SHA. Track its run ID
+     and read only its jobs, following pagination in both lists. A newer run
+     replaces all older job state, even
+     when the head is unchanged: `edited` events also cancel previous runs.
+     Absence of a matching run is indeterminate, not completion. In particular,
+     while a push's new run has not appeared, do not fall back to the previous
+     head's cancelled run.
+  4. Interpret jobs using `prepare.outputs.reviewer`: only that selected
+     reviewer matters. The other two reviewer jobs normally skip. Deduplication
+     requires `prepare.outputs.reviewed == 'true'` and the existing marker;
+     skipped reviewer or `post` rows alone do not prove it. If dedupe is reported
+     but the marker cannot be found, re-read the reviews and report the
+     inconsistency if it persists, rather than claiming a landed review.
+     A skipped `prepare` means the run was ineligible: re-read the PR and the
+     eligibility gates in `review.yml` (`ENABLE_AI_REVIEW`, `WIP:`, same-repo
+     head), then exit as **superseded**. If this leaves the loop stopped without
+     a review on an open PR, restore `WIP: ` as required below; a disabled
+     review variable does not imply that the title is already prefixed.
+  5. Between the selected reviewer succeeding and `post` being created, no
+     live reviewer row and no `post` row can be a healthy transition (issue #87).
+     Missing rows alone remain indeterminate. Positive terminal evidence is a
+     failed/cancelled `prepare` or selected reviewer, a terminal `post` with no
+     marker, or a terminal workflow run with no marker (including cancellation
+     before any job was created). Apply the superseded and dedupe checks above
+     first. A skipped selected reviewer or skipped `post` outside those cases
+     warrants inspecting the run and its dependencies, not assuming dedupe.
+     Before returning any terminal verdict, re-read the PR, latest matching
+     run, and marker: a push, edit, or successful post may have occurred between
+     the earlier API reads. A `WIP:` title or closed PR means superseded; a
+     changed head/run means restart the checks; a current-head marker means
+     landed. Only an unchanged, eligible terminal run without a marker
+     takes the failure path. If a cancellation's replacement event is not yet
+     visible, inspect its cause before re-arming; cancellation alone does not
+     identify a provider failure or justify changing routes.
+
+  Give the wait a deadline past the sum of the jobs it waits on. Those run in sequence and cap
   at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
   `timeout-minutes: 25` can fire during a healthy run. `timeout-minutes` bounds
   execution and not the wait for a free runner, and the Codex route queues for

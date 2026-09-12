@@ -101,8 +101,13 @@ export function createBotWeaponRig(id: BotWeaponId): BotWeaponRig {
     node.name = `bot-weapon-mechanism-${key}`;
     rest.set(node, { position: node.position.clone(), rotation: node.rotation.clone() });
   }
+  // No shadow casting from the guns: the bot bodies already ground them
+  // visually, and every caster is re-rasterized into the shadow map each
+  // frame — ~10 detailed meshes per bot cratered CPU-rasterizer throughput 4x
+  // in the 13-bot arena (7.7 vs 33.5 fps), starving the game-time-bound smoke
+  // phases. Matches the first-person viewmodels, which never cast either.
   mount.traverse(node => {
-    if (node instanceof THREE.Mesh) node.castShadow = true;
+    if (node instanceof THREE.Mesh) node.castShadow = false;
   });
   return { mount, muzzle: authored.muzzle ?? null, mechanisms, rest,
     magazineOut: authored.magazineOut, port: authored.port };

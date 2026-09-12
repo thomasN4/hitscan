@@ -73,7 +73,11 @@ async function start(): Promise<void> {
     for (const v of validateWeapons(Object.values(WEAPONS))) console.error(v);
   }
 
-  initEngine(session.map);
+  initEngine(session.map, {
+    // Local rendering concern, not match rules: read here rather than
+    // through sessionConfig, so the committed config query is untouched.
+    lowFx: new URLSearchParams(location.search).get('lowfx') === '1',
+  });
   initHUD();
   setAssetStatus('loading');
   const weaponAssets = await loadWeaponAssets(import.meta.env.BASE_URL);

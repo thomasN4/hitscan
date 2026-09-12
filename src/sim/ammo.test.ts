@@ -77,20 +77,32 @@ describe('planReload', () => {
 describe('cancelsReload', () => {
   // A per-round reload two shells in: the baseline every stance flips. mag/reserve
   // are irrelevant here — cancelReload clears the schedule, never the magazine.
-  const loading = { reloading: true, sprinting: false };
+  // Whole-mag baseline: aiming is refused upstream and must never cancel here.
+  const loading = { reloading: true, sprinting: false, aiming: false, perRound: false };
 
-  test('sprinting cancels a running reload', () => {
-    expect(cancelsReload({ ...loading, sprinting: true })).toBe(true);
+  test.each([
+    ['sprinting a whole-mag reload', { sprinting: true }],
+    ['sprinting a per-round reload', { sprinting: true, perRound: true }],
+    ['aiming a per-round reload', { aiming: true, perRound: true }],
+  ])('%s cancels a running reload', (_name, stance) => {
+    expect(cancelsReload({ ...loading, ...stance })).toBe(true);
+  });
+
+  test('aiming a whole-mag reload cancels nothing — RMB is refused upstream', () => {
+    expect(cancelsReload({ ...loading, aiming: true })).toBe(false);
   });
 
   test('a settled stance leaves the reload alone', () => {
     expect(cancelsReload(loading)).toBe(false);
   });
 
-  test('sprinting with no reload running cancels nothing', () => {
+  test.each([
+    ['sprinting', { sprinting: true }],
+    ['aiming a per-round reload', { aiming: true, perRound: true }],
+  ])('%s with no reload running cancels nothing', (_name, stance) => {
     // The caller guards on this too, but the rule owns it: a stance is not an
     // event, so a level-triggered check must be inert on an idle weapon.
-    expect(cancelsReload({ ...loading, reloading: false, sprinting: true })).toBe(false);
+    expect(cancelsReload({ ...loading, reloading: false, ...stance })).toBe(false);
   });
 });
 

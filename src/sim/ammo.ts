@@ -76,10 +76,12 @@ export interface ReloadRequest {
 export interface ReloadDecision {
   start: boolean;
   /**
-   * A STARTED reload drops iron sights / the scope — one motion at a time,
-   * and a fresh RMB press re-raises once the reload finishes (same semantics
-   * as unscopeOnShot: clearing input.aiming beats a still-held button). False
-   * whenever `start` is false: a REFUSED reload must never touch the aim.
+   * A STARTED reload drops iron sights / the scope — one motion at a time
+   * (same semantics as unscopeOnShot: clearing input.aiming beats a
+   * still-held button). What a fresh RMB press does next depends on the
+   * weapon: it cancels a gradual (perRound) reload and raises at once, while
+   * a whole-mag reload refuses it until the reload finishes. False whenever
+   * `start` is false: a REFUSED reload must never touch the aim.
    */
   dropAim: boolean;
 }
@@ -96,19 +98,25 @@ export interface StanceCancelRequest {
   reloading: boolean;
   /** Shift sprint is active with a net movement direction. */
   sprinting: boolean;
+  /** RMB held: iron sights / scope raised right now. */
+  aiming: boolean;
+  /** The held weapon reloads shell-by-shell (shotgun, revolver). */
+  perRound: boolean;
 }
 
 /**
  * Whether this frame's stance cancels a running reload.
  *
- * Only sprint wins: raising the sights during a reload is refused instead
- * (main.ts blocks the fresh RMB press and updateWeapon keeps adsLerp at 0
- * while reloading), so aiming can never arrive mid-reload to cancel it.
+ * Sprint always wins. Aiming wins only for gradual (perRound) reloads, where
+ * interrupting keeps every landed shell — the rest of the budget is dropped,
+ * not the chambered rounds. For whole-mag reloads aiming is refused upstream
+ * instead (main.ts blocks the fresh RMB press and updateWeapon keeps adsLerp
+ * at 0 while reloading), so it can never arrive mid-reload to cancel one.
  * Rounds a per-round reload has already moved stay live;
  * weapons.ts:cancelReload clears the schedule, not the magazine.
  *
  * Level-triggered rather than edge-triggered.
  */
 export function cancelsReload(r: StanceCancelRequest): boolean {
-  return r.reloading && r.sprinting;
+  return r.reloading && (r.sprinting || (r.aiming && r.perRound));
 }

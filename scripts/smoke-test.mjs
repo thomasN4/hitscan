@@ -2098,9 +2098,9 @@ async function runShotgunCheck() {
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
 
-      // Same shape for the sights, opposite verdict: raising them mid-reload
-      // is refused — ADS is impossible until the reload finishes — so the
-      // reload keeps running with the sights down and every landed shell kept.
+      // Same shape for the sights, opposite verdict from whole-mag weapons:
+      // a gradual reload is interrupted by raising them — the reload stops
+      // but every shell already chambered stays live, exactly as sprint does.
       cs.weapon.mag = 2;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' }));
@@ -2138,8 +2138,8 @@ async function runShotgunCheck() {
     if (result.shotMag !== result.reloadMid.mag - 1 || !result.shotCancelledReload) throw new Error(`firing must cancel the per-round reload and consume the chambered shell: ${JSON.stringify(result)}`);
     if (!result.beforeSprintCancel.reloading || result.beforeSprintCancel.mag <= 2) throw new Error(`per-round control did not load shells before sprint: ${JSON.stringify(result)}`);
     if (result.afterSprintCancel.reloading || result.afterSprintCancel.mag !== result.beforeSprintCancel.mag) throw new Error(`sprint did not preserve landed shells while cancelling reload: ${JSON.stringify(result)}`);
-    if (!result.beforeAimCancel.reloading || result.beforeAimCancel.mag <= 2) throw new Error(`per-round control did not load shells before the aim refusal: ${JSON.stringify(result)}`);
-    if (!result.afterAimCancel.reloading || result.afterAimCancel.aiming || result.afterAimCancel.mag < result.beforeAimCancel.mag) throw new Error(`RMB during a per-round reload must neither cancel it nor raise the sights, keeping every landed shell: ${JSON.stringify(result)}`);
+    if (!result.beforeAimCancel.reloading || result.beforeAimCancel.mag <= 2) throw new Error(`per-round control did not load shells before the aim cancel: ${JSON.stringify(result)}`);
+    if (result.afterAimCancel.reloading || !result.afterAimCancel.aiming || result.afterAimCancel.mag !== result.beforeAimCancel.mag) throw new Error(`raising the sights must cancel the per-round reload, raise, and keep every landed shell: ${JSON.stringify(result)}`);
     console.log('[shotgun] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

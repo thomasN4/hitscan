@@ -417,8 +417,18 @@ and a planner waiting on it cannot tell the difference from the outside:
   live while the latest run's `post` job has no row**, and conclude it died
   only on positive evidence from that run — its `prepare` or reviewer job
   itself failed or was cancelled, or its `post` job reached a terminal status
-  with no `<!-- ai-review:<sha> -->` marker comment for this head. Give the
-  wait a deadline past the sum of the jobs it waits on. Those run in sequence and cap
+  with no `<!-- ai-review:<sha> -->` marker comment for this head. A third exit
+  is neither landing nor death: if the latest run's `prepare` job is skipped —
+  `WIP: ` re-added mid-flight, `ENABLE_AI_REVIEW` flipped to `false`, or any
+  other `if` at `review.yml:77-80` leaving the run stillborn — the run will
+  never review, so stop watching the run and re-read the PR instead of waiting
+  on rows that will never come. The same exit applies when the PR carries
+  `WIP: ` again, which reads off the title without touching the run rows: with
+  the prefix on, no arming exists by definition, so the watcher its arming
+  created is already moot. Either way the verdict is "superseded", never "the
+  reviewer died" — it must not feed the stopping rule's death path; the prefix
+  being back on already says the loop is back at step 2. Give the wait a
+  deadline past the sum of the jobs it waits on. Those run in sequence and cap
   at 5 + 25 + 5 minutes, so a deadline merely past the reviewer's own
   `timeout-minutes: 25` can fire during a healthy run. `timeout-minutes` bounds
   execution and not the wait for a free runner, and the Codex route queues for

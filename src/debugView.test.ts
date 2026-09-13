@@ -260,7 +260,8 @@ describe('buildDebugSegments', () => {
 
   it('drops segments past capacity rather than writing out of bounds', () => {
     const { pos, col } = buffers();
-    // 24 bots is the buffer's whole budget; a 25th must be refused silently.
+    // The fixture crowd (40 bots) overflows the segment buffer on purpose;
+    // anything past capacity must be refused silently.
     const long = Array.from({ length: 200 }, (_, i) => new THREE.Vector3(i, 0, 0));
     const crowd = Array.from({ length: 40 }, () => bot({ navPath: long, targetEye: new THREE.Vector3(1, 1, 1) }));
     const verts = buildDebugSegments(crowd, pos, col, VIEW);

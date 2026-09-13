@@ -1131,7 +1131,7 @@ export class Bot implements BotShape {
  * either position while a named weapon arms every bot on the side
  * identically — which is what lets a smoke phase or a playtest hold the
  * weapon still and vary something else. The primary draws over
- * BOT_PRIMARY_IDS (smg/sniper/shotgun); the secondary draws over
+ * BOT_PRIMARY_IDS (smg/ak47/sniper/shotgun); the secondary draws over
  * BOT_SIDEARM_IDS (pistol/revolver).
  */
 export function spawnBots(count: number, team: Team, choice: BotWeaponChoice = 'smg', secondaryChoice: BotSecondaryChoice = 'pistol'): void {

@@ -21,7 +21,7 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   const body = new THREE.Group();
   const offset = id === 'sniper' ? { x: 0.26, y: 0.12 }
     : id === 'shotgun' ? { x: 0.20, y: 0.105 }
-      : id === 'smg' ? { x: 0.25, y: 0.14 } : { x: 0.24, y: 0.15 };
+      : (id === 'smg' || id === 'ak47') ? { x: 0.25, y: 0.14 } : { x: 0.24, y: 0.15 };
   const sightLine = id === 'pistol' ? -0.004 : id === 'revolver' ? 0.037 : id === 'shotgun' ? .034 : 0;
   body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' ? -0.50 : id === 'shotgun' ? -.46 : -0.57);
   group.add(body);
@@ -55,5 +55,5 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   return { authored, group, body, mechanisms, rest,
     // Shoulder the SMG close enough that the butt pad falls below the frame.
     // Keep the stock's near-plane intersection below the view even during recoil.
-    aimOffset: { x: -offset.x, y: offset.y - sightLine, z: id === 'smg' ? 0.10 : 0.06 } };
+    aimOffset: { x: -offset.x, y: offset.y - sightLine, z: (id === 'smg' || id === 'ak47') ? 0.10 : 0.06 } };
 }

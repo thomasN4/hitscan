@@ -56,7 +56,7 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   }
   // Reload blocking exposes loading mechanisms and anchors loose cartridges
   // to the authored ports; game clocks still own ammunition and readiness.
-  if ((id === 'smg' || id === 'sniper') && pose.reload > 0) poseRifleReload(vm, pose);
+  if ((id === 'smg' || id === 'ak47' || id === 'sniper') && pose.reload > 0) poseRifleReload(vm, pose);
   if (id === 'pistol' && pose.reload > 0) posePistolReload(vm, pose);
   if (id === 'shotgun' && pose.reload > 0) poseShotgunReload(vm, pose);
   if (id === 'revolver') poseRevolverReload(vm, pose);

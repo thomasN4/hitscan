@@ -7,7 +7,7 @@ const browser = await puppeteer.launch({
   headless: true, args: ['--no-sandbox', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });
 try {
-  for (const asset of ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife']) for (const failure of ['missing', 'corrupt', 'none']) {
+  for (const asset of ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47']) for (const failure of ['missing', 'corrupt', 'none']) {
     const page = await browser.newPage();
     let requests = 0;
     await page.setRequestInterception(true);
@@ -18,7 +18,7 @@ try {
       else if (failure === 'corrupt') void request.respond({ status: 200, contentType: 'model/gltf-binary', body: 'broken asset' });
       else void request.continue();
     });
-    if (asset === 'pistol') await page.evaluateOnNewDocument(() => sessionStorage.setItem('acsc.loadout', JSON.stringify({primary:'smg',secondary:'pistol'})));
+    await page.evaluateOnNewDocument(asset => sessionStorage.setItem('acsc.loadout', JSON.stringify({primary: asset === 'ak47' ? 'ak47' : 'smg', secondary:'pistol'})), asset);
     await page.goto(base + '/?map=arena&tbots=1', { waitUntil: 'networkidle0' });
     if (failure !== 'none') {
       await page.waitForFunction(() => document.getElementById('assetStatus').textContent.includes('Could not load'));
@@ -28,16 +28,16 @@ try {
       await page.waitForFunction(() => Boolean(window.__cs));
       assert.equal(await page.$eval('#playBtn', b => b.disabled), false);
       // Each viewmodel owns its own nodes: posing one must not move another's.
-      const independent = await page.evaluate(() => {
+      const independent = await page.evaluate(asset => {
         const scene = window.__cs.bots[0].mesh.parent;
-        const a = scene.getObjectByName('viewmodel-smg').getObjectByName('weapon-mechanism-slide');
+        const a = scene.getObjectByName(asset === 'ak47' ? 'viewmodel-ak47' : 'viewmodel-smg').getObjectByName('weapon-mechanism-slide');
         const b = scene.getObjectByName('viewmodel-pistol').getObjectByName('weapon-mechanism-slide');
         const before = b.position.clone();
         a.position.z += .4;
         const ok = a !== b && b.position.equals(before);
         a.position.z -= .4;
         return ok;
-      });
+      }, asset);
       assert.equal(independent, true);
       const pistolRest = asset === 'pistol' ? await page.evaluate(() => {
         const vm = window.__cs.bots[0].mesh.parent.getObjectByName('viewmodel-pistol');
@@ -70,15 +70,15 @@ try {
         }, {}, pistolRest);
       }
       // A cancelled reload must leave finite mechanism transforms behind.
-      await page.waitForFunction(() => {
+      await page.waitForFunction(asset => {
         const scene = window.__cs.bots[0].mesh.parent;
         let valid = true;
-        scene.getObjectByName('viewmodel-smg').traverse(node => {
+        scene.getObjectByName(asset === 'ak47' ? 'viewmodel-ak47' : 'viewmodel-smg').traverse(node => {
           if (!node.name.startsWith('weapon-mechanism-')) return;
           valid &&= [...node.position.toArray(), ...node.quaternion.toArray()].every(Number.isFinite);
         });
         return valid;
-      });
+      }, {}, asset);
     }
     assert.equal(requests, 1, 'Asset loads exactly once per page');
     await page.close();

@@ -33,8 +33,8 @@ function mockAsset(id: WeaponId): THREE.Object3D {
   // A body mesh standing in for the gun's bulk: Box3 (the stock-clearance
   // slide) measures geometry, not bare markers. Primaries overhang behind
   // the grip like real stocks; sidearms and the blade stay short of it.
-  const primary = id === 'smg' || id === 'sniper' || id === 'shotgun';
-  const bodyLength = id === 'sniper' ? 1.05 : id === 'shotgun' ? 0.8 : id === 'smg' ? 0.7 : 0.3;
+  const primary = id === 'ak47' || id === 'smg' || id === 'sniper' || id === 'shotgun';
+  const bodyLength = id === 'sniper' ? 1.05 : id === 'shotgun' ? 0.8 : (id === 'smg' || id === 'ak47') ? 0.7 : 0.3;
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, bodyLength));
   // Span ends at one stock-overhang behind the grip (asset +z is rearward):
   // primaries overhang 0.3 like real stocks, the rest 0.03.
@@ -70,7 +70,7 @@ function mockAsset(id: WeaponId): THREE.Object3D {
   return root;
 }
 
-const IDS: readonly WeaponId[] = ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife'];
+const IDS: readonly WeaponId[] = ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47'];
 
 function initMocks(): void {
   const assets = Object.fromEntries(IDS.map(id => [id, mockAsset(id)])) as WeaponAssets;
@@ -116,7 +116,7 @@ describe('botWeaponModels', () => {
       expect(gripLocal.z).toBeGreaterThanOrEqual(-1e-9);
       // Primaries overhang the limit and ride forward; short weapons stay
       // exactly grip-seated.
-      if (id === 'smg' || id === 'sniper' || id === 'shotgun') expect(gripLocal.z).toBeGreaterThan(0.1);
+      if (id === 'ak47' || id === 'smg' || id === 'sniper' || id === 'shotgun') expect(gripLocal.z).toBeGreaterThan(0.1);
       else expect(gripLocal.z).toBeLessThan(1e-9);
     }
   });

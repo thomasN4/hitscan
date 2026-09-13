@@ -17,7 +17,7 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
-import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
+import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxShell, sfxMechanism, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
@@ -108,6 +108,7 @@ export function currentViewmodelRecoil(): number {
 
 // Per-weapon shot sound; keyed by WeaponId so no weapon can miss.
 const SHOT_SFX: Record<WeaponId, () => void> = {
+  ak47: sfxAk47,
   smg: sfxShoot,
   sniper: sfxSniper,
   shotgun: sfxShotgun,
@@ -126,6 +127,7 @@ const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
  */
 export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
   VIEWMODELS = {
+    ak47: createWeaponViewModel('ak47', weaponAssets),
     smg: createWeaponViewModel('smg', weaponAssets),
     sniper: createWeaponViewModel('sniper', weaponAssets),
     shotgun: createWeaponViewModel('shotgun', weaponAssets),

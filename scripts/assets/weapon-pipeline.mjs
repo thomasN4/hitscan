@@ -148,7 +148,7 @@ export function weaponPipeline(mode) {
     assert.match(gltfAddon ?? '', /^\d+\.\d+\.\d+$/, 'Exporter did not report a glTF add-on version');
     const previous = readPreviousGltfAddon();
     if (previous && previous !== gltfAddon)
-      console.warn(`glTF add-on moved ${previous} -> ${gltfAddon}; normalized output should be unaffected`);
+      console.warn(`glTF add-on moved ${previous} -> ${gltfAddon}; outputs differing only by exporter version still normalize byte-identical`);
     const assets = ['shotgun','revolver','pistol','smg','sniper','knife'].map(id => {
       const source=`assets/source/${id}.blend`, output=`public/assets/${id}.glb`;
       const normalized = normalizeWeaponGlb(readFileSync(root+output));

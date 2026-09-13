@@ -93,7 +93,7 @@
   #endScore { font-size: 30px; font-weight: bold; margin-bottom: 26px; }
   #endScore .ct { color: #66b2ff; }
   #endScore .t { color: #ffcc66; }
-  /* Match-end score screen: the wrapper bounds the table so a full 25-row
+  /* Match-end score screen: the wrapper bounds the table so a full 32-row
      roster scrolls internally while the title, score and buttons stay on
      screen. overflow-y:auto (not scroll) keeps small rosters exactly as
      today with no scrollbar chrome when the table fits. */
@@ -135,7 +135,7 @@
   <div id="vignette"></div>
   <div id="topbar">
     <div class="score" id="scoreCT">CT 0</div>
-    <div class="score" id="timer">2:00</div>
+    <div class="score" id="timer">5:00</div>
     <div class="score" id="scoreT">T 0</div>
   </div>
   <div id="killfeed"></div>
@@ -173,11 +173,11 @@
     </label>
     <label>
       <span class="cfgName">Terrorist bots</span>
-      <input id="cfgBotsT" type="number" min="1" max="12" step="1">
+      <input id="cfgBotsT" type="number" min="1" max="16" step="1">
     </label>
     <label>
       <span class="cfgName">CT bots</span>
-      <input id="cfgBotsCt" type="number" min="0" max="12" step="1">
+      <input id="cfgBotsCt" type="number" min="0" max="15" step="1">
     </label>
     <label>
       <span class="cfgName">Match time (min)</span>

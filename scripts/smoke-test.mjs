@@ -71,15 +71,16 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
     const hook = await page.evaluate(() => !!window.__cs);
     if (!hook) throw new Error('debug hook __cs missing — module failed to load?');
 
-    // Menu-config defaults on a bare URL: 6 T bots, 2:00 round. Bot count
-    // only checked on arena — the range spawns silhouettes, not registry bots.
+    // Menu-config defaults on a bare URL: 6 T bots, 5 CT bots, 5:00 round.
+    // Bot count only checked on arena — the range spawns silhouettes, not registry bots.
     if (configCheck) {
       const cfgDefaults = await page.evaluate(() => ({
         botsT: window.__cs.game.botsT,
+        botsCt: window.__cs.game.botsCt,
         roundSeconds: window.__cs.game.roundSeconds,
         botCount: window.__cs.bots.length,
       }));
-      if (cfgDefaults.botsT !== 6 || cfgDefaults.roundSeconds !== 120 || cfgDefaults.botCount !== 6) {
+      if (cfgDefaults.botsT !== 6 || cfgDefaults.botsCt !== 5 || cfgDefaults.roundSeconds !== 300 || cfgDefaults.botCount !== 11) {
         throw new Error(`default match config wrong: ${JSON.stringify(cfgDefaults)}`);
       }
     }
@@ -785,7 +786,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
 
 // Menu-config round trip: the committed query must drive spawn count, round
 // length and the HUD timer, and pre-fill the start-menu form. Uses time=90
-// (1.5 min) so a passing timer read can't just be stale markup ('2:00');
+// (1.5 min) so a passing timer read can't just be stale markup ('5:00');
 // remember `time` rides the URL in SECONDS — the menu's minutes input is
 // converted before commit.
 async function runConfigCheck() {
@@ -867,7 +868,7 @@ async function runConfigCheck() {
     const timerText = await page.evaluate(() => document.getElementById('timer').textContent);
     // The entered state has already simulated ≥1 frame, so 90 s may read as
     // 1:30 or have ticked down to 1:29 — either proves the CONFIGURED length
-    // rendered (stale '2:00' markup would fail).
+    // rendered (stale '5:00' markup would fail).
     if (timerText !== '1:30' && timerText !== '1:29') throw new Error(`timer should show configured 90 s, got "${timerText}"`);
     console.log('[config] OK', JSON.stringify(applied));
   } catch (e) {

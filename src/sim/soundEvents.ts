@@ -10,13 +10,13 @@
 // two, and the buffer costs a fixed 256 slots forever instead of growing until
 // the match ends.
 //
-// What 256 buys, at the configurable worst case of 24 bots (12 per team) with
+// What 256 buys, at the configurable worst case of 31 bots (16 T + 15 CT) with
 // the player holding the trigger and running. Bots now fire on their WEAPON's
 // cadence (sim/botWeapons.ts), and the loudest is a field of smgs: three
 // rounds at the catalog's 0.075 s, then a 0.9-1.5 s pause — a 1.35 s cycle for
-// 3 events, so 2.2/s each and ~53/s across 24. Plus the player's SMG at
-// 13.3/s and footsteps at 3.3/s: call it 70 events/s, so the ring retains
-// ~3.7 s.
+// 3 events, so 2.2/s each and ~68/s across 31. Plus the player's SMG at
+// 13.3/s and footsteps at 3.3/s: call it 85 events/s, so the ring retains
+// ~3.0 s.
 //
 // That is HALF the headroom the pre-weapon bot left (it fired once per ~1.3 s,
 // for ~35/s overall), and the reason is bursts rather than volume of bots.

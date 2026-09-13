@@ -17,8 +17,8 @@ describe('state module purity', () => {
   test('ships with match-config defaults', () => {
     expect(session.map).toBe('arena');
     expect(session.botsT).toBe(6);
-    expect(session.botsCt).toBe(0);
-    expect(session.roundSeconds).toBe(120);
+    expect(session.botsCt).toBe(5);
+    expect(session.roundSeconds).toBe(300);
   });
 
   test('ships with a full primary/secondary catalog split', () => {

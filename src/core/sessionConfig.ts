@@ -25,7 +25,7 @@ export interface SessionConfig {
   map: MapName;
   /** Enemy (T-side) bot count. */
   botsT: number;
-  /** Allied (CT-side) bot count — stored only until allied bots exist. */
+  /** Allied (CT-side) bot count. */
   botsCt: number;
   /** Round length in seconds. */
   roundSeconds: number;
@@ -43,9 +43,9 @@ export interface SessionConfig {
 // The menu's number inputs mirror these via their min/max attributes; the
 // parser clamps independently of the DOM so a hand-edited URL is safe too.
 /** Enemy bots. Minimum 1: zero enemies would fire checkRoundEnd instantly. */
-export const BOTS_T_LIMITS = { min: 1, max: 12 } as const;
-/** Allied bots — stored only this tranche; 0 means none configured. */
-export const BOTS_CT_LIMITS = { min: 0, max: 12 } as const;
+export const BOTS_T_LIMITS = { min: 1, max: 16 } as const;
+/** Allied bots — 0 means none configured. */
+export const BOTS_CT_LIMITS = { min: 0, max: 15 } as const;
 /** Round length in seconds; the menu edits minutes within [0.5, 30]. */
 export const TIME_LIMITS_S = { min: 30, max: 1800 } as const;
 

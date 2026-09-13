@@ -66,7 +66,7 @@ describe('parseSessionConfig', () => {
   );
 
   // ---------- bot counts ----------
-  it('clamps tbots into [1,12] both ways', () => {
+  it('clamps tbots into [1,16] both ways', () => {
     expect(parseSessionConfig(src({ tbots: '-4' })).botsT).toBe(BOTS_T_LIMITS.min);
     expect(parseSessionConfig(src({ tbots: '99' })).botsT).toBe(BOTS_T_LIMITS.max);
   });
@@ -179,11 +179,11 @@ describe('asBotSecondary', () => {
     expect(got.botSecondaryCt).toBe(SESSION_DEFAULTS.botSecondaryCt);
   });
 
-  it('defaults both sides to a sidearm, so a default match can run dry and swap', () => {
+  it('defaults both sides to mixed, so a default match varies its sidearms', () => {
     const got = parseSessionConfig(src({}));
     expect(got.botSecondaryT).toBe(SESSION_DEFAULTS.botSecondaryT);
     expect(got.botSecondaryCt).toBe(SESSION_DEFAULTS.botSecondaryCt);
-    expect(SESSION_DEFAULTS.botSecondaryT).toBe('pistol');
+    expect(SESSION_DEFAULTS.botSecondaryT).toBe('mixed');
   });
 });
 

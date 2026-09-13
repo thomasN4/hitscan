@@ -289,6 +289,80 @@ describe('findPath', () => {
   });
 });
 
+describe('clearance pricing', () => {
+  // A long wall with open ground beside it: the pure-shortest trip grazes the
+  // face at half a metre for the whole 19 m. Priced at nav.ts:CLEARANCE_WEIGHT
+  // the same trip should ride one cell further out where the detour is cheap.
+  // (A short corner-rounding trip is NOT expected to swing wide — the exit jog
+  // inherits the tight endpoint's uplift, so hugging correctly wins when the
+  // saving cannot amortize it. The long parallel run is the discriminating
+  // shape, and the one from the arena playtest.)
+  const wallSide = () => world([{ minX: 0, maxX: 20, minZ: 0, maxZ: 4 }]);
+  const longBounds = { minX: 0, maxX: 20, minZ: 0, maxZ: 10 };
+  const priced = (weight: number) =>
+    buildNavGrid({ bounds: longBounds, cell: 1, stepHeight: STEP, probe: wallSide(), clearanceWeight: weight });
+  const from = at(0.5, 4.5);
+  const to = at(19.5, 4.5);
+  const wallBand: Wall = { minX: 0, maxX: 20, minZ: 0, maxZ: 4 };
+
+  /** Planar distance from a point to a wall rectangle (0 inside). */
+  const rectDist = (p: THREE.Vector3, w: Wall): number => {
+    const dx = Math.max(w.minX - p.x, 0, p.x - w.maxX);
+    const dz = Math.max(w.minZ - p.z, 0, p.z - w.maxZ);
+    return Math.hypot(dx, dz);
+  };
+  const meanClearance = (path: THREE.Vector3[]): number =>
+    path.reduce((sum, p) => sum + rectDist(p, wallBand), 0) / path.length;
+
+  /** Sum of the graph's own (possibly uplifted) edge costs along a path. */
+  const pricedCost = (grid: NavGrid, path: THREE.Vector3[]): number => {
+    let sum = 0;
+    for (let k = 1; k < path.length; k++) {
+      const a = nearestNode(grid, path[k - 1]!);
+      const b = nearestNode(grid, path[k]!);
+      let charged = NaN;
+      for (let e = grid.edgeStart[a]!; e < grid.edgeStart[a + 1]!; e++) {
+        if (grid.edgeTo[e] === b) { charged = grid.edgeCost[e]!; break; }
+      }
+      expect(charged).not.toBeNaN();
+      sum += charged;
+    }
+    return sum;
+  };
+
+  test('a priced route rides further off a parallel wall than the pure-shortest one', () => {
+    const plain = findPath(priced(0), from, to)!;
+    expect(meanClearance(plain)).toBeCloseTo(0.5, 6);
+    const wide = findPath(priced(0.4), from, to)!;
+    expect(meanClearance(wide)).toBeGreaterThan(meanClearance(plain));
+    expect(Math.max(...wide.map(p => p.z))).toBeGreaterThan(4.5);
+  });
+
+  test('the clearance detour stays within ~10% of the pure-shortest length', () => {
+    const plain = findPath(priced(0), from, to)!;
+    const wide = findPath(priced(0.4), from, to)!;
+    expect(pathCost(wide)).toBeLessThanOrEqual(pathCost(plain) * 1.1);
+  });
+
+  test('A* stays optimal under uplifts — the heuristic is still admissible', () => {
+    const grid = priced(0.4);
+    const path = findPath(grid, from, to)!;
+    expect(pricedCost(grid, path)).toBeCloseTo(optimalCost(grid, from, to), 6);
+  });
+
+  test('a one-cell gap stays routable at a premium, never pruned shut', () => {
+    const gap = buildNavGrid({
+      bounds, cell: 1, stepHeight: STEP,
+      probe: world([
+        { minX: 0, maxX: 5, minZ: 4.4, maxZ: 5.6 },
+        { minX: 6, maxX: 10, minZ: 4.4, maxZ: 5.6 },
+      ]),
+      clearanceWeight: 0.4,
+    });
+    expect(connected(gap, at(5, 1), at(5, 9))).toBe(true);
+  });
+});
+
 describe('pickPatrolNode', () => {
   /** An rng consuming a scripted sequence, then repeating its last value forever. */
   function queue(values: number[]): { rng: () => number; draws: () => number } {

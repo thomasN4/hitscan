@@ -36,6 +36,15 @@ const CELL = 1;
 /** Padding (m) around the level's geometry, so the outermost floor is sampled. */
 const MARGIN = 2;
 
+/**
+ * Wall-clearance price on every route (see sim/navGrid.ts:clearanceWeight).
+ * 0.4 uplifts a fully wall-adjacent metre by 40%: centre lines win where the
+ * detour is cheap, tight gaps stay routable at a premium. Bounded by the
+ * ~10% detour pin in sim/navGrid.test.ts — raise it and that test prices the
+ * difference.
+ */
+const CLEARANCE_WEIGHT = 0.4;
+
 /** The current map's graph; undefined until buildNav() runs. */
 let grid: NavGrid | undefined;
 
@@ -126,7 +135,7 @@ export function buildNav(): NavGrid {
     },
   };
   const t0 = performance.now();
-  grid = buildNavGrid({ bounds, cell: CELL, stepHeight: STEP_HEIGHT, probe, links: navLinks });
+  grid = buildNavGrid({ bounds, cell: CELL, stepHeight: STEP_HEIGHT, probe, links: navLinks, clearanceWeight: CLEARANCE_WEIGHT });
   // DEV-only, like bots.ts:debugLog: the build runs once at startup and its
   // cost scales with map size times collider count, so a map that quietly
   // makes it expensive should be visible rather than felt. Statically dead in

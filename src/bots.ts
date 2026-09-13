@@ -37,7 +37,7 @@ import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WE
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
-import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, HEAD_HEIGHT } from './collision';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, collidesAt, HEAD_HEIGHT } from './collision';
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
@@ -54,7 +54,7 @@ import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
-import { shouldAbandonRoute } from './sim/routeFollow';
+import { shouldAbandonRoute, furthestWalkable } from './sim/routeFollow';
 import { approach } from './sim/smoothing';
 import { botShotKick, createBotWeaponRig, pickBotShoulderOffset, poseBotWeaponRig, type BotWeaponRig } from './core/botWeaponModels';
 
@@ -107,6 +107,14 @@ const WAYPOINT_REACHED = 1;
 const ROUTE_INTERVAL = 1;
 
 /**
+ * How far ahead (m) the route shortcut may look for a walkable line past the
+ * next node — ~3 polyline joints on the 1 m graph. Short on purpose: the
+ * clearance-priced graph already rides off the walls, and this only irons the
+ * joint waggle rather than replanning the line.
+ */
+const LOOKAHEAD_DISTANCE = 3;
+
+/**
  * How far (m) off its own path a bot may drift before the route is thrown
  * away and rebuilt — it fell, was shoved, or respawned somewhere else.
  */
@@ -134,6 +142,9 @@ const PLAYER_ZONE_FRACTION: Record<HitZone, number> = {
  * per frame in updateBots.
  */
 let routeBudget = 1;
+
+/** Reused walkability probe for the route shortcut — allocation in the frame loop is the thing to avoid here. */
+const shortcutProbe = new THREE.Vector3();
 
 /**
  * The sound sequence every bot reads through THIS frame, captured once in
@@ -869,7 +880,23 @@ export class Bot implements BotShape {
       this.clearRouteCache();
       return null;
     }
-    return to.lengthSq() < 1e-8 ? null : to;
+    // Shortcut smoothing: steer at the furthest walkable line within a few
+    // metres rather than turning at every 1 m joint. Consumption above is
+    // untouched — skipped legs are aimed past, never marked reached — so the
+    // abandon decision keeps its ground truth and elevator boardings (which
+    // return before this line) can never be aimed past. Sampled against the
+    // same feet-aware gate the step itself obeys. See sim/routeFollow.ts.
+    const shortcutIdx = furthestWalkable(
+      this.path,
+      this.transportPath,
+      this.leg,
+      here,
+      LOOKAHEAD_DISTANCE,
+      (x, z) => collidesAt(shortcutProbe.set(x, 0, z), BOT_RADIUS, here.y, colliders),
+    );
+    const target = this.path[shortcutIdx]!;
+    const shortcut = new THREE.Vector3(target.x - here.x, 0, target.z - here.z);
+    return shortcut.lengthSq() < 1e-8 ? null : shortcut;
   }
 
   /** Drop the cached route: path, leg and goal key. */

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { shouldAbandonRoute } from './routeFollow';
+import { furthestWalkable, shouldAbandonRoute } from './routeFollow';
 
 /**
  * Abandon distance is bots.ts:ROUTE_ABANDON's value, passed as a parameter —
@@ -68,5 +68,63 @@ describe('shouldAbandonRoute', () => {
     // if a future caller does not.
     expect(shouldAbandonRoute([LIP, FOOT], 9, ON_FLIGHT, ABANDON)).toBe(false);
     expect(shouldAbandonRoute([LIP, FOOT], 9, { x: 40, z: 30 }, ABANDON)).toBe(true);
+  });
+});
+
+describe('furthestWalkable', () => {
+  /** Six nodes in a straight line, one metre apart — the graph's own rhythm. */
+  const straight = [
+    { x: 0, z: 0 }, { x: 1, z: 0 }, { x: 2, z: 0 },
+    { x: 3, z: 0 }, { x: 4, z: 0 }, { x: 5, z: 0 },
+  ];
+  const open = (): boolean => false;
+  /** A blocked disc — the stand-in for a wall the gate would refuse. */
+  const disc = (cx: number, cz: number, r: number) => (x: number, z: number): boolean =>
+    Math.hypot(x - cx, z - cz) < r;
+
+  test('steers at the furthest waypoint within range on open ground', () => {
+    // Range 3 covers nodes 1..3 from the origin; the shortcut takes node 3
+    // rather than turning at 1 and 2 on the way there.
+    expect(furthestWalkable(straight, [], 0, { x: 0, z: 0 }, 3, open)).toBe(3);
+  });
+
+  test('stops at the path end rather than overrunning it', () => {
+    expect(furthestWalkable(straight, [], 0, { x: 0, z: 0 }, 99, open)).toBe(5);
+  });
+
+  test('a blocked line is skipped, never steered through', () => {
+    // A wall sitting on node 2: every line past it samples blocked, so the
+    // shortcut holds at node 1 — the last clear line — instead of cutting
+    // the corner through geometry.
+    expect(furthestWalkable(straight, [], 0, { x: 0, z: 0 }, 5, disc(2, 0, 0.6))).toBe(1);
+  });
+
+  test('a clear later line past a blocked joint is still taken', () => {
+    // The joint at (1,0) is walled, but the lines past it round the disc
+    // cleanly: skipping ends the scan only for boardings, so the shortcut
+    // aims at the furthest clear line rather than stopping dead behind the
+    // blocked joint.
+    const corner = [{ x: 0, z: 0 }, { x: 1, z: 0 }, { x: 2, z: 0 }, { x: 2, z: 1 }, { x: 2, z: 2 }];
+    expect(furthestWalkable(corner, [], 0, { x: 0, z: 0 }, 5, disc(1.2, 0, 0.5))).toBe(4);
+  });
+
+  test('never aims past an elevator boarding leg', () => {
+    // The boarding at node 2 ends the scan even though nodes past it are
+    // nearer than the range and walkable: aiming past the mouth steers around
+    // the deck instead of onto it.
+    const transport = [{}, {}, { elevatorId: 'e' }, {}, {}];
+    expect(furthestWalkable(straight, transport, 0, { x: 0, z: 0 }, 99, open)).toBe(1);
+  });
+
+  test('waypoints beyond range are skipped, nearer later ones still taken', () => {
+    // A far excursion mid-path must not end the scan: the excursion is out of
+    // range, but the nearer node past it is a legitimate shortcut.
+    const zigzag = [{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 1, z: 0 }];
+    expect(furthestWalkable(zigzag, [], 0, { x: 0, z: 0 }, 3, open)).toBe(2);
+  });
+
+  test('an empty path and an overrun leg stay put', () => {
+    expect(furthestWalkable([], [], 0, { x: 0, z: 0 }, 3, open)).toBe(0);
+    expect(furthestWalkable(straight, [], 9, { x: 5, z: 0 }, 3, open)).toBe(5);
   });
 });

@@ -6,11 +6,14 @@ import {
   BOTS_CT_LIMITS,
   asBotWeapon,
   asBotSecondary,
+  asTeam,
   BOTS_T_LIMITS,
   TIME_LIMITS_S,
+  botLimits,
   clampTo,
   configsEqual,
   configToQuery,
+  defaultBotCounts,
   numOr,
   parseSessionConfig,
   secondsToMinutesLabel,
@@ -30,6 +33,7 @@ function srcFromQuery(q: string): ParamSource {
 
 const CFG: SessionConfig = {
   map: 'range',
+  playerTeam: 'CT',
   botsT: 10,
   botsCt: 3,
   roundSeconds: 90,
@@ -41,7 +45,7 @@ const CFG: SessionConfig = {
 
 // Each side's pair is adjacent, which is the order configToQuery writes.
 const CFG_QUERY =
-  '?map=range&tbots=10&ctbots=3&time=90&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=mixed';
+  '?map=range&side=ct&tbots=10&ctbots=3&time=90&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=mixed';
 
 describe('parseSessionConfig', () => {
   it('empty source yields every default', () => {
@@ -78,6 +82,28 @@ describe('parseSessionConfig', () => {
     expect(parseSessionConfig(src({ ctbots: '0' })).botsCt).toBe(0);
     expect(parseSessionConfig(src({ ctbots: '-1' })).botsCt).toBe(BOTS_CT_LIMITS.min);
     expect(parseSessionConfig(src({ ctbots: '50' })).botsCt).toBe(BOTS_CT_LIMITS.max);
+  });
+
+  // ---------- side mirroring ----------
+  it('bare ?side=t mirrors defaults to 5 own-side Ts and 6 enemy CTs', () => {
+    expect(parseSessionConfig(src({ side: 't' }))).toMatchObject({
+      playerTeam: 'T', botsT: 5, botsCt: 6,
+    });
+  });
+  it('explicit counts on T-side are preserved, not swapped', () => {
+    expect(parseSessionConfig(src({ side: 't', tbots: '4', ctbots: '8' }))).toMatchObject({
+      playerTeam: 'T', botsT: 4, botsCt: 8,
+    });
+  });
+  it('T-side clamps mirror: own Ts 0..15, enemy CTs 1..16', () => {
+    expect(parseSessionConfig(src({ side: 't', tbots: '99' })).botsT).toBe(15);
+    expect(parseSessionConfig(src({ side: 't', tbots: '-4' })).botsT).toBe(0);
+    expect(parseSessionConfig(src({ side: 't', ctbots: '99' })).botsCt).toBe(16);
+    expect(parseSessionConfig(src({ side: 't', ctbots: '0' })).botsCt).toBe(1);
+  });
+  it('garbage counts on T-side fall back to the mirrored defaults', () => {
+    expect(parseSessionConfig(src({ side: 't', tbots: 'junk' })).botsT).toBe(5);
+    expect(parseSessionConfig(src({ side: 't', ctbots: 'junk' })).botsCt).toBe(6);
   });
 
   // ---------- time ----------
@@ -129,11 +155,17 @@ describe('configToQuery', () => {
   it('round-trips through the parser unchanged', () => {
     expect(parseSessionConfig(srcFromQuery(configToQuery(CFG)))).toEqual(CFG);
   });
+
+  it('round-trips a T-side config unchanged', () => {
+    const tCfg: SessionConfig = { ...CFG, playerTeam: 'T', botsT: 5, botsCt: 6 };
+    expect(parseSessionConfig(srcFromQuery(configToQuery(tCfg)))).toEqual(tCfg);
+  });
 });
 
 describe('configsEqual', () => {
   it('is true only when every field matches', () => {
     expect(configsEqual(CFG, { ...CFG })).toBe(true);
+    expect(configsEqual(CFG, { ...CFG, playerTeam: 'T' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botsT: 9 })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, map: 'arena' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botsCt: 0 })).toBe(false);
@@ -142,6 +174,42 @@ describe('configsEqual', () => {
     expect(configsEqual(CFG, { ...CFG, botWeaponCt: 'smg' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botSecondaryT: 'pistol' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botSecondaryCt: 'pistol' })).toBe(false);
+  });
+});
+
+describe('asTeam', () => {
+  it('accepts t/ct case-insensitively', () => {
+    expect(asTeam('t', 'CT')).toBe('T');
+    expect(asTeam('T', 'CT')).toBe('T');
+    expect(asTeam('ct', 'T')).toBe('CT');
+    expect(asTeam('CT', 'T')).toBe('CT');
+    expect(asTeam(' t ', 'CT')).toBe('T');
+  });
+
+  it('falls back for absent, empty and garbage values', () => {
+    expect(asTeam(null, 'CT')).toBe('CT');
+    expect(asTeam(undefined, 'T')).toBe('T');
+    expect(asTeam('', 'CT')).toBe('CT');
+    expect(asTeam('terrorist', 'CT')).toBe('CT');
+    expect(asTeam('toString', 'CT')).toBe('CT');
+  });
+
+  it('parses side independently of the other params', () => {
+    expect(parseSessionConfig(src({ side: 't' })).playerTeam).toBe('T');
+    expect(parseSessionConfig(src({ side: 'nope' })).playerTeam).toBe(SESSION_DEFAULTS.playerTeam);
+    expect(parseSessionConfig(src({})).playerTeam).toBe('CT');
+  });
+});
+
+describe('botLimits/defaultBotCounts', () => {
+  it('CT-side: enemy Ts 1..16, allied CTs 0..15', () => {
+    expect(botLimits('CT')).toEqual({ limitT: BOTS_T_LIMITS, limitCt: BOTS_CT_LIMITS });
+    expect(defaultBotCounts('CT')).toEqual({ botsT: 6, botsCt: 5 });
+  });
+
+  it('T-side mirrors: allied Ts 0..15, enemy CTs 1..16, defaults 5/6', () => {
+    expect(botLimits('T')).toEqual({ limitT: BOTS_CT_LIMITS, limitCt: BOTS_T_LIMITS });
+    expect(defaultBotCounts('T')).toEqual({ botsT: 5, botsCt: 6 });
   });
 });
 

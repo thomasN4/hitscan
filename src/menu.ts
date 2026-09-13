@@ -9,7 +9,7 @@
 // missing id is a named startup error via hud.ts:requireEl.
 //
 // Commit model: match settings ride ONE query string
-// (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=).
+// (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=).
 // Play compares the form against the applied session config — equal means the
 // page already matches, so it opens the loadout picker; different means
 // navigate-and-reload (map switching is a full reload, and pointer lock needs
@@ -17,14 +17,14 @@
 // points: match start (after Play) and death (replacing the old plain death
 // screen), pre-filled with lastLoadout either way. Its Deploy click doubles as
 // the user gesture pointer lock requires — see main.ts's onDeploy handler.
-import type { LoadoutState, MapName, WeaponClass, WeaponId } from './core/state';
+import type { LoadoutState, MapName, Team, WeaponClass, WeaponId } from './core/state';
 import { bots, score, WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
 import type { MatchWinner } from './sim/match';
 import {
-  BOTS_CT_LIMITS,
-  BOTS_T_LIMITS,
   TIME_LIMITS_S,
   asMapName,
+  asTeam,
+  botLimits,
   clampTo,
   asBotSecondary,
   asBotWeapon,
@@ -43,6 +43,31 @@ const SUBTITLES: Record<MapName, string> = {
   warehouse1: 'Racking aisles, a contested mezzanine, and conveyors only you can vault',
   warehouse2: 'A catwalk ring over an open floor \u2014 stairs, cargo lifts, and nowhere to hide from above',
 };
+
+/**
+ * T-side subtitle override per map — null where the static line is already
+ * side-agnostic. A full Record, not an if-branch: a new map fails to compile
+ * until it decides whether its T-side wording names the enemy, instead of
+ * silently showing the CT-side line to a T-side player.
+ */
+const T_SUBTITLES: Record<MapName, string | null> = {
+  arena: 'Eliminate all CTs to win the round',
+  range: null,
+  elevation: null,
+  warehouse1: null,
+  warehouse2: null,
+};
+
+/**
+ * Menu subtitle for a map + side: the T-side override where the table has
+ * one, the static line otherwise.
+ */
+export function subtitleFor(map: MapName, side: Team): string {
+  // null is a TABLE ENTRY meaning "no T-side override", not an index miss —
+  // T_SUBTITLES is keyed by the full MapName union.
+  if (side === 'T') return T_SUBTITLES[map] ?? SUBTITLES[map];
+  return SUBTITLES[map];
+}
 
 /** What the menu does on Play/Resume/Quit/Deploy — main.ts supplies the behaviors. */
 export interface MenuHandlers {
@@ -69,7 +94,8 @@ let startMenu: HTMLElement, pauseMenu: HTMLElement, loadoutScreen: HTMLElement, 
   colPrimary: HTMLElement, colSecondary: HTMLElement,
   endTitle: HTMLElement, endScoreCT: HTMLElement, endScoreT: HTMLElement, scoreboardBody: HTMLElement;
 let deployBtn: HTMLButtonElement;
-let mapSel: HTMLSelectElement, weaponTSel: HTMLSelectElement, weaponCtSel: HTMLSelectElement,
+let mapSel: HTMLSelectElement, sideSel: HTMLSelectElement,
+  weaponTSel: HTMLSelectElement, weaponCtSel: HTMLSelectElement,
   secondaryTSel: HTMLSelectElement, secondaryCtSel: HTMLSelectElement,
   botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
   timeMinIn: HTMLInputElement;
@@ -163,7 +189,7 @@ export function showEndScreen(winner: MatchWinner): void {
 
   interface Row { name: string; team: 'T' | 'CT'; kills: number; deaths: number; you: boolean }
   const rows: Row[] = [
-    { name: 'You', team: 'CT', kills: score.playerKills, deaths: score.playerDeaths, you: true },
+    { name: 'You', team: session.playerTeam, kills: score.playerKills, deaths: score.playerDeaths, you: true },
     ...bots.map(b => ({ name: b.name, team: b.team, kills: b.kills, deaths: b.deaths, you: false })),
   ];
   // Explicit you-first tie-break: ES2019 sorts are stable, but the documented
@@ -236,6 +262,7 @@ export function initMenus(handlers: MenuHandlers): void {
   endScoreT = requireEl('endScoreT');
   scoreboardBody = requireEl('scoreboardBody');
   mapSel = requireEl('cfgMap') as HTMLSelectElement;
+  sideSel = requireEl('cfgSide') as HTMLSelectElement;
   botsTIn = requireEl('cfgBotsT') as HTMLInputElement;
   botsCtIn = requireEl('cfgBotsCt') as HTMLInputElement;
   timeMinIn = requireEl('cfgTimeMin') as HTMLInputElement;
@@ -245,6 +272,7 @@ export function initMenus(handlers: MenuHandlers): void {
   secondaryCtSel = requireEl('cfgSecondaryCt') as HTMLSelectElement;
 
   mapSel.value = session.map;
+  sideSel.value = session.playerTeam.toLowerCase();
   weaponTSel.value = session.botWeaponT;
   weaponCtSel.value = session.botWeaponCt;
   secondaryTSel.value = session.botSecondaryT;
@@ -255,6 +283,15 @@ export function initMenus(handlers: MenuHandlers): void {
   applyMapUi();
 
   mapSel.onchange = applyMapUi;
+  // Flipping sides swaps the two count fields so "enemy 6 / own 5" survives
+  // the flip: the numbers are side-fixed (tbots counts Ts), but the DEFAULTS
+  // are role-relative. Weapon settings are side-fixed too and stay put.
+  sideSel.onchange = () => {
+    const tmp = botsTIn.value;
+    botsTIn.value = botsCtIn.value;
+    botsCtIn.value = tmp;
+    applyMapUi();
+  };
   buildCards();
 
   requireEl('playBtn').onclick = () => {
@@ -296,7 +333,15 @@ export function initMenus(handlers: MenuHandlers): void {
 /** Range matches have no bots and no clock: gray those rows out live. */
 function applyMapUi(): void {
   const isRange = mapSel.value === 'range';
-  subtitleEl.textContent = SUBTITLES[asMapName(mapSel.value)];
+  const side = asTeam(sideSel.value, session.playerTeam);
+  subtitleEl.textContent = subtitleFor(asMapName(mapSel.value), side);
+  // Clamp ranges mirror the side: the enemy wave needs ≥1 and caps at 16,
+  // the player's own side allows 0 and caps at 15.
+  const limits = botLimits(side);
+  botsTIn.min = String(limits.limitT.min);
+  botsTIn.max = String(limits.limitT.max);
+  botsCtIn.min = String(limits.limitCt.min);
+  botsCtIn.max = String(limits.limitCt.max);
   botsTIn.disabled = isRange;
   botsCtIn.disabled = isRange;
   timeMinIn.disabled = isRange;
@@ -310,7 +355,8 @@ function applyMapUi(): void {
 /** Field-by-field view of what the page was loaded with. */
 function appliedConfig(): SessionConfig {
   return {
-    map: session.map, botsT: session.botsT, botsCt: session.botsCt,
+    map: session.map, playerTeam: session.playerTeam,
+    botsT: session.botsT, botsCt: session.botsCt,
     roundSeconds: session.roundSeconds,
     botWeaponT: session.botWeaponT, botWeaponCt: session.botWeaponCt,
     botSecondaryT: session.botSecondaryT, botSecondaryCt: session.botSecondaryCt,
@@ -319,12 +365,15 @@ function appliedConfig(): SessionConfig {
 
 /** Form contents as a SessionConfig, clamped exactly like the URL parser. */
 function candidateConfig(): SessionConfig {
+  const side = asTeam(sideSel.value, session.playerTeam);
+  const limits = botLimits(side);
   return {
     map: asMapName(mapSel.value),
+    playerTeam: side,
     // A cleared/garbage field keeps the currently-applied value rather than
     // forcing a retype; Number('') is 0, so emptiness must be checked first.
-    botsT: Math.round(clampTo(numOr(botsTIn.value, session.botsT), BOTS_T_LIMITS)),
-    botsCt: Math.round(clampTo(numOr(botsCtIn.value, session.botsCt), BOTS_CT_LIMITS)),
+    botsT: Math.round(clampTo(numOr(botsTIn.value, session.botsT), limits.limitT)),
+    botsCt: Math.round(clampTo(numOr(botsCtIn.value, session.botsCt), limits.limitCt)),
     roundSeconds: Math.round(
       clampTo(numOr(timeMinIn.value, session.roundSeconds / 60) * 60, TIME_LIMITS_S),
     ),

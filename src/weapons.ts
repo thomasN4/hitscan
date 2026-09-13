@@ -351,7 +351,7 @@ function swingMelee(def: WeaponDef): void {
   const dir = shotDirection(currentAimPitch(), currentAimYaw(), 0);
   const candidates: MeleeCandidate<Bot>[] = [];
   for (const bot of bots) {
-    if (!bot.alive || bot.team === 'CT') continue;
+    if (!bot.alive || bot.team === session.playerTeam) continue;
     for (const zone of ['head', 'torso', 'legs'] as const) {
       candidates.push({ payload: bot, zone, at: bot[zone].getWorldPosition(new THREE.Vector3()) });
     }
@@ -451,7 +451,7 @@ export function shoot(): void {
   soundEvents.emit({
     kind: 'gunshot',
     sourceId: 'player',
-    team: 'CT',       // the player fights on the CT side (combat.ts, bots.ts)
+    team: session.playerTeam,
     pos: playerFeet(player),
     radius: GUNSHOT_RADIUS_M,
     t: gameTime.now(),
@@ -488,9 +488,9 @@ export function shoot(): void {
     // length checked above; the assertion only records that fact
     const hit = hits[0]!;
     const bot = botFor(hit.object); // stamped onto each part in Bot's constructor
-    if (bot && bot.team === 'CT') {
+    if (bot && bot.team === session.playerTeam) {
       // Friendly fire is OFF: ally bodies stop the bullet (visible impact,
-      // no hitmarker, no damage) but never bleed CT score.
+      // no hitmarker, no damage) but never bleed the ally's score.
       spawnImpact(hit.point);
     } else if (bot) {
       const part = partForMesh(bot, hit.object);

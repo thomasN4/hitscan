@@ -1,7 +1,7 @@
 // core/sessionConfig.ts — pure parse/serialize for the match-config query.
 //
 // The start menu commits settings by navigating to ONE query string
-// (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
+// (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
 // back once at startup and writes the result into `session`. Parsing lives here rather than in
 // main.ts so the clamp/fallback matrix is unit-testable in plain Node: the
 // input is a minimal `{ get(name) }` view (URLSearchParams satisfies it
@@ -17,15 +17,17 @@
 // menu.ts. asMapName is shared for the same reason: menu.ts used to open-code
 // its own `=== 'range' ? 'range' : 'arena'`, which silently drops any map
 // added after it was written.
-import type { BotSecondaryChoice, BotWeaponChoice, MapName } from './state';
+import type { BotSecondaryChoice, BotWeaponChoice, MapName, Team } from './state';
 import { SESSION_DEFAULTS } from './state';
 
 /** Everything the menu configures about a match; mirrors session's config fields. */
 export interface SessionConfig {
   map: MapName;
-  /** Enemy (T-side) bot count. */
+  /** Which side the player fights for; the other side is the enemy wave. */
+  playerTeam: Team;
+  /** T-side bot count (enemy on CT-side, allied on T-side). */
   botsT: number;
-  /** Allied (CT-side) bot count. */
+  /** CT-side bot count (allied on CT-side, enemy on T-side). */
   botsCt: number;
   /** Round length in seconds. */
   roundSeconds: number;
@@ -42,12 +44,35 @@ export interface SessionConfig {
 // ---------- Accepted ranges ----------
 // The menu's number inputs mirror these via their min/max attributes; the
 // parser clamps independently of the DOM so a hand-edited URL is safe too.
-/** Enemy bots. Minimum 1: zero enemies would fire checkRoundEnd instantly. */
+// Limits are side-relative: the ENEMY wave needs at least 1 bot (zero enemies
+// would fire checkRoundEnd instantly) and caps at 16, while the player's own
+// side allows 0 and caps at 15 (the player fills the 16th slot). botLimits()
+// picks which physical field gets which range.
+/** Enemy-wave range (1..16) and allied-wave range (0..15), CT-player canonical. */
 export const BOTS_T_LIMITS = { min: 1, max: 16 } as const;
-/** Allied bots — 0 means none configured. */
+/** Allied-wave range, CT-player canonical. */
 export const BOTS_CT_LIMITS = { min: 0, max: 15 } as const;
 /** Round length in seconds; the menu edits minutes within [0.5, 30]. */
 export const TIME_LIMITS_S = { min: 30, max: 1800 } as const;
+
+/**
+ * Side-appropriate clamp ranges for the two bot-count fields. On CT-side the
+ * T field is the enemy wave and the CT field the allies; on T-side it is the
+ * reverse — enemy 6 / own 5 stays the default both ways.
+ */
+export function botLimits(playerTeam: Team): { limitT: Limits; limitCt: Limits } {
+  if (playerTeam === 'T') return { limitT: BOTS_CT_LIMITS, limitCt: BOTS_T_LIMITS };
+  return { limitT: BOTS_T_LIMITS, limitCt: BOTS_CT_LIMITS };
+}
+
+/**
+ * Side-appropriate default bot counts: enemy 6, own side 5. SESSION_DEFAULTS
+ * is the CT-player instance; T-side mirrors it.
+ */
+export function defaultBotCounts(playerTeam: Team): { botsT: number; botsCt: number } {
+  if (playerTeam === 'T') return { botsT: SESSION_DEFAULTS.botsCt, botsCt: SESSION_DEFAULTS.botsT };
+  return { botsT: SESSION_DEFAULTS.botsT, botsCt: SESSION_DEFAULTS.botsCt };
+}
 
 /** Minimal read-only view over a param bag. */
 export interface ParamSource {
@@ -97,7 +122,7 @@ export function secondsToMinutesLabel(seconds: number): string {
  * next time a map is added.
  *
  * Membership goes through an exhaustive Record rather than a literal chain so
- * widening MapName fails to compile HERE too, not just at BUILDERS / SPAWN_Z /
+ * widening MapName fails to compile HERE too, not just at BUILDERS / SPAWN /
  * SUBTITLES. The cast is the unavoidable cost of runtime narrowing (`in` can't
  * narrow a bare string); hasOwn rather than `in` keeps prototype keys like
  * 'toString' from passing the guard and reaching the builder lookup.
@@ -114,6 +139,25 @@ export function asMapName(raw: string | null | undefined): MapName {
   return typeof raw === 'string' && Object.hasOwn(IS_MAP_NAME, raw)
     ? (raw as MapName)
     : SESSION_DEFAULTS.map;
+}
+
+/**
+ * Narrow an untrusted string to Team, falling back for anything unrecognized.
+ *
+ * Shared with the start menu's candidateConfig() like asMapName: the form's
+ * <select> and the URL parser must agree on what counts as a side. Accepts
+ * 't'/'ct' case-insensitively (the canonical query writes lowercase); a stale
+ * or garbage value falls back rather than throwing.
+ */
+const IS_TEAM: Record<Team, true> = {
+  T: true,
+  CT: true,
+};
+
+export function asTeam(raw: string | null | undefined, fallback: Team): Team {
+  if (typeof raw !== 'string') return fallback;
+  const n = raw.trim().toUpperCase();
+  return Object.hasOwn(IS_TEAM, n) ? (n as Team) : fallback;
 }
 
 /**
@@ -173,10 +217,16 @@ export function asBotSecondary(
 
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
+  // Side first: bot-count fallbacks AND clamp ranges both mirror off it, so
+  // ?side=t alone yields 5 own-side Ts and 6 enemy CTs.
+  const playerTeam = asTeam(src.get('side'), SESSION_DEFAULTS.playerTeam);
+  const limits = botLimits(playerTeam);
+  const defaults = defaultBotCounts(playerTeam);
   return {
     map: asMapName(src.get('map')),
-    botsT: Math.round(clampTo(numOr(src.get('tbots'), SESSION_DEFAULTS.botsT), BOTS_T_LIMITS)),
-    botsCt: Math.round(clampTo(numOr(src.get('ctbots'), SESSION_DEFAULTS.botsCt), BOTS_CT_LIMITS)),
+    playerTeam,
+    botsT: Math.round(clampTo(numOr(src.get('tbots'), defaults.botsT), limits.limitT)),
+    botsCt: Math.round(clampTo(numOr(src.get('ctbots'), defaults.botsCt), limits.limitCt)),
     roundSeconds: Math.round(
       clampTo(numOr(src.get('time'), SESSION_DEFAULTS.roundSeconds), TIME_LIMITS_S),
     ),
@@ -195,6 +245,7 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
 export function configToQuery(cfg: SessionConfig): string {
   const p = new URLSearchParams();
   p.set('map', cfg.map);
+  p.set('side', cfg.playerTeam.toLowerCase());
   p.set('tbots', String(cfg.botsT));
   p.set('ctbots', String(cfg.botsCt));
   p.set('time', String(cfg.roundSeconds));
@@ -209,6 +260,7 @@ export function configToQuery(cfg: SessionConfig): string {
 export function configsEqual(a: SessionConfig, b: SessionConfig): boolean {
   return (
     a.map === b.map &&
+    a.playerTeam === b.playerTeam &&
     a.botsT === b.botsT &&
     a.botsCt === b.botsCt &&
     a.roundSeconds === b.roundSeconds &&

@@ -146,6 +146,9 @@ let routeBudget = 1;
 /** Reused walkability probe for the route shortcut — allocation in the frame loop is the thing to avoid here. */
 const shortcutProbe = new THREE.Vector3();
 
+/** Reused feeler probe for the brain's travel wall-sense, for the same reason. */
+const senseProbe = new THREE.Vector3();
+
 /**
  * The sound sequence every bot reads through THIS frame, captured once in
  * updateBots before any bot runs. It is what makes hearing independent of
@@ -583,6 +586,10 @@ export class Bot implements BotShape {
         selfSpeed: this.speed,
         moveBlocked: this.moveBlocked,
         heard,
+        // The travel wall-sense's feeler, answered by the same feet-aware
+        // gate the step below obeys: standable here means the step survives.
+        canStandAt: (x, z) =>
+          !collidesAt(senseProbe.set(x, 0, z), BOT_RADIUS, this.mesh.position.y, colliders),
         // Lazy on purpose: pathfinding is the expensive thing here, so it is
         // only paid when the policy has already decided it wants to travel
         // rather than fight where it stands. The pursuit flag keys the route

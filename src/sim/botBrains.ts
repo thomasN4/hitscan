@@ -81,6 +81,19 @@ export interface BrainParams {
   /** Seconds a jammed bot commits to sliding one way along whatever blocks it. */
   commitTime: number;
   /**
+   * Feeler reach (m) for the travel wall-sense: diagonal probes at
+   * heading·range ± perp·range through the view's standability probe. ~1 m
+   * looks a quarter-second ahead at bot speed — far enough to pre-steer,
+   * near enough that a doorway still reads open on both feelers.
+   */
+  wallProbeRange: number;
+  /**
+   * Outward bias weight vs the waypoint heading when exactly one feeler is
+   * blocked. Half the heading's weight eases off the wall without abandoning
+   * the line; both feelers blocked (a doorway) holds the line instead.
+   */
+  wallPush: number;
+  /**
    * Seconds a bot may fail to CLOSE on its target beyond farBand before it
    * stops trusting band steering and routes on the flat — the flat analogue
    * of climbThreshold's job: evidence gathered, not anticipation.
@@ -136,6 +149,8 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   climbExit: 0.45,     // just over one riser — keep routing to the last step
   stuckTime: 0.25,
   commitTime: 0.5,
+  wallProbeRange: 1, // diagonal feelers ~1.4 m out — a quarter-second at bot speed
+  wallPush: 0.5,     // half the heading's weight: ease off, don't abandon the line
   noProgressTime: 1.5,   // ~2 juke swings would be 4 s; 1.5 s is already patient
   noProgressEpsilon: 0.25, // ≈ 4 frames of full-speed closure
   fleeReset: 2,          // a target 2 m farther than the best seen is running, not stalling
@@ -176,6 +191,14 @@ export interface BrainView {
   selfSpeed: number;
   /** Whether LAST frame's step was rejected by world collision. */
   moveBlocked: boolean;
+  /**
+   * Whether a body may stand at (x, z) at this bot's OWN feet height — the
+   * travel wall-sense's feeler. Executor-backed by the same feet-aware gate
+   * the step obeys (collision.ts:collidesAt at the bot's own radius), so a
+   * "standable" answer means the intended step would survive there too.
+   * Travel only: engage steering never asks.
+   */
+  canStandAt(x: number, z: number): boolean;
   /**
    * Hostile noises heard SINCE the last frame — already filtered by the
    * executor for team and earshot, so an entry here is by construction
@@ -706,6 +729,26 @@ export class DefaultBrain implements BotBrain {
       step.set(-heading.z * this.slideDir, 0, heading.x * this.slideDir);
     } else {
       step.copy(heading);
+      // Wall-sense: diagonal feelers a step ahead through the view's
+      // standability probe. A wall on ONE side eases the step away before
+      // contact grinds speed off in the executor's slide gate; both sides
+      // blocked (a doorway) holds the line rather than picking a side. Takes
+      // no draws — the per-frame juke sequence is untouched.
+      const range = this.params.wallProbeRange;
+      const px = -heading.z, pz = heading.x;
+      const leftBlocked = !view.canStandAt(
+        view.selfFeet.x + (heading.x + px) * range,
+        view.selfFeet.z + (heading.z + pz) * range,
+      );
+      const rightBlocked = !view.canStandAt(
+        view.selfFeet.x + (heading.x - px) * range,
+        view.selfFeet.z + (heading.z - pz) * range,
+      );
+      if (leftBlocked !== rightBlocked) {
+        const side = leftBlocked ? -1 : 1;
+        step.x += px * side * this.params.wallPush;
+        step.z += pz * side * this.params.wallPush;
+      }
     }
     step.normalize().multiplyScalar(view.selfSpeed * dt);
   }

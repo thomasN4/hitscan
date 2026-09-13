@@ -150,6 +150,8 @@ interface ViewOpts {
   nextPatrolWaypoint?: () => THREE.Vector3 | undefined | null;
   /** Hostile noises this frame, executor-filtered; default none. */
   heard?: readonly HeardSound[];
+  /** Standability feeler; default open ground — every pre-sense test walks nowhere near a wall. */
+  canStandAt?: (x: number, z: number) => boolean;
 }
 
 /** Canonical view: observed target due +x, mid-band, LEVEL, 4 m/s. */
@@ -173,6 +175,8 @@ function view(o: ViewOpts = {}): BrainView {
     // No patrol route by default either: the patrol tests pass their own
     // thunk, and the pause-before-patrol tests want a goalless answer (null).
     nextPatrolWaypoint: o.nextPatrolWaypoint ?? (() => null),
+    // Open ground by default: the sense tests pass their own walls.
+    canStandAt: o.canStandAt ?? (() => true),
   };
 }
 
@@ -522,6 +526,67 @@ describe('DefaultBrain routing', () => {
     brain.onRespawn();
     // A rise that only CONTINUES a route must not start one on a fresh life.
     expect(brain.decide(onRoute({ rise: 1.2 }), STEP_DT).mode).toBe('engage');
+  });
+});
+
+// The travel wall-sense: diagonal feelers ease a routed step off a wall on
+// one side before contact grinds speed off in the slide gate. Same replay
+// style as the routing describes above — the waypoint is due +z from feet at
+// the origin, so with the shipped range 1 the feelers sit at (±1, 0, 1) and a
+// `x >= -0.5` probe walls exactly the -x one.
+describe('DefaultBrain travel wall-sense', () => {
+  const STEP_DT = 0.1;
+  const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
+  const onRoute = (overrides: ViewOpts = {}): BrainView =>
+    view({ dist: 20, rise: 3.6, nextWaypoint: () => NORTH(), ...overrides });
+
+  it('walks the line untouched when both feelers read open', () => {
+    const { step, mode } = calmBrain().decide(onRoute(), STEP_DT);
+    expect(mode).toBe('route');
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('eases away from a wall on one side, still mostly forward', () => {
+    // Blend = heading (0,0,1) + push 0.5 along +x, normalized to speed·dt.
+    const len = Math.sqrt(1 + 0.5 * 0.5);
+    const { step } = calmBrain().decide(onRoute({ canStandAt: (x) => x >= -0.5 }), STEP_DT);
+    expect(step.x).toBeCloseTo((0.5 / len) * 4 * STEP_DT, 12);
+    expect(step.z).toBeCloseTo((1 / len) * 4 * STEP_DT, 12);
+  });
+
+  it('mirrors: a wall on the other side pushes the other way', () => {
+    const { step } = calmBrain().decide(onRoute({ canStandAt: (x) => x <= 0.5 }), STEP_DT);
+    expect(step.x).toBeLessThan(0);
+    expect(step.z).toBeGreaterThan(0);
+  });
+
+  it('holds the line through a doorway, both feelers blocked', () => {
+    // Picking a side inside a gap would steer into a jamb; the line holds.
+    const { step } = calmBrain().decide(onRoute({ canStandAt: () => false }), STEP_DT);
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('a committed slide ignores the feelers', () => {
+    // Three refused frames arm the sideways commit; the feelers must not
+    // leak a forward component back into the committed slide.
+    const brain = calmBrain();
+    const jammed = onRoute({ moveBlocked: true, canStandAt: (x) => x >= -0.5 });
+    for (let f = 1; f <= 3; f++) brain.decide(jammed, STEP_DT);
+    const slide = brain.decide(jammed, STEP_DT);
+    expect(Math.abs(slide.step.x)).toBeCloseTo(4 * STEP_DT, 12);
+    expect(slide.step.z).toBeCloseTo(0, 12);
+  });
+
+  it('engage steering never asks the probe', () => {
+    // Scoping pin: the sense belongs to routed travel, so a mid-band
+    // firefight takes no standability reads at all.
+    let asked = 0;
+    const v = view({ dist: 10, canStandAt: () => { asked++; return true; } });
+    const { mode } = calmBrain().decide(v, STEP_DT);
+    expect(mode).toBe('engage');
+    expect(asked).toBe(0);
   });
 });
 

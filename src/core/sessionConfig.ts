@@ -1,7 +1,7 @@
 // core/sessionConfig.ts — pure parse/serialize for the match-config query.
 //
 // The start menu commits settings by navigating to ONE query string
-// (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
+// (?map=&mode=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
 // back once at startup and writes the result into `session`. Parsing lives here rather than in
 // main.ts so the clamp/fallback matrix is unit-testable in plain Node: the
 // input is a minimal `{ get(name) }` view (URLSearchParams satisfies it
@@ -17,12 +17,14 @@
 // menu.ts. asMapName is shared for the same reason: menu.ts used to open-code
 // its own `=== 'range' ? 'range' : 'arena'`, which silently drops any map
 // added after it was written.
-import type { BotSecondaryChoice, BotWeaponChoice, MapName, Team } from './state';
-import { SESSION_DEFAULTS } from './state';
+import type { BotSecondaryChoice, BotWeaponChoice, MapName, MatchMode, Team } from './state';
+import { DOM_FLAGS, SESSION_DEFAULTS } from './state';
 
 /** Everything the menu configures about a match; mirrors session's config fields. */
 export interface SessionConfig {
   map: MapName;
+  /** Match ruleset: kill-score TDM, or domination when the map has flags. */
+  mode: MatchMode;
   /** Which side the player fights for; the other side is the enemy wave. */
   playerTeam: Team;
   /** T-side bot count (enemy on CT-side, allied on T-side). */
@@ -215,6 +217,23 @@ export function asBotSecondary(
     : fallback;
 }
 
+/**
+ * Narrow an untrusted string to MatchMode, falling back for anything
+ * unrecognized. Shared with the start menu's candidateConfig() like
+ * asMapName: the form's <select> and the URL parser must agree on what
+ * counts as a mode.
+ */
+const IS_MATCH_MODE: Record<MatchMode, true> = {
+  tdm: true,
+  dom: true,
+};
+
+export function asMatchMode(raw: string | null | undefined, fallback: MatchMode): MatchMode {
+  return typeof raw === 'string' && Object.hasOwn(IS_MATCH_MODE, raw)
+    ? (raw as MatchMode)
+    : fallback;
+}
+
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
   // Side first: bot-count fallbacks AND clamp ranges both mirror off it, so
@@ -222,9 +241,15 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
   const playerTeam = asTeam(src.get('side'), SESSION_DEFAULTS.playerTeam);
   const limits = botLimits(playerTeam);
   const defaults = defaultBotCounts(playerTeam);
+  const map = asMapName(src.get('map'));
+  // Domination needs flags: a map with none (every map but elevation for now)
+  // falls back to TDM rather than booting a flagless domination match.
+  const mode = DOM_FLAGS[map].length > 0
+    ? asMatchMode(src.get('mode'), SESSION_DEFAULTS.mode)
+    : 'tdm';
   return {
-    map: asMapName(src.get('map')),
-    playerTeam,
+    map,
+    mode,
     botsT: Math.round(clampTo(numOr(src.get('tbots'), defaults.botsT), limits.limitT)),
     botsCt: Math.round(clampTo(numOr(src.get('ctbots'), defaults.botsCt), limits.limitCt)),
     roundSeconds: Math.round(
@@ -245,6 +270,7 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
 export function configToQuery(cfg: SessionConfig): string {
   const p = new URLSearchParams();
   p.set('map', cfg.map);
+  p.set('mode', cfg.mode);
   p.set('side', cfg.playerTeam.toLowerCase());
   p.set('tbots', String(cfg.botsT));
   p.set('ctbots', String(cfg.botsCt));
@@ -260,6 +286,7 @@ export function configToQuery(cfg: SessionConfig): string {
 export function configsEqual(a: SessionConfig, b: SessionConfig): boolean {
   return (
     a.map === b.map &&
+    a.mode === b.mode &&
     a.playerTeam === b.playerTeam &&
     a.botsT === b.botsT &&
     a.botsCt === b.botsCt &&

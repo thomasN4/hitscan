@@ -953,6 +953,52 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
   },
 };
 
+/** Match ruleset. `tdm` is kill-score team deathmatch; `dom` is domination (flag capture ticks points, kills score nothing). */
+export type MatchMode = 'tdm' | 'dom';
+
+/**
+ * Static definition of one domination capture point.
+ *
+ * `feetY` is the walk surface the flag sits on (like SpawnZone.y), so a flag
+ * can live on a deck — elevation's B sits on the building slab at 3.6 while A
+ * and C sit on open ground. Capture counts bodies whose feet are within
+ * VERTICAL_TOL of the flag (sim/domination.ts), so the deck fight and the
+ * ground floor below it never bleed into each other.
+ */
+export interface FlagDef {
+  /** Display id: 'A', 'B' or 'C'. */
+  id: string;
+  x: number;
+  /** Feet height of the flag's walk surface. */
+  feetY: number;
+  z: number;
+  /** Planar capture radius in metres. */
+  radius: number;
+}
+
+/**
+ * Domination flags per map. A full Record for the same reason as BUILDERS /
+ * SPAWN / BOT_SPAWNS: adding a MapName must fail to compile until the new map
+ * says where its flags are. An EMPTY array means "no domination on this map" —
+ * sessionConfig's parser falls back to `tdm` there, so `?mode=dom` on any
+ * other map degrades safely instead of booting a flagless match.
+ */
+export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
+  arena: [],
+  range: [],
+  // A (0,0,-30) and C (0,0,30): open ground between the spawn bands and the
+  // central building, clear of the crate clusters beside them. B (0,3.6,0):
+  // the second-floor slab west of the stairwell hole (x[2,6], z[-9,0]) — the
+  // deck fight the map was built to observe. Radius 4.5 keeps A's ring clear
+  // of the plateau's east face (x = -27) and the crates around both points.
+  elevation: [
+    { id: 'A', x: 0, feetY: 0, z: -30, radius: 4.5 },
+    { id: 'B', x: 0, feetY: 3.6, z: 0, radius: 4.5 },
+    { id: 'C', x: 0, feetY: 0, z: 30, radius: 4.5 },
+  ],
+  warehouse1: [],
+  warehouse2: [],
+};
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every
  * garbage/out-of-range ?time= value falls back to (see
@@ -964,6 +1010,7 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
  */
 export const SESSION_DEFAULTS: Readonly<{
   map: MapName;
+  mode: MatchMode;
   playerTeam: Team;
   botsT: number;
   botsCt: number;
@@ -974,6 +1021,8 @@ export const SESSION_DEFAULTS: Readonly<{
   botSecondaryCt: BotSecondaryChoice;
 }> = {
   map: 'arena',
+  // TDM preserves every historical bare-URL match; domination is opt-in per match.
+  mode: 'tdm',
   // CT default preserves the historical bare-URL match: 6 enemy Ts, 5 allied CTs.
   playerTeam: 'CT',
   botsT: 6,
@@ -1007,7 +1056,7 @@ export const SESSION_DEFAULTS: Readonly<{
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
-  // query string (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
+  // query string (?map=&mode=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
   // a full page reload — map
   // switching is a reload and there is deliberately no hot-swapping of scenes
   // at runtime. The key list is spelled out in four places (here, AGENTS.md,
@@ -1017,6 +1066,8 @@ export interface SessionState {
   // parse of the URL at startup — reading `location` here would break this
   // module's importability in Node.
   map: MapName;
+  /** Match ruleset: kill-score TDM, or domination when the map has flags. */
+  mode: MatchMode;
   /** Which side the player fights for. The other side is the enemy wave. */
   playerTeam: Team;
   /** T-side bot count. Enemy (1..16) on CT-side, allied (0..15) on T-side; clamped by botLimits() in sessionConfig. */
@@ -1298,10 +1349,74 @@ export const score: ScoreState = {
  * an unresolvable attacker to the victim's opposing side) and guard against
  * same-team casualties where those are possible; the mapping itself lives
  * only here.
+ *
+ * Domination matches never call this: kills score nothing there (team points
+ * tick from owned flags into the `dom` slice instead), while personal K/D
+ * counters are still bumped by the same callers.
  */
 export function creditKill(killerTeam: Team): void {
+  if (session.mode === 'dom') return;
   if (killerTeam === 'CT') score.scoreKills++;
   else score.scoreDeaths++;
+}
+
+/**
+ * Live state of one domination capture point. Written by the domination
+ * updater (see domination.ts, driven from main.ts); read by the HUD, the flag
+ * visuals and the bot objective dispatcher. `pos` is the flag centre at its
+ * walk-surface height — bots route to it like any other goal.
+ */
+export interface DomFlagState {
+  /** Display id from the FlagDef ('A', 'B', 'C'). */
+  id: string;
+  /** Flag centre: x/z from the def, y at the def's walk-surface height. */
+  pos: THREE.Vector3;
+  /** Planar capture radius in metres, from the def. */
+  radius: number;
+  /** Owning side, or null while neutral. */
+  owner: Team | null;
+  /**
+   * 0..1 capture progress toward `challenger`. Resets whenever the point
+   * empties, is contested, or changes hands.
+   */
+  progress: number;
+  /** Which side the progress belongs to; null when no side is capturing. */
+  challenger: Team | null;
+}
+
+/**
+ * Domination match bookkeeping. Written by the domination updater in main.ts's
+ * loop (capture + tick scoring); read by the HUD, the end screen and the bot
+ * dispatcher. Scores accumulate fractionally and render floored — a per-frame
+ * `dt` tick would otherwise never move an integer counter visibly.
+ */
+export interface DomState {
+  /** Live flag states, in A/B/C order; empty when the match is not domination. */
+  flags: DomFlagState[];
+  /** Points ticked by CT-owned flags (fractional internally). */
+  scoreCt: number;
+  /** Points ticked by T-owned flags (fractional internally). */
+  scoreT: number;
+}
+
+export const dom: DomState = {
+  flags: [],
+  scoreCt: 0,
+  scoreT: 0,
+};
+
+/** Reset the domination slice to a fresh match over `defs` (or to empty outside dom mode). */
+export function resetDom(defs: FlagDef[]): void {
+  dom.flags = defs.map(d => ({
+    id: d.id,
+    pos: new THREE.Vector3(d.x, d.feetY, d.z),
+    radius: d.radius,
+    owner: null,
+    progress: 0,
+    challenger: null,
+  }));
+  dom.scoreCt = 0;
+  dom.scoreT = 0;
 }
 
 /** Raw keyboard state by `event.code`. Written in main.ts, read through keyHeld. */

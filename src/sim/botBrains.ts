@@ -154,9 +154,9 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   engageRange: 45,
   climbThreshold: 1.5, // ≈ 5 risers; well clear of STEP_HEIGHT's 0.3
   climbExit: 0.45,     // just over one riser — keep routing to the last step
-  stuckTime: 0.25,
-  commitTime: 0.5,
-  wallProbeRange: 1, // diagonal feelers ~1.4 m out — a quarter-second at bot speed
+  stuckTime: 0.1,    // catch a tenth-second wedge; single-frame brushes still reset
+  commitTime: 2,     // sustain the escape around a corner; see docs/bot-movement-tuning.md
+  wallProbeRange: 1, // retained after sweeps: shorter feelers regressed backing away from walls
   wallPush: 0.5,     // half the heading's weight: ease off, don't abandon the line
   wallSenseCooldown: 0.5, // sense flips at most twice a second; the contact edge stays ungated
   noProgressTime: 1.5,   // ~2 juke swings would be 4 s; 1.5 s is already patient

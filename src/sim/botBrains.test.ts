@@ -398,11 +398,13 @@ describe('DefaultBrain visual intent', () => {
 
 // Routing — following the executor's path instead of steering at the target.
 //
-// dt 0.1 makes the timers whole frames: stuckTime 0.25 is 3 frames (0.3 > 0.25),
-// commitTime 0.5 is 5. The waypoint points due +z so a routing step reads on
+// Explicit fixture timers: stuckTime 0.25 is 3 frames (0.3 > 0.25),
+// commitTime 0.5 is 5. Shipped tuning is exercised by botMovement.test.ts.
+// The waypoint points due +z so a routing step reads on
 // step.z alone, and any step.x at all would be drift that must not be there.
 describe('DefaultBrain routing', () => {
   const STEP_DT = 0.1;
+  const calmBrain = (): DefaultBrain => brainOf({ ...moveParams(), stuckTime: 0.25, commitTime: 0.5 }, calmRng);
   const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
   /** Target a level up, with a route available. */
   const onRoute = (overrides: ViewOpts = {}): BrainView =>
@@ -532,7 +534,7 @@ describe('DefaultBrain routing', () => {
 // The travel wall-sense: diagonal feelers ease a routed step off a wall on
 // one side before contact grinds speed off in the slide gate. Same replay
 // style as the routing describes above — the waypoint is due +z from feet at
-// the origin, so with the shipped range 1 the feelers sit at (±1, 0, 1) and a
+// the origin, so with range 1 the feelers sit at (±1, 0, 1) and a
 // `x >= -0.5` probe walls exactly the -x one.
 describe('DefaultBrain travel wall-sense', () => {
   const STEP_DT = 0.1;
@@ -663,16 +665,16 @@ describe('DefaultBrain engage wall-sense', () => {
     const brain = calmBrain();
     const far = duel({ dist: 20 });
     const brush = duel({ dist: 20, moveBlocked: true });
-    brain.decide(brush, STEP_DT);
+    brain.decide(brush, DT);
     // One clean frame resets the jam counter — the wedge below starts over.
-    brain.decide(far, STEP_DT);
-    const { step, mode } = brain.decide(brush, STEP_DT);
+    brain.decide(far, DT);
+    const { step, mode } = brain.decide(brush, DT);
     expect(mode).toBe('engage');
     // Radial 1 plus the 0.7 strafe, normalized: forward survives, so no
     // commit armed.
     const len = Math.sqrt(1 + 0.7 * 0.7);
-    expect(step.x).toBeCloseTo((1 / len) * 4 * STEP_DT, 12);
-    expect(step.z).toBeCloseTo((0.7 / len) * 4 * STEP_DT, 12);
+    expect(step.x).toBeCloseTo((1 / len) * 4 * DT, 12);
+    expect(step.z).toBeCloseTo((0.7 / len) * 4 * DT, 12);
   });
 });
 

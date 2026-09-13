@@ -44,7 +44,7 @@ import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyAttack } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, botKillTag, updateScore } from './hud';
-import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode } from './sim/botBrains';
+import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode, type BrainParams } from './sim/botBrains';
 import {
   makeBotLoadout, resolveBotSecondary, resolveBotWeapon,
 } from './sim/botWeapons';
@@ -112,7 +112,15 @@ const ROUTE_INTERVAL = 1;
  * clearance-priced graph already rides off the walls, and this only irons the
  * joint waggle rather than replanning the line.
  */
-const LOOKAHEAD_DISTANCE = 3;
+export const LOOKAHEAD_DISTANCE = 3;
+
+/** Per-instance tuning and optional measurement hooks for repeatable movement trials. */
+export interface BotOptions {
+  brainParams?: BrainParams;
+  lookaheadDistance?: number;
+  onMovement?: (intended: number, realized: number) => void;
+  onRouteBuild?: () => void;
+}
 
 /**
  * How far (m) off its own path a bot may drift before the route is thrown
@@ -354,7 +362,9 @@ export class Bot implements BotShape {
    */
   private patrolGoal: THREE.Vector3 | null = null;
 
-  constructor(team: Team = 'T', weapon: BotPrimaryId = 'smg', secondary: BotSidearmId = 'pistol') {
+  private readonly options: BotOptions;
+
+  constructor(team: Team = 'T', weapon: BotPrimaryId = 'smg', secondary: BotSidearmId = 'pistol', options: BotOptions = {}) {
     // Plain assignments, not parameter properties: the `name` derivation must
     // see the team, and field initializers run before constructor-body
     // parameter-property writes would. The brain is the same case for a
@@ -363,8 +373,9 @@ export class Bot implements BotShape {
     this.team = team;
     this.name = `${team}-${++teamSerials[team]}`;
     this.weapon = weapon;
+    this.options = options;
     this.brain = new DefaultBrain(
-      DEFAULT_BRAIN_PARAMS,
+      options.brainParams ?? DEFAULT_BRAIN_PARAMS,
       Math.random,
       makeBotLoadout(weapon, secondary, id => WEAPONS[id], Math.random),
     );
@@ -655,8 +666,9 @@ export class Bot implements BotShape {
     // Report rejection for NEXT frame's brain. DefaultBrain consumes the
     // contact's leading edge to reverse once; sustained rejection preserves
     // that committed drift until the bot clears the geometry.
-    this.moveBlocked =
-      Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ) < intended * 0.25;
+    const realized = Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ);
+    this.moveBlocked = realized < intended * 0.25;
+    this.options.onMovement?.(intended, realized);
 
     // Vertical: same swept support resolution as the player, so bots climb
     // stairs mid-chase and land when they walk off an edge.
@@ -847,6 +859,7 @@ export class Bot implements BotShape {
       recomputed = true;
       this.routeCooldown = ROUTE_INTERVAL;
       const found = transportRoute(here, goal);
+      this.options.onRouteBuild?.();
       if (found) {
         this.transportPath = found;
         this.path = found.map(w => w.point);
@@ -899,7 +912,7 @@ export class Bot implements BotShape {
       this.transportPath,
       this.leg,
       here,
-      LOOKAHEAD_DISTANCE,
+      this.options.lookaheadDistance ?? LOOKAHEAD_DISTANCE,
       (x, z) => collidesAt(shortcutProbe.set(x, 0, z), BOT_RADIUS, here.y, colliders),
     );
     const target = this.path[shortcutIdx]!;

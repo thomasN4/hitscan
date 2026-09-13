@@ -181,8 +181,13 @@ export interface WeaponDef {
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
 export type HitZone = 'head' | 'torso' | 'legs';
 
-/** Sides. The player is implicitly CT-side; Ts are the enemy wave. */
+/** Sides. The player fights for `session.playerTeam`; the other side is the enemy wave. */
 export type Team = 'T' | 'CT';
+
+/** The other side: the enemy of CT is T and vice versa. */
+export function opposing(team: Team): Team {
+  return team === 'CT' ? 'T' : 'CT';
+}
 
 /** Structural shape of one bot (see bots.ts for the concrete class). */
 export interface Bot {
@@ -814,7 +819,7 @@ export const DESERT_AMBIENCE: Ambience = {
 };
 
 /**
- * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN_Z /
+ * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN /
  * SUBTITLES: adding a MapName must fail to compile until the new map says what
  * it looks like, rather than silently inheriting the desert.
  */
@@ -897,7 +902,7 @@ export interface SpawnZone {
  * (maps/warehouse1.ts:25-27). A map smaller than that band strands bots
  * outside its own geometry.
  *
- * A full Record for the same reason as BUILDERS / SPAWN_Z / AMBIENCE: adding a
+ * A full Record for the same reason as BUILDERS / SPAWN / AMBIENCE: adding a
  * MapName must fail to compile until the new map says where its bots start.
  *
  * The first four entries reproduce that old band exactly — `x ∈ [-45, 45]`,
@@ -937,12 +942,16 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
 
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every
- * garbage/out-of-range ?tbots=/?ctbots=/?time= value falls back to
- * (see core/sessionConfig.ts for the parser). The start-menu form initializes
+ * garbage/out-of-range ?time= value falls back to (see
+ * core/sessionConfig.ts for the parser). The bot-count fields are the
+ * exception: garbage ?tbots=/?ctbots= values fall back through
+ * defaultBotCounts(playerTeam) and clamp through botLimits(playerTeam), so
+ * both mirror on T-side. The start-menu form initializes
  * from these too, so they are the single source for all of it.
  */
 export const SESSION_DEFAULTS: Readonly<{
   map: MapName;
+  playerTeam: Team;
   botsT: number;
   botsCt: number;
   roundSeconds: number;
@@ -952,6 +961,8 @@ export const SESSION_DEFAULTS: Readonly<{
   botSecondaryCt: BotSecondaryChoice;
 }> = {
   map: 'arena',
+  // CT default preserves the historical bare-URL match: 6 enemy Ts, 5 allied CTs.
+  playerTeam: 'CT',
   botsT: 6,
   botsCt: 5,
   roundSeconds: 300,
@@ -983,7 +994,7 @@ export const SESSION_DEFAULTS: Readonly<{
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
-  // query string (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
+  // query string (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
   // a full page reload — map
   // switching is a reload and there is deliberately no hot-swapping of scenes
   // at runtime. The key list is spelled out in four places (here, AGENTS.md,
@@ -993,9 +1004,11 @@ export interface SessionState {
   // parse of the URL at startup — reading `location` here would break this
   // module's importability in Node.
   map: MapName;
-  /** Enemy (T-side) bot count, clamped to 1..16 by the parser. */
+  /** Which side the player fights for. The other side is the enemy wave. */
+  playerTeam: Team;
+  /** T-side bot count. Enemy (1..16) on CT-side, allied (0..15) on T-side; clamped by botLimits() in sessionConfig. */
   botsT: number;
-  /** Allied (CT-side) bot count, 0..15. */
+  /** CT-side bot count. Allied (0..15) on CT-side, enemy (1..16) on T-side; clamped by botLimits() in sessionConfig. */
   botsCt: number;
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;
@@ -1234,18 +1247,19 @@ export function cancelPendingReloadSfx(): void {
 }
 
 /**
- * Match bookkeeping. Team counters have three writers: bots.ts increments
- * scoreKills on a CT-side kill (player or ally) and scoreDeaths when a T
- * downs a CT, combat.ts increments scoreDeaths when the player dies,
- * main.ts's loop counts roundTime down (arena only). The player counters
- * are the scoreboard's "You" row: bots.ts bumps playerKills on the player's
- * own kills and combat.ts bumps playerDeaths when the player dies. hud.ts
- * renders the top bar; menu.ts renders the end screen.
+ * Match bookkeeping. The team counters' rule lives in creditKill() (a
+ * CT-side kill — player or ally — bumps scoreKills, a T-side kill bumps
+ * scoreDeaths), called from bots.ts on a bot's death and from combat.ts
+ * when the player dies; main.ts's loop counts roundTime down (arena only).
+ * The player counters are the scoreboard's "You" row: bots.ts bumps
+ * playerKills on the player's own kills and combat.ts bumps playerDeaths
+ * when the player dies. hud.ts renders the top bar; menu.ts renders the
+ * end screen.
  */
 export interface ScoreState {
-  /** Shown as the CT score: player kills plus ally kills of Ts. */
+  /** Shown as the CT score: CT-side kills — the player's (on CT-side) plus CT allies'. */
   scoreKills: number;
-  /** Shown as the T score: T-side kills — the player's deaths plus CT allies'. */
+  /** Shown as the T score: T-side kills — the player's (on T-side) plus T allies'. */
   scoreDeaths: number;
   /** Kills credited to YOU personally (excludes ally kills). */
   playerKills: number;
@@ -1264,6 +1278,18 @@ export const score: ScoreState = {
   playerDeaths: 0,
   roundTime: SESSION_DEFAULTS.roundSeconds,
 };
+
+/**
+ * The side-fixed scoring rule in ONE place: a CT kill bumps scoreKills, a
+ * T kill bumps scoreDeaths. Callers resolve the killer's side (defaulting
+ * an unresolvable attacker to the victim's opposing side) and guard against
+ * same-team casualties where those are possible; the mapping itself lives
+ * only here.
+ */
+export function creditKill(killerTeam: Team): void {
+  if (killerTeam === 'CT') score.scoreKills++;
+  else score.scoreDeaths++;
+}
 
 /** Raw keyboard state by `event.code`. Written in main.ts, read through keyHeld. */
 export const keys: Record<string, boolean | undefined> = {};

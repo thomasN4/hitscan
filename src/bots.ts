@@ -1,6 +1,6 @@
 // bots.ts — bot bodies and effectors: meshes, collision-gated movement,
-// probabilistic shots, death/respawn. Both teams (T enemies, CT allies) are
-// instances of this one class; behavior comes from sim/botBrains.ts.
+// probabilistic shots, death/respawn. Both teams (enemy wave and the player's
+// allied side) are instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
 // Each frame update() runs ONE visual acquisition (sim/perception.ts) over
@@ -33,7 +33,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
@@ -507,12 +507,13 @@ export class Bot implements BotShape {
 
     // Opposing entities as STABLE CANDIDATES — no positional selection here.
     // Perception owns acquisition; the brain only ever learns about the one
-    // candidate the frame's single ray successfully looked at. Ts fight the
-    // player and every CT; CTs fight every T. The player is listed even
+    // candidate the frame's single ray successfully looked at. Bots opposing
+    // the player's side fight the player and every allied bot; allied bots
+    // fight every enemy. The player is listed even
     // while dead — a dead candidate is a cheap rejection, so the bot holds
     // rather than chasing the corpse position.
     const enemies: Target[] = [];
-    if (this.team === 'T') {
+    if (this.team !== session.playerTeam) {
       enemies.push({
         kind: 'player',
         id: 'player',
@@ -1070,18 +1071,19 @@ export class Bot implements BotShape {
     this.elevatorTrip = null;
     this.mesh.visible = false;
     this.deaths++;
-    // Team scores: scoreKills is the CT score (player kills and CT allies
-    // downing a T); scoreDeaths is the T score, so a T downing a CT counts
-    // there — the same counter combat.ts bumps when a T downs the player.
-    if (killerName === undefined || this.team === 'T') score.scoreKills++;
-    else score.scoreDeaths++;
+    // Team scores are side-fixed (creditKill): scoreKills is the CT score,
+    // scoreDeaths the T score. Credit the killer's side for an opposing
+    // casualty only — a player kill counts for the player's side, whatever
+    // it is.
+    const killer = killerName === undefined
+      ? undefined
+      : bots.find(b => b.name === killerName);
+    const killerTeam = killer?.team ?? session.playerTeam;
+    if (killerTeam === opposing(this.team)) creditKill(killerTeam);
     // Scoreboard attribution: the player's own kills get a personal counter;
     // a bot killer is resolved by display name (unique per team serial).
     // Hoisted out of the counter branch because the killfeed needs it too:
     // a bot killer names the weapon it did it with.
-    const killer = killerName === undefined
-      ? undefined
-      : bots.find(b => b.name === killerName);
     if (killerName === undefined) score.playerKills++;
     else if (killer) killer.kills++;
     updateScore();
@@ -1124,7 +1126,9 @@ export class Bot implements BotShape {
 
 /**
  * Create a starting wave of one team. Called from main.ts with the
- * menu-configured counts (the parser clamps Ts to >= 1, CTs to >= 0) and
+ * menu-configured counts (the parser clamps the enemy wave to >= 1 and the
+ * allied wave to >= 0 — which physical field gets which range depends on
+ * the player's side, see botLimits() in sessionConfig) and
  * that team's weapon settings.
  *
  * Both choices are resolved PER BOT, so 'mixed' gives a varied wave in

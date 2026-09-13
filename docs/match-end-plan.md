@@ -21,6 +21,10 @@ never resolved into a win, and there was nowhere to see them at the end.
   which releases pointer lock (freezing the sim through the existing lock
   gate) and reveals the screen on a WALL-clock beat for the same reason
   damagePlayer's death picker uses one.
+  *(Annotation, PR #120: with a selectable side, wiping the side opposing
+  `session.playerTeam` wins outright for the player's side
+  (`combat.ts:checkRoundEnd` selects `foeTeam` and hands `endMatch` the
+  player's own side).)*
 - **1v1 keeps the wave loop.** With a single enemy, elimination would end the
   match seconds after every spawn, so `eliminationEndsMatch(ts.length)` is
   false for tbots ≤ 1 and the old wave-respawn behavior stays — killfeed line
@@ -28,6 +32,9 @@ never resolved into a win, and there was nowhere to see them at the end.
   in a 1v1, so "Round won!" overstated it); only the clock can end such a
   match. The check passes the LIVE wave count, not session.botsT, so debug
   tooling removing bots can't leave one survivor ending the match.
+  *(Annotation, PR #120: the count is now the live `foes` wave and the
+  parameter is renamed `enemyCount` (`sim/match.ts`); the ≤1 rule is
+  unchanged.)*
 - **Winner decided by the CALLER**, passed into endMatch as `'CT' | 'T' |
   'draw'`: elimination knows its winner outright; expiry computes from the
   scores. endMatch owns state + presentation only.

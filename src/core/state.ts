@@ -184,6 +184,11 @@ export type HitZone = 'head' | 'torso' | 'legs';
 /** Sides. The player fights for `session.playerTeam`; the other side is the enemy wave. */
 export type Team = 'T' | 'CT';
 
+/** The other side: the enemy of CT is T and vice versa. */
+export function opposing(team: Team): Team {
+  return team === 'CT' ? 'T' : 'CT';
+}
+
 /** Structural shape of one bot (see bots.ts for the concrete class). */
 export interface Bot {
   /** Per-match serial (1-based), stamped at construction — stable across deaths. */
@@ -937,8 +942,11 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
 
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every
- * garbage/out-of-range ?tbots=/?ctbots=/?time= value falls back to
- * (see core/sessionConfig.ts for the parser). The start-menu form initializes
+ * garbage/out-of-range ?time= value falls back to (see
+ * core/sessionConfig.ts for the parser). The bot-count fields are the
+ * exception: garbage ?tbots=/?ctbots= values fall back through
+ * defaultBotCounts(playerTeam) and clamp through botLimits(playerTeam), so
+ * both mirror on T-side. The start-menu form initializes
  * from these too, so they are the single source for all of it.
  */
 export const SESSION_DEFAULTS: Readonly<{

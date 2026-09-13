@@ -8,7 +8,7 @@ import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
          sanitizeLoadout, session, player, playerFeet, equippedId,
          AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld, input,
-         effectiveCrouching, wpn,
+         effectiveCrouching, wpn, opposing,
          cancelPendingReloadSfx } from './state';
 
 describe('state module purity', () => {
@@ -289,5 +289,14 @@ describe('BOT_SPAWNS', () => {
         expect(z.maxZ).toBeGreaterThan(z.minZ);
       }
     }
+  });
+});
+
+describe('opposing', () => {
+  test('returns the other side both ways', () => {
+    // The single name for the enemy side both combat.ts call sites share;
+    // a second literal comparison elsewhere is how they drift apart.
+    expect(opposing('CT')).toBe('T');
+    expect(opposing('T')).toBe('CT');
   });
 });

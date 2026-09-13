@@ -1198,7 +1198,12 @@ Three things about that path are deliberate:
 
 **This is the first path by which a bot can melee the PLAYER.**
 `weapons.ts:swingMelee` skips `team === 'CT'` and routes only through
-`damageBot`, so it could never have served. The two paths share `sim/melee.ts`
+`damageBot`, so it could never have served. *(Annotation, PR #120: with a
+selectable side the skip is same-side — `src/weapons.ts:352` reads
+`bot.team === session.playerTeam`, so a T-side player's knife hits CTs. The
+conclusion stands: the player path routes only through `damageBot` and can
+never hit the player, so the dedicated `bots.ts` swing path is still
+required.)* The two paths share `sim/melee.ts`
 rather than each other — `bots.ts` importing `weapons.ts` would be the module
 cycle the architecture rules ban.
 

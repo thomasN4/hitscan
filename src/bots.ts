@@ -1126,7 +1126,9 @@ export class Bot implements BotShape {
 
 /**
  * Create a starting wave of one team. Called from main.ts with the
- * menu-configured counts (the parser clamps Ts to >= 1, CTs to >= 0) and
+ * menu-configured counts (the parser clamps the enemy wave to >= 1 and the
+ * allied wave to >= 0 — which physical field gets which range depends on
+ * the player's side, see botLimits() in sessionConfig) and
  * that team's weapon settings.
  *
  * Both choices are resolved PER BOT, so 'mixed' gives a varied wave in

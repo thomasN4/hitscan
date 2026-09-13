@@ -6,7 +6,7 @@
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
 import type { Bot as BotShape, HitZone, MapName, Team } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
@@ -42,7 +42,7 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     // Side-fixed scores: a CT kill is a CT point (scoreKills), a T kill a T
     // point (scoreDeaths). The attacker is always the enemy; the fallback
     // covers an unresolvable name by crediting the opposing side.
-    const killerTeam: Team = attacker?.team ?? (session.playerTeam === 'CT' ? 'T' : 'CT');
+    const killerTeam: Team = attacker?.team ?? opposing(session.playerTeam);
     if (killerTeam === 'CT') score.scoreKills++;
     else score.scoreDeaths++;
     score.playerDeaths++;
@@ -188,7 +188,7 @@ export function respawn(): void {
  * everyone back after 2.5s, leaving only the clock to end the match.
  */
 export function checkRoundEnd(): void {
-  const foeTeam: Team = session.playerTeam === 'CT' ? 'T' : 'CT';
+  const foeTeam: Team = opposing(session.playerTeam);
   const foes = bots.filter(b => b.team === foeTeam);
   if (foes.length > 0 && foes.every(b => !b.alive)) {
     // Live wave count, not session bot counts: debug tooling can remove bots,

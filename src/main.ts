@@ -13,7 +13,7 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
                LoadoutState, Team,
-               MapName, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
+               MapName, MatchMode, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
 import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
@@ -329,6 +329,7 @@ async function start(): Promise<void> {
 
   const game: DebugGame = {
     get map() { return session.map; }, set map(v: MapName) { session.map = v; },
+    get mode() { return session.mode; }, set mode(v: MatchMode) { session.mode = v; },
     get playerTeam() { return session.playerTeam; }, set playerTeam(v: Team) { session.playerTeam = v; },
     get primary() { return loadout.primary; }, set primary(v: WeaponId) { loadout.primary = v; },
     get secondary() { return loadout.secondary; }, set secondary(v: WeaponId) { loadout.secondary = v; },

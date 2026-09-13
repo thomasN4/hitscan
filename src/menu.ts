@@ -9,7 +9,7 @@
 // missing id is a named startup error via hud.ts:requireEl.
 //
 // Commit model: match settings ride ONE query string
-// (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=).
+// (?map=&mode=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=).
 // Play compares the form against the applied session config — equal means the
 // page already matches, so it opens the loadout picker; different means
 // navigate-and-reload (map switching is a full reload, and pointer lock needs
@@ -17,12 +17,13 @@
 // points: match start (after Play) and death (replacing the old plain death
 // screen), pre-filled with lastLoadout either way. Its Deploy click doubles as
 // the user gesture pointer lock requires — see main.ts's onDeploy handler.
-import type { LoadoutState, MapName, Team, WeaponClass, WeaponId } from './core/state';
-import { bots, score, WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
+import type { LoadoutState, MapName, MatchMode, Team, WeaponClass, WeaponId } from './core/state';
+import { DOM_FLAGS, bots, score, WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
 import type { MatchWinner } from './sim/match';
 import {
   TIME_LIMITS_S,
   asMapName,
+  asMatchMode,
   asTeam,
   botLimits,
   clampTo,
@@ -59,10 +60,11 @@ const T_SUBTITLES: Record<MapName, string | null> = {
 };
 
 /**
- * Menu subtitle for a map + side: the T-side override where the table has
- * one, the static line otherwise.
+ * Menu subtitle for a map + side + mode: domination on elevation names the
+ * objective; everything else keeps the static line (or its T-side override).
  */
-export function subtitleFor(map: MapName, side: Team): string {
+export function subtitleFor(map: MapName, side: Team, mode: MatchMode = 'tdm'): string {
+  if (mode === 'dom' && DOM_FLAGS[map].length > 0) return 'Domination — capture A, B and C; first to 200 points holds the map';
   // null is a TABLE ENTRY meaning "no T-side override", not an index miss —
   // T_SUBTITLES is keyed by the full MapName union.
   if (side === 'T') return T_SUBTITLES[map] ?? SUBTITLES[map];
@@ -95,6 +97,7 @@ let startMenu: HTMLElement, pauseMenu: HTMLElement, loadoutScreen: HTMLElement, 
   endTitle: HTMLElement, endScoreCT: HTMLElement, endScoreT: HTMLElement, scoreboardBody: HTMLElement;
 let deployBtn: HTMLButtonElement;
 let mapSel: HTMLSelectElement, sideSel: HTMLSelectElement,
+  modeSel: HTMLSelectElement,
   weaponTSel: HTMLSelectElement, weaponCtSel: HTMLSelectElement,
   secondaryTSel: HTMLSelectElement, secondaryCtSel: HTMLSelectElement,
   botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
@@ -263,6 +266,7 @@ export function initMenus(handlers: MenuHandlers): void {
   scoreboardBody = requireEl('scoreboardBody');
   mapSel = requireEl('cfgMap') as HTMLSelectElement;
   sideSel = requireEl('cfgSide') as HTMLSelectElement;
+  modeSel = requireEl('cfgMode') as HTMLSelectElement;
   botsTIn = requireEl('cfgBotsT') as HTMLInputElement;
   botsCtIn = requireEl('cfgBotsCt') as HTMLInputElement;
   timeMinIn = requireEl('cfgTimeMin') as HTMLInputElement;
@@ -273,6 +277,7 @@ export function initMenus(handlers: MenuHandlers): void {
 
   mapSel.value = session.map;
   sideSel.value = session.playerTeam.toLowerCase();
+  modeSel.value = session.mode;
   weaponTSel.value = session.botWeaponT;
   weaponCtSel.value = session.botWeaponCt;
   secondaryTSel.value = session.botSecondaryT;
@@ -283,6 +288,7 @@ export function initMenus(handlers: MenuHandlers): void {
   applyMapUi();
 
   mapSel.onchange = applyMapUi;
+  modeSel.onchange = applyMapUi;
   // Flipping sides swaps the two count fields so "enemy 6 / own 5" survives
   // the flip: the numbers are side-fixed (tbots counts Ts), but the DEFAULTS
   // are role-relative. Weapon settings are side-fixed too and stay put.
@@ -334,7 +340,12 @@ export function initMenus(handlers: MenuHandlers): void {
 function applyMapUi(): void {
   const isRange = mapSel.value === 'range';
   const side = asTeam(sideSel.value, session.playerTeam);
-  subtitleEl.textContent = subtitleFor(asMapName(mapSel.value), side);
+  const map = asMapName(mapSel.value);
+  subtitleEl.textContent = subtitleFor(map, side, asMatchMode(modeSel.value, session.mode));
+  // Domination exists only where flags do (elevation for now): off it the
+  // mode select is pinned to TDM rather than offering a broken choice.
+  modeSel.disabled = DOM_FLAGS[map].length === 0;
+  if (modeSel.disabled) modeSel.value = 'tdm';
   // Clamp ranges mirror the side: the enemy wave needs ≥1 and caps at 16,
   // the player's own side allows 0 and caps at 15.
   const limits = botLimits(side);
@@ -355,7 +366,7 @@ function applyMapUi(): void {
 /** Field-by-field view of what the page was loaded with. */
 function appliedConfig(): SessionConfig {
   return {
-    map: session.map, playerTeam: session.playerTeam,
+    map: session.map, mode: session.mode, playerTeam: session.playerTeam,
     botsT: session.botsT, botsCt: session.botsCt,
     roundSeconds: session.roundSeconds,
     botWeaponT: session.botWeaponT, botWeaponCt: session.botWeaponCt,
@@ -369,6 +380,12 @@ function candidateConfig(): SessionConfig {
   const limits = botLimits(side);
   return {
     map: asMapName(mapSel.value),
+    // The menu and the URL parser share asMatchMode (like asMapName), and
+    // the flagless-map fallback matches the parser's: a disabled select is
+    // pinned to tdm by applyMapUi, so this read agrees with it.
+    mode: DOM_FLAGS[asMapName(mapSel.value)].length > 0
+      ? asMatchMode(modeSel.value, session.mode)
+      : 'tdm',
     playerTeam: side,
     // A cleared/garbage field keeps the currently-applied value rather than
     // forcing a retype; Number('') is 0, so emptiness must be checked first.

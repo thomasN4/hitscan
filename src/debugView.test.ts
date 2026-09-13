@@ -92,11 +92,11 @@ describe('buildDebugSegments', () => {
     expectVertex(pos, 1, 10, 5.3, 0);
   });
 
-  it('colours the intent line by brain mode, all five distinct', () => {
+  it('colours the intent line by brain mode, all seven distinct', () => {
     const { pos, col } = buffers();
     const target = new THREE.Vector3(1, 1, 1);
     const seen: number[][] = [];
-    for (const mode of ['hold', 'search', 'route', 'engage', 'patrol'] as const) {
+    for (const mode of ['hold', 'search', 'route', 'engage', 'patrol', 'objective', 'capture'] as const) {
       buildDebugSegments([bot({ mode, targetEye: target })], pos, col, VIEW);
       seen.push([col[0]!, col[1]!, col[2]!]);
     }

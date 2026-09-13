@@ -33,11 +33,11 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, player, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, dom, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
-import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, HEAD_HEIGHT } from './collision';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, collidesAt, HEAD_HEIGHT } from './collision';
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
@@ -51,6 +51,8 @@ import {
 import { meleeSwing, isBackstab, type MeleeCandidate } from './sim/melee';
 import { damageForPart } from './sim/damage';
 import { acquireVisual, type PerceptionId } from './sim/perception';
+import { assignDomObjectives, DISPATCH_INTERVAL_S } from './sim/domination';
+import { pickDomRespawn } from './domSpawns';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
@@ -340,6 +342,24 @@ export class Bot implements BotShape {
    */
   private patrolGoal: THREE.Vector3 | null = null;
 
+  /**
+   * The domination flag this bot is assigned to, or null outside dom matches
+   * (and whenever the dispatcher has nothing to give). Written by
+   * updateBots' dispatcher via assignObjective(); read once per frame as
+   * BrainView.objective. The position is the flag's own — it never moves, so
+   * sharing the reference is safe, and the view clones it on the way in.
+   */
+  private domObjective: { id: string; pos: THREE.Vector3; radius: number } | null = null;
+
+  /**
+   * Take (or clear) the dispatcher's flag assignment. The brain consumes it
+   * as BrainView.objective on the next update; a mid-life reassignment
+   * simply retargets the route cache through the existing owner-key change.
+   */
+  assignObjective(o: { id: string; pos: THREE.Vector3; radius: number } | null): void {
+    this.domObjective = o;
+  }
+
   constructor(team: Team = 'T', weapon: BotPrimaryId = 'smg', secondary: BotSidearmId = 'pistol') {
     // Plain assignments, not parameter properties: the `name` derivation must
     // see the team, and field initializers run before constructor-body
@@ -407,22 +427,33 @@ export class Bot implements BotShape {
    * not left at the floor: maps/warehouse2.ts spawns Ts on the catwalk, and
    * testing those against the ground-floor geometry beneath the ring would
    * reject the good draws and keep the bad ones.
+   *
+   * In domination matches RESPAWNS pass a director-chosen point (near owned
+   * flags, far from enemies — see domSpawns.ts) instead of a zone draw. The
+   * initial wave never does: construction always samples the zone, so match
+   * openings stay exactly as before. A director point that fails the same
+   * collision test falls back to the zone draw rather than spawning walled.
    */
-  spawnAtRandom(): void {
+  spawnAtRandom(at?: THREE.Vector3): void {
     this.elevatorTrip = null;
     this.clearRouteCache();
     const zone = BOT_SPAWNS[session.map][this.team];
-    const p = findFreeSpawn(
-      () => new THREE.Vector3(
-        zone.minX + Math.random() * (zone.maxX - zone.minX),
+    let p: THREE.Vector3;
+    if (at && !collidesAt(at, BOT_RADIUS, at.y, colliders)) {
+      p = at.clone();
+    } else {
+      p = findFreeSpawn(
+        () => new THREE.Vector3(
+          zone.minX + Math.random() * (zone.maxX - zone.minX),
+          zone.y,
+          zone.minZ + Math.random() * (zone.maxZ - zone.minZ),
+        ),
+        BOT_RADIUS,
+        colliders,
+        32,
         zone.y,
-        zone.minZ + Math.random() * (zone.maxZ - zone.minZ),
-      ),
-      BOT_RADIUS,
-      colliders,
-      32,
-      zone.y,
-    );
+      );
+    }
     this.respawnPoint.copy(p);
     this.mesh.position.copy(p);
     // Spawn facing is a team convention, not a gameplay input: Ts look toward
@@ -457,7 +488,21 @@ export class Bot implements BotShape {
     this.hp = 100;
     this.alive = true;
     this.mesh.visible = true;
-    this.spawnAtRandom();
+    // Domination respawns come through the director (near owned flags, far
+    // from enemies); every other match — and every initial wave, which never
+    // passes through here — keeps the zone draw.
+    if (session.mode === 'dom' && dom.flags.length > 0) {
+      const foe = opposing(this.team);
+      const enemies = bots
+        .filter(b => b.team === foe && b.alive)
+        .map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
+      if (session.playerTeam === foe && player.alive) {
+        enemies.push({ x: player.pos.x, z: player.pos.z });
+      }
+      this.spawnAtRandom(pickDomRespawn(this.team, enemies));
+    } else {
+      this.spawnAtRandom();
+    }
     // The brain outlived the body: re-arm its spawn stagger and drop the
     // corpse's attention, memory and reactions — a new life inherits nothing.
     this.brain.onRespawn();
@@ -477,6 +522,9 @@ export class Bot implements BotShape {
     this.soundCursor = soundEvents.latestSeq;
     this.clearRouteCache();
     this.patrolGoal = null;
+    // The dispatcher's next run reassigns the new life; until then the corpse's
+    // flag is dead — routing to it would walk a fresh spawn back to old orders.
+    this.domObjective = null;
     this.routeCooldown = 0;
     this.mode = 'hold';
     this.targetEye = null;
@@ -583,6 +631,13 @@ export class Bot implements BotShape {
         // routes to it under the same one-A-star-per-frame budget. Only paid
         // when the brain has already decided it has nothing better to do.
         nextPatrolWaypoint: () => this.nextPatrolWaypoint(),
+        // The dispatcher's flag assignment, cloned on the way in: the flag
+        // never moves, but the view contract is copies, never live state.
+        objective: this.domObjective === null ? null : {
+          id: this.domObjective.id,
+          pos: this.domObjective.pos.clone(),
+          radius: this.domObjective.radius,
+        },
       },
       dt,
     );
@@ -590,10 +645,11 @@ export class Bot implements BotShape {
     // Route-cache ownership: whenever the intent leaves route/engage — a
     // search or hold of any kind (arrival, dead end, damage reaction,
     // forget, patrol pause) — drop the cached path so a later, unrelated
-    // goal cannot inherit it. And whenever the intent leaves patrol — a
-    // visual, damage reaction, search or hold interrupted it — the patrol
-    // goal is dead: drop it (and any patrol-owned path) so a later leg
-    // cannot inherit a stale destination.
+    // goal cannot inherit it. Objective and capture intents keep theirs like
+    // route and engage do; only search and hold clear. And whenever the
+    // intent leaves patrol — a visual, damage reaction, search or hold
+    // interrupted it — the patrol goal is dead: drop it (and any
+    // patrol-owned path) so a later leg cannot inherit a stale destination.
     if (intent.mode === 'search' || intent.mode === 'hold') this.clearRouteCache();
     if (intent.mode !== 'patrol') this.clearPatrolGoal();
 
@@ -1157,5 +1213,48 @@ export function updateBots(dt: number, player: PlayerState): void {
   // after it in this array and not to the ones before — hearing would depend
   // on registry order. With it, every bot hears it on the next frame.
   soundHighWater = soundEvents.latestSeq;
+  // Domination assignments refresh on a slow tick, not per frame: the pure
+  // dispatcher is sticky across runs, and re-running it per frame would
+  // churn the route cache owner keys for nothing.
+  domDispatchIn -= dt;
+  if (domDispatchIn <= 0) {
+    domDispatchIn = DISPATCH_INTERVAL_S;
+    dispatchDomObjectives();
+  }
   bots.forEach(b => b.update(dt, player));
+}
+
+/**
+ * Last dispatcher run's bot-id → flag-id map. The pure assignment takes it
+ * as the stickiness input; dead bots keep their entries until the next run
+ * drops them (only alive bots are fed in), and respawn() clears the per-bot
+ * side immediately so a new life never walks old orders.
+ */
+const domAssignments = new Map<number, string>();
+let domDispatchIn = 0;
+
+/**
+ * Run the domination dispatcher and deal the results to every bot. Outside
+ * dom matches (or with no flags live) every hand stays empty: brains read
+ * null objectives and the whole ladder below behaves exactly as TDM.
+ */
+function dispatchDomObjectives(): void {
+  if (session.mode !== 'dom' || dom.flags.length === 0) return;
+  const assigned = assignDomObjectives(
+    bots.filter(b => b.alive).map(b => ({
+      id: b.id,
+      team: b.team,
+      x: b.mesh.position.x,
+      z: b.mesh.position.z,
+    })),
+    dom.flags.map(f => ({ id: f.id, x: f.pos.x, z: f.pos.z, owner: f.owner })),
+    domAssignments,
+  );
+  domAssignments.clear();
+  for (const [id, flagId] of assigned) domAssignments.set(id, flagId);
+  for (const b of bots) {
+    const flagId = b.alive ? domAssignments.get(b.id) : undefined;
+    const flag = flagId === undefined ? undefined : dom.flags.find(f => f.id === flagId);
+    b.assignObjective(flag ? { id: flag.id, pos: flag.pos, radius: flag.radius } : null);
+  }
 }

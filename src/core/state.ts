@@ -272,6 +272,13 @@ export interface Bot {
    * but can never know (or shoot at) what sent it.
    */
   onIncomingFire(bearing: THREE.Vector3): void;
+  /**
+   * Take (or clear) the domination dispatcher's flag assignment, consumed as
+   * BrainView.objective on the next update. Null outside dom matches. The
+   * position is the flag's own static point; the executor clones it into the
+   * view, so sharing the reference here is safe.
+   */
+  assignObjective(o: { id: string; pos: THREE.Vector3; radius: number } | null): void;
 }
 
 /** One transient impact puff tracked by effects.ts. */

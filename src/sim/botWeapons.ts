@@ -114,6 +114,14 @@ export type BotWeaponTuning = BotRangedTuning | BotMeleeTuning;
  * resolve() below.
  */
 export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
+  ak47: {
+    kind: 'ranged',
+    // SMG hit odds and burst pacing, with rifle stand-off distance.
+    hitChanceNear: 0.30, hitChanceDivisor: 70, hitChanceMin: 0.05,
+    headChance: 0.12, legChance: 0.20,
+    burst: 3, burstPauseMin: 0.9, burstPauseSpan: 0.6,
+    nearBand: 12, farBand: 24, engageRange: 55, strafeFactor: 0.5,
+  },
   smg: {
     kind: 'ranged',
     // Sprays and closes: three-round bursts, a mediocre per-ray chance, and a
@@ -209,7 +217,7 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
  * blade via the fallback every loadout already carries.
  */
 export const BOT_PRIMARY_IDS: readonly BotPrimaryId[] =
-  ['smg', 'sniper', 'shotgun'];
+  ['smg', 'sniper', 'shotgun', 'ak47'];
 
 /**
  * Turn a menu/URL bot-primary setting into the weapon ONE bot carries.

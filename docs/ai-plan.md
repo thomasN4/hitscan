@@ -63,6 +63,9 @@ height, navigation and senses work recorded below):
   identity first, otherwise fairly rotates through cheaply eligible opposing
   candidates. A dead player remains listed only as a cheap rejection; without
   another observation the bot holds and never chases the corpse.)*
+  *(Annotation, PR #120: with a selectable side the player counts as
+  `session.playerTeam`-side — bots opposing the player's side list the player
+  as a candidate (`bots.ts`), and allied bots never do.)*
 - **Friendly fire off.** Ally bodies stop player bullets (impact puff, no
   hitmarker, no damage). Bot-vs-bot fire only ever flows cross-team by
   construction.
@@ -79,6 +82,10 @@ height, navigation and senses work recorded below):
   downing a CT (bots.ts). Rounds are won when all *Ts* are dead; dead CTs
   self-respawn on their own half via the same pausable 6 s clock everyone
   uses.
+  *(Annotation, PR #120: with a selectable side the counters credit the
+  killer's side — a T-side player kill increments `scoreDeaths` — and rounds
+  are won when the side opposing `session.playerTeam` is wiped
+  (`combat.ts:checkRoundEnd`).)*
 - **Identity.** Global `id` unique across teams for debugging; display names
   use per-team counters (`T-1…`, `CT-1…`) so killfeeds read naturally.
 
@@ -1191,7 +1198,12 @@ Three things about that path are deliberate:
 
 **This is the first path by which a bot can melee the PLAYER.**
 `weapons.ts:swingMelee` skips `team === 'CT'` and routes only through
-`damageBot`, so it could never have served. The two paths share `sim/melee.ts`
+`damageBot`, so it could never have served. *(Annotation, PR #120: with a
+selectable side the skip is same-side — `src/weapons.ts:352` reads
+`bot.team === session.playerTeam`, so a T-side player's knife hits CTs. The
+conclusion stands: the player path routes only through `damageBot` and can
+never hit the player, so the dedicated `bots.ts` swing path is still
+required.)* The two paths share `sim/melee.ts`
 rather than each other — `bots.ts` importing `weapons.ts` would be the module
 cycle the architecture rules ban.
 

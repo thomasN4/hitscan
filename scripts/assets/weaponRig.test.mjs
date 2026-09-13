@@ -13,7 +13,7 @@ async function asset(id) {
   const buffer=new ArrayBuffer(bytes.length); new Uint8Array(buffer).set(bytes);
   return (await new GLTFLoader().parseAsync(buffer,'')).scene;
 }
-for(const id of ['shotgun','revolver','pistol','smg','sniper','knife']) {
+for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47']) {
   test(`${id} export contract rejects corrupt data and missing mechanisms`, async()=>{
     const bytes=readFileSync(new URL(`../../public/assets/${id}.glb`,import.meta.url));
     expect(validateWeaponGlb(bytes,id).vertices).toBeGreaterThan(1000);
@@ -88,10 +88,10 @@ test('pistol magazine follows the authored well and restores after every reload 
   expect(magazine.position.distanceTo(rest)).toBeLessThan(1e-6);
 });
 
-for (const id of ['smg','sniper']) {
+for (const id of ['smg','sniper','ak47']) {
   test(`${id} rejects detached actions and sideways magazine extraction`, async()=>{
     const source=await asset(id);
-    const mechanism=source.getObjectByName(id==='smg'?'mechanism_slide':'mechanism_bolt');
+    const mechanism=source.getObjectByName(id!=='sniper'?'mechanism_slide':'mechanism_bolt');
     const magazine=source.getObjectByName('mechanism_magazine');
     magazine.attach(mechanism);
     expect(()=>createAuthoredWeaponRig(id,source)).toThrow('hierarchy');
@@ -117,7 +117,7 @@ for (const id of ['smg','sniper']) {
       if (pose.charge>.9) {
         charged=true;
         expect(magazine.position.distanceTo(rest)).toBeLessThan(1e-6);
-        const action=vm.mechanisms[id==='smg'?'slide':'bolt'];
+        const action=vm.mechanisms[id!=='sniper'?'slide':'bolt'];
         expect(action.position.z-vm.rest.get(action).position.z).toBeGreaterThan(.04);
       }
       const frozen=magazine.position.clone();
@@ -142,7 +142,7 @@ test('knife has a blade tip and no firearm mechanisms or loading markers',async(
   expect(Object.keys(vm.mechanisms)).toEqual([]);
 });
 
-for (const id of ['smg','sniper']) test(`${id} extracted magazine stays visible during reload`,async()=>{
+for (const id of ['smg','sniper','ak47']) test(`${id} extracted magazine stays visible during reload`,async()=>{
   const vm=createWeaponViewModel(id,{[id]:await asset(id)});
   for (const aspect of [4/3,16/9,21/9]) {
     const camera=new PerspectiveCamera(BASE_FOV,aspect,.1,300);

@@ -80,16 +80,18 @@ export function validateWeaponGlb(bytes, id) {
   assert.equal(gltf.buffers.length, 1);
   assert.ok(!gltf.buffers[0].uri && gltf.buffers[0].byteLength <= bytes.length - length - 28);
   assert.ok(!gltf.images?.length && !gltf.animations?.length && !gltf.extensionsRequired?.length);
-  assert.ok(['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife'].includes(id), 'Unknown weapon asset');
+  assert.ok(['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47'].includes(id), 'Unknown weapon asset');
   const parts = {
     shotgun: ['grip_left', 'mechanism_pump'], revolver: ['mechanism_cylinder', 'mechanism_rotor', 'mechanism_hammer'],
     pistol: ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'],
+    ak47: ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'],
     smg: ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'],
     sniper: ['grip_left', 'mechanism_bolt', 'mechanism_magazine', 'magazine_out'], knife: ['blade_tip'],
   };
   const required = ['grip_right', ...(id === 'knife' ? [] : ['reload_port', 'Muzzle']), ...parts[id]];
   for (const name of required) assert.equal(gltf.nodes.filter(n => n.name === name).length, 1, `Missing/duplicate ${name}`);
   const palettes = {
+    ak47: ['Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Warm walnut'],
     smg: ['Brushed steel', 'Charcoal blued steel', 'Recess / rubber'],
     sniper: ['Brushed steel', 'Charcoal blued steel', 'Olive composite', 'Recess / rubber'],
     knife: ['Brushed steel', 'Charcoal blued steel', 'Recess / rubber'],
@@ -149,7 +151,7 @@ export function weaponPipeline(mode) {
     const previous = readPreviousGltfAddon();
     if (previous && previous !== gltfAddon)
       console.warn(`glTF add-on moved ${previous} -> ${gltfAddon}; outputs differing only by exporter version still normalize byte-identical`);
-    const assets = ['shotgun','revolver','pistol','smg','sniper','knife'].map(id => {
+    const assets = ['shotgun','revolver','pistol','smg','sniper','knife','ak47'].map(id => {
       const source=`assets/source/${id}.blend`, output=`public/assets/${id}.glb`;
       const normalized = normalizeWeaponGlb(readFileSync(root+output));
       writeFileSync(root+output, normalized);
@@ -160,7 +162,7 @@ export function weaponPipeline(mode) {
     const manifest=JSON.parse(readFileSync(root+manifestPath));
     assert.equal(manifest.exporterSha256,hash(exporter),'Weapon exporter changed: run assets:export');
     assert.match(manifest.gltfAddon ?? '', /^\d+\.\d+\.\d+$/, 'Weapon manifest lacks gltfAddon: run assets:export');
-    assert.deepEqual(manifest.assets.map(asset => asset.id).sort(), ['knife','pistol','revolver','shotgun','smg','sniper']);
+    assert.deepEqual(manifest.assets.map(asset => asset.id).sort(), ['ak47','knife','pistol','revolver','shotgun','smg','sniper']);
     const entries = manifest.assets.map(asset => ({ asset, bytes: readFileSync(root + asset.output) }));
     const seen = entries.map(({ asset, bytes }) => readGlbGenerator(bytes, asset.id));
     assert.equal(new Set(seen).size, 1, `Mixed exporter versions across GLBs ${[...new Set(seen)]}: run assets:export`);

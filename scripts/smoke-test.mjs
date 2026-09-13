@@ -2669,11 +2669,12 @@ async function runBotWeaponsCheck() {
   const mapErrors = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
-  const PRIMARIES = ['smg', 'sniper', 'shotgun'];
+  const PRIMARIES = ['smg', 'sniper', 'shotgun', 'ak47'];
   // Zone damage each weapon can deal, from WEAPONS: torso, legs (x0.75), head
   // (x headshotMult). A shotgun pull sums pellets, so it is excluded from the
   // membership claim and gets the range claim instead.
   const ZONES = {
+    ak47: [30, 22.5, 60],
     smg: [26, 19.5, 52],
     revolver: [55, 41.25, 220],
   };

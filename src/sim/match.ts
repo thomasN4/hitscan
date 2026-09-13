@@ -2,7 +2,7 @@
 //
 // Pure. Kept out of combat.ts/main.ts so the two ways a match can end are
 // unit-testable without a browser: the clock expiring (winner by score) and
-// the last T falling (immediate CT win, except the 1v1 case).
+// the last enemy falling (immediate win for the player's side, except the 1v1 case).
 
 /** Which side took the match, or nobody. */
 export type MatchWinner = 'CT' | 'T' | 'draw';
@@ -19,11 +19,11 @@ export function decideWinner(scoreKills: number, scoreDeaths: number): MatchWinn
 }
 
 /**
- * Whether "every T dead at once" ends the match outright rather than just
+ * Whether "every enemy dead at once" ends the match outright rather than just
  * respawning the wave. With a single enemy there is no wave to come back
  * from — the arena would end seconds after every spawn — so 1v1 keeps the
  * old respawn behavior and only the clock can end it.
  */
-export function eliminationEndsMatch(botsT: number): boolean {
-  return botsT > 1;
+export function eliminationEndsMatch(enemyCount: number): boolean {
+  return enemyCount > 1;
 }

@@ -249,7 +249,8 @@ def knife():
     save_and_render('knife',(0,-.065,-.126),.70)
 
 
-import sys
-selected = sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else ['smg','sniper','knife']
-for name in selected:
-    {'smg': smg, 'sniper': sniper, 'knife': knife}[name]()
+if __name__ == '__main__':
+    import sys
+    selected = sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else ['smg','sniper','knife']
+    for name in selected:
+        {'smg': smg, 'sniper': sniper, 'knife': knife}[name]()

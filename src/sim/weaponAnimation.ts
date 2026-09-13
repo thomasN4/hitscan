@@ -87,7 +87,7 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
     pump: shotgunPump(input),
     boltLift: id === 'sniper' && firing && !reloading ? hold(cycle, 0.12, 0.26, 0.76, 0.90) : 0,
     boltPull: id === 'sniper' && firing && !reloading ? hold(cycle, 0.27, 0.46, 0.54, 0.75) : 0,
-    slide: (id === 'pistol' || id === 'smg') && firing && !reloading ? hold(shotAge, -0.001, 0.025, 0.035, 0.09) : 0,
+    slide: (id === 'pistol' || id === 'smg' || id === 'ak47') && firing && !reloading ? hold(shotAge, -0.001, 0.025, 0.035, 0.09) : 0,
     hammer: id === 'revolver' && firing && !reloading ? hold(cycle, 0.05, 0.25, 0.35, 0.48) : 0,
     // Index the next chamber after the loading fingers withdraw. A full sixth
     // turn is geometrically identical at the next round's zero phase.

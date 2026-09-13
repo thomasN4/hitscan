@@ -17,7 +17,7 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
-import { sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
+import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxShell, sfxMechanism, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
@@ -108,6 +108,7 @@ export function currentViewmodelRecoil(): number {
 
 // Per-weapon shot sound; keyed by WeaponId so no weapon can miss.
 const SHOT_SFX: Record<WeaponId, () => void> = {
+  ak47: sfxAk47,
   smg: sfxShoot,
   sniper: sfxSniper,
   shotgun: sfxShotgun,
@@ -126,6 +127,7 @@ const muzzleFlashLight = new THREE.PointLight(0xffdd88, 0, 12);
  */
 export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
   VIEWMODELS = {
+    ak47: createWeaponViewModel('ak47', weaponAssets),
     smg: createWeaponViewModel('smg', weaponAssets),
     sniper: createWeaponViewModel('sniper', weaponAssets),
     shotgun: createWeaponViewModel('shotgun', weaponAssets),
@@ -349,7 +351,7 @@ function swingMelee(def: WeaponDef): void {
   const dir = shotDirection(currentAimPitch(), currentAimYaw(), 0);
   const candidates: MeleeCandidate<Bot>[] = [];
   for (const bot of bots) {
-    if (!bot.alive || bot.team === 'CT') continue;
+    if (!bot.alive || bot.team === session.playerTeam) continue;
     for (const zone of ['head', 'torso', 'legs'] as const) {
       candidates.push({ payload: bot, zone, at: bot[zone].getWorldPosition(new THREE.Vector3()) });
     }
@@ -449,7 +451,7 @@ export function shoot(): void {
   soundEvents.emit({
     kind: 'gunshot',
     sourceId: 'player',
-    team: 'CT',       // the player fights on the CT side (combat.ts, bots.ts)
+    team: session.playerTeam,
     pos: playerFeet(player),
     radius: GUNSHOT_RADIUS_M,
     t: gameTime.now(),
@@ -486,9 +488,9 @@ export function shoot(): void {
     // length checked above; the assertion only records that fact
     const hit = hits[0]!;
     const bot = botFor(hit.object); // stamped onto each part in Bot's constructor
-    if (bot && bot.team === 'CT') {
+    if (bot && bot.team === session.playerTeam) {
       // Friendly fire is OFF: ally bodies stop the bullet (visible impact,
-      // no hitmarker, no damage) but never bleed CT score.
+      // no hitmarker, no damage) but never bleed the ally's score.
       spawnImpact(hit.point);
     } else if (bot) {
       const part = partForMesh(bot, hit.object);

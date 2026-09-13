@@ -8,7 +8,7 @@ import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
          sanitizeLoadout, session, player, playerFeet, equippedId,
          AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld, input,
-         effectiveCrouching, wpn,
+         effectiveCrouching, wpn, opposing, score, creditKill,
          cancelPendingReloadSfx } from './state';
 
 describe('state module purity', () => {
@@ -289,5 +289,30 @@ describe('BOT_SPAWNS', () => {
         expect(z.maxZ).toBeGreaterThan(z.minZ);
       }
     }
+  });
+});
+
+describe('opposing', () => {
+  test('returns the other side both ways', () => {
+    // The single name for the enemy side both combat.ts call sites share;
+    // a second literal comparison elsewhere is how they drift apart.
+    expect(opposing('CT')).toBe('T');
+    expect(opposing('T')).toBe('CT');
+  });
+});
+
+describe('creditKill', () => {
+  test('credits the killer’s side-fixed counter', () => {
+    // The one owner of the side→counter mapping both combat.ts (player
+    // death) and bots.ts (bot death) call; a second copy elsewhere is how
+    // they drift apart.
+    score.scoreKills = 0;
+    score.scoreDeaths = 0;
+    creditKill('CT');
+    expect(score.scoreKills).toBe(1);
+    expect(score.scoreDeaths).toBe(0);
+    creditKill('T');
+    expect(score.scoreKills).toBe(1);
+    expect(score.scoreDeaths).toBe(1);
   });
 });

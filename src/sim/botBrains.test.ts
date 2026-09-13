@@ -579,14 +579,100 @@ describe('DefaultBrain travel wall-sense', () => {
     expect(slide.step.z).toBeCloseTo(0, 12);
   });
 
-  it('engage steering never asks the probe', () => {
-    // Scoping pin: the sense belongs to routed travel, so a mid-band
-    // firefight takes no standability reads at all.
+  it('engage steering reads only the strafe pair', () => {
+    // Scoping pin, widened by the engage wall-sense: a mid-band firefight
+    // takes exactly the two lateral feeler reads per frame — no diagonal
+    // travel feelers, no per-joint wandering.
     let asked = 0;
     const v = view({ dist: 10, canStandAt: () => { asked++; return true; } });
     const { mode } = calmBrain().decide(v, STEP_DT);
     expect(mode).toBe('engage');
-    expect(asked).toBe(0);
+    expect(asked).toBe(2);
+  });
+});
+
+// The engage wall-sense: corner contact used to flicker moveBlocked, and
+// every flicker edge re-reversed the strafe — vibration with zero net lateral
+// progress while the radial pinned the bot in. Same replay style as above:
+// mid-band target due +x, so the strafe axis is ±z and a `z <= 0.5` probe
+// walls exactly the side the calm brain strafes toward first.
+describe('DefaultBrain engage wall-sense', () => {
+  const STEP_DT = 0.1;
+  /** Mid-band firefight, strafing +z first; never routes, never latches. */
+  const duel = (overrides: ViewOpts = {}): BrainView => view({ dist: 10, ...overrides });
+
+  it('flips the strafe before contact with a walled side', () => {
+    // Blend after the flip: heading (0,0,-1) weighted 0.5 against nothing
+    // radial — pure reversed strafe at full speed, the same frame.
+    const { step, mode } = calmBrain().decide(duel({ canStandAt: (_x, z) => z <= 0.5 }), STEP_DT);
+    expect(mode).toBe('engage');
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(-4 * STEP_DT, 12);
+  });
+
+  it('holds the strafe through a doorway, both feelers blocked', () => {
+    const { step } = calmBrain().decide(duel({ canStandAt: () => false }), STEP_DT);
+    expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('debounces feeler flips so they cannot chatter', () => {
+    // The wall swaps sides every frame; without the refractory period the
+    // strafe would alternate with it. First frame flips, the next 0.4 s hold,
+    // and the flip back lands once the 0.5 s cooldown spends (a frame of
+    // float residue either way — the test polls past it rather than pinning
+    // it).
+    const brain = calmBrain();
+    let wallPlusZ = true;
+    const v = (): BrainView => duel({ canStandAt: (_x, z) => (wallPlusZ ? z <= 0.5 : z >= -0.5) });
+    expect(brain.decide(v(), STEP_DT).step.z).toBeLessThan(0); // flipped
+    for (let f = 1; f <= 4; f++) {
+      wallPlusZ = false; // the far side is walled now — must NOT flip back yet
+      expect(brain.decide(v(), STEP_DT).step.z, `frame ${f}`).toBeLessThan(0);
+    }
+    wallPlusZ = false;
+    let flipped = false;
+    for (let f = 1; f <= 3 && !flipped; f++) {
+      flipped = brain.decide(v(), STEP_DT).step.z > 0;
+    }
+    expect(flipped).toBe(true);
+  });
+
+  it('sidesteps a sustained wedge without leaving engage or holding fire', () => {
+    // Three refused frames arm the same commit travel() uses; the step goes
+    // pure lateral while the band, the mode and the trigger all still run.
+    const fire = new StubFire();
+    fire.readyNow = true;
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    const wedged = duel({ moveBlocked: true });
+    brain.decide(wedged, STEP_DT); // contact edge flips the strafe; brush
+    brain.decide(wedged, STEP_DT); // level; still a brush
+    const slide = brain.decide(wedged, STEP_DT); // blockedFor 0.3: commit
+    expect(slide.mode).toBe('engage');
+    expect(slide.step.x).toBeCloseTo(0, 12);
+    expect(Math.abs(slide.step.z)).toBeCloseTo(4 * STEP_DT, 12);
+    expect(slide.wantShoot).toBe(true);
+    expect(fire.pulls).toBeGreaterThan(0);
+    // …and the commit persists while the wedge does.
+    const held = brain.decide(wedged, STEP_DT);
+    expect(Math.abs(held.step.z)).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('a brush never sidesteps: isolated rejections keep band steering', () => {
+    // Beyond farBand so the radial leg discriminates: a committed sidestep
+    // would read all-x, while the band blend keeps a forward component.
+    const brain = calmBrain();
+    const far = duel({ dist: 20 });
+    const brush = duel({ dist: 20, moveBlocked: true });
+    brain.decide(brush, STEP_DT);
+    // One clean frame resets the jam counter — the wedge below starts over.
+    brain.decide(far, STEP_DT);
+    const { step, mode } = brain.decide(brush, STEP_DT);
+    expect(mode).toBe('engage');
+    // Radial 1 plus the 0.7 strafe, normalized: forward survives, so no
+    // commit armed.
+    const len = Math.sqrt(1 + 0.7 * 0.7);
+    expect(step.x).toBeCloseTo((1 / len) * 4 * STEP_DT, 12);
+    expect(step.z).toBeCloseTo((0.7 / len) * 4 * STEP_DT, 12);
   });
 });
 

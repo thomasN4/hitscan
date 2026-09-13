@@ -953,17 +953,18 @@ export const SESSION_DEFAULTS: Readonly<{
 }> = {
   map: 'arena',
   botsT: 6,
-  botsCt: 0,
-  roundSeconds: 120,
+  botsCt: 5,
+  roundSeconds: 300,
   // A varied field by default: the whole point of the tranche is that the
   // enemy's weapon is a fact about the enemy, not a constant. Pinning a
   // single weapon is what smoke phases and playtests do deliberately.
   botWeaponT: 'mixed',
   botWeaponCt: 'mixed',
-  // Pistol, so the dry swap exists in a default match rather than only when
-  // someone goes looking for it: every bot always carries a sidearm.
-  botSecondaryT: 'pistol',
-  botSecondaryCt: 'pistol',
+  // Mixed, so both the primary spread and the dry swap to a varied sidearm
+  // exist in a default match rather than only when someone goes looking for
+  // them: every bot always carries a sidearm.
+  botSecondaryT: 'mixed',
+  botSecondaryCt: 'mixed',
 };
 
 // ---------- Owner-scoped slices ----------
@@ -992,9 +993,9 @@ export interface SessionState {
   // parse of the URL at startup — reading `location` here would break this
   // module's importability in Node.
   map: MapName;
-  /** Enemy (T-side) bot count, clamped to 1..12 by the parser. */
+  /** Enemy (T-side) bot count, clamped to 1..16 by the parser. */
   botsT: number;
-  /** Allied (CT-side) bot count, 0..12 — stored only; allies don't exist yet. */
+  /** Allied (CT-side) bot count, 0..15. */
   botsCt: number;
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;

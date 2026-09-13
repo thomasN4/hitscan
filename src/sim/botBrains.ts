@@ -203,6 +203,14 @@ export interface BrainView {
    */
   nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | undefined | null;
   /**
+   * The team's assigned domination flag, or null outside domination matches
+   * (and whenever the dispatcher has nothing to give). A COPY of a static,
+   * HUD-public position — flag states are broadcast to both teams, so routing
+   * here reveals nothing a scoreboard wouldn't. Pursued only when no visual,
+   * damage, search or memory commitment outranks it; see decide().
+   */
+  objective: { id: string; pos: THREE.Vector3; radius: number } | null;
+  /**
    * Lazy patrol waypoint request — the patrol analogue of `nextWaypoint`,
    * same three-way contract and the same lazy on purpose: pathfinding still
    * obeys the shared one-A-star-per-frame budget, so the callback is only
@@ -226,14 +234,16 @@ export interface BrainView {
  * `engage` and `route` are the two active modes; `search` scans in place
  * from a remembered position's arrival, a routing dead end, or a
  * direction-only incoming-fire bearing (the damage search advances for its
- * first seconds); `patrol` walks a map-wide route with no target knowledge
+ * first seconds); `objective` walks the domination flag the dispatcher
+ * assigned, and `capture` holds inside its ring watching for contact;
+ * `patrol` walks a map-wide route with no target knowledge
  * at all; `hold` stands still on forget, on plain sight loss (pre-memory),
  * or inside the one-second patrol pause. Reported for OBSERVABILITY, not
  * consumed by the executor: hud.ts renders it in the DEV bot readout,
  * because "why is that bot doing that" is otherwise only answerable by
  * pausing in devtools.
  */
-export type BrainMode = 'hold' | 'search' | 'route' | 'engage' | 'patrol';
+export type BrainMode = 'hold' | 'search' | 'route' | 'engage' | 'patrol' | 'objective' | 'capture';
 
 /** What a brain wants done this frame. */
 export interface BrainIntent {
@@ -470,6 +480,12 @@ export class DefaultBrain implements BotBrain {
    * about the new advance, and must not cut it on the entry frame.
    */
   private advanceRequested = false;
+  /**
+   * Watch-rotation angle (radians) of an active flag capture. Advanced while
+   * holding inside the objective ring so a capping bot surveys rather than
+   * staring one way; reset by onRespawn with the rest of the per-life state.
+   */
+  private objectiveHeading = 0;
 
   /**
    * @param base the weapon-independent policy. The per-weapon bands, engage
@@ -534,6 +550,7 @@ export class DefaultBrain implements BotBrain {
     this.advanceArmed = false;
     this.advanceCancelled = false;
     this.advanceRequested = false;
+    this.objectiveHeading = 0;
   }
 
   /** See BotBrain.onIncomingFire. The bearing is copied and planar-normalized. */
@@ -790,8 +807,11 @@ export class DefaultBrain implements BotBrain {
     // establish a new place to investigate.
     //
     // Ignored sounds are NOT queued: the executor cursor has already consumed
-    // them, so a noise that arrives mid-pursuit is simply discarded.
-    if (this.memory === null && !this.searching) {
+    // them, so a noise that arrives mid-pursuit is simply discarded. An
+    // assigned objective counts as a commitment like memory and search: flag
+    // states are fresher evidence than a stale footstep, so hearing never
+    // pulls a bot off its flag — only hold and patrol stay interruptible.
+    if (this.memory === null && !this.searching && view.objective === null) {
       const lead = pickHeardLead(view.heard, view.selfFeet);
       if (lead !== null) this.adoptHeard(lead);
     }
@@ -836,7 +856,16 @@ export class DefaultBrain implements BotBrain {
       return this.memoryIntent(view, dt, jukeDraw);
     }
 
-    // Priority 6 — strictly lowest: nothing seen, nothing remembered, no
+    // Priority 6: the assigned domination flag — only when nothing above
+    // owns the bot. A visible enemy, a damage reaction, a live search and a
+    // remembered position all outrank the flag, so a capping bot that takes
+    // contact fights first and walks back afterwards (the assignment is
+    // sticky across fights).
+    if (view.objective !== null) {
+      return this.objectiveIntent(view, dt, jukeDraw);
+    }
+
+    // Priority 7 — strictly lowest: nothing seen, nothing remembered, no
     // live search. Patrol. The pause gates the request: hold for
     // `patrolPause` seconds first (spawn, respawn, search expiry, patrol
     // arrival and failed selection all land here), then ask the executor for
@@ -846,7 +875,7 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 6 — strictly lowest: patrol. After the one-second pause the
+   * Priority 7 — strictly lowest: patrol. After the one-second pause the
    * brain asks the executor for a patrol waypoint: a vector means travel at
    * normal speed (mode `patrol`, never shoot, null focus, looking one metre
    * along the next waypoint at eye height); `undefined` means the route
@@ -1123,6 +1152,100 @@ export class DefaultBrain implements BotBrain {
       mode: 'route',
       focusId: this.focus,
       lookAt: this.goalLookAt(mem),
+      facing: toward.clone(),
+    };
+  }
+
+  /**
+   * Priority 6: walk the assigned domination flag, then hold its ring.
+   *
+   * Travel reuses the shared route walker under the executor's pursuit cache:
+   * the flag is a static goal with no focus id, so it keys on its own
+   * coordinates and never inherits a memory route (memory is null on every
+   * path that reaches here). The routing latch is raised like a memory
+   * pursuit's, so the climb hysteresis survives into the next visible frame
+   * on the way up to the deck flag.
+   *
+   * Arrival (inside 70% of the ring) is `capture`, not a search: the bot
+   * stands the point, advances its watch rotation, and NEVER shoots — there
+   * is no observation behind the trigger, exactly like a memory pursuit. A
+   * confirmed-unreachable flag holds facing it rather than searching: a
+   * search would age out and patrol away from the assignment.
+   */
+  private objectiveIntent(view: BrainView, dt: number, jukeDraw: number): BrainIntent {
+    const obj = view.objective!;
+    const toObj = new THREE.Vector3(obj.pos.x - view.selfFeet.x, 0, obj.pos.z - view.selfFeet.z);
+    const dist = toObj.length();
+    const toward = dist > 1e-9 ? toObj.clone().multiplyScalar(1 / dist) : view.facing.clone();
+
+    if (dist <= obj.radius * 0.7) {
+      this.routing = false;
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      this.objectiveHeading += dt * 0.6;
+      const heading = new THREE.Vector3(
+        Math.sin(this.objectiveHeading), 0, Math.cos(this.objectiveHeading),
+      );
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'capture',
+        focusId: null,
+        lookAt: new THREE.Vector3(
+          view.selfFeet.x + heading.x,
+          view.selfFeet.y + LOOK_EYE_HEIGHT,
+          view.selfFeet.z + heading.z,
+        ),
+        facing: heading,
+      };
+    }
+
+    const waypoint = view.nextWaypoint(obj.pos);
+    if (waypoint === undefined) {
+      // Budget deferred: wait in place, still `objective` — the goal is not
+      // going anywhere, unlike a fleeing memory.
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'objective',
+        focusId: null,
+        lookAt: new THREE.Vector3(
+          obj.pos.x, obj.pos.y + LOOK_EYE_HEIGHT, obj.pos.z,
+        ),
+        facing: toward.clone(),
+      };
+    }
+    if (waypoint === null) {
+      // The graph confirmed there is no way there: hold facing the flag.
+      // Searching would forget the assignment and patrol away from it.
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'objective',
+        focusId: null,
+        lookAt: new THREE.Vector3(
+          obj.pos.x, obj.pos.y + LOOK_EYE_HEIGHT, obj.pos.z,
+        ),
+        facing: toward.clone(),
+      };
+    }
+    this.routing = true;
+    const step = new THREE.Vector3();
+    this.travel(step, waypoint, view, dt);
+    return {
+      step,
+      wantShoot: false,
+      mode: 'objective',
+      focusId: null,
+      lookAt: new THREE.Vector3(
+        view.selfFeet.x + toward.x,
+        view.selfFeet.y + LOOK_EYE_HEIGHT,
+        view.selfFeet.z + toward.z,
+      ),
       facing: toward.clone(),
     };
   }

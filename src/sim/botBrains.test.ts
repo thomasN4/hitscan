@@ -150,6 +150,8 @@ interface ViewOpts {
   nextPatrolWaypoint?: () => THREE.Vector3 | undefined | null;
   /** Hostile noises this frame, executor-filtered; default none. */
   heard?: readonly HeardSound[];
+  /** Assigned domination flag; default null = TDM or undispatched. */
+  objective?: { id: string; pos: THREE.Vector3; radius: number } | null;
 }
 
 /** Canonical view: observed target due +x, mid-band, LEVEL, 4 m/s. */
@@ -173,6 +175,8 @@ function view(o: ViewOpts = {}): BrainView {
     // No patrol route by default either: the patrol tests pass their own
     // thunk, and the pause-before-patrol tests want a goalless answer (null).
     nextPatrolWaypoint: o.nextPatrolWaypoint ?? (() => null),
+    // No objective by default: every pre-domination test describes a TDM bot.
+    objective: o.objective ?? null,
   };
 }
 
@@ -1683,5 +1687,74 @@ describe('DefaultBrain damage advance', () => {
       expect(brain.decide(view({ visual: null }), 0.25).mode, `search frame ${f}`).toBe('search');
     }
     expect(brain.decide(view({ visual: null }), 0.25).mode).toBe('hold');
+  });
+});
+
+describe('DefaultBrain domination objective', () => {
+  const flag = { id: 'B', pos: new THREE.Vector3(0, 0, 20), radius: 4.5 };
+
+  it('routes to the assigned flag when nothing outranks it', () => {
+    const brain = calmBrain();
+    const intent = brain.decide(view({
+      visual: null,
+      objective: flag,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(intent.mode).toBe('objective');
+    expect(intent.wantShoot).toBe(false);
+    expect(intent.focusId).toBeNull();
+    expect(intent.step.length()).toBeGreaterThan(0);
+  });
+
+  it('captures on arrival: holds the ring, watches, never shoots', () => {
+    const brain = calmBrain();
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const first = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(first.mode).toBe('capture');
+    expect(first.step.length()).toBe(0);
+    expect(first.wantShoot).toBe(false);
+    // The watch rotates: a later frame faces elsewhere.
+    const later = brain.decide(view({ visual: null, objective: close }), 2);
+    expect(later.mode).toBe('capture');
+    expect(later.facing.x).not.toBeCloseTo(first.facing.x, 2);
+  });
+
+  it('a visual outranks the objective and the bot walks back after', () => {
+    const brain = calmBrain();
+    const seen = brain.decide(view({ dist: 10, objective: flag }), DT);
+    expect(seen.mode).toBe('engage');
+    const back = brain.decide(view({
+      visual: null,
+      objective: flag,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    // Sight loss with a remembered position pursues memory first...
+    expect(['route', 'objective']).toContain(back.mode);
+  });
+
+  it('hearing never pulls a bot off its flag', () => {
+    const brain = calmBrain();
+    const noise = { seq: 1, t: 0, kind: 'gunshot' as const, pos: new THREE.Vector3(5, 0, 0) };
+    const intent = brain.decide(view({
+      visual: null,
+      objective: flag,
+      heard: [noise],
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+      nextPatrolWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(intent.mode).toBe('objective');
+  });
+
+  it('an unreachable flag holds facing it instead of searching away', () => {
+    const brain = calmBrain();
+    for (let f = 0; f < 3; f++) {
+      const intent = brain.decide(view({
+        visual: null,
+        objective: flag,
+        nextWaypoint: () => null,
+      }), 0.5);
+      expect(intent.mode).toBe('objective');
+      expect(intent.step.length()).toBe(0);
+    }
   });
 });

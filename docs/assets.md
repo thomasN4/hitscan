@@ -23,6 +23,16 @@ source/output/export-script SHA-256 hashes and settings in
 `assets:check` verifies all six committed GLBs without Blender.
 The exporter disables audio via `ALSOFT_DRIVERS=null` for headless Linux machines.
 
+The manifest also records `gltfAddon` (e.g. `"5.2.40"`), the Khronos glTF
+Blender I/O add-on version, which Blender's own version string does not
+distinguish. That string is embedded in every GLB's `asset.generator`, so
+export strips the version tail to `Khronos glTF Blender I/O` before hashing —
+inputs differing only by exporter version re-export byte-identical, and
+`assets:check` fails on mixed or unnormalized generators with a named error
+instead of a bare hash mismatch (issue #112). An add-on bump that changes
+anything else still moves the output hashes — re-export to refresh them
+rather than reading a moved hash as corruption.
+
 The sources are modeled in game coordinates: metres, Y up, -Z forward. Blender's
 native Z-up convention is deliberately not used here. Export uses
 `export_yup=False` to avoid rotating these coordinates a second time. Apply mesh

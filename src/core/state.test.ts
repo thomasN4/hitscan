@@ -7,7 +7,7 @@
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
          sanitizeLoadout, session, player, playerFeet, equippedId,
-         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld, input,
+         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, DOM_FLAGS, keys, keyHeld, input,
          effectiveCrouching, wpn, opposing, score, creditKill,
          cancelPendingReloadSfx } from './state';
 
@@ -314,5 +314,35 @@ describe('creditKill', () => {
     creditKill('T');
     expect(score.scoreKills).toBe(1);
     expect(score.scoreDeaths).toBe(1);
+  });
+
+  test('kills score nothing in domination — flags own the team points', () => {
+    session.mode = 'dom';
+    score.scoreKills = 0;
+    score.scoreDeaths = 0;
+    creditKill('CT');
+    creditKill('T');
+    expect(score.scoreKills).toBe(0);
+    expect(score.scoreDeaths).toBe(0);
+    session.mode = 'tdm';
+  });
+});
+
+describe('DOM_FLAGS', () => {
+  test('elevation holds three flags with B on the building deck', () => {
+    expect(DOM_FLAGS.elevation.map(f => f.id)).toEqual(['A', 'B', 'C']);
+    const b = DOM_FLAGS.elevation[1]!;
+    expect(b.feetY).toBe(3.6);
+    // A and C sit on open ground between the spawn bands and the building.
+    expect(DOM_FLAGS.elevation[0]!.feetY).toBe(0);
+    expect(DOM_FLAGS.elevation[2]!.feetY).toBe(0);
+    expect(DOM_FLAGS.elevation[0]!.z).toBeLessThan(0);
+    expect(DOM_FLAGS.elevation[2]!.z).toBeGreaterThan(0);
+  });
+
+  test('every other map has no flags (domination falls back to TDM there)', () => {
+    for (const map of ['arena', 'range', 'warehouse1', 'warehouse2'] as const) {
+      expect(DOM_FLAGS[map]).toEqual([]);
+    }
   });
 });

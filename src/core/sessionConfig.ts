@@ -250,6 +250,7 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
   return {
     map,
     mode,
+    playerTeam,
     botsT: Math.round(clampTo(numOr(src.get('tbots'), defaults.botsT), limits.limitT)),
     botsCt: Math.round(clampTo(numOr(src.get('ctbots'), defaults.botsCt), limits.limitCt)),
     roundSeconds: Math.round(

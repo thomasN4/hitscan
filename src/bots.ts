@@ -33,7 +33,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
@@ -1071,15 +1071,15 @@ export class Bot implements BotShape {
     this.elevatorTrip = null;
     this.mesh.visible = false;
     this.deaths++;
-    // Team scores are side-fixed: scoreKills is the CT score, scoreDeaths the
-    // T score. Credit the killer's side for an opposing casualty — a player
-    // kill counts for the player's side, whatever it is.
+    // Team scores are side-fixed (creditKill): scoreKills is the CT score,
+    // scoreDeaths the T score. Credit the killer's side for an opposing
+    // casualty only — a player kill counts for the player's side, whatever
+    // it is.
     const killer = killerName === undefined
       ? undefined
       : bots.find(b => b.name === killerName);
     const killerTeam = killer?.team ?? session.playerTeam;
-    if (killerTeam === 'CT' && this.team === 'T') score.scoreKills++;
-    else if (killerTeam === 'T' && this.team === 'CT') score.scoreDeaths++;
+    if (killerTeam === opposing(this.team)) creditKill(killerTeam);
     // Scoreboard attribution: the player's own kills get a personal counter;
     // a bot killer is resolved by display name (unique per team serial).
     // Hoisted out of the counter branch because the killfeed needs it too:

@@ -1247,14 +1247,14 @@ export function cancelPendingReloadSfx(): void {
 }
 
 /**
- * Match bookkeeping. Team counters have three writers: bots.ts credits the
- * killer's side for an opposing casualty (a CT-side kill — player or ally —
- * bumps scoreKills, a T-side kill bumps scoreDeaths), combat.ts credits the
- * killer's side when the player dies, main.ts's loop counts roundTime down
- * (arena only). The player counters are the scoreboard's "You" row: bots.ts
- * bumps playerKills on the player's own kills and combat.ts bumps
- * playerDeaths when the player dies. hud.ts renders the top bar; menu.ts
- * renders the end screen.
+ * Match bookkeeping. The team counters' rule lives in creditKill() (a
+ * CT-side kill — player or ally — bumps scoreKills, a T-side kill bumps
+ * scoreDeaths), called from bots.ts on a bot's death and from combat.ts
+ * when the player dies; main.ts's loop counts roundTime down (arena only).
+ * The player counters are the scoreboard's "You" row: bots.ts bumps
+ * playerKills on the player's own kills and combat.ts bumps playerDeaths
+ * when the player dies. hud.ts renders the top bar; menu.ts renders the
+ * end screen.
  */
 export interface ScoreState {
   /** Shown as the CT score: CT-side kills — the player's (on CT-side) plus CT allies'. */
@@ -1278,6 +1278,18 @@ export const score: ScoreState = {
   playerDeaths: 0,
   roundTime: SESSION_DEFAULTS.roundSeconds,
 };
+
+/**
+ * The side-fixed scoring rule in ONE place: a CT kill bumps scoreKills, a
+ * T kill bumps scoreDeaths. Callers resolve the killer's side (defaulting
+ * an unresolvable attacker to the victim's opposing side) and guard against
+ * same-team casualties where those are possible; the mapping itself lives
+ * only here.
+ */
+export function creditKill(killerTeam: Team): void {
+  if (killerTeam === 'CT') score.scoreKills++;
+  else score.scoreDeaths++;
+}
 
 /** Raw keyboard state by `event.code`. Written in main.ts, read through keyHeld. */
 export const keys: Record<string, boolean | undefined> = {};

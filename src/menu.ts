@@ -45,11 +45,27 @@ const SUBTITLES: Record<MapName, string> = {
 };
 
 /**
- * Menu subtitle for a map + side. Only the arena names the enemy, so only it
- * varies; every other map keeps its static line.
+ * T-side subtitle override per map — null where the static line is already
+ * side-agnostic. A full Record, not an if-branch: a new map fails to compile
+ * until it decides whether its T-side wording names the enemy, instead of
+ * silently showing the CT-side line to a T-side player.
+ */
+const T_SUBTITLES: Record<MapName, string | null> = {
+  arena: 'Eliminate all CTs to win the round',
+  range: null,
+  elevation: null,
+  warehouse1: null,
+  warehouse2: null,
+};
+
+/**
+ * Menu subtitle for a map + side: the T-side override where the table has
+ * one, the static line otherwise.
  */
 export function subtitleFor(map: MapName, side: Team): string {
-  if (map === 'arena') return side === 'T' ? 'Eliminate all CTs to win the round' : SUBTITLES.arena;
+  // null is a TABLE ENTRY meaning "no T-side override", not an index miss —
+  // T_SUBTITLES is keyed by the full MapName union.
+  if (side === 'T') return T_SUBTITLES[map] ?? SUBTITLES[map];
   return SUBTITLES[map];
 }
 

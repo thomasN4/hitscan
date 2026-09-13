@@ -6,7 +6,7 @@
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
 import type { Bot as BotShape, HitZone, MapName, Team } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing, creditKill } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
@@ -39,12 +39,11 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     player.alive = false;
     cancelPendingReloadSfx();
     const attacker = bots.find(b => b.name === attackerName);
-    // Side-fixed scores: a CT kill is a CT point (scoreKills), a T kill a T
-    // point (scoreDeaths). The attacker is always the enemy; the fallback
-    // covers an unresolvable name by crediting the opposing side.
+    // Side-fixed scores via creditKill: a CT kill is a CT point, a T kill a
+    // T point. The attacker is always the enemy; the fallback covers an
+    // unresolvable name by crediting the opposing side.
     const killerTeam: Team = attacker?.team ?? opposing(session.playerTeam);
-    if (killerTeam === 'CT') score.scoreKills++;
-    else score.scoreDeaths++;
+    creditKill(killerTeam);
     score.playerDeaths++;
     if (attacker) attacker.kills++;
     addKillfeed(`${attackerName}${botKillTag(attacker)} killed You`);
@@ -118,10 +117,13 @@ export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerNam
  * A full Record rather than a ternary chain on purpose: adding a MapName now
  * fails to compile until the new map declares where EACH side starts, instead
  * of silently inheriting the arena's coordinates. T spawns mirror CT across
- * -z (facing +z); the range is side-agnostic (no bots), so both entries face
- * downrange. feetY is the floor under the spawn — 0 everywhere except
- * warehouse2's T-side catwalk (5.1, matching BOT_SPAWNS). yaw is the spawn
- * facing: into the map on combat maps, downrange on the range for both sides.
+ * -z (facing +z) with ONE exception: warehouse2's T side starts on the -z
+ * catwalk band (z -16), not the mirrored +z yard — the mirrored yard has no
+ * T presence, the catwalk is the T half of that map (BOT_SPAWNS -19..-13).
+ * The range is side-agnostic (no bots), so both entries face downrange.
+ * feetY is the floor under the spawn — 0 everywhere except warehouse2's
+ * T-side catwalk (5.1, matching BOT_SPAWNS). yaw is the spawn facing: into
+ * the map on combat maps, downrange on the range for both sides.
  */
 const SPAWN: Record<Team, Record<MapName, { z: number; feetY: number; yaw: number }>> = {
   CT: {

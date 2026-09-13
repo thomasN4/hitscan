@@ -1239,18 +1239,19 @@ export function cancelPendingReloadSfx(): void {
 }
 
 /**
- * Match bookkeeping. Team counters have three writers: bots.ts increments
- * scoreKills on a CT-side kill (player or ally) and scoreDeaths when a T
- * downs a CT, combat.ts increments scoreDeaths when the player dies,
- * main.ts's loop counts roundTime down (arena only). The player counters
- * are the scoreboard's "You" row: bots.ts bumps playerKills on the player's
- * own kills and combat.ts bumps playerDeaths when the player dies. hud.ts
- * renders the top bar; menu.ts renders the end screen.
+ * Match bookkeeping. Team counters have three writers: bots.ts credits the
+ * killer's side for an opposing casualty (a CT-side kill — player or ally —
+ * bumps scoreKills, a T-side kill bumps scoreDeaths), combat.ts credits the
+ * killer's side when the player dies, main.ts's loop counts roundTime down
+ * (arena only). The player counters are the scoreboard's "You" row: bots.ts
+ * bumps playerKills on the player's own kills and combat.ts bumps
+ * playerDeaths when the player dies. hud.ts renders the top bar; menu.ts
+ * renders the end screen.
  */
 export interface ScoreState {
-  /** Shown as the CT score: player kills plus ally kills of Ts. */
+  /** Shown as the CT score: CT-side kills — the player's (on CT-side) plus CT allies'. */
   scoreKills: number;
-  /** Shown as the T score: T-side kills — the player's deaths plus CT allies'. */
+  /** Shown as the T score: T-side kills — the player's (on T-side) plus T allies'. */
   scoreDeaths: number;
   /** Kills credited to YOU personally (excludes ally kills). */
   playerKills: number;

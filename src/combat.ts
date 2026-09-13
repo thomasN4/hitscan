@@ -120,22 +120,23 @@ export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerNam
  * of silently inheriting the arena's coordinates. T spawns mirror CT across
  * -z (facing +z); the range is side-agnostic (no bots), so both entries face
  * downrange. feetY is the floor under the spawn — 0 everywhere except
- * warehouse2's T-side catwalk (5.1, matching BOT_SPAWNS).
+ * warehouse2's T-side catwalk (5.1, matching BOT_SPAWNS). yaw is the spawn
+ * facing: into the map on combat maps, downrange on the range for both sides.
  */
-const SPAWN: Record<Team, Record<MapName, { z: number; feetY: number }>> = {
+const SPAWN: Record<Team, Record<MapName, { z: number; feetY: number; yaw: number }>> = {
   CT: {
-    arena: { z: 48, feetY: 0 },
-    range: { z: 8, feetY: 0 },       // behind the firing line
-    elevation: { z: 48, feetY: 0 },  // open ground south of the two-story building
-    warehouse1: { z: 40, feetY: 0 }, // dock yard floor, 5 m clear of the south dock's face at z = 45
-    warehouse2: { z: 27, feetY: 0 }, // the +z yard, between the shell wall at 20.5 and the fence at 34
+    arena: { z: 48, feetY: 0, yaw: 0 },
+    range: { z: 8, feetY: 0, yaw: 0 },       // behind the firing line
+    elevation: { z: 48, feetY: 0, yaw: 0 },  // open ground south of the two-story building
+    warehouse1: { z: 40, feetY: 0, yaw: 0 }, // dock yard floor, 5 m clear of the south dock's face at z = 45
+    warehouse2: { z: 27, feetY: 0, yaw: 0 }, // the +z yard, between the shell wall at 20.5 and the fence at 34
   },
   T: {
-    arena: { z: -48, feetY: 0 },
-    range: { z: 8, feetY: 0 },
-    elevation: { z: -48, feetY: 0 },
-    warehouse1: { z: -40, feetY: 0 },
-    warehouse2: { z: -16, feetY: 5.1 }, // the -z catwalk band (BOT_SPAWNS -19..-13)
+    arena: { z: -48, feetY: 0, yaw: Math.PI },
+    range: { z: 8, feetY: 0, yaw: 0 },       // side-agnostic lane: same firing line, same facing
+    elevation: { z: -48, feetY: 0, yaw: Math.PI },
+    warehouse1: { z: -40, feetY: 0, yaw: Math.PI },
+    warehouse2: { z: -16, feetY: 5.1, yaw: Math.PI }, // the -z catwalk band (BOT_SPAWNS -19..-13)
   },
 };
 
@@ -147,7 +148,7 @@ export function respawn(): void {
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;
-  aim.yaw = session.playerTeam === 'T' ? Math.PI : 0;   // T faces +z, CT faces -z
+  aim.yaw = spawn.yaw;
   aim.pitch = 0;
   wpn.recoil = 0;    // else the view punch would spawn the camera mid-climb
   wpn.recoilYaw = 0; // and mid-wander, off to one side
@@ -159,9 +160,12 @@ export function respawn(): void {
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
   motion.airLerp = 0;
   motion.crouchLerp = 0;
-  // Spawns sit on open ground; without this, dying on the platform would
-  // ease the camera DOWN from its stale smoothed height over the first ~100ms.
-  motion.groundSmoothY = 0;
+  // The camera rides a smoothed ground height (player.ts eases it toward the
+  // physics feet), so seed it AT the spawn floor — not 0. Dying on platform
+  // geometry with a stale height would otherwise ease the view down from it
+  // over the first ~100 ms, and a 5.1 m spawn (warehouse2 T-side) would climb
+  // up from the shed floor instead of starting on the catwalk.
+  motion.groundSmoothY = spawn.feetY;
   input.crouching = false; // else a death while crouch-toggled respawns you crouched
   wpn.adsLerp = 0;
   armLoadout();   // refills both loadout positions and mirrors the primary into `weapon`

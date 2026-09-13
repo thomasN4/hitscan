@@ -807,7 +807,8 @@ describe('DefaultBrain flat-routing latch', () => {
     brain.decide(stalled(), CADENCE_DT);
     expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('route');
     // Geometry refuses the waypoint step long enough to be a jam, not a
-    // brush: stuckTime 0.25 is one cadence frame…
+    // brush: the shipped stuckTime (0.1) is under one cadence frame (0.25),
+    // so the first refused frame arms the commit…
     const slide = brain.decide(stalled({ moveBlocked: true }), CADENCE_DT);
     // …which commits the slide: perpendicular to the heading, all x.
     expect(Math.abs(slide.step.x)).toBeCloseTo(4 * CADENCE_DT, 12);

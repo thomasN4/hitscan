@@ -58,6 +58,32 @@ export function collidesAt(pos: THREE.Vector3, radius: number, feetY: number, co
 }
 
 /**
+ * Whether a body with its feet at `feetY` could walk onto (x, z): nothing
+ * blocks the footprint there (collidesAt) AND a surface within one step
+ * below the feet sits under the point itself. collidesAt alone answers "no
+ * wall here", which a point in mid-air past a deck edge also satisfies, so a
+ * planner sampling a line between nav nodes — which carry a floor guarantee
+ * the points between them do not — asks this instead. A drop deeper than
+ * STEP_HEIGHT is a fall, not a step.
+ *
+ * Support is tested at the CENTRE, not over the footprint, on purpose. The
+ * movement stage keeps a body up while any part of its footprint overlaps a
+ * surface, so the centres that fall form a band more than `radius` outside
+ * every surface — and a sampled line can clip that band for less than one
+ * sample step, passing every footprint test and still dropping the body
+ * between two samples. With the centre itself required to be over a
+ * surface at samples no further apart than `radius`, no point between two
+ * passing samples is more than half a radius from a surface, so none can
+ * fall. Stricter than resolveVertical near an edge, which is the right side
+ * to err on for a shortcut; the nodes themselves stay reachable.
+ */
+export function standableAt(pos: THREE.Vector3, radius: number, feetY: number, colliders: THREE.Box3[]): boolean {
+  if (collidesAt(pos, radius, feetY, colliders)) return false;
+  const support = supportHeightAt(pos.x, pos.z, 0, feetY + STEP_HEIGHT, colliders);
+  return support >= feetY - STEP_HEIGHT - COLLISION_EPSILON;
+}
+
+/**
  * Whether ONE collider blocks a footprint centred at (x, z) with feet at
  * `feetY`. The predicate collidesAt is built from, factored out so the
  * unwedge test below cannot drift away from it.

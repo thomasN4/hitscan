@@ -37,7 +37,7 @@ import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, cred
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
-import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, collidesAt, HEAD_HEIGHT } from './collision';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, collidesAt, standableAt, HEAD_HEIGHT } from './collision';
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
@@ -54,7 +54,7 @@ import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
-import { shouldAbandonRoute, furthestWalkable } from './sim/routeFollow';
+import { consumeReached, furthestWalkable, shouldAbandonRoute } from './sim/routeFollow';
 import { approach } from './sim/smoothing';
 import { botShotKick, createBotWeaponRig, pickBotShoulderOffset, poseBotWeaponRig, type BotWeaponRig } from './core/botWeaponModels';
 
@@ -318,6 +318,12 @@ export class Bot implements BotShape {
   private elevatorRequested = false;
   /** How far along `path` the bot has got. */
   private leg = 0;
+  /**
+   * The furthest leg the shortcut steered at last frame — the bound on which
+   * legs proximity may consume (sim/routeFollow.ts:consumeReached). Reset
+   * with `leg` whenever the path is replaced.
+   */
+  private aimed = 0;
   /**
    * World-space point the brain's intent looks at (a copy of the observed
    * eye), for debugView.ts's intent line; null when the brain has nothing
@@ -838,6 +844,7 @@ export class Bot implements BotShape {
       this.routeKey = key;
       this.path = [];
       this.leg = 0;
+      this.aimed = 0;
     }
     // Drop a path the bot is no longer on: it fell off an edge, got shoved,
     // or respawned across the map still holding last life's route. The
@@ -848,6 +855,7 @@ export class Bot implements BotShape {
     if (this.path.length > 0 && shouldAbandonRoute(this.path, this.leg, here, ROUTE_ABANDON)) {
       this.path = [];
       this.leg = 0;
+      this.aimed = 0;
     }
     const wantsRecompute = this.path.length === 0
       || (!patrolArrival && this.routeCooldown <= 0);
@@ -864,10 +872,12 @@ export class Bot implements BotShape {
         this.transportPath = found;
         this.path = found.map(w => w.point);
         this.leg = 0;
+        this.aimed = 0;
       } else {
         // A failed recompute must not keep walking a stale path.
         this.path = [];
         this.leg = 0;
+        this.aimed = 0;
       }
     }
     if (this.path.length === 0) {
@@ -877,12 +887,11 @@ export class Bot implements BotShape {
     }
 
     // Consume waypoints already stood on, planar — the step is planar too.
-    while (this.leg < this.path.length - 1) {
-      const w = this.path[this.leg]!;
-      if (this.transportPath[this.leg]?.elevatorId) break;
-      if (Math.hypot(w.x - here.x, w.z - here.z) >= WAYPOINT_REACHED) break;
-      this.leg++;
-    }
+    // Any leg up to the one the shortcut aimed at counts, not only the
+    // current one in strict order: a corner cut or a shove can carry the
+    // bot past `path[leg]` outside the reach radius, and a frozen leg would
+    // starve the abandon check below and never reach a boarding leg.
+    this.leg = consumeReached(this.path, this.transportPath, this.leg, this.aimed, here, WAYPOINT_REACHED);
     const w = this.path[this.leg]!;
     const elevatorId = this.transportPath[this.leg]?.elevatorId;
     if (elevatorId) {
@@ -902,22 +911,25 @@ export class Bot implements BotShape {
       return null;
     }
     // Shortcut smoothing: steer at the furthest walkable line within a few
-    // metres rather than turning at every 1 m joint. Consumption above is
-    // untouched — skipped legs are aimed past, never marked reached — so the
-    // abandon decision keeps its ground truth and elevator boardings (which
-    // return before this line) can never be aimed past. Sampled against the
-    // same feet-aware gate the step itself obeys. See sim/routeFollow.ts.
-    const shortcutIdx = furthestWalkable(
+    // metres rather than turning at every 1 m joint. Aiming past a leg does
+    // not mark it reached; consumption above does, by proximity, for legs up
+    // to the one aimed at — so the abandon decision keeps its ground truth
+    // and elevator boardings (which return before this line) are never aimed
+    // past. Samples are gated on collision AND support, the pair the step
+    // itself obeys: between nav nodes there is no floor guarantee, and a
+    // chord across a deck's concave corner samples clear over the drop
+    // (collision.test.ts:standableAt). See sim/routeFollow.ts.
+    this.aimed = furthestWalkable(
       this.path,
       this.transportPath,
       this.leg,
       here,
       this.options.lookaheadDistance ?? LOOKAHEAD_DISTANCE,
-      (x, z) => collidesAt(shortcutProbe.set(x, 0, z), BOT_RADIUS, here.y, colliders),
+      (x, z) => !standableAt(shortcutProbe.set(x, 0, z), BOT_RADIUS, here.y, colliders),
     );
-    const target = this.path[shortcutIdx]!;
-    const shortcut = new THREE.Vector3(target.x - here.x, 0, target.z - here.z);
-    return shortcut.lengthSq() < 1e-8 ? null : shortcut;
+    const target = this.path[this.aimed]!;
+    to.set(target.x - here.x, 0, target.z - here.z);
+    return to.lengthSq() < 1e-8 ? null : to;
   }
 
   /** Drop the cached route: path, leg and goal key. */
@@ -925,6 +937,7 @@ export class Bot implements BotShape {
     this.path = [];
     this.transportPath = [];
     this.leg = 0;
+    this.aimed = 0;
     this.routeKey = null;
   }
 

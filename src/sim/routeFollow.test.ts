@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { furthestWalkable, shouldAbandonRoute } from './routeFollow';
+import { consumeReached, furthestWalkable, shouldAbandonRoute } from './routeFollow';
 
 /**
  * Abandon distance is bots.ts:ROUTE_ABANDON's value, passed as a parameter —
@@ -126,5 +126,63 @@ describe('furthestWalkable', () => {
   test('an empty path and an overrun leg stay put', () => {
     expect(furthestWalkable([], [], 0, { x: 0, z: 0 }, 3, open)).toBe(0);
     expect(furthestWalkable(straight, [], 9, { x: 5, z: 0 }, 3, open)).toBe(5);
+  });
+});
+
+describe('consumeReached', () => {
+  const REACHED = 1;
+  const straight = [
+    { x: 0, z: 0 }, { x: 1, z: 0 }, { x: 2, z: 0 },
+    { x: 3, z: 0 }, { x: 4, z: 0 }, { x: 5, z: 0 },
+  ];
+
+  test('walks one reached waypoint at a time, as before', () => {
+    // Standing on node 1 with node 2 a metre off: consume 1, stop at 2.
+    expect(consumeReached(straight, [], 1, 1, { x: 1, z: 0 }, REACHED)).toBe(2);
+    // Nothing within reach: the leg holds.
+    expect(consumeReached(straight, [], 1, 1, { x: 0, z: 3 }, REACHED)).toBe(1);
+  });
+
+  test('a shortcut past the current leg still consumes the legs it reached', () => {
+    // Aimed at node 3, the bot cut wide of node 1 (1.2 m off) and now
+    // stands on node 3. Strict-order consumption would freeze leg at 1;
+    // the bot has plainly got past it.
+    expect(consumeReached(straight, [], 1, 3, { x: 3, z: 0 }, REACHED)).toBe(4);
+  });
+
+  test('a shove off the current leg does not freeze consumption', () => {
+    // Shoved 1.5 m beside node 1 while aimed at node 2, then on top of 2.
+    expect(consumeReached(straight, [], 1, 2, { x: 1, z: 1.5 }, REACHED)).toBe(1);
+    expect(consumeReached(straight, [], 1, 2, { x: 2, z: 0.2 }, REACHED)).toBe(3);
+  });
+
+  test('never consumes a waypoint it was not steered at', () => {
+    // A path doubling back: node 4 sits beside node 0. Standing on node 0,
+    // aimed at 1, the bot must not jump to leg 5 through the wall between.
+    const hairpin = [{ x: 0, z: 0 }, { x: 1, z: 0 }, { x: 2, z: 0 }, { x: 2, z: 0.6 }, { x: 0.2, z: 0.6 }, { x: -1, z: 0.6 }];
+    expect(consumeReached(hairpin, [], 0, 1, { x: 0.2, z: 0 }, REACHED)).toBe(2);
+    // Steered at node 4 (the caller verified the line), it may.
+    expect(consumeReached(hairpin, [], 0, 4, { x: 0.2, z: 0 }, REACHED)).toBe(5);
+  });
+
+  test('never consumes a boarding leg or anything past it', () => {
+    const transport = [{}, {}, { elevatorId: 'e' }, {}, {}, {}];
+    // Reaching node 2 (the boarding leg) while aimed past it: leg stops at 2.
+    expect(consumeReached(straight, transport, 1, 4, { x: 1.8, z: 0 }, REACHED)).toBe(2);
+    expect(consumeReached(straight, transport, 2, 4, { x: 3, z: 0 }, REACHED)).toBe(2);
+  });
+
+  test('never consumes the final waypoint', () => {
+    expect(consumeReached(straight, [], 4, 9, { x: 4.5, z: 0 }, REACHED)).toBe(5);
+    expect(consumeReached(straight, [], 5, 9, { x: 5, z: 0 }, REACHED)).toBe(5);
+  });
+
+  test('an aimed index behind the leg scans only the current leg', () => {
+    expect(consumeReached(straight, [], 3, 0, { x: 3, z: 0 }, REACHED)).toBe(4);
+    expect(consumeReached(straight, [], 3, 0, { x: 4, z: 0 }, REACHED)).toBe(3);
+  });
+
+  test('an empty path stays at leg 0', () => {
+    expect(consumeReached([], [], 0, 0, { x: 0, z: 0 }, REACHED)).toBe(0);
   });
 });

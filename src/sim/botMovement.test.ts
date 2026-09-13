@@ -45,7 +45,7 @@ function corner(params: BrainParams, hz: number): { loss: number; stall: number 
 
 test.each([20, 60, 120])('escapes an engaged inside corner without grinding at %i Hz', hz => {
   const tuned = corner(DEFAULT_BRAIN_PARAMS, hz);
-  const previous = corner({ ...DEFAULT_BRAIN_PARAMS, wallProbeRange: 1, stuckTime: 0.25, commitTime: 0.5 }, hz);
+  const previous = corner({ ...DEFAULT_BRAIN_PARAMS, stuckTime: 0.25, commitTime: 0.5 }, hz);
   expect(tuned.loss).toBeLessThan(0.2);
   expect(tuned.loss).toBeLessThan(previous.loss * 0.7);
   expect(tuned.stall).toBeLessThanOrEqual(0.1 + 1 / hz + 1e-9);

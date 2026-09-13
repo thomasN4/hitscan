@@ -571,8 +571,9 @@ describe('DefaultBrain travel wall-sense', () => {
   });
 
   it('a committed slide ignores the feelers', () => {
-    // Three refused frames arm the sideways commit; the feelers must not
-    // leak a forward component back into the committed slide.
+    // First refused frame arms the sideways commit (shipped stuckTime 0.1 at
+    // STEP_DT 0.1); the feelers must not leak a forward component back into
+    // the committed slide.
     const brain = calmBrain();
     const jammed = onRoute({ moveBlocked: true, canStandAt: (x) => x >= -0.5 });
     for (let f = 1; f <= 3; f++) brain.decide(jammed, STEP_DT);
@@ -640,15 +641,16 @@ describe('DefaultBrain engage wall-sense', () => {
   });
 
   it('sidesteps a sustained wedge without leaving engage or holding fire', () => {
-    // Three refused frames arm the same commit travel() uses; the step goes
-    // pure lateral while the band, the mode and the trigger all still run.
+    // First refused frame arms the same commit travel() uses (stuckTime 0.1
+    // at STEP_DT 0.1); the step goes pure lateral while the band, the mode
+    // and the trigger all still run.
     const fire = new StubFire();
     fire.readyNow = true;
     const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
     const wedged = duel({ moveBlocked: true });
-    brain.decide(wedged, STEP_DT); // contact edge flips the strafe; brush
-    brain.decide(wedged, STEP_DT); // level; still a brush
-    const slide = brain.decide(wedged, STEP_DT); // blockedFor 0.3: commit
+    brain.decide(wedged, STEP_DT); // contact edge flips the strafe; already committed
+    brain.decide(wedged, STEP_DT); // committed
+    const slide = brain.decide(wedged, STEP_DT); // still committed
     expect(slide.mode).toBe('engage');
     expect(slide.step.x).toBeCloseTo(0, 12);
     expect(Math.abs(slide.step.z)).toBeCloseTo(4 * STEP_DT, 12);
@@ -657,6 +659,25 @@ describe('DefaultBrain engage wall-sense', () => {
     // …and the commit persists while the wedge does.
     const held = brain.decide(wedged, STEP_DT);
     expect(Math.abs(held.step.z)).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('a patrol-armed commit does not steer the next firefight', () => {
+    // Patrol geometry arms the shared timers, hold freezes them (it never
+    // runs updateJam), and the next visual must re-enter engage fresh rather
+    // than sliding on geometry it already left behind.
+    const brain = brainOf({ ...moveParams(), patrolPause: 0 }, calmRng);
+    const patrolBlocked = view({
+      visual: null,
+      moveBlocked: true,
+      nextPatrolWaypoint: () => new THREE.Vector3(0, 0, 4),
+    });
+    brain.decide(patrolBlocked, STEP_DT); // arms commitLeft
+    brain.decide(view({ visual: null, moveBlocked: true, nextPatrolWaypoint: () => null }), STEP_DT); // hold
+    const { step, mode } = brain.decide(duel({ dist: 20, moveBlocked: false }), STEP_DT);
+    expect(mode).toBe('engage');
+    // Beyond farBand the band blend keeps a forward component; a leaked
+    // commit would read pure lateral (all-z, no x).
+    expect(step.x).toBeGreaterThan(0);
   });
 
   it('a brush never sidesteps: isolated rejections keep band steering', () => {

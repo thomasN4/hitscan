@@ -63,7 +63,7 @@ export function shouldAbandonRoute(
 
 /**
  * Spacing (m) between walkability samples along a shortcut segment — about a
- * body diameter, so a wall the executor's own gate would refuse cannot hide
+ * body radius, so a wall the executor's own gate would refuse cannot hide
  * between two samples.
  */
 const SHORTCUT_SAMPLE_STEP = 0.5;
@@ -102,15 +102,22 @@ export function furthestWalkable(
 ): number {
   if (path.length === 0) return leg;
   const clamped = Math.min(leg, path.length - 1);
-  let target = clamped;
+  // A leg the bot must board through ends the scan; find that boundary first
+  // so the walk below never looks past an elevator mouth.
+  let end = path.length;
   for (let k = clamped + 1; k < path.length; k++) {
-    if (transport[k]?.elevatorId) break;
+    if (transport[k]?.elevatorId) { end = k; break; }
+  }
+  // Walk downward from the furthest eligible leg: the first in-range clear
+  // segment is the maximum qualifying index, and the common all-clear case
+  // costs one segment check instead of one per candidate.
+  for (let k = end - 1; k > clamped; k--) {
     const cand = path[k]!;
     if (planarDistance(cand, here) > maxDistance) continue;
     if (segmentBlocked(here, cand, isBlocked)) continue;
-    target = k;
+    return k;
   }
-  return target;
+  return clamped;
 }
 
 /** Whether any walkability sample along the segment from `from` to `to` is blocked. */

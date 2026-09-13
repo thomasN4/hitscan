@@ -211,7 +211,7 @@ function optimalCost(grid: NavGrid, from: THREE.Vector3, to: THREE.Vector3): num
   return dist[goal]!;
 }
 
-/** Summed 3D length of a returned path — the cost its edges charged. */
+/** Summed 3D length of a returned path — geometric length, not charged cost (see pricedCost below for uplifted edges). */
 const pathCost = (path: THREE.Vector3[]): number =>
   path.slice(1).reduce((sum, p, i) => sum + p.distanceTo(path[i]!), 0);
 

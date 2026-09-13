@@ -449,6 +449,15 @@ export class DefaultBrain implements BotBrain {
    */
   private wasBlocked = false;
   /**
+   * True when the previous frame's intent was engage. Jam timers are shared
+   * by routed travel and engaged strafing, but a patrol-armed commit must not
+   * steer an unrelated firefight: entering engage from any non-engage mode
+   * restarts the timers (and the wall-sense cooldown) instead of inheriting
+   * geometry the bot already left behind. Continuing engage frames preserve
+   * them, so a sustained wedge still commits.
+   */
+  private wasEngage = false;
+  /**
    * The identity this brain's attention is on: the last observed id, held
    * across temporary sight loss so acquisition probes it first when the
    * look could plausibly succeed again. Cleared by onRespawn — a new life
@@ -558,6 +567,7 @@ export class DefaultBrain implements BotBrain {
     this.stalledFor = 0;
     this.stallBase = Infinity;
     this.wasBlocked = false;
+    this.wasEngage = false;
     this.focus = null;
     this.memory = null;
     this.searching = false;
@@ -823,6 +833,7 @@ export class DefaultBrain implements BotBrain {
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;
       }
+      this.wasEngage = false;
       return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
     }
 
@@ -831,8 +842,13 @@ export class DefaultBrain implements BotBrain {
       // Priority 2: something is actually in sight. Ordinary sound never
       // pulls a bot off an opponent it can see, so this frame's noises go
       // unread — the executor has already advanced the cursor past them.
+      // visualIntent owns the wasEngage latch (entry vs continuation).
       return this.visualIntent(view, vis, dt, jukeDraw);
     }
+    // No visual this frame: every path below is non-engage, so the next
+    // visual frame re-enters engage fresh. Timers are preserved (a patrol
+    // wedge frozen through hold resumes), only the latch flips.
+    this.wasEngage = false;
 
     // Priority 3: a newly heard hostile noise — only when nothing is already
     // committed. A pending bearing and a current visual (the two returns
@@ -989,6 +1005,10 @@ export class DefaultBrain implements BotBrain {
    * fire cadence — unchanged.
    */
   private visualIntent(view: BrainView, vis: VisualObservation, dt: number, jukeDraw: number): BrainIntent {
+    // Entering engage from any non-engage mode restarts the jam machinery —
+    // a patrol-armed commit must not steer this firefight. Continuing engage
+    // preserves it, so a sustained wedge still commits.
+    const prevEngage = this.wasEngage;
     this.focus = vis.id;
     // Freeze the last-known position: COPIES of the observation's geometry —
     // the observation belongs to the executor and the target moves.
@@ -1073,14 +1093,23 @@ export class DefaultBrain implements BotBrain {
     const step = new THREE.Vector3();
     if (this.routing) {
       this.travel(step, waypoint!, view, dt);
-    } else if (this.updateJam(view, dt)) {
+    } else if (prevEngage && this.updateJam(view, dt)) {
       // Sustained wedge while engaged: sidestep decisively along the strafe
       // axis without leaving engage — the band, the facing and the trigger
       // below all still run, only the steering is overridden. Same
-      // brush-vs-jam timers and alternating sides as travel().
+      // brush-vs-jam timers and alternating sides as travel(). Gated on
+      // continuing engage: the entry frame below restarts instead of sliding
+      // on patrol geometry the bot already left behind.
       step.set(-toTarget.z * this.slideDir, 0, toTarget.x * this.slideDir)
         .normalize().multiplyScalar(view.selfSpeed * dt);
     } else {
+      if (!prevEngage) {
+        // First engage frame after patrol/hold/search/route: zero the shared
+        // timers (and the feeler cooldown) rather than inheriting them.
+        this.blockedFor = 0;
+        this.commitLeft = 0;
+        this.senseCooldown = 0;
+      }
       // Strafe wall-sense, ahead of the blend: flip away from a walled side
       // while the other reads open, before contact grinds. Pure lateral
       // feelers — the radial leg is band policy and owns its own slides.
@@ -1148,6 +1177,7 @@ export class DefaultBrain implements BotBrain {
     // degenerate (zero planar offset).
     const facing = dist > 1e-9 ? dir.clone() : view.facing.clone();
 
+    this.wasEngage = !this.routing;
     return {
       step,
       wantShoot,

@@ -37,7 +37,7 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 
 Before deploying you pick a **loadout**: one primary and one secondary from the weapon catalog (SMG / sniper / shotgun primaries; pistol / revolver secondaries). The picker opens at match start (after Play) and again on death, pre-filled with your last pick; Deploy commits it and enters the game. In-game, `1`/`2` switch between the two positions and `Q` quick-swaps. Your pick survives map switches via sessionStorage.
 
-Five maps plus the match setup (enemy/allied bot counts, round length in minutes, and each side's bot primary and secondary), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&tbots=…&ctbots=…&time=…&tweap=…&tsec=…&ctweap=…&ctsec=…`) and reloads the page:
+Five maps plus the match setup (your side, enemy/allied bot counts, round length in minutes, and each side's bot primary and secondary), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&side=…&tbots=…&ctbots=…&time=…&tweap=…&tsec=…&ctweap=…&ctsec=…`) and reloads the page:
 
 **Bots carry real loadouts.** Each side sets a primary (SMG / sniper / shotgun) and a secondary (pistol / revolver), or **Mixed** (the default for both positions) to draw one per bot, and the choice drives everything downstream: its accuracy curve and falloff, how close it wants to fight, its rate of fire, its magazine and reload, its damage by hit zone — and its silhouette, its report, and the killfeed line it leaves. A sniper bot threatens across the whole map and a shotgun bot is harmless past ten metres, so what the enemy is holding is now worth reading off their barrel. When a position runs dry the bot swaps down the ladder — primary, then sidearm, then the blade every loadout carries.
 
@@ -52,7 +52,7 @@ Common rules:
 - Damage zones: head ×2 with the SMG/pistol (two headshots to kill), ×4 with the sniper/shotgun/revolver (one-shot kill); torso ×1; legs ×0.75.
 - Accuracy stacks: each weapon has an inherent rest cone, on top of which stance, movement and being airborne add spread, all multiplied by a spray factor that grows while you hold the trigger. Crouching is the most accurate stance and crouch-walking the most accurate way to move; sprinting is far worse than walking (movement scales cubically), and shooting mid-air is worse still. Recoil climbs vertically *and* wanders horizontally, so sustained fire has to be steered, not just pulled down.
 - Bullets leave persistent decals (capped at 200; oldest recycled) — check your grouping on any surface.
-- A match ends two ways: when the clock runs out the higher kill score wins (ties draw), and wiping every enemy bot wins outright for CT — unless it's a 1v1, where the lone bot respawns and only the clock can end it. The end shows a score screen (winner, team scores, per-bot K/D) with Rematch / Back to Menu.
+- A match ends two ways: when the clock runs out the higher kill score wins (ties draw), and wiping every enemy bot wins outright for your side — unless it's a 1v1, where the lone bot respawns and only the clock can end it. The end shows a score screen (winner, team scores, per-bot K/D) with Rematch / Back to Menu.
 - Individual bots self-respawn 6 s after dying.
 - Bots' accuracy degrades with distance.
 

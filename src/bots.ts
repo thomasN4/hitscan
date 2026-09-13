@@ -1,6 +1,6 @@
 // bots.ts — bot bodies and effectors: meshes, collision-gated movement,
-// probabilistic shots, death/respawn. Both teams (T enemies, CT allies) are
-// instances of this one class; behavior comes from sim/botBrains.ts.
+// probabilistic shots, death/respawn. Both teams (enemy wave and the player's
+// allied side) are instances of this one class; behavior comes from sim/botBrains.ts.
 //
 // Division of labor with sim/botBrains.ts: a BotBrain DECIDES, Bot EXECUTES.
 // Each frame update() runs ONE visual acquisition (sim/perception.ts) over
@@ -507,12 +507,13 @@ export class Bot implements BotShape {
 
     // Opposing entities as STABLE CANDIDATES — no positional selection here.
     // Perception owns acquisition; the brain only ever learns about the one
-    // candidate the frame's single ray successfully looked at. Ts fight the
-    // player and every CT; CTs fight every T. The player is listed even
+    // candidate the frame's single ray successfully looked at. Bots opposing
+    // the player's side fight the player and every allied bot; allied bots
+    // fight every enemy. The player is listed even
     // while dead — a dead candidate is a cheap rejection, so the bot holds
     // rather than chasing the corpse position.
     const enemies: Target[] = [];
-    if (this.team === 'T') {
+    if (this.team !== session.playerTeam) {
       enemies.push({
         kind: 'player',
         id: 'player',
@@ -1070,18 +1071,19 @@ export class Bot implements BotShape {
     this.elevatorTrip = null;
     this.mesh.visible = false;
     this.deaths++;
-    // Team scores: scoreKills is the CT score (player kills and CT allies
-    // downing a T); scoreDeaths is the T score, so a T downing a CT counts
-    // there — the same counter combat.ts bumps when a T downs the player.
-    if (killerName === undefined || this.team === 'T') score.scoreKills++;
-    else score.scoreDeaths++;
+    // Team scores are side-fixed: scoreKills is the CT score, scoreDeaths the
+    // T score. Credit the killer's side for an opposing casualty — a player
+    // kill counts for the player's side, whatever it is.
+    const killer = killerName === undefined
+      ? undefined
+      : bots.find(b => b.name === killerName);
+    const killerTeam = killer?.team ?? session.playerTeam;
+    if (killerTeam === 'CT' && this.team === 'T') score.scoreKills++;
+    else if (killerTeam === 'T' && this.team === 'CT') score.scoreDeaths++;
     // Scoreboard attribution: the player's own kills get a personal counter;
     // a bot killer is resolved by display name (unique per team serial).
     // Hoisted out of the counter branch because the killfeed needs it too:
     // a bot killer names the weapon it did it with.
-    const killer = killerName === undefined
-      ? undefined
-      : bots.find(b => b.name === killerName);
     if (killerName === undefined) score.playerKills++;
     else if (killer) killer.kills++;
     updateScore();

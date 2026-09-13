@@ -181,7 +181,7 @@ export interface WeaponDef {
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
 export type HitZone = 'head' | 'torso' | 'legs';
 
-/** Sides. The player is implicitly CT-side; Ts are the enemy wave. */
+/** Sides. The player fights for `session.playerTeam`; the other side is the enemy wave. */
 export type Team = 'T' | 'CT';
 
 /** Structural shape of one bot (see bots.ts for the concrete class). */
@@ -814,7 +814,7 @@ export const DESERT_AMBIENCE: Ambience = {
 };
 
 /**
- * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN_Z /
+ * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN /
  * SUBTITLES: adding a MapName must fail to compile until the new map says what
  * it looks like, rather than silently inheriting the desert.
  */
@@ -897,7 +897,7 @@ export interface SpawnZone {
  * (maps/warehouse1.ts:25-27). A map smaller than that band strands bots
  * outside its own geometry.
  *
- * A full Record for the same reason as BUILDERS / SPAWN_Z / AMBIENCE: adding a
+ * A full Record for the same reason as BUILDERS / SPAWN / AMBIENCE: adding a
  * MapName must fail to compile until the new map says where its bots start.
  *
  * The first four entries reproduce that old band exactly — `x ∈ [-45, 45]`,
@@ -943,6 +943,7 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
  */
 export const SESSION_DEFAULTS: Readonly<{
   map: MapName;
+  playerTeam: Team;
   botsT: number;
   botsCt: number;
   roundSeconds: number;
@@ -952,6 +953,8 @@ export const SESSION_DEFAULTS: Readonly<{
   botSecondaryCt: BotSecondaryChoice;
 }> = {
   map: 'arena',
+  // CT default preserves the historical bare-URL match: 6 enemy Ts, 5 allied CTs.
+  playerTeam: 'CT',
   botsT: 6,
   botsCt: 5,
   roundSeconds: 300,
@@ -983,7 +986,7 @@ export const SESSION_DEFAULTS: Readonly<{
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
-  // query string (?map=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
+  // query string (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
   // a full page reload — map
   // switching is a reload and there is deliberately no hot-swapping of scenes
   // at runtime. The key list is spelled out in four places (here, AGENTS.md,
@@ -993,9 +996,11 @@ export interface SessionState {
   // parse of the URL at startup — reading `location` here would break this
   // module's importability in Node.
   map: MapName;
-  /** Enemy (T-side) bot count, clamped to 1..16 by the parser. */
+  /** Which side the player fights for. The other side is the enemy wave. */
+  playerTeam: Team;
+  /** T-side bot count. Enemy (1..16) on CT-side, allied (0..15) on T-side; clamped by botLimits() in sessionConfig. */
   botsT: number;
-  /** Allied (CT-side) bot count, 0..15. */
+  /** CT-side bot count. Allied (0..15) on CT-side, enemy (1..16) on T-side; clamped by botLimits() in sessionConfig. */
   botsCt: number;
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;

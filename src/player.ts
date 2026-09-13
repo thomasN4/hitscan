@@ -19,7 +19,7 @@
 // blends use sim/smoothing.ts.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, input, aim, wpn, motion, keyHeld, effectiveCrouching, gameTime, soundEvents, playerFeet } from './core/state';
+import { player, input, aim, wpn, motion, keyHeld, effectiveCrouching, gameTime, soundEvents, playerFeet, session } from './core/state';
 import { slideMoveXZ, resolveVertical, HEAD_HEIGHT } from './collision';
 import { colliders, liftPads, elevatorCarry } from './world';
 import { sfxFootstep } from './audio';
@@ -192,7 +192,7 @@ export function updateMovement(dt: number): void {
         soundEvents.emit({
           kind: 'footstep',
           sourceId: 'player',
-          team: 'CT',
+          team: session.playerTeam,
           pos: playerFeet(player),
           radius: sprinting ? FOOTSTEP_RUN_RADIUS_M : FOOTSTEP_WALK_RADIUS_M,
           t: gameTime.now(),

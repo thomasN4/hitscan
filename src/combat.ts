@@ -5,7 +5,7 @@
 // makes the kill/score/respawn rules easy to audit. It also owns endMatch,
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
-import type { Bot as BotShape, HitZone, MapName } from './core/state';
+import type { Bot as BotShape, HitZone, MapName, Team } from './core/state';
 import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
@@ -15,7 +15,7 @@ import { flashDamageVignette, clearVignette, botKillTag, addKillfeed, updateScor
 import { showLoadoutPicker, showEndScreen } from './menu';
 
 /**
- * Apply damage to the player. On death: awards the bot-side score,
+ * Apply damage to the player. On death: awards the killer's side its score,
  * releases pointer lock (which pauses the loop) and shows the death screen.
  * @param dmg raw damage; caller decides falloff/accuracy
  * @param attackerName display name for the killfeed — required so the
@@ -38,9 +38,14 @@ export function damagePlayer(dmg: number, attackerName: string): void {
   if (player.hp <= 0) {
     player.alive = false;
     cancelPendingReloadSfx();
-    score.scoreDeaths++;
-    score.playerDeaths++;
     const attacker = bots.find(b => b.name === attackerName);
+    // Side-fixed scores: a CT kill is a CT point (scoreKills), a T kill a T
+    // point (scoreDeaths). The attacker is always the enemy; the fallback
+    // covers an unresolvable name by crediting the opposing side.
+    const killerTeam: Team = attacker?.team ?? (session.playerTeam === 'CT' ? 'T' : 'CT');
+    if (killerTeam === 'CT') score.scoreKills++;
+    else score.scoreDeaths++;
+    score.playerDeaths++;
     if (attacker) attacker.kills++;
     addKillfeed(`${attackerName}${botKillTag(attacker)} killed You`);
     updateScore();
@@ -108,28 +113,41 @@ export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerNam
 }
 
 /**
- * Player spawn z per map, on the map's centre line (x = 0).
+ * Player spawn per side per map, on the map's centre line (x = 0).
  *
  * A full Record rather than a ternary chain on purpose: adding a MapName now
- * fails to compile until the new map declares where the player starts, instead
- * of silently inheriting the arena's coordinates.
+ * fails to compile until the new map declares where EACH side starts, instead
+ * of silently inheriting the arena's coordinates. T spawns mirror CT across
+ * -z (facing +z); the range is side-agnostic (no bots), so both entries face
+ * downrange. feetY is the floor under the spawn — 0 everywhere except
+ * warehouse2's T-side catwalk (5.1, matching BOT_SPAWNS).
  */
-const SPAWN_Z: Record<MapName, number> = {
-  arena: 48,
-  range: 8,       // behind the firing line
-  elevation: 48,  // open ground south of the two-story building
-  warehouse1: 40, // dock yard floor, 5 m clear of the south dock's face at z = 45
-  warehouse2: 27, // the +z yard, between the shell wall at 20.5 and the fence at 34
+const SPAWN: Record<Team, Record<MapName, { z: number; feetY: number }>> = {
+  CT: {
+    arena: { z: 48, feetY: 0 },
+    range: { z: 8, feetY: 0 },       // behind the firing line
+    elevation: { z: 48, feetY: 0 },  // open ground south of the two-story building
+    warehouse1: { z: 40, feetY: 0 }, // dock yard floor, 5 m clear of the south dock's face at z = 45
+    warehouse2: { z: 27, feetY: 0 }, // the +z yard, between the shell wall at 20.5 and the fence at 34
+  },
+  T: {
+    arena: { z: -48, feetY: 0 },
+    range: { z: 8, feetY: 0 },
+    elevation: { z: -48, feetY: 0 },
+    warehouse1: { z: -40, feetY: 0 },
+    warehouse2: { z: -16, feetY: 5.1 }, // the -z catwalk band (BOT_SPAWNS -19..-13)
+  },
 };
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
 export function respawn(): void {
   cancelPendingReloadSfx();
-  player.pos.set(0, player.eyeHeight, SPAWN_Z[session.map]);
+  const spawn = SPAWN[session.playerTeam][session.map];
+  player.pos.set(0, spawn.feetY + player.eyeHeight, spawn.z);
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;
-  aim.yaw = 0;   // face -z, into the arena / downrange
+  aim.yaw = session.playerTeam === 'T' ? Math.PI : 0;   // T faces +z, CT faces -z
   aim.pitch = 0;
   wpn.recoil = 0;    // else the view punch would spawn the camera mid-climb
   wpn.recoilYaw = 0; // and mid-wander, off to one side
@@ -159,21 +177,21 @@ export function respawn(): void {
 }
 
 /**
- * Win check after each bot death. With two or more Ts, wiping the enemy
- * team wins the match outright (endMatch). In a 1v1 there is no wave to
- * speak of — the arena would end seconds after every spawn — so the old
- * behavior stays: announce the clear and bring everyone back after 2.5s,
- * leaving only the clock to end the match. CT casualties never end anything
- * — the wave is the enemy.
+ * Win check after each bot death. With two or more enemies, wiping the
+ * opposing team wins the match outright (endMatch) for the player's side. In
+ * a 1v1 there is no wave to speak of — the arena would end seconds after
+ * every spawn — so the old behavior stays: announce the clear and bring
+ * everyone back after 2.5s, leaving only the clock to end the match.
  */
 export function checkRoundEnd(): void {
-  const ts = bots.filter(b => b.team === 'T');
-  if (ts.length > 0 && ts.every(b => !b.alive)) {
-    // Live wave count, not session.botsT: debug tooling can remove bots, and
-    // the decision should read what's actually on the field.
-    if (eliminationEndsMatch(ts.length)) {
-      addKillfeed('★ All Ts eliminated!');
-      endMatch('CT');
+  const foeTeam: Team = session.playerTeam === 'CT' ? 'T' : 'CT';
+  const foes = bots.filter(b => b.team === foeTeam);
+  if (foes.length > 0 && foes.every(b => !b.alive)) {
+    // Live wave count, not session bot counts: debug tooling can remove bots,
+    // and the decision should read what's actually on the field.
+    if (eliminationEndsMatch(foes.length)) {
+      addKillfeed(foeTeam === 'T' ? '★ All Ts eliminated!' : '★ All CTs eliminated!');
+      endMatch(session.playerTeam);
     } else {
       addKillfeed('★ Bot down — respawning...');
       // Game time: the wave stays dead while paused. Every bot goes through
@@ -187,9 +205,9 @@ export function checkRoundEnd(): void {
 /**
  * End the match and move to the score screen. One-shot: both win conditions
  * converge here, and whichever fires first owns the transition. Winner is
- * decided by the caller — 'CT' outright on elimination, or by kill score
- * when the clock runs out (sim/match.ts:decideWinner); callers announce
- * their own killfeed line first.
+ * decided by the caller — the player's side outright on elimination, or by
+ * kill score when the clock runs out (sim/match.ts:decideWinner); callers
+ * announce their own killfeed line first.
  *
  * Pointer lock is released first so the loop stops simulating; the screen
  * then reveals on a WALL-clock delay for the same reason damagePlayer's

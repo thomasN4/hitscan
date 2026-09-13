@@ -180,7 +180,7 @@ export function poseBotWeaponRig(
     if (m.hammer) m.hammer.rotation.x += 0.5 * kick;
   }
   // Documented pairing (weaponAssets.ts): magazineOut/port exist exactly when
-  // mechanisms.magazine does (pistol/smg/sniper). The shotgun feeds its tube
+  // mechanisms.magazine does (pistol/smg/ak47/sniper). The shotgun feeds its tube
   // and the revolver its swung-out cylinder, so neither displaces a magazine.
   if (pose.reloadBlend > 0.001 && m.magazine && rig.magazineOut && rig.port) {
     const magazine = m.magazine;

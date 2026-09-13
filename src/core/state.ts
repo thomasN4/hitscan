@@ -67,7 +67,7 @@ export type BotSecondaryChoice = BotSidearmId | 'mixed';
 
 /**
  * A menu/URL bot-PRIMARY setting: one primary firearm for the whole team, or
- * 'mixed' for an independent smg/sniper/shotgun draw per bot
+ * 'mixed' for an independent smg/ak47/sniper/shotgun draw per bot
  * (sim/botWeapons.ts:resolveBotWeapon). Sidearms and the blade are not legal
  * here — the secondary position and the fallback blade already cover those —
  * so an unrecognized value (including a stale ?tweap=knife bookmark) falls

@@ -15,7 +15,7 @@ import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, S
                LoadoutState, Team,
                MapName, MatchMode, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders, elevators, updateElevators } from './world';
 import { HEAD_HEIGHT } from './collision';
@@ -28,10 +28,12 @@ import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeap
 import { updateEffects } from './effects';
 import { toggleDebugView, updateDebugView } from './debugView';
 import { respawn, endMatch } from './combat';
+import { updateDomination } from './domination';
+import { buildDomFlags } from './domFlags';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, addKillfeed } from './hud';
 import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout, setAssetStatus } from './menu';
 import { sfxZoom } from './audio';
-import { decideWinner } from './sim/match';
+import { decideWinner, decideDomWinner } from './sim/match';
 import { isDeploying } from './sim/weaponSwap';
 import { validateWeapons } from './sim/validateWeapons';
 import { loadWeaponAssets } from './core/weaponAssets';
@@ -94,6 +96,13 @@ async function start(): Promise<void> {
   // which the builder is what fills. Map switching is a full page reload, so
   // this runs once per session.
   buildNav();
+  // Domination flags reset before the wave: the respawn director reads owned
+  // flags, and a stale slice from a previous match would aim it at ghosts.
+  // (Module scope initializes empty, so this is Reload-proofing, not TDM.)
+  if (session.mode === 'dom') {
+    resetDom(DOM_FLAGS[session.map]);
+    buildDomFlags();
+  }
   if (!RANGE) {
     // Either count may be 0 when it is the player's own side; the enemy side
     // always has ≥1 (enforced by botLimits in sessionConfig).
@@ -122,7 +131,10 @@ async function start(): Promise<void> {
     // is the user gesture pointer lock needs.
     onDeploy: (primary, secondary) => {
       setLoadout(primary, secondary);
-      if (!player.alive) respawn();
+      // Death deploys in domination respawn through the director (near owned
+      // flags, far from enemies); the match-opening deploy finds the player
+      // alive and keeps the fixed SPAWN.
+      if (!player.alive) respawn(session.mode === 'dom');
       lock();
     },
   });
@@ -288,10 +300,16 @@ async function start(): Promise<void> {
       updateCamera();
       updateViewmodel();
       if (!RANGE) updateBots(dt, player);
+      // Domination capture + tick scoring, after every body has moved. The
+      // updater also ends the match on the score limit; the clock below
+      // stays the second way out.
+      if (!RANGE && session.mode === 'dom') updateDomination(dt);
 
       // Round clock: arena only — meaningless on the range, so freeze it there.
       // Clamped at 0 rather than reset: expiry ENDS the match (combat.ts:endMatch),
-      // winner by kill score (sim/match.ts:decideWinner). The matchOver check is
+      // winner by kill score in TDM (sim/match.ts:decideWinner) and by ticked
+      // flag points in domination (decideDomWinner, floored like the HUD).
+      // The matchOver check is
       // redundant with the lock gate in the normal flow (endMatch releases the
       // pointer), but keeps a same-frame double-fire impossible if lock release
       // ever becomes async.
@@ -300,7 +318,9 @@ async function start(): Promise<void> {
         setTimer(score.roundTime);
         if (score.roundTime <= 0 && !session.matchOver) {
           addKillfeed('⏱ Time expired');
-          endMatch(decideWinner(score.scoreKills, score.scoreDeaths));
+          endMatch(session.mode === 'dom'
+            ? decideDomWinner(Math.floor(dom.scoreCt), Math.floor(dom.scoreT))
+            : decideWinner(score.scoreKills, score.scoreDeaths));
         }
       }
 
@@ -375,7 +395,7 @@ async function start(): Promise<void> {
     get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
   };
 
-  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, nav: { route, transportRoute, grid: navGrid } };
+  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, dom, nav: { route, transportRoute, grid: navGrid } };
 }
 
 void start().catch((error: unknown) => {
@@ -395,6 +415,8 @@ declare global {
       elevators: typeof elevators;
       /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */
       gameTime: typeof gameTime;
+      /** Domination slice — flags, ticked scores; empty flags outside dom matches. */
+      dom: typeof dom;
       /**
        * Navigation graph queries. The graph is the one part of the AI whose
        * correctness can be checked without watching a bot move, so the smoke

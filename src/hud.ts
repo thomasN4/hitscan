@@ -7,8 +7,9 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, dom, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
 import { isLowAmmo } from './sim/ammo';
+import { DOM_SCORE_LIMIT } from './sim/domination';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -33,7 +34,8 @@ const el = requireEl;
 let hitmarkerEl: HTMLElement, killfeedEl: HTMLElement, hpText: HTMLElement,
   healthFill: HTMLElement, magText: HTMLElement, ammoSep: HTMLElement,
   ammoReserve: HTMLElement, reloadHint: HTMLElement, scopeOverlay: HTMLElement,
-  zoomText: HTMLElement, weaponName: HTMLElement, botDebug: HTMLElement;
+  zoomText: HTMLElement, weaponName: HTMLElement, botDebug: HTMLElement,
+  domFlagsEl: HTMLElement;
 
 // Declared non-optional on purpose: like engine.ts's singletons, the
 // contract is "read only after init*()" — typing them optional would push
@@ -60,6 +62,7 @@ export function initHUD(): void {
   zoomText = el('zoomText');
   weaponName = el('weaponName');
   botDebug = el('botDebug');
+  domFlagsEl = el('domFlags');
 }
 
 let hitmarkerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,8 +110,46 @@ export function addKillfeed(text: string): void {
 
 /** Refresh CT/T round score from score.scoreKills / score.scoreDeaths. */
 export function updateScore(): void {
+  // Domination owns the top bar instead: floored tick points toward the
+  // limit, so the bar agrees with the end screen and the limit killfeed.
+  if (session.mode === 'dom') {
+    requireEl('scoreCT').textContent = `CT ${Math.floor(dom.scoreCt)}/${DOM_SCORE_LIMIT}`;
+    requireEl('scoreT').textContent = `${Math.floor(dom.scoreT)}/${DOM_SCORE_LIMIT} T`;
+    return;
+  }
   requireEl('scoreCT').textContent = 'CT ' + score.scoreKills;
   requireEl('scoreT').textContent = 'T ' + score.scoreDeaths;
+}
+
+/**
+ * Refresh the domination flag chips (owner colour + live capture percent).
+ * Called from the domination updater each sim frame; cached so a steady
+ * state never touches the DOM. Hidden outside dom matches.
+ */
+let lastDomHUD = '';
+export function updateDomHUD(): void {
+  if (session.mode !== 'dom' || dom.flags.length === 0) {
+    if (lastDomHUD !== '') {
+      lastDomHUD = '';
+      domFlagsEl.style.display = 'none';
+    }
+    return;
+  }
+  const text = dom.flags
+    .map(f => `${f.id}:${f.owner ?? '-'}:${f.challenger ?? '-'}:${Math.floor(f.progress * 100)}`)
+    .join('|');
+  if (text === lastDomHUD) return;
+  lastDomHUD = text;
+  domFlagsEl.style.display = 'flex';
+  updateScore();
+  for (const f of dom.flags) {
+    const chip = requireEl(`flag${f.id}`);
+    chip.textContent = f.challenger !== null
+      ? `${f.id} ${Math.floor(f.progress * 100)}%`
+      : f.id;
+    chip.classList.toggle('t', f.owner === 'T');
+    chip.classList.toggle('ct', f.owner === 'CT');
+  }
 }
 
 /** Format remaining seconds as m:ss in the top-bar timer. */

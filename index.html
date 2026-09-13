@@ -48,6 +48,12 @@
   #scoreCT { color: #66b2ff; } #scoreT { color: #ffcc66; }
   #timer { color: #fff; min-width: 70px; text-align: center; }
 
+  /* Domination flag chips: owner colour + live capture percent */
+  #domFlags { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; font-size: 16px; font-weight: bold; text-shadow: 0 0 4px #000; }
+  .flag { padding: 3px 12px; border-radius: 4px; background: rgba(0,0,0,.45); color: #bbb; border: 1px solid #555; }
+  .flag.t { color: #ffcc66; border-color: #ffcc66; }
+  .flag.ct { color: #66b2ff; border-color: #66b2ff; }
+
   /* Kill feed */
   #killfeed { position: absolute; top: 60px; right: 20px; text-align: right; font-size: 14px; text-shadow: 0 1px 2px #000; }
   .kf { background: rgba(0,0,0,.45); padding: 3px 8px; margin-top: 4px; border-radius: 3px; opacity: 1; transition: opacity 1s; }
@@ -138,6 +144,11 @@
     <div class="score" id="timer">5:00</div>
     <div class="score" id="scoreT">T 0</div>
   </div>
+  <div id="domFlags" style="display:none">
+    <div class="flag" id="flagA">A</div>
+    <div class="flag" id="flagB">B</div>
+    <div class="flag" id="flagC">C</div>
+  </div>
   <div id="killfeed"></div>
   <div id="botDebug"></div>
   <div id="bottom">
@@ -176,6 +187,13 @@
       <select id="cfgSide">
         <option value="ct">CT</option>
         <option value="t">T</option>
+      </select>
+    </label>
+    <label>
+      <span class="cfgName">Mode</span>
+      <select id="cfgMode">
+        <option value="tdm">Team Deathmatch</option>
+        <option value="dom">Domination</option>
       </select>
     </label>
     <label>

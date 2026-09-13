@@ -11,6 +11,7 @@ import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
 import { sfxHurt } from './audio';
+import { pickDomRespawn } from './domSpawns';
 import { flashDamageVignette, clearVignette, botKillTag, addKillfeed, updateScore, updateHUD } from './hud';
 import { showLoadoutPicker, showEndScreen } from './menu';
 
@@ -143,10 +144,30 @@ const SPAWN: Record<Team, Record<MapName, { z: number; feetY: number; yaw: numbe
 };
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
-export function respawn(): void {
+export function respawn(useDirector = false): void {
   cancelPendingReloadSfx();
   const spawn = SPAWN[session.playerTeam][session.map];
-  player.pos.set(0, spawn.feetY + player.eyeHeight, spawn.z);
+  // Domination redeploys (death → picker → Deploy) come through the director
+  // — near owned flags, far from enemies — while the match opening keeps the
+  // fixed SPAWN: main.ts passes false at startup and true on death deploys.
+  const feetY = spawn.feetY;
+  if (useDirector && session.mode === 'dom') {
+    const foeTeam = opposing(session.playerTeam);
+    const enemies = bots
+      .filter(b => b.team === foeTeam && b.alive)
+      .map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
+    const p = pickDomRespawn(session.playerTeam, enemies);
+    player.pos.set(p.x, p.y + player.eyeHeight, p.z);
+    motion.groundSmoothY = p.y;
+  } else {
+    player.pos.set(0, feetY + player.eyeHeight, spawn.z);
+    // The camera rides a smoothed ground height (player.ts eases it toward the
+    // physics feet), so seed it AT the spawn floor — not 0. Dying on platform
+    // geometry with a stale height would otherwise ease the view down from it
+    // over the first ~100 ms, and a 5.1 m spawn (warehouse2 T-side) would climb
+    // up from the shed floor instead of starting on the catwalk.
+    motion.groundSmoothY = feetY;
+  }
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;
@@ -162,12 +183,6 @@ export function respawn(): void {
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
   motion.airLerp = 0;
   motion.crouchLerp = 0;
-  // The camera rides a smoothed ground height (player.ts eases it toward the
-  // physics feet), so seed it AT the spawn floor — not 0. Dying on platform
-  // geometry with a stale height would otherwise ease the view down from it
-  // over the first ~100 ms, and a 5.1 m spawn (warehouse2 T-side) would climb
-  // up from the shed floor instead of starting on the catwalk.
-  motion.groundSmoothY = spawn.feetY;
   input.crouching = false; // else a death while crouch-toggled respawns you crouched
   wpn.adsLerp = 0;
   armLoadout();   // refills both loadout positions and mirrors the primary into `weapon`
@@ -188,8 +203,13 @@ export function respawn(): void {
  * a 1v1 there is no wave to speak of — the arena would end seconds after
  * every spawn — so the old behavior stays: announce the clear and bring
  * everyone back after 2.5s, leaving only the clock to end the match.
+ *
+ * TDM only: domination has no wipe win (flags own the points), so this
+ * returns immediately there and the wave simply self-revives on its 6 s
+ * schedule.
  */
 export function checkRoundEnd(): void {
+  if (session.mode === 'dom') return;
   const foeTeam: Team = opposing(session.playerTeam);
   const foes = bots.filter(b => b.team === foeTeam);
   if (foes.length > 0 && foes.every(b => !b.alive)) {

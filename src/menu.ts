@@ -18,7 +18,7 @@
 // screen), pre-filled with lastLoadout either way. Its Deploy click doubles as
 // the user gesture pointer lock requires — see main.ts's onDeploy handler.
 import type { LoadoutState, MapName, MatchMode, Team, WeaponClass, WeaponId } from './core/state';
-import { DOM_FLAGS, bots, score, WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
+import { DOM_FLAGS, bots, dom, score, WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
 import type { MatchWinner } from './sim/match';
 import {
   TIME_LIMITS_S,
@@ -187,8 +187,16 @@ export function showEndScreen(winner: MatchWinner): void {
   endTitle.classList.toggle('ct', winner === 'CT');
   endTitle.classList.toggle('t', winner === 'T');
   endTitle.classList.toggle('draw', winner === 'draw');
-  endScoreCT.textContent = 'CT ' + score.scoreKills;
-  endScoreT.textContent = score.scoreDeaths + ' T';
+  // Domination is decided on ticked flag points (first to DOM_SCORE_LIMIT or
+  // highest at the clock); kills score nothing there, so the kill counters
+  // would show a 0 — 0 line under a decided banner.
+  if (session.mode === 'dom') {
+    endScoreCT.textContent = `CT ${Math.floor(dom.scoreCt)}`;
+    endScoreT.textContent = `${Math.floor(dom.scoreT)} T`;
+  } else {
+    endScoreCT.textContent = 'CT ' + score.scoreKills;
+    endScoreT.textContent = score.scoreDeaths + ' T';
+  }
 
   interface Row { name: string; team: 'T' | 'CT'; kills: number; deaths: number; you: boolean }
   const rows: Row[] = [

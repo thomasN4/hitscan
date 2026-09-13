@@ -179,7 +179,7 @@ export function asTeam(raw: string | null | undefined, fallback: Team): Team {
  * does for the number fields.
  */
 const IS_BOT_WEAPON: Record<BotWeaponChoice, true> = {
-  mixed: true, smg: true, sniper: true, shotgun: true,
+  mixed: true, ak47: true, smg: true, sniper: true, shotgun: true,
 };
 
 export function asBotWeapon(

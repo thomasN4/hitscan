@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs';
 const BASE = process.env.CS_SMOKE_BASE || 'http://127.0.0.1:5178';
 const OUT = process.argv[2] || '/tmp/weapon-animation-check';
 const ids = process.argv.slice(3);
-if (!ids.length) ids.push('smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife');
+if (!ids.length) ids.push('smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife', 'ak47');
 mkdirSync(OUT, { recursive: true });
 const browser = await puppeteer.launch({
   executablePath: '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave',
@@ -32,7 +32,7 @@ async function snapshot(page) {
   return page.evaluate(() => {
     const cs = window.__cs;
     const scene = cs.bots[0].mesh.parent;
-    const vm = scene.getObjectByName(`viewmodel-${cs.weapon.name.toLowerCase()}`);
+    const vm = scene.getObjectByName(`viewmodel-${cs.weapon.name.toLowerCase().replaceAll('-', '')}`);
     const parts = {};
     vm.traverse(node => {
       if (node.name.startsWith('weapon-mechanism-')) {
@@ -75,7 +75,7 @@ try {
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (['error', 'warning'].includes(m.type())) errors.push(m.text()); });
     await page.evaluateOnNewDocument(id => sessionStorage.setItem('acsc.loadout', JSON.stringify({
-      primary: ['smg', 'sniper', 'shotgun'].includes(id) ? id : 'smg',
+      primary: ['smg', 'sniper', 'shotgun', 'ak47'].includes(id) ? id : 'smg',
       secondary: id === 'revolver' ? 'revolver' : 'pistol',
     })), id);
     await page.goto(`${BASE}/?map=arena&tbots=1&time=600&style=${process.env.CS_SMOKE_STYLE || 'ligne-claire'}`, { waitUntil: 'networkidle0' });
@@ -90,7 +90,7 @@ try {
     if (['pistol', 'revolver'].includes(id)) await page.keyboard.press('Digit2');
     if (id === 'knife') await page.keyboard.press('Digit3');
     await runFor(page, 0.35);
-    assert.equal(await page.evaluate(() => window.__cs.weapon.name.toLowerCase()), id);
+    assert.equal(await page.evaluate(() => window.__cs.weapon.name.toLowerCase().replaceAll('-', '')), id);
     const idle = await snapshot(page);
     if (idle.parts['weapon-mechanism-shell']) assert.equal(idle.parts['weapon-mechanism-shell'].visible, false);
     await page.screenshot({ path: `${OUT}/${id}-hip.png` });
@@ -151,7 +151,7 @@ try {
         assert.ok(finite(pose), `${id}: non-finite mechanism transform during reload`);
         if (label === 'insert' && perRound) assert.equal(pose.parts['weapon-mechanism-shell'].visible, true);
         if (label === 'insert' && id === 'revolver') assert.ok(pose.parts['weapon-mechanism-cylinder'].rotation[2] > idle.parts['weapon-mechanism-cylinder'].rotation[2] + 1.4);
-        if (id === 'smg' || id === 'sniper') {
+        if (id === 'smg' || id === 'ak47' || id === 'sniper') {
           const rest = idle.parts['weapon-mechanism-magazine'].position;
           const mag = pose.parts['weapon-mechanism-magazine'].position;
           assert.ok(Math.abs(mag[0]-rest[0]) < 1e-6 && Math.abs(mag[2]-rest[2]) < 1e-6, 'Rifle magazine must follow its vertical well');
@@ -213,10 +213,11 @@ try {
       await page.keyboard.press('KeyR'); await runFor(page, 0.1);
       await page.keyboard.press('Digit3');
       await page.keyboard.press(['pistol', 'revolver'].includes(id) ? 'Digit2' : 'Digit1');
-      await runFor(page, 0.3);
+      // A fresh draw blocks reload for the full 0.4-second deploy window.
+      await runFor(page, 0.5);
       const swapped = await snapshot(page);
       assert.equal(swapped.reloading, false);
-      if (['pistol','smg','sniper'].includes(id)) {
+      if (['pistol','smg','sniper','ak47'].includes(id)) {
         // Sprint still cancels a running reload CS-style; ADS is refused
         // instead — RMB mid-reload neither cancels it nor raises the sights.
         await page.keyboard.press('KeyR'); await runFor(page, .5);

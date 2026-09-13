@@ -74,7 +74,7 @@ test('buffer hashing matches the recorded output hashes', () => {
   }
 });
 
-for (const id of ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife']) {
+for (const id of ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47']) {
   test(`${id} committed GLB carries the canonical generator`, () => {
     const bytes = readFileSync(new URL(`../../public/assets/${id}.glb`, import.meta.url));
     expect(readGlbGenerator(bytes)).toBe(CANONICAL_GENERATOR);

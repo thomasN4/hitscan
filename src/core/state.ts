@@ -24,7 +24,7 @@ import type { BrainMode } from '../sim/botBrains';
 export type WeaponClass = 'primary' | 'secondary' | 'melee';
 
 /** Catalog ids — stable strings; the loadout slice and the picker use them. */
-export type WeaponId = 'smg' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'knife';
+export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'knife';
 
 /**
  * Weapons a BOT may hold. Since tranche 7b that is the WHOLE catalog, the
@@ -46,7 +46,7 @@ export type BotWeaponId = WeaponId;
  * so the menu/URL boundary says exactly what it accepts; a new primary must
  * be added here AND to sim/botWeapons.ts:BOT_PRIMARY_IDS.
  */
-export type BotPrimaryId = 'smg' | 'sniper' | 'shotgun';
+export type BotPrimaryId = 'smg' | 'ak47' | 'sniper' | 'shotgun';
 
 /**
  * Sidearms — the catalog weapons a bot may carry in its SECONDARY position.
@@ -67,7 +67,7 @@ export type BotSecondaryChoice = BotSidearmId | 'mixed';
 
 /**
  * A menu/URL bot-PRIMARY setting: one primary firearm for the whole team, or
- * 'mixed' for an independent smg/sniper/shotgun draw per bot
+ * 'mixed' for an independent smg/ak47/sniper/shotgun draw per bot
  * (sim/botWeapons.ts:resolveBotWeapon). Sidearms and the blade are not legal
  * here — the secondary position and the fallback blade already cover those —
  * so an unrecognized value (including a stale ?tweap=knife bookmark) falls
@@ -400,6 +400,19 @@ export const SLOTS: readonly WeaponSlot[] = [0, 1];
  * shot cone in radians, before any stance/movement/spray.
  */
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
+  ak47: {
+    name: 'AK-47', class: 'primary',
+    magSize: 30, reserveMax: 90,
+    fireRate: 0.1, // 600 RPM; slower, harder kicks reward controlled bursts.
+    reloadTime: 2.5,
+    damage: 30, headshotMult: 2, // 60 to the head: two hits kill a fresh 100-HP target.
+    zoomFovs: [55], spreadMul: 0.3, inherent: 0.002,
+    sprayKick: 0.10, sprayCap: 4, sprayRecover: 0.29,
+    recoilKick: 1.5, recoilRecover: 5, // Net +1 unit/shot at 600 RPM.
+    punchRad: 0.018, // Shared 6-unit cap gives about 6.2 degrees of climb.
+    yawKick: 0.65, yawRecover: 0.5, // Mean kick .325 exceeds .05 drain per shot.
+    scopedOverlay: false,
+  },
   smg: {
     name: 'SMG',
     class: 'primary',
@@ -1013,7 +1026,7 @@ export interface SessionState {
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;
   /**
-   * PRIMARY firearm every bot on each side starts with (smg/sniper/shotgun),
+   * PRIMARY firearm every bot on each side starts with (smg/ak47/sniper/shotgun),
    * or 'mixed' to draw one per bot. Read once by main.ts when it spawns the
    * waves; the SETTING is fixed for the match, so nothing re-reads these.
    *

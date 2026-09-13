@@ -26,7 +26,7 @@ export function createAuthoredWeaponRig(id: AuthoredWeaponId, asset: THREE.Objec
   const grip = required(root, 'grip_right');
   const mechanismNames: Record<AuthoredWeaponId, ReadonlyArray<keyof AuthoredWeaponRig['mechanisms']>> = {
     shotgun: ['pump'], revolver: ['cylinder', 'rotor', 'hammer'], pistol: ['slide', 'magazine'],
-    smg: ['slide', 'magazine'], sniper: ['bolt', 'magazine'], knife: [],
+    ak47: ['slide', 'magazine'], smg: ['slide', 'magazine'], sniper: ['bolt', 'magazine'], knife: [],
   };
   const mechanisms: AuthoredWeaponRig['mechanisms'] = {};
   for (const key of mechanismNames[id]) mechanisms[key] = required(root, `mechanism_${key}`);
@@ -35,7 +35,7 @@ export function createAuthoredWeaponRig(id: AuthoredWeaponId, asset: THREE.Objec
   if (id === 'shotgun' && support.parent !== mechanisms.pump
     || id === 'revolver' && (port?.parent !== mechanisms.cylinder || mechanisms.rotor?.parent !== mechanisms.cylinder))
     throw new Error(`Weapon asset: incompatible ${id} mechanism hierarchy`);
-  const magazineOut = id === 'pistol' || id === 'smg' || id === 'sniper' ? required(root, 'magazine_out') : undefined;
+  const magazineOut = id === 'pistol' || id === 'smg' || id === 'ak47' || id === 'sniper' ? required(root, 'magazine_out') : undefined;
   if (magazineOut) {
     const magazine = mechanisms.magazine;
     const action = id === 'sniper' ? mechanisms.bolt : mechanisms.slide;
@@ -85,10 +85,10 @@ export async function loadWeaponAssets(base: string): Promise<WeaponAssets> {
     if (!meshes) throw new Error(`Weapon asset: ${id} contains no meshes`);
     return scene;
   }
-  const [shotgun, revolver, pistol, smg, sniper, knife] = await Promise.all([
-    load('shotgun'), load('revolver'), load('pistol'), load('smg'), load('sniper'), load('knife'),
+  const [shotgun, revolver, pistol, smg, sniper, knife, ak47] = await Promise.all([
+    load('shotgun'), load('revolver'), load('pistol'), load('smg'), load('sniper'), load('knife'), load('ak47'),
   ]);
-  return { shotgun, revolver, pistol, smg, sniper, knife };
+  return { shotgun, revolver, pistol, smg, sniper, knife, ak47 };
 }
 /** Evaluate an authored marker in body coordinates, including moving parents. */
 export function attachmentPoint(node: THREE.Object3D, body: THREE.Object3D): THREE.Vector3 {

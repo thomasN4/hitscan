@@ -49,6 +49,9 @@ function playGunshot(vol = 0.35, freqBase = 900, dur = 0.12): void {
   src.start();
 }
 
+/** AK-47: fuller low report, distinct from the fast SMG crack. */
+export const sfxAk47 = (): void => playGunshot(0.46, 680, 0.20);
+
 export const sfxShoot = (): void => playGunshot(0.4, 1400, 0.14);
 
 /** Sniper: deeper boom with a longer tail than the smg crack. */
@@ -125,6 +128,7 @@ interface EnemyAttackTone {
 }
 
 const ENEMY_ATTACK_TONE: Record<BotWeaponId, EnemyAttackTone> = {
+  ak47: { voice: 'report', vol: 0.36, falloff: 190, freqBase: 600, dur: 0.16 },
   smg:      { voice: 'report', vol: 0.30, falloff: 150, freqBase: 800, dur: 0.09 },
   pistol:   { voice: 'report', vol: 0.26, falloff: 130, freqBase: 950, dur: 0.08 },
   revolver: { voice: 'report', vol: 0.36, falloff: 190, freqBase: 640, dur: 0.16 },

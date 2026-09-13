@@ -26,6 +26,14 @@ describe('weapon presentation timelines', () => {
     expect(at(1).pump).toBe(0);
   });
 
+  test('AK action reciprocates and closes before the next 600-RPM shot', () => {
+    const at = (age: number) => weaponPose({ ...idle, id: 'ak47', shotAt: 10,
+      fireInterval: WEAPONS.ak47.fireRate, now: 10 + age });
+    expect(at(.03).slide).toBeCloseTo(1);
+    expect(at(.095).slide).toBe(0);
+    expect(at(.1).slide).toBe(0);
+  });
+
   test('bolt unlocks before retracting and closes before the firing interval ends', () => {
     const at = (phase: number) => weaponPose({ ...idle, id: 'sniper', shotAt: 10,
       fireInterval: 1.1, now: 10 + phase * 1.1 });
@@ -46,7 +54,7 @@ describe('weapon presentation timelines', () => {
   });
 
   test('empty magazines charge after seating; partial reloads do not', () => {
-    for (const id of ['smg', 'pistol', 'sniper'] as const) {
+    for (const id of ['ak47', 'smg', 'pistol', 'sniper'] as const) {
       const input = { ...idle, id, reloading: true, reloadStartedAt: 7, reloadT: 0.86 };
       expect(weaponPose({ ...input, emptyReload: true }).charge).toBeGreaterThan(0);
       expect(weaponPose({ ...input, emptyReload: true }).magazine).toBe(0);
@@ -142,7 +150,7 @@ describe('shotgun ADS chambering', () => {
 
   test('reloads, fresh animation state and other weapons cannot chamber', () => {
     for (const extra of [{ reloading: true }, { shotAt: -Infinity },
-      ...(['smg', 'sniper', 'pistol', 'revolver', 'knife'] as const).map(id => ({ id }))]) {
+      ...(['ak47', 'smg', 'sniper', 'pistol', 'revolver', 'knife'] as const).map(id => ({ id }))]) {
       expect(at(.4, 1, extra)).toEqual({ dip: -0, roll: 0, recoilScale: 1 });
     }
   });

@@ -1,7 +1,7 @@
 # First-person weapon assets
 
 Editable sources under `assets/source/`: `shotgun.blend`, `revolver.blend`,
-`pistol.blend`, `smg.blend`, `sniper.blend`, and `knife.blend`.
+`pistol.blend`, `smg.blend`, `sniper.blend`, `knife.blend`, and `ak47.blend`.
 Runtime exports live under `public/assets/` with the matching `.glb` names. The
 game retains procedural maps and synthesized audio — bots hold the same
 authored weapon models as the player, mounted third-person on their aim
@@ -20,7 +20,7 @@ npm run build
 edited sources, preserves them, writes GLB, validates the result, then records
 source/output/export-script SHA-256 hashes and settings in
 `assets/weapons-manifest.json`. Commit sources, GLBs and manifest together.
-`assets:check` verifies all six committed GLBs without Blender.
+`assets:check` verifies all seven committed GLBs without Blender.
 The exporter disables audio via `ALSOFT_DRIVERS=null` for headless Linux machines.
 
 The manifest also records `gltfAddon` (e.g. `"5.2.40"`), the Khronos glTF
@@ -156,7 +156,7 @@ still fails the check. Sky-background ADS captures verify the visible result.
 
 ## SMG, sniper rifle and knife
 
-All six first-person weapons now load authored GLBs. The SMG and sniper use
+All seven first-person weapons now load authored GLBs. The SMG and sniper use
 fixed well/extraction markers for their detachable magazines, with independent
 SMG action and sniper bolt assemblies. The knife uses grip and blade-tip markers
 without firearm-only loading markers. See
@@ -176,7 +176,7 @@ CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-animation-check.mjs /tmp
 CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-assets-check.mjs
 ```
 
-The asset checks cover missing/corrupt files and one-load startup for all six
+The asset checks cover missing/corrupt files and one-load startup for all seven
 assets. Unit checks exercise exported contracts, independent clones, magazine
 paths, action restoration and aiming visibility. Runtime palette and framing
 are reviewed in the browser; the studio renders use Workbench material colors.
@@ -195,3 +195,42 @@ The rifle reload roll keeps the extracted magazines visible:
 | SMG reload | Sniper reload |
 | --- | --- |
 | ![SMG magazine extraction](images/remaining-weapons/smg-reload-insert.png) | ![Sniper magazine extraction](images/remaining-weapons/sniper-reload-insert.png) |
+
+
+## AK-47
+
+The AK-47 is a primary for the player and either bot team, including mixed
+loadouts. It fires fully automatically at 600 RPM with 30/90 ammunition and a
+2.5-second magazine reload. Damage is 30 torso, 60 head and 22.5 legs: two
+headshots kill a fresh 100-HP target. Tighter rested accuracy than the SMG is
+balanced by stronger climb and sideways recoil; existing defaults are unchanged.
+
+`create-ak47-preview.py` generates only `assets/source/ak47.blend`, using the
+shared modeling helpers without regenerating other weapons. Its wood stock,
+curved front magazine, gas tube and right charging handle form a conventional
+AK silhouette. The source validates 101 magazine and action positions against
+receiver geometry. The simplified straight magazine extraction uses the existing
+rifle reload roll; empty reloads rack the action after seating. Gameplay clocks
+remain authoritative. Rear-notch clearance and the front sight crest at the
+centre of ADS are checked through the full firing cycle.
+
+```sh
+ALSOFT_DRIVERS=null blender --background --factory-startup --python-exit-code 1 --python scripts/assets/create-ak47-preview.py
+npm run assets:export
+npm run assets:check
+CS_SMOKE_BASE=http://127.0.0.1:5197 node scripts/ak47-check.mjs /tmp/ak47-review
+CS_SMOKE_BASE=http://127.0.0.1:5197 node scripts/weapon-animation-check.mjs /tmp/ak47-review ak47
+```
+
+The AK integration check uses real picker input, persisted selection, hitscan
+headshots, held-trigger cadence, recoil across swapping, and both bot teams'
+GLB mounts. It also runs against production preview. Animation checks wait
+through the complete draw delay before testing reload input.
+
+| Hip | Iron sights |
+| --- | --- |
+| ![AK-47 hip](images/ak47/ak47-hip.png) | ![AK-47 iron sights](images/ak47/ak47-ads.png) |
+
+| Magazine extraction | Bot-held model |
+| --- | --- |
+| ![AK-47 reload](images/ak47/ak47-reload-insert.png) | ![Bot holding the AK-47](images/ak47/ak47-bot.png) |

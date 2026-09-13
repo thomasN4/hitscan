@@ -92,7 +92,7 @@ describe('BOT_WEAPON_TUNING', () => {
   test('the mixed pools are exactly the primaries and the sidearms', () => {
     // Pins the product decision: sidearms never appear as primaries, the
     // blade never draws at all — it arrives only as every loadout's fallback.
-    expect([...BOT_PRIMARY_IDS].sort()).toEqual(['shotgun', 'smg', 'sniper']);
+    expect([...BOT_PRIMARY_IDS].sort()).toEqual(['ak47', 'shotgun', 'smg', 'sniper']);
     expect([...BOT_SIDEARM_IDS].sort()).toEqual(['pistol', 'revolver']);
   });
 

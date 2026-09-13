@@ -225,7 +225,7 @@ describe('asBotSecondary', () => {
     // loadout's last position, so accepting it would name a duplicate the
     // loadout then drops; and 'none' is gone entirely — every bot always
     // carries a sidearm. A silently ignored setting is worse than a fallback.
-    for (const id of ['smg', 'sniper', 'shotgun', 'knife', 'none']) {
+    for (const id of ['ak47', 'smg', 'sniper', 'shotgun', 'knife', 'none']) {
       expect(asBotSecondary(id, 'pistol')).toBe('pistol');
     }
   });
@@ -257,7 +257,7 @@ describe('asBotSecondary', () => {
 
 describe('asBotWeapon', () => {
   it('accepts every primary firearm, and mixed', () => {
-    for (const id of ['mixed', 'smg', 'sniper', 'shotgun'] as const) {
+    for (const id of ['mixed', 'ak47', 'smg', 'sniper', 'shotgun'] as const) {
       expect(asBotWeapon(id, 'smg')).toBe(id);
     }
   });

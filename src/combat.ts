@@ -126,19 +126,15 @@ const RANGE_SPAWN = { x: 0, z: 8, feetY: 0, yaw: 0 };
 export function respawn(useDirector = false): void {
   cancelPendingReloadSfx();
   // Placement mirrors the bots' exactly. Domination redeploys (death → picker
-  // → Deploy) come through the director — near owned flags, far from enemies —
-  // while the match opening and every TDM (re)spawn draw from the team's
+  // → Deploy) come through the director — an owned-flag ring or the home zone
+  // at equal shares — while the match opening and every TDM (re)spawn draw from the team's
   // BOT_SPAWNS zone through the same rejection sampling Bot.spawnAtRandom
   // uses, at the player's own radius and the zone's feet height (which is what
   // puts a warehouse2 T on the catwalk). main.ts passes false at startup and
   // true on death deploys. The range keeps its fixed firing line: no bots, no
   // band worth drawing.
   if (useDirector && session.mode === 'dom') {
-    const foeTeam = opposing(session.playerTeam);
-    const enemies = bots
-      .filter(b => b.team === foeTeam && b.alive)
-      .map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
-    const p = pickDomRespawn(session.playerTeam, enemies);
+    const p = pickDomRespawn(session.playerTeam);
     player.pos.set(p.x, p.y + player.eyeHeight, p.z);
     motion.groundSmoothY = p.y;
   } else if (session.map === 'range') {

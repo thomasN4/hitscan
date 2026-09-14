@@ -1,67 +1,79 @@
-// domSpawns.ts — CoD-style respawn director for domination matches.
+// domSpawns.ts — uniform-share respawn director for domination matches.
 //
 // Initial spawns stay exactly as before (BOT_SPAWNS zones: bots via
 // Bot.spawnAtRandom, the player via the same draw in combat.ts:respawn).
-// RESPAWNS in dom mode come through here instead: half the candidates ring team-owned flags,
-// half come from the team's initial zone, the standable ones are ranked by
-// sim/domination.ts:scoreDomSpawn (far from enemies, near owned flags) and
-// the winner is returned as a feet position.
+// RESPAWNS in dom mode come through here instead: one zone is picked uniformly
+// from the team's owned flags plus its initial zone (1/(k+1) each — with A+B
+// owned that is 1/3 A, 1/3 B, 1/3 home), then a point is drawn uniformly
+// WITHIN that zone (sim/domSpawnDraw.ts) and returned as a feet position.
+// Pure uniform: enemy positions play no part, so a camped flag ring kills at
+// full odds.
 //
-// Standability is checked here against live colliders; RANKING is the pure
-// seam's job. That split is what keeps the scoring unit-testable in Node
+// A colliding draw is resampled inside the SAME zone, so a walled ring does
+// not silently become a home-zone spawn and skew the shares. Only after the
+// zone's budget is exhausted do the other zones get their own budgets; a fully
+// walled map still returns the last draw rather than hanging.
+//
+// Standability is checked here against live colliders; DRAWING is the pure
+// seam's job. That split is what keeps the draw unit-testable in Node
 // while the geometry test stays where colliders live.
 import * as THREE from 'three';
 import { BOT_SPAWNS, dom, session, type Team } from './core/state';
 import { colliders } from './world';
 import { collidesAt } from './collision';
 import { NAV_RADIUS } from './nav';
-import { scoreDomSpawn, type SpawnCandidate } from './sim/domination';
+import {
+  DOM_RING_INNER,
+  DOM_RING_OUTER,
+  drawRingPoint,
+  drawZonePoint,
+  pickDomZoneIndex,
+  type SpawnCandidate,
+} from './sim/domSpawnDraw';
 
-/** Respawn candidates drawn per call: half flag rings, half zone draws. */
-const CANDIDATES = 8;
-/** Flag-ring band (m): inside the capture radius would spawn onto the fight, outside 10 m is not "near" it. */
-const RING_INNER = 4;
-const RING_OUTER = 10;
+/** Draws retried inside one zone before the director tries another zone. */
+const ZONE_TRIES = 16;
 
 /**
  * Pick a domination respawn point for `team`.
  *
- * @param team respawning side; its owned flags anchor the ring candidates.
- * @param enemies world-space XZ of live opponents to spawn away from.
- * @param rng draw stream; Math.random in production, scripted in a pinch.
+ * @param team respawning side; its owned flags plus its initial zone share the draw equally.
+ * @param rng draw stream; Math.random in production, scripted in tests.
+ * @param isStandable collision gate; live colliders in production, stubbed in tests.
  */
 export function pickDomRespawn(
   team: Team,
-  enemies: readonly { x: number; z: number }[],
   rng: () => number = Math.random,
+  isStandable: (c: SpawnCandidate) => boolean = (c) =>
+    !collidesAt(new THREE.Vector3(c.x, 0, c.z), NAV_RADIUS, c.y, colliders),
 ): THREE.Vector3 {
   const zone = BOT_SPAWNS[session.map][team];
   const owned = dom.flags.filter(f => f.owner === team);
-  const candidates: SpawnCandidate[] = [];
-  for (let i = 0; i < CANDIDATES; i++) {
-    if (owned.length > 0 && i % 2 === 0) {
-      const f = owned[Math.floor(rng() * owned.length)]!;
-      const a = rng() * Math.PI * 2;
-      const r = RING_INNER + rng() * (RING_OUTER - RING_INNER);
-      candidates.push({ x: f.pos.x + Math.cos(a) * r, y: f.pos.y, z: f.pos.z + Math.sin(a) * r });
-    } else {
-      candidates.push({
-        x: zone.minX + rng() * (zone.maxX - zone.minX),
-        y: zone.y,
-        z: zone.minZ + rng() * (zone.maxZ - zone.minZ),
-      });
+  // Owned flags are indices 0..k-1 in flag order, home is index k — the same
+  // numbering sim/domSpawnDraw.ts:pickDomZoneIndex deals.
+  const first = pickDomZoneIndex(owned.length, rng);
+  const order = [first];
+  for (let i = 0; i <= owned.length; i++) {
+    if (i !== first) order.push(i);
+  }
+  // Bound-guarded read below: order always holds the picked zone first, and
+  // ZONE_TRIES >= 1, so last is assigned before any return path is skipped.
+  let last: SpawnCandidate | undefined;
+  for (const zi of order) {
+    const flag = zi < owned.length ? owned[zi] : undefined;
+    for (let t = 0; t < ZONE_TRIES; t++) {
+      const c = flag !== undefined
+        ? drawRingPoint(
+          { x: flag.pos.x, y: flag.pos.y, z: flag.pos.z },
+          rng,
+          DOM_RING_INNER,
+          DOM_RING_OUTER,
+        )
+        : drawZonePoint(zone, rng);
+      last = c;
+      if (isStandable(c)) return new THREE.Vector3(c.x, c.y, c.z);
     }
   }
-  // NAV_RADIUS fits both bodies (bots 0.5, player 0.45): one graph, one test.
-  const standable = candidates.filter(
-    c => !collidesAt(new THREE.Vector3(c.x, 0, c.z), NAV_RADIUS, c.y, colliders),
-  );
-  const pool = standable.length > 0 ? standable : candidates;
-  const idx = scoreDomSpawn(
-    pool,
-    enemies,
-    owned.map(f => ({ x: f.pos.x, z: f.pos.z })),
-  );
-  const won = pool[idx] ?? candidates[0]!;
+  const won = last!;
   return new THREE.Vector3(won.x, won.y, won.z);
 }

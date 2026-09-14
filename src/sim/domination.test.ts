@@ -4,7 +4,6 @@ import {
   TICK_POINTS_PER_SEC,
   assignDomObjectives,
   countFlagBodies,
-  scoreDomSpawn,
   tickDomScores,
   updateFlagCapture,
   type MutableDomFlag,
@@ -161,29 +160,5 @@ describe('assignDomObjectives', () => {
 
   test('no flags means no assignments', () => {
     expect(assignDomObjectives([{ id: 1, team: 'T', x: 0, z: 0 }], [], new Map()).size).toBe(0);
-  });
-});
-
-describe('scoreDomSpawn', () => {
-  test('prefers far-from-enemy and near-owned-flag', () => {
-    const candidates = [
-      { x: 0, y: 0, z: -50 },
-      { x: 0, y: 0, z: 50 },
-    ];
-    const idx = scoreDomSpawn(
-      candidates,
-      [{ x: 0, z: -40 }],
-      [{ x: 0, z: 45 }],
-    );
-    expect(idx).toBe(1);
-  });
-
-  test('empty candidates score -1; ties go to the lowest index', () => {
-    expect(scoreDomSpawn([], [{ x: 0, z: 0 }], [])).toBe(-1);
-    expect(scoreDomSpawn(
-      [{ x: 5, y: 0, z: 0 }, { x: -5, y: 0, z: 0 }],
-      [],
-      [],
-    )).toBe(0);
   });
 });

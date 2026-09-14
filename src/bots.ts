@@ -33,7 +33,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, player, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, dom, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, dom, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
@@ -459,8 +459,9 @@ export class Bot implements BotShape {
    * testing those against the ground-floor geometry beneath the ring would
    * reject the good draws and keep the bad ones.
    *
-   * In domination matches RESPAWNS pass a director-chosen point (near owned
-   * flags, far from enemies — see domSpawns.ts) instead of a zone draw. The
+   * In domination matches RESPAWNS pass a director-chosen point (an owned-flag
+   * ring or the home zone at equal shares — see domSpawns.ts) instead of a
+   * zone draw. The
    * initial wave never does: construction always samples the zone, so match
    * openings stay exactly as before. A director point that fails the same
    * collision test falls back to the zone draw rather than spawning walled.
@@ -519,18 +520,11 @@ export class Bot implements BotShape {
     this.hp = 100;
     this.alive = true;
     this.mesh.visible = true;
-    // Domination respawns come through the director (near owned flags, far
-    // from enemies); every other match — and every initial wave, which never
-    // passes through here — keeps the zone draw.
+    // Domination respawns come through the director (owned-flag rings and the
+    // home zone at equal shares); every other match — and every initial wave,
+    // which never passes through here — keeps the zone draw.
     if (session.mode === 'dom' && dom.flags.length > 0) {
-      const foe = opposing(this.team);
-      const enemies = bots
-        .filter(b => b.team === foe && b.alive)
-        .map(b => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
-      if (session.playerTeam === foe && player.alive) {
-        enemies.push({ x: player.pos.x, z: player.pos.z });
-      }
-      this.spawnAtRandom(pickDomRespawn(this.team, enemies));
+      this.spawnAtRandom(pickDomRespawn(this.team));
     } else {
       this.spawnAtRandom();
     }

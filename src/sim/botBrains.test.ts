@@ -145,6 +145,8 @@ interface ViewOpts {
   moveBlocked?: boolean;
   selfSpeed?: number;
   facing?: THREE.Vector3;
+  /** Own feet; default the origin (grade under every at-grade test flag). */
+  selfFeet?: THREE.Vector3;
   nextWaypoint?: (goal: THREE.Vector3) => THREE.Vector3 | undefined | null;
   /** Patrol thunk outcome, like nextWaypoint; default null = nothing usable. */
   nextPatrolWaypoint?: () => THREE.Vector3 | undefined | null;
@@ -172,7 +174,7 @@ function view(o: ViewOpts = {}): BrainView {
     ? visualAt(o.dist ?? 10, o.rise ?? 0, o.dist3, o.visualId)
     : o.visual;
   return {
-    selfFeet: new THREE.Vector3(0, 0, 0),
+    selfFeet: o.selfFeet ?? new THREE.Vector3(0, 0, 0),
     facing: o.facing ?? new THREE.Vector3(1, 0, 0),
     visual,
     onGround: o.onGround ?? true,
@@ -1911,6 +1913,51 @@ describe('DefaultBrain domination objective', () => {
     const later = brain.decide(view({ visual: null, objective: close }), 2);
     expect(later.mode).toBe('capture');
     expect(later.facing.x).not.toBeCloseTo(first.facing.x, 2);
+  });
+
+  it('a bot a floor below its flag keeps routing instead of capturing', () => {
+    // Elevation's B at deck height, the bot planar-inside the hold circle
+    // but on the ground floor 3.6 m below: the census (isBodyInRing) does
+    // not count it, so the brain must not capture-spot it either — or it
+    // would hold a point it can never tick and never climb the stairs.
+    const deck = { id: 'B', pos: new THREE.Vector3(0, 3.6, 1), radius: 4.5 };
+    const brain = calmBrain();
+    const intent = brain.decide(view({
+      visual: null,
+      objective: deck,
+      selfFeet: new THREE.Vector3(0, 0, 0),
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(intent.mode).toBe('objective');
+    expect(intent.step.length()).toBeGreaterThan(0);
+  });
+
+  it('a bot on the flag deck captures: the vertical window binds both ways', () => {
+    const deck = { id: 'B', pos: new THREE.Vector3(0, 3.6, 1), radius: 4.5 };
+    const brain = calmBrain();
+    const intent = brain.decide(view({
+      visual: null,
+      objective: deck,
+      selfFeet: new THREE.Vector3(0, 3.6, 0),
+    }), DT);
+    expect(intent.mode).toBe('capture');
+  });
+
+  it('a below-deck holder-rank bot does not take the flag-hold branch', () => {
+    // holdRank 0 planar-inside but a floor down, WITH cover (a mate holds):
+    // isCapping is false, so the designated-holder shortcut in decide()
+    // must not fire — the bearing owns this escort like any TDM bot and
+    // starts a damage search, not a leashed dodge in `capture` mode.
+    const deck = { id: 'B', pos: new THREE.Vector3(0, 3.6, 1), radius: 4.5, cappingMates: 1, holdRank: 0 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const intent = brain.decide(view({
+      visual: null,
+      objective: deck,
+      selfFeet: new THREE.Vector3(0, 0, 0),
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(intent.mode).toBe('search');
   });
 
   it('a visual outranks the objective and the bot walks back after', () => {

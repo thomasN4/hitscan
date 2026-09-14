@@ -131,9 +131,10 @@ async function start(): Promise<void> {
     // is the user gesture pointer lock needs.
     onDeploy: (primary, secondary) => {
       setLoadout(primary, secondary);
-      // Death deploys in domination respawn through the director (near owned
-      // flags, far from enemies); the match-opening deploy finds the player
-      // alive and keeps the zone-drawn opening spawn.
+      // Death deploys in domination respawn through the director (an owned
+      // flag's ring or the home zone at equal shares — enemy positions play
+      // no part, so a camped flag keeps full odds); the match-opening deploy
+      // finds the player alive and keeps the zone-drawn opening spawn.
       if (!player.alive) respawn(session.mode === 'dom');
       lock();
     },

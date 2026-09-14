@@ -123,8 +123,11 @@ export function updateScore(): void {
 
 /**
  * Refresh the domination flag chips (owner colour + live capture percent).
- * Called from the domination updater each sim frame; cached so a steady
- * state never touches the DOM. Hidden outside dom matches.
+ * Called from the domination updater each sim frame; the chips are cached
+ * so a steady flag state never touches the DOM, but the score bar is NOT
+ * part of that cache — tick points accrue with no flag change, so it
+ * refreshes every frame regardless.
+ * Hidden outside dom matches.
  */
 let lastDomHUD = '';
 export function updateDomHUD(): void {
@@ -135,13 +138,13 @@ export function updateDomHUD(): void {
     }
     return;
   }
+  if (domFlagsEl.style.display !== 'flex') domFlagsEl.style.display = 'flex';
+  updateScore();
   const text = dom.flags
     .map(f => `${f.id}:${f.owner ?? '-'}:${f.challenger ?? '-'}:${Math.floor(f.progress * 100)}`)
     .join('|');
   if (text === lastDomHUD) return;
   lastDomHUD = text;
-  domFlagsEl.style.display = 'flex';
-  updateScore();
   for (const f of dom.flags) {
     const chip = requireEl(`flag${f.id}`);
     chip.textContent = f.challenger !== null

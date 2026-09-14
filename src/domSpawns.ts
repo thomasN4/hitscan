@@ -14,13 +14,16 @@
 // zone's budget is exhausted do the other zones get their own budgets; a fully
 // walled map still returns the last draw rather than hanging.
 //
-// Standability is checked here against live colliders; DRAWING is the pure
-// seam's job. That split is what keeps the draw unit-testable in Node
-// while the geometry test stays where colliders live.
+// Standability is checked here against live colliders via
+// collision.ts:standableAt — unobstructed AND supported within a step below
+// the feet, so a ring draw over a stairwell void is resampled rather than
+// spawning midair. DRAWING is the pure seam's job. That split is what keeps
+// the draw unit-testable in Node while the geometry test stays where
+// colliders live.
 import * as THREE from 'three';
 import { BOT_SPAWNS, dom, session, type Team } from './core/state';
 import { colliders } from './world';
-import { collidesAt } from './collision';
+import { standableAt } from './collision';
 import { NAV_RADIUS } from './nav';
 import {
   DOM_RING_INNER,
@@ -45,7 +48,7 @@ export function pickDomRespawn(
   team: Team,
   rng: () => number = Math.random,
   isStandable: (c: SpawnCandidate) => boolean = (c) =>
-    !collidesAt(new THREE.Vector3(c.x, 0, c.z), NAV_RADIUS, c.y, colliders),
+    standableAt(new THREE.Vector3(c.x, 0, c.z), NAV_RADIUS, c.y, colliders),
 ): THREE.Vector3 {
   const zone = BOT_SPAWNS[session.map][team];
   const owned = dom.flags.filter(f => f.owner === team);

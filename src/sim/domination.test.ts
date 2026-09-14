@@ -221,6 +221,22 @@ describe('assignDomObjectives', () => {
     expect(onA.length).toBe(0);
   });
 
+  test('a bot standing on a secure owned flag attacks outward, even nearby', () => {
+    // The review-bot counterexample: a T bot AT captured A, neutral B ~48 m
+    // away. Pricing secure-own (even at +15, or +7 with stickiness) keeps
+    // the bot stationed on ground that ticks nothing. Secure-own is not
+    // ranked at all, so the bot attacks despite the distance — stickiness
+    // included, since hysteresis must not anchor a bot to an unranked flag.
+    const owned = [
+      { id: 'A', x: 0, z: -30, owner: 'T' as const, challenger: null as 'T' | 'CT' | null },
+      { id: 'B', x: 0, z: 18, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+      { id: 'C', x: 0, z: 30, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+    ];
+    const bots = [{ id: 1, team: 'T' as const, x: 0, z: -30 }];
+    expect(assignDomObjectives(bots, owned, new Map()).get(1)).toBe('B');
+    expect(assignDomObjectives(bots, owned, new Map([[1, 'A']])).get(1)).toBe('B');
+  });
+
   test('a threatened flag keeps its defender while the rest attack', () => {
     const threatened = [
       { id: 'A', x: 0, z: -30, owner: 'T' as const, challenger: 'CT' as const },

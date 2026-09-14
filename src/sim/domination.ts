@@ -213,12 +213,12 @@ function threatenedBy(flag: DispatchFlag, team: Team): boolean {
  * from the assigning team's view. Neutral is cheapest (a free point), taking
  * an enemy flag costs a fight, and a threatened own flag ranks WITH neutral
  * — distance decides who diverts, so nearby attackers answer the back-cap
- * while far ones keep their attack. Stacking a secure owned flag is last
- * resort; nothing is ever stationed there, only sent when it is threatened
- * (the defenders below).
+ * while far ones keep their attack. A SECURE own flag is not ranked at all:
+ * standing on it ticks nothing, so no bot is ever priced onto one while a
+ * contestable flag has room — the only assignments there are the last-resort
+ * fallback when every other flag is full or fully owned (see below).
  */
 const ENEMY_FLAG_COST = 5;
-const OWNED_FLAG_COST = 15;
 /**
  * Stickiness bonus (equivalent metres) for keeping a bot on its previous
  * flag. Re-dispatch runs every DISPATCH_INTERVAL_S; without hysteresis two
@@ -227,15 +227,27 @@ const OWNED_FLAG_COST = 15;
 const STICKY_BONUS = 8;
 
 /**
+ * Whether a flag is contestable work for `team`'s attackers: neutral,
+ * enemy-held, or owned-but-threatened. Secure owned flags are excluded —
+ * standing on them ticks nothing, so pricing them (even last) stations bots
+ * on exactly the ground the no-stationing rule vacated.
+ */
+function contestable(flag: DispatchFlag, team: Team): boolean {
+  return flag.owner !== team || threatenedBy(flag, team);
+}
+
+/**
  * Assign every bot to a flag, per team independently. Defenders first — one
  * per THREATENED flag only (owned with live enemy progress), capped at a
  * third of the team, nearest bots stick — then the rest to the cheapest
- * flag with room under FLAG_CAP: neutral and threatened-own before enemy
- * before secure-own, nearest before farthest, previous assignment
- * discounted. Secure owned flags are never stationed: nothing ticks by
- * standing on them, and a back-cap answers itself through the challenger it
- * raises. Deterministic: ties break by bot id, so the suite scripts it
- * exactly and the field never visibly churns.
+ * CONTESTABLE flag with room under FLAG_CAP: neutral and threatened-own
+ * before enemy, nearest before farthest, previous assignment discounted.
+ * Secure owned flags take nobody while contestable ground has room —
+ * nothing ticks by standing on them, and a back-cap answers itself through
+ * the challenger it raises. Only when no contestable flag has room (every
+ * flag owned, or every other flag full past FLAG_CAP) do leftover bots sit
+ * nearest as a last resort. Deterministic: ties break by bot id, so the
+ * suite scripts it exactly and the field never visibly churns.
  *
  * @param previous last run's bot-id → flag-id map; unknown ids count as unassigned.
  */
@@ -277,23 +289,29 @@ export function assignDomObjectives(
       defenders.add(best.bot.id);
       take(best.bot, best.flag.id);
     }
-    // Attackers: cheapest flag with room — neutral and threatened-own, then
-    // enemy, then secure-own. A threatened own flag ranks with neutral so
-    // the response is whoever is close, not the whole team turning around.
+    // Attackers: cheapest CONTESTABLE flag with room — neutral and
+    // threatened-own, then enemy. Secure-own is not ranked: a bot standing
+    // on one must attack outward even when the owned ground is nearer than
+    // the neutral point, or the no-stationing rule is fiction. A threatened
+    // own flag ranks with neutral so the response is whoever is close, not
+    // the whole team turning around.
     for (const bot of teamBots) {
       if (defenders.has(bot.id)) continue;
       let best: { flag: DispatchFlag; cost: number } | null = null;
       for (const flag of flags) {
+        if (!contestable(flag, team)) continue;
         if ((load.get(flag.id) ?? 0) >= FLAG_CAP) continue;
         const ownership = flag.owner === null || threatenedBy(flag, team)
           ? 0
-          : flag.owner === team ? OWNED_FLAG_COST : ENEMY_FLAG_COST;
+          : ENEMY_FLAG_COST;
         const cost = Math.hypot(bot.x - flag.x, bot.z - flag.z) + ownership -
           (previous.get(bot.id) === flag.id ? STICKY_BONUS : 0);
         if (best === null || cost < best.cost) best = { flag, cost };
       }
-      // FLAG_CAP only binds past 12 bots a side; fall back to nearest so no
-      // bot is ever left goalless by the cap arithmetic.
+      // No contestable flag with room — every flag owned, or every other
+      // flag full past FLAG_CAP — so sit nearest as a last resort (which is
+      // also what keeps no bot ever goalless). nearestFlag spans all flags,
+      // secure-own included.
       take(bot, best?.flag.id ?? nearestFlag(bot, flags).id);
     }
   }

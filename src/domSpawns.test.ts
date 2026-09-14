@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest';
+import * as THREE from 'three';
 import { BOT_SPAWNS, DOM_FLAGS, dom, resetDom, session } from './core/state';
 import { pickDomRespawn } from './domSpawns';
+import { colliders, resetWorld } from './world';
 
 /** Deterministic PRNG (LCG) for share checks. */
 function lcg(seed: number): () => number {
@@ -69,6 +71,29 @@ describe('pickDomRespawn', () => {
     const h = pickDomRespawn('T', () => 0, () => false);
     // Order is A, B, home; the last draw is the home rect at fractions 0,0.
     expect([h.x, h.y, h.z]).toEqual([home.minX, home.y, home.minZ]);
+  });
+
+  test('a ring draw over a stairwell void is rejected by the live gate', () => {
+    // Only B owned, so the zones are [B-ring, home]. A 3x3 deck slab under
+    // B leaves the constant-stream ring draw (angle 0, radius fraction 0 →
+    // 4 m past the deck edge, support 2+ m below) over the void.
+    // collidesAt alone would accept it — nothing rises above the feet
+    // there — so the live standableAt gate must refuse all 16 draws and
+    // fall through to the home zone instead of spawning midair.
+    for (const f of dom.flags) f.owner = null;
+    dom.flags[1]!.owner = 'T';
+    resetWorld();
+    try {
+      colliders.push(new THREE.Box3(
+        new THREE.Vector3(B.x - 1.5, B.y - 0.3, B.z - 1.5),
+        new THREE.Vector3(B.x + 1.5, B.y, B.z + 1.5),
+      ));
+      const p = pickDomRespawn('T', () => 0);
+      const home = BOT_SPAWNS.elevation.T;
+      expect([p.x, p.y, p.z]).toEqual([home.minX, home.y, home.minZ]);
+    } finally {
+      resetWorld();
+    }
   });
 
   test('A+B owned deals ~1/3 each across seeded respawns', () => {

@@ -45,6 +45,7 @@ import * as THREE from 'three';
 import type { PerceptionId, VisualObservation } from './perception';
 import type { HeardSound } from './soundEvents';
 import type { FireController, ShotOutcome } from './botWeapons';
+import { VERTICAL_TOL_M } from './domination';
 import type { BotWeaponId, ObjectiveView } from '../core/state';
 
 /** Shared +Y axis for the scan rotation (Three.js positive-Y convention). */
@@ -693,17 +694,21 @@ export class DefaultBrain implements BotBrain {
 
   /**
    * Whether this frame's view has the bot standing its point: an assigned
-   * objective with own feet inside the capture hold. The planar test mirrors
-   * objectiveIntent's arrival (same fraction, no vertical term — the brain
-   * steers planar and the executor's ring already proved the height when the
-   * bot walked in). A capping bot holds through live stimuli; see decide.
+   * objective with own feet inside the capture hold, planar AND vertical.
+   * The planar test mirrors objectiveIntent's arrival (same fraction, same
+   * height window — the census's VERTICAL_TOL_M, so the brain and the ring
+   * can never disagree about who is "on" a flag). A bot under Elevation's
+   * deck flag is planar-inside but a floor away: it must keep routing to
+   * the stairs, not sit in the holder branch. A capping bot holds through
+   * live stimuli; see decide.
    */
   private isCapping(view: BrainView): boolean {
     const obj = view.objective;
     if (obj === null) return false;
     const dx = obj.pos.x - view.selfFeet.x;
     const dz = obj.pos.z - view.selfFeet.z;
-    return Math.hypot(dx, dz) <= obj.radius * CAPTURE_HOLD_FRACTION;
+    if (Math.hypot(dx, dz) > obj.radius * CAPTURE_HOLD_FRACTION) return false;
+    return Math.abs(obj.pos.y - view.selfFeet.y) <= VERTICAL_TOL_M;
   }
 
   /**
@@ -1522,8 +1527,8 @@ export class DefaultBrain implements BotBrain {
    * pursuit's, so the climb hysteresis survives into the next visible frame
    * on the way up to the deck flag.
    *
-   * Arrival (inside the hold fraction of the ring) is `capture`, not a
-   * search: the bot works the point — drifting inside it, dodging bearings
+    * Arrival (inside the hold fraction of the ring, on the flag's level)
+    * is `capture`, not a search: the bot works the point — drifting inside
    * along it — and advances its watch rotation. With no current visual
    * nothing shoots — there is no observation behind the trigger, exactly
    * like a memory pursuit — but a visual inside engage range IS shot at on
@@ -1537,8 +1542,12 @@ export class DefaultBrain implements BotBrain {
     const toObj = new THREE.Vector3(obj.pos.x - view.selfFeet.x, 0, obj.pos.z - view.selfFeet.z);
     const dist = toObj.length();
     const toward = dist > 1e-9 ? toObj.clone().multiplyScalar(1 / dist) : view.facing.clone();
+    // Same gate as isCapping (hold fraction + VERTICAL_TOL_M): planar-only
+    // arrival would capture-spot a bot standing a floor below the flag and
+    // strand it there instead of routing it up the stairs.
 
-    if (dist <= obj.radius * CAPTURE_HOLD_FRACTION) {
+    if (dist <= obj.radius * CAPTURE_HOLD_FRACTION &&
+        Math.abs(obj.pos.y - view.selfFeet.y) <= VERTICAL_TOL_M) {
       this.routing = false;
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;

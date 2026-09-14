@@ -1432,8 +1432,10 @@ export interface DomFlagState {
   /** Owning side, or null while neutral. */
   owner: Team | null;
   /**
-   * 0..1 capture progress toward `challenger`. Resets whenever the point
-   * empties, is contested, or changes hands.
+   * 0..1 capture progress toward `challenger`. Frozen while contested;
+   * decays while the point sits empty or securely owned (stepping off
+   * briefly costs little, abandoning wipes); restarts from 0 on a
+   * challenger switch and on a completed ownership flip.
    */
   progress: number;
   /** Which side the progress belongs to; null when no side is capturing. */

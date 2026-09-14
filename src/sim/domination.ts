@@ -22,7 +22,7 @@ export const DOM_SCORE_LIMIT = 200;
  * parser clamps hand-typed URLs into it, mirroring TIME_LIMITS_S's job for
  * round length.
  */
-export const SCORE_LIMITS = { min: 50, max: 500 } as const;
+export const SCORE_LIMITS = { min: 50, max: 2000 } as const;
 /**
  * Feet-height window (m) a body must be inside to count toward a flag.
  * Elevation's B sits on the slab at 3.6 over a walkable ground floor: 2.0

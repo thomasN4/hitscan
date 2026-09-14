@@ -152,7 +152,8 @@ interface ViewOpts {
   heard?: readonly HeardSound[];
   /**
    * Assigned domination flag; default null = TDM or undispatched. Mates
-   * default to zero — an uncovered push — unless the test covers the flag.
+   * default to zero — an uncovered push — and rank to zero — the designated
+   * holder — unless the test says otherwise.
    */
   objective?: {
     id: string;
@@ -160,6 +161,7 @@ interface ViewOpts {
     radius: number;
     assignedMates?: number;
     cappingMates?: number;
+    holdRank?: number;
   } | null;
   /** Standability feeler; default open ground — every pre-sense test walks nowhere near a wall. */
   canStandAt?: (x: number, z: number) => boolean;
@@ -187,13 +189,15 @@ function view(o: ViewOpts = {}): BrainView {
     // thunk, and the pause-before-patrol tests want a goalless answer (null).
     nextPatrolWaypoint: o.nextPatrolWaypoint ?? (() => null),
     // No objective by default: every pre-domination test describes a TDM bot.
-    // Mates default to zero — an uncovered push — unless the test covers it.
+    // Mates default to zero — an uncovered push — and rank to zero — the
+    // designated holder — unless the test says otherwise.
     objective: o.objective === undefined || o.objective === null ? null : {
       id: o.objective.id,
       pos: o.objective.pos,
       radius: o.objective.radius,
       assignedMates: o.objective.assignedMates ?? 0,
       cappingMates: o.objective.cappingMates ?? 0,
+      holdRank: o.objective.holdRank ?? 0,
     },
     // Open ground by default: the sense tests pass their own walls.
     canStandAt: o.canStandAt ?? (() => true),
@@ -2076,5 +2080,45 @@ describe('DefaultBrain domination objective', () => {
     expect(intent.wantShoot).toBe(false);
     // ...while still tracking the contact for acquisition and the readout.
     expect(intent.focusId).toBe('player');
+  });
+
+  it('the holder keeps holding while higher ranks are present', () => {
+    // Rank 0 is the designation, not solitude: cover present changes nothing
+    // for the holder.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5, cappingMates: 2, holdRank: 0 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const intent = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(intent.mode).toBe('capture');
+    expect(intent.step.length()).toBe(0);
+  });
+
+  it('a non-holder standing the ring escorts: bearings own it like cover', () => {
+    // Rank 1 with a mate holding: the damage search outranks the point, and
+    // the bot leaves the ring to serve it instead of sitting beside the holder.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5, cappingMates: 1, holdRank: 1 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const intent = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(intent.mode).toBe('search');
+    expect(intent.step.length()).toBeGreaterThan(0);
+  });
+
+  it('a non-holder standing the ring engages a visual instead of holding', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5, cappingMates: 1, holdRank: 1 };
+    const intent = calmBrain().decide(view({ visual: visualAt(10), objective: close }), DT);
+    expect(intent.mode).toBe('engage');
+    expect(intent.focusId).toBe('player');
+  });
+
+  it('a non-holder idles on the point when nothing live happens', () => {
+    // No bearing, no visual: the normal ladder reaches priority 5, which
+    // returns the same capture hold — presence still ticks while idle, and
+    // the next live contact peels it off.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5, cappingMates: 1, holdRank: 1 };
+    const intent = calmBrain().decide(view({ visual: null, objective: close }), DT);
+    expect(intent.mode).toBe('capture');
+    expect(intent.step.length()).toBe(0);
+    expect(intent.wantShoot).toBe(false);
   });
 });

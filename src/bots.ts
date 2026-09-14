@@ -51,7 +51,7 @@ import {
 import { meleeSwing, isBackstab, type MeleeCandidate } from './sim/melee';
 import { damageForPart } from './sim/damage';
 import { acquireVisual, type PerceptionId } from './sim/perception';
-import { assignDomObjectives, countFlagBodies, isBodyInRing, DISPATCH_INTERVAL_S, type DomBody } from './sim/domination';
+import { assignDomObjectives, countFlagBodies, holderRanks, isBodyInRing, DISPATCH_INTERVAL_S, type DomBody } from './sim/domination';
 import { pickDomRespawn } from './domSpawns';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
@@ -673,6 +673,7 @@ export class Bot implements BotShape {
           radius: this.domObjective.radius,
           assignedMates: this.domObjective.assignedMates,
           cappingMates: cappingMatesFor(this, this.domObjective.id),
+          holdRank: holdRankFor(this, this.domObjective.id),
         },
       },
       dt,
@@ -1299,8 +1300,16 @@ export function updateBots(dt: number, player: PlayerState): void {
  */
 const domCensus = new Map<string, { t: number; ct: number }>();
 
+/**
+ * Holder rank per flag per bot id (see sim/domination.ts:holderRanks).
+ * Refreshed with the census above; read per bot through holdRankFor. Empty
+ * outside dom matches with it.
+ */
+const domHolders = new Map<string, Map<number, number>>();
+
 function refreshDomCensus(player: PlayerState): void {
   domCensus.clear();
+  domHolders.clear();
   if (session.mode !== 'dom' || dom.flags.length === 0) return;
   const bodies: DomBody[] = [];
   if (player.alive) {
@@ -1311,7 +1320,15 @@ function refreshDomCensus(player: PlayerState): void {
     if (!b.alive) continue;
     bodies.push({ team: b.team, x: b.mesh.position.x, feetY: b.mesh.position.y, z: b.mesh.position.z });
   }
-  for (const f of dom.flags) domCensus.set(f.id, countFlagBodies(f, bodies));
+  // Ranked bodies are bots only: the player counts toward the census above
+  // but never takes a rank (see holderRanks).
+  const ranked = bots
+    .filter(b => b.alive)
+    .map(b => ({ id: b.id, team: b.team, x: b.mesh.position.x, feetY: b.mesh.position.y, z: b.mesh.position.z }));
+  for (const f of dom.flags) {
+    domCensus.set(f.id, countFlagBodies(f, bodies));
+    domHolders.set(f.id, holderRanks(f, ranked));
+  }
 }
 
 /**
@@ -1328,6 +1345,16 @@ function cappingMatesFor(bot: Bot, flagId: string): number {
   const feet = bot.mesh.position;
   const selfIn = isBodyInRing(flag, { team: bot.team, x: feet.x, feetY: feet.y, z: feet.z });
   return Math.max(0, total - (selfIn ? 1 : 0));
+}
+
+/**
+ * This bot's holder rank on `flagId`'s ladder (0 designates the holder).
+ * Absent — no census, no live flag, or the bot outside the ring — reads as
+ * 0, which is exactly "nobody ahead of me" and is only ever read while the
+ * brain is capping anyway.
+ */
+function holdRankFor(bot: Bot, flagId: string): number {
+  return domHolders.get(flagId)?.get(bot.id) ?? 0;
 }
 
 /**

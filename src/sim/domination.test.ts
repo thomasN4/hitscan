@@ -4,6 +4,7 @@ import {
   TICK_POINTS_PER_SEC,
   assignDomObjectives,
   countFlagBodies,
+  holderRanks,
   isBodyInRing,
   tickDomScores,
   updateFlagCapture,
@@ -72,6 +73,44 @@ describe('isBodyInRing', () => {
     const inRing = bodies.filter(b => isBodyInRing(f, b));
     expect(inRing.filter(b => b.team === 'T')).toHaveLength(counts.t);
     expect(inRing.filter(b => b.team === 'CT')).toHaveLength(counts.ct);
+  });
+});
+
+describe('holderRanks', () => {
+  const f = flag();
+  const body = (id: number, team: 'T' | 'CT', x = 0, feetY = 0, z = 0) => ({ id, team, x, feetY, z });
+
+  test('a lone holder ranks zero', () => {
+    expect(holderRanks(f, [body(3, 'T')]).get(3)).toBe(0);
+  });
+
+  test('the lowest id holds while higher ids escort, in arrival-independent order', () => {
+    const ranks = holderRanks(f, [body(7, 'T'), body(2, 'T'), body(5, 'T')]);
+    expect(ranks.get(2)).toBe(0);
+    expect(ranks.get(5)).toBe(1);
+    expect(ranks.get(7)).toBe(2);
+  });
+
+  test('ranks are per team: enemies share no ladder', () => {
+    const ranks = holderRanks(f, [body(1, 'T'), body(2, 'CT')]);
+    expect(ranks.get(1)).toBe(0);
+    expect(ranks.get(2)).toBe(0);
+  });
+
+  test('bodies outside the ring (planar or vertical) rank nobody and appear nowhere', () => {
+    const deck = flag({ pos: { x: 0, y: 3.6, z: 0 } });
+    const ranks = holderRanks(deck, [
+      body(1, 'T', 0, 3.6, 0),
+      body(2, 'T', 40, 3.6, 0),
+      body(3, 'T', 0, 0, 0),
+    ]);
+    expect(ranks.get(1)).toBe(0);
+    expect(ranks.has(2)).toBe(false);
+    expect(ranks.has(3)).toBe(false);
+  });
+
+  test('an empty ring ranks nobody', () => {
+    expect(holderRanks(f, []).size).toBe(0);
   });
 });
 

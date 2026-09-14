@@ -70,6 +70,41 @@ export function isBodyInRing(
 }
 
 /**
+ * A ring body with identity, for holder ranking. Bots only — the player has
+ * no bot id and never appears here (though they still count in
+ * countFlagBodies): rank is bots-only by design, so a player passing through
+ * the ring never vacates the point by outranking its bots.
+ */
+export interface RankedBody extends DomBody {
+  id: number;
+}
+
+/**
+ * Holder rank per bot id: among each team's bodies inside the ring, how many
+ * have a LOWER id. Rank 0 is the designated holder and sits the point;
+ * higher ranks escort — free to leave the ring after live contact while the
+ * holder keeps ticking the capture. Per team independently, so opposite
+ * sides converging on one flag rank against their own mates only. Bots
+ * outside the ring are absent (their rank is read as 0, which is exactly
+ * "nobody ahead of me" and is only ever read while capping anyway).
+ */
+export function holderRanks(
+  flag: Pick<MutableDomFlag, 'pos' | 'radius'>,
+  bodies: readonly RankedBody[],
+): Map<number, number> {
+  const ids: Record<Team, number[]> = { T: [], CT: [] };
+  for (const b of bodies) {
+    if (isBodyInRing(flag, b)) ids[b.team].push(b.id);
+  }
+  const ranks = new Map<number, number>();
+  for (const team of ['T', 'CT'] as const) {
+    const sorted = ids[team].sort((a, b) => a - b);
+    sorted.forEach((id, rank) => ranks.set(id, rank));
+  }
+  return ranks;
+}
+
+/**
  * Count each side's bodies inside a flag's ring (see isBodyInRing).
  */
 export function countFlagBodies(

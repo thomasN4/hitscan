@@ -24,11 +24,13 @@
 // (`search`) that forgets after `forgetTime`. A bot HOLDING a domination
 // objective skips that whole ghost chain — the flag outranks ordinary scans
 // and remembered positions — and walks back to its point. Against LIVE
-// stimuli the teammate cover decides: a bot standing its point holds through
-// everything, shooting at a current visual IN PLACE rather than leaving to
-// engage it, and drops direction-only bearings unread; a pusher walking to
-// an UNCOVERED flag walks on through potshots the same way; only an escort
-// (a mate already holding) still hunts bearings and visuals. Only a CURRENT
+// stimuli the teammate cover decides: the designated holder (rank 0 among
+// the same-team bots standing its point) holds through everything, shooting
+// at a current visual IN PLACE rather than leaving to engage it, and drops
+// direction-only bearings unread, while higher ranks escort — free to leave
+// the ring after live contact; a pusher walking to an UNCOVERED flag walks
+// on through potshots the same way; only an escort (a mate already holding)
+// still hunts bearings and visuals. Only a CURRENT
 // visible observation can order a shot — memory, search and damage reactions
 // never fire — and a capture shot is still gated on one, through the same
 // executor agreement.
@@ -258,10 +260,10 @@ export interface BrainView {
    * teams, so routing here reveals nothing a scoreboard wouldn't, and the
    * mates are bare counts, never identities or positions. Outranks
    * ghost-chasing (ordinary scans, remembered positions, fresh noises);
-   * against live stimuli the cover decides: a bot standing its point holds
-   * through everything and shoots in place, an uncovered pusher walks on
-   * through potshots, and only an escort (cover present) still hunts
-   * bearings and visuals; see decide().
+   * against live stimuli the cover decides: the designated holder (rank 0)
+   * holds through everything and shoots in place, higher ranks escort, an
+   * uncovered pusher walks on through potshots, and only an escort (cover
+   * present) still hunts bearings and visuals; see decide().
    */
   objective: ObjectiveView | null;
   /**
@@ -872,15 +874,18 @@ export class DefaultBrain implements BotBrain {
       this.params = this.fire.params(this.base);
     }
 
-    // Flag-hold: a bot standing its point never leaves it — not for a
-    // bearing, not for a visual, not for an ongoing damage search. Potshots
-    // with no visual are dropped unread (presence is what ticks the capture,
-    // and stepping out to chase a bearing hands the point over); a live
-    // visual is shot at IN PLACE by objectiveIntent rather than engaged, so
-    // the trigger still runs through the executor's focus agreement. Ghosts
-    // are dropped with the same call priority 5 uses. wasEngage is cleared
-    // so the next real firefight elsewhere re-enters fresh.
-    if (this.isCapping(view)) {
+    // Flag-hold: the designated holder (rank 0 on its ring's ladder) never
+    // leaves its point — not for a bearing, not for a visual, not for an
+    // ongoing damage search. Potshots with no visual are dropped unread
+    // (presence is what ticks the capture, and stepping out to chase a
+    // bearing hands the point over); a live visual is shot at IN PLACE by
+    // objectiveIntent rather than engaged, so the trigger still runs through
+    // the executor's focus agreement. Ghosts are dropped with the same call
+    // priority 5 uses. wasEngage is cleared so the next real firefight
+    // elsewhere re-enters fresh. Higher ranks skip all of this and fall
+    // through to the normal ladder as escorts: covered (a rank-0 mate holds
+    // the ring), so bearings and visuals own them until the fight is over.
+    if (view.objective !== null && this.isCapping(view) && view.objective.holdRank === 0) {
       this.pendingBearing = null;
       if (this.searching || this.memory !== null) this.clearInvestigation(false);
       this.wasEngage = false;
@@ -998,13 +1003,14 @@ export class DefaultBrain implements BotBrain {
 
     // Priority 5: the assigned domination flag — above ghost-chasing. What
     // still outranks it depends on the cover: an escort (a mate already
-    // holding) hunts bearings (priorities 1 and 4) and visuals (priority 2)
+    // holding — an en-route pusher with cover, or a non-holder standing the
+    // ring) hunts bearings (priorities 1 and 4) and visuals (priority 2)
     // like a TDM bot, while an uncovered pusher walks on through bearings
-    // and only visuals divert it. Cappers never reach this line — the
-    // flag-hold above returns first. A lost sighting or an ordinary scan
-    // never diverts either way — the remembered ghost is dropped here and
-    // the bot walks back to its point (the assignment is sticky across
-    // fights).
+    // and only visuals divert it. Only the designated holder never reaches
+    // this line — the flag-hold above returns first. A lost sighting or an
+    // ordinary scan never diverts either way — the remembered ghost is
+    // dropped here and the bot walks back to its point (the assignment is
+    // sticky across fights).
     if (view.objective !== null) {
       if (this.searching || this.memory !== null) this.clearInvestigation(false);
       return this.objectiveIntent(view, dt, jukeDraw);

@@ -189,6 +189,33 @@ export function opposing(team: Team): Team {
   return team === 'CT' ? 'T' : 'CT';
 }
 
+/**
+ * The domination flag a bot is assigned to. The position is the flag's own
+ * static point (it never moves); `assignedMates` is how many live SAME-team
+ * bots share this assignment, excluding the holder — the dispatcher's answer
+ * to "who is supposed to be here with me", refreshed on its slow tick.
+ */
+export interface DomObjective {
+  id: string;
+  pos: THREE.Vector3;
+  radius: number;
+  /** Live same-team bots sharing this assignment, excluding the holder. */
+  assignedMates: number;
+}
+
+/**
+ * What the brain sees of its assignment each frame: the static dispatch
+ * above plus `cappingMates` — live same-team bodies (bots AND the player)
+ * currently inside the same ring, excluding the viewer. Counts, never
+ * identities or positions: flag states are broadcast to both teams, so this
+ * reveals nothing a scoreboard wouldn't. The executor recomputes it every
+ * frame; the dispatch half stays sticky between dispatcher runs.
+ */
+export interface ObjectiveView extends DomObjective {
+  /** Live same-team bodies inside this flag's ring, excluding the viewer. */
+  cappingMates: number;
+}
+
 /** Structural shape of one bot (see bots.ts for the concrete class). */
 export interface Bot {
   /** Per-match serial (1-based), stamped at construction — stable across deaths. */
@@ -278,7 +305,7 @@ export interface Bot {
    * position is the flag's own static point; the executor clones it into the
    * view, so sharing the reference here is safe.
    */
-  assignObjective(o: { id: string; pos: THREE.Vector3; radius: number } | null): void;
+  assignObjective(o: DomObjective | null): void;
 }
 
 /** One transient impact puff tracked by effects.ts. */

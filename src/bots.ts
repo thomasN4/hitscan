@@ -33,7 +33,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from './core/materials';
 import { scene, camera } from './core/engine';
-import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, dom, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type HitZone, type PlayerState, type Team } from './core/state';
+import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, creditKill, BOT_SPAWNS, WEAPONS, dom, type Bot as BotShape, type BotPrimaryId, type BotSecondaryChoice, type BotSidearmId, type BotWeaponChoice, type BotWeaponId, type DomObjective, type HitZone, type PlayerState, type Team } from './core/state';
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
@@ -51,7 +51,7 @@ import {
 import { meleeSwing, isBackstab, type MeleeCandidate } from './sim/melee';
 import { damageForPart } from './sim/damage';
 import { acquireVisual, type PerceptionId } from './sim/perception';
-import { assignDomObjectives, DISPATCH_INTERVAL_S } from './sim/domination';
+import { assignDomObjectives, countFlagBodies, isBodyInRing, DISPATCH_INTERVAL_S, type DomBody } from './sim/domination';
 import { pickDomRespawn } from './domSpawns';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
@@ -376,15 +376,18 @@ export class Bot implements BotShape {
    * updateBots' dispatcher via assignObjective(); read once per frame as
    * BrainView.objective. The position is the flag's own — it never moves, so
    * sharing the reference is safe, and the view clones it on the way in.
+   * `assignedMates` is the dispatch half of the teammate cover (same-team
+   * bots sharing the assignment); the live half, `cappingMates`, is computed
+   * per frame in update() from the ring census updateBots keeps.
    */
-  private domObjective: { id: string; pos: THREE.Vector3; radius: number } | null = null;
+  private domObjective: DomObjective | null = null;
 
   /**
    * Take (or clear) the dispatcher's flag assignment. The brain consumes it
    * as BrainView.objective on the next update; a mid-life reassignment
    * simply retargets the route cache through the existing owner-key change.
    */
-  assignObjective(o: { id: string; pos: THREE.Vector3; radius: number } | null): void {
+  assignObjective(o: DomObjective | null): void {
     this.domObjective = o;
   }
 
@@ -660,12 +663,16 @@ export class Bot implements BotShape {
         // routes to it under the same one-A-star-per-frame budget. Only paid
         // when the brain has already decided it has nothing better to do.
         nextPatrolWaypoint: () => this.nextPatrolWaypoint(),
-        // The dispatcher's flag assignment, cloned on the way in: the flag
-        // never moves, but the view contract is copies, never live state.
+        // The dispatcher's flag assignment plus live teammate cover, cloned
+        // on the way in: the flag never moves, but the view contract is
+        // copies, never live state. The mates are bare counts, never
+        // identities or positions — flag states are broadcast anyway.
         objective: this.domObjective === null ? null : {
           id: this.domObjective.id,
           pos: this.domObjective.pos.clone(),
           radius: this.domObjective.radius,
+          assignedMates: this.domObjective.assignedMates,
+          cappingMates: cappingMatesFor(this, this.domObjective.id),
         },
       },
       dt,
@@ -1267,6 +1274,10 @@ export function updateBots(dt: number, player: PlayerState): void {
   // after it in this array and not to the ones before — hearing would depend
   // on registry order. With it, every bot hears it on the next frame.
   soundHighWater = soundEvents.latestSeq;
+  // Domination ring census, EVERY frame (unlike the 1 s dispatch below):
+  // cover is a live fact — a mate stepping onto or off the point must reach
+  // the brains this frame, not after the next dispatch.
+  refreshDomCensus(player);
   // Domination assignments refresh on a slow tick, not per frame: the pure
   // dispatcher is sticky across runs, and re-running it per frame would
   // churn the route cache owner keys for nothing.
@@ -1276,6 +1287,47 @@ export function updateBots(dt: number, player: PlayerState): void {
     dispatchDomObjectives();
   }
   bots.forEach(b => b.update(dt, player));
+}
+
+/**
+ * Live per-flag body counts for the brains' teammate cover. Refreshed once
+ * per frame in updateBots (before any bot runs, like the hearing snapshot);
+ * each bot reads its own team's count minus itself when it stands inside.
+ * Bodies mirror domination.ts's updater — the player counted as the teammate
+ * they are, so a bot pushing a flag its player already holds knows it is
+ * covered. Empty outside dom matches, so TDM bots never see a cover fact.
+ */
+const domCensus = new Map<string, { t: number; ct: number }>();
+
+function refreshDomCensus(player: PlayerState): void {
+  domCensus.clear();
+  if (session.mode !== 'dom' || dom.flags.length === 0) return;
+  const bodies: DomBody[] = [];
+  if (player.alive) {
+    const feet = playerFeet(player);
+    bodies.push({ team: session.playerTeam, x: feet.x, feetY: feet.y, z: feet.z });
+  }
+  for (const b of bots) {
+    if (!b.alive) continue;
+    bodies.push({ team: b.team, x: b.mesh.position.x, feetY: b.mesh.position.y, z: b.mesh.position.z });
+  }
+  for (const f of dom.flags) domCensus.set(f.id, countFlagBodies(f, bodies));
+}
+
+/**
+ * Live same-team bodies inside `flagId`'s ring, excluding `bot` itself —
+ * the capping half of BrainView.objective. Zero with no census or no live
+ * flag of that id (flags never leave mid-match; the guard is what proves it
+ * to noUncheckedIndexedAccess).
+ */
+function cappingMatesFor(bot: Bot, flagId: string): number {
+  const counts = domCensus.get(flagId);
+  const flag = dom.flags.find(f => f.id === flagId);
+  if (counts === undefined || flag === undefined) return 0;
+  const total = bot.team === 'T' ? counts.t : counts.ct;
+  const feet = bot.mesh.position;
+  const selfIn = isBodyInRing(flag, { team: bot.team, x: feet.x, feetY: feet.y, z: feet.z });
+  return Math.max(0, total - (selfIn ? 1 : 0));
 }
 
 /**
@@ -1294,8 +1346,9 @@ let domDispatchIn = 0;
  */
 function dispatchDomObjectives(): void {
   if (session.mode !== 'dom' || dom.flags.length === 0) return;
+  const alive = bots.filter(b => b.alive);
   const assigned = assignDomObjectives(
-    bots.filter(b => b.alive).map(b => ({
+    alive.map(b => ({
       id: b.id,
       team: b.team,
       x: b.mesh.position.x,
@@ -1306,9 +1359,25 @@ function dispatchDomObjectives(): void {
   );
   domAssignments.clear();
   for (const [id, flagId] of assigned) domAssignments.set(id, flagId);
+  // Teammate cover, dispatch half: same-team bots sharing each assignment,
+  // counted from the FRESH map so a re-dispatch never reports last second's
+  // company. Keyed per team — opposite sides converging on one flag are not
+  // each other's cover.
+  const byId = new Map(alive.map(b => [b.id, b.team] as const));
+  const groups = new Map<string, number[]>();
+  for (const [id, flagId] of assigned) {
+    const team = byId.get(id);
+    if (team === undefined) continue;
+    const key = `${team}:${flagId}`;
+    const ids = groups.get(key);
+    if (ids) ids.push(id);
+    else groups.set(key, [id]);
+  }
+  const mates = new Map<number, number>();
+  for (const ids of groups.values()) for (const id of ids) mates.set(id, ids.length - 1);
   for (const b of bots) {
     const flagId = b.alive ? domAssignments.get(b.id) : undefined;
     const flag = flagId === undefined ? undefined : dom.flags.find(f => f.id === flagId);
-    b.assignObjective(flag ? { id: flag.id, pos: flag.pos, radius: flag.radius } : null);
+    b.assignObjective(flag ? { id: flag.id, pos: flag.pos, radius: flag.radius, assignedMates: mates.get(b.id) ?? 0 } : null);
   }
 }

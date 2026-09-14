@@ -150,8 +150,17 @@ interface ViewOpts {
   nextPatrolWaypoint?: () => THREE.Vector3 | undefined | null;
   /** Hostile noises this frame, executor-filtered; default none. */
   heard?: readonly HeardSound[];
-  /** Assigned domination flag; default null = TDM or undispatched. */
-  objective?: { id: string; pos: THREE.Vector3; radius: number } | null;
+  /**
+   * Assigned domination flag; default null = TDM or undispatched. Mates
+   * default to zero — an uncovered push — unless the test covers the flag.
+   */
+  objective?: {
+    id: string;
+    pos: THREE.Vector3;
+    radius: number;
+    assignedMates?: number;
+    cappingMates?: number;
+  } | null;
   /** Standability feeler; default open ground — every pre-sense test walks nowhere near a wall. */
   canStandAt?: (x: number, z: number) => boolean;
 }
@@ -178,7 +187,14 @@ function view(o: ViewOpts = {}): BrainView {
     // thunk, and the pause-before-patrol tests want a goalless answer (null).
     nextPatrolWaypoint: o.nextPatrolWaypoint ?? (() => null),
     // No objective by default: every pre-domination test describes a TDM bot.
-    objective: o.objective ?? null,
+    // Mates default to zero — an uncovered push — unless the test covers it.
+    objective: o.objective === undefined || o.objective === null ? null : {
+      id: o.objective.id,
+      pos: o.objective.pos,
+      radius: o.objective.radius,
+      assignedMates: o.objective.assignedMates ?? 0,
+      cappingMates: o.objective.cappingMates ?? 0,
+    },
     // Open ground by default: the sense tests pass their own walls.
     canStandAt: o.canStandAt ?? (() => true),
   };
@@ -1965,16 +1981,100 @@ describe('DefaultBrain domination objective', () => {
     expect(brain.decide(view({ visual: null }), DT).mode).toBe('hold');
   });
 
-  it('a damage-armed search keeps priority over the objective', () => {
+  it('a damage-armed search keeps priority over the objective while covered', () => {
+    // An escort (a mate already holding) hunts bearings like a TDM bot:
+    // being shot at matters more than standing orders.
+    const covered = { ...flag, cappingMates: 1 };
     const brain = calmBrain();
     brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
     expect(brain.decide(view({ visual: null }), DT).mode).toBe('search');
-    // Being shot at matters more than standing orders.
     const reacting = brain.decide(view({
+      visual: null,
+      objective: covered,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(reacting.mode).toBe('search');
+  });
+
+  it('an uncovered pusher drops the bearing and walks on', () => {
+    // Nobody holds the flag (mates default to zero): potshots must not kite
+    // the push off the point. Facing stays on the flag, not the bearing.
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(-1, 0, 0));
+    const intent = brain.decide(view({
       visual: null,
       objective: flag,
       nextWaypoint: () => new THREE.Vector3(0, 0, 1),
     }), DT);
-    expect(reacting.mode).toBe('search');
+    expect(intent.mode).toBe('objective');
+    expect(intent.step.length()).toBeGreaterThan(0);
+    // The bearing is consumed, not shelved: the next frame walks on too.
+    const next = brain.decide(view({
+      visual: null,
+      objective: flag,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(next.mode).toBe('objective');
+  });
+
+  it('an uncovered pusher drops an ongoing damage search and walks back', () => {
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    expect(brain.decide(view({ visual: null }), DT).mode).toBe('search');
+    const back = brain.decide(view({
+      visual: null,
+      objective: flag,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(back.mode).toBe('objective');
+    // And the search behind it is gone: with no objective the next frame
+    // holds instead of resuming the scan.
+    expect(brain.decide(view({ visual: null }), DT).mode).toBe('hold');
+  });
+
+  it('a capper holds through the bearing: no advance, no scan', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const intent = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(intent.mode).toBe('capture');
+    expect(intent.step.length()).toBe(0);
+    expect(intent.wantShoot).toBe(false);
+  });
+
+  it('a capper drops an ongoing damage search instead of serving it', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    expect(brain.decide(view({ visual: null }), DT).mode).toBe('search');
+    // Reaching the point mid-search ends the search: the ring owns the bot.
+    const held = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(held.mode).toBe('capture');
+    expect(held.step.length()).toBe(0);
+  });
+
+  it('a capper shoots a visual in place instead of leaving to engage', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const fire = new StubFire();
+    fire.readyNow = true;
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    const intent = brain.decide(view({ visual: visualAt(10), objective: close }), DT);
+    expect(intent.mode).toBe('capture');
+    expect(intent.step.length()).toBe(0);
+    expect(intent.wantShoot).toBe(true);
+    expect(intent.focusId).toBe('player');
+    expect(intent.lookAt!.x).toBeCloseTo(10, 12);
+    expect(fire.pulls).toBe(1);
+  });
+
+  it('a capper holds fire beyond engage range but still holds the ring', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = eagerBrain(); // the weapon is always willing
+    const intent = brain.decide(view({ visual: visualAt(10, 0, 50), objective: close }), DT);
+    expect(intent.mode).toBe('capture');
+    expect(intent.step.length()).toBe(0);
+    expect(intent.wantShoot).toBe(false);
+    // ...while still tracking the contact for acquisition and the readout.
+    expect(intent.focusId).toBe('player');
   });
 });

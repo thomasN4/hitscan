@@ -4,6 +4,7 @@ import {
   TICK_POINTS_PER_SEC,
   assignDomObjectives,
   countFlagBodies,
+  isBodyInRing,
   tickDomScores,
   updateFlagCapture,
   type MutableDomFlag,
@@ -41,6 +42,36 @@ describe('countFlagBodies', () => {
       { team: 'CT', x: 0, feetY: 0, z: 0 },
     ]);
     expect(counts).toEqual({ t: 1, ct: 0 });
+  });
+});
+
+describe('isBodyInRing', () => {
+  const f = flag();
+  test('inside the planar ring at grade counts', () => {
+    expect(isBodyInRing(f, { team: 'T', x: 1, feetY: 0, z: 1 })).toBe(true);
+  });
+
+  test('outside the planar ring does not count, even at grade', () => {
+    expect(isBodyInRing(f, { team: 'T', x: 40, feetY: 0, z: 0 })).toBe(false);
+  });
+
+  test('the vertical window binds both ways: deck body, ground flag', () => {
+    const deck = flag({ pos: { x: 0, y: 3.6, z: 0 } });
+    expect(isBodyInRing(deck, { team: 'T', x: 0, feetY: 3.6, z: 0 })).toBe(true);
+    expect(isBodyInRing(deck, { team: 'CT', x: 0, feetY: 0, z: 0 })).toBe(false);
+  });
+
+  test('agrees with countFlagBodies on every body it counts', () => {
+    const bodies = [
+      { team: 'T' as const, x: 1, feetY: 0, z: 1 },
+      { team: 'T' as const, x: 4, feetY: 0, z: 0 },
+      { team: 'CT' as const, x: -2, feetY: 0, z: -2 },
+      { team: 'CT' as const, x: 40, feetY: 0, z: 0 },
+    ];
+    const counts = countFlagBodies(f, bodies);
+    const inRing = bodies.filter(b => isBodyInRing(f, b));
+    expect(inRing.filter(b => b.team === 'T')).toHaveLength(counts.t);
+    expect(inRing.filter(b => b.team === 'CT')).toHaveLength(counts.ct);
   });
 });
 

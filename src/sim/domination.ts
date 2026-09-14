@@ -54,8 +54,23 @@ export interface DomBody {
 }
 
 /**
- * Count each side's bodies inside a flag's ring: planar distance within the
- * radius AND feet within VERTICAL_TOL_M of the flag's walk surface.
+ * Whether one body counts toward a flag: planar distance within the radius
+ * AND feet within VERTICAL_TOL_M of the flag's walk surface. The single
+ * ring test behind both the capture tick and the bots' teammate awareness,
+ * so the two can never disagree about who is "on" a flag.
+ */
+export function isBodyInRing(
+  flag: Pick<MutableDomFlag, 'pos' | 'radius'>,
+  body: DomBody,
+): boolean {
+  const dx = body.x - flag.pos.x;
+  const dz = body.z - flag.pos.z;
+  if (dx * dx + dz * dz > flag.radius * flag.radius) return false;
+  return Math.abs(body.feetY - flag.pos.y) <= VERTICAL_TOL_M;
+}
+
+/**
+ * Count each side's bodies inside a flag's ring (see isBodyInRing).
  */
 export function countFlagBodies(
   flag: Pick<MutableDomFlag, 'pos' | 'radius'>,
@@ -64,10 +79,7 @@ export function countFlagBodies(
   let t = 0;
   let ct = 0;
   for (const b of bodies) {
-    const dx = b.x - flag.pos.x;
-    const dz = b.z - flag.pos.z;
-    if (dx * dx + dz * dz > flag.radius * flag.radius) continue;
-    if (Math.abs(b.feetY - flag.pos.y) > VERTICAL_TOL_M) continue;
+    if (!isBodyInRing(flag, b)) continue;
     if (b.team === 'T') t++;
     else ct++;
   }

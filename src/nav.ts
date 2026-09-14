@@ -36,6 +36,13 @@ const CELL = 1;
 /** Padding (m) around the level's geometry, so the outermost floor is sampled. */
 const MARGIN = 2;
 
+/**
+ * Wall-clearance price on every route (see sim/navGrid.ts:clearanceWeight).
+ * Each blocked cardinal neighbour adds weight/4 to traversal cost. This is
+ * a soft preference, not a clearance guarantee or a global detour bound.
+ */
+export const CLEARANCE_WEIGHT = 0.4;
+
 /** The current map's graph; undefined until buildNav() runs. */
 let grid: NavGrid | undefined;
 
@@ -108,7 +115,7 @@ function boundsOf(boxes: readonly THREE.Box3[]): Bounds {
  * `colliders` is populated. Map switching is a full page reload, so this runs
  * exactly once per session.
  */
-export function buildNav(): NavGrid {
+export function buildNav(clearanceWeight = CLEARANCE_WEIGHT): NavGrid {
   const staticBoxes = colliders.filter(c => !elevators.some(e => e.collider === c));
   const bounds = boundsOf(staticBoxes);
   const index = indexColliders(staticBoxes, bounds);
@@ -126,7 +133,7 @@ export function buildNav(): NavGrid {
     },
   };
   const t0 = performance.now();
-  grid = buildNavGrid({ bounds, cell: CELL, stepHeight: STEP_HEIGHT, probe, links: navLinks });
+  grid = buildNavGrid({ bounds, cell: CELL, stepHeight: STEP_HEIGHT, probe, links: navLinks, clearanceWeight });
   // DEV-only, like bots.ts:debugLog: the build runs once at startup and its
   // cost scales with map size times collider count, so a map that quietly
   // makes it expensive should be visible rather than felt. Statically dead in

@@ -14,8 +14,9 @@
 //
 // The default policy: with a current visual observation, engage — approach
 // beyond farBand, back off inside nearBand, drift perpendicular with random
-// jukes, route when the observation sits a level up or band steering
-// demonstrably cannot close, fire on cooldown. A direction-only incoming-fire
+// jukes and a debounced wall-sense flip, sidestepping a sustained wedge
+// without leaving engage, route when the observation sits a level up or band
+// steering demonstrably cannot close, fire on cooldown. A direction-only incoming-fire
 // bearing outranks everything for one frame and starts a damage-armed search
 // where the shot came from. On sight loss WITHOUT standing orders the LAST
 // KNOWN position is pursued: the brain routes to the frozen remembered feet,
@@ -85,6 +86,25 @@ export interface BrainParams {
   /** Seconds a jammed bot commits to sliding one way along whatever blocks it. */
   commitTime: number;
   /**
+   * Feeler reach (m) for the travel wall-sense: diagonal probes at
+   * heading·range ± perp·range through the view's standability probe. ~1 m
+   * looks a quarter-second ahead at bot speed — far enough to pre-steer,
+   * near enough that a doorway still reads open on both feelers.
+   */
+  wallProbeRange: number;
+  /**
+   * Outward bias weight vs the waypoint heading when exactly one feeler is
+   * blocked. Half the heading's weight eases off the wall without abandoning
+   * the line; both feelers blocked (a doorway) holds the line instead.
+   */
+  wallPush: number;
+  /**
+   * Refractory period (s) between wall-sense strafe flips while engaged. The
+   * contact edge stays ungated as the blind-spot backstop; the feelers must
+   * not chatter faster than the sidestep commit below can make progress.
+   */
+  wallSenseCooldown: number;
+  /**
    * Seconds a bot may fail to CLOSE on its target beyond farBand before it
    * stops trusting band steering and routes on the flat — the flat analogue
    * of climbThreshold's job: evidence gathered, not anticipation.
@@ -138,8 +158,11 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   engageRange: 45,
   climbThreshold: 1.5, // ≈ 5 risers; well clear of STEP_HEIGHT's 0.3
   climbExit: 0.45,     // just over one riser — keep routing to the last step
-  stuckTime: 0.25,
-  commitTime: 0.5,
+  stuckTime: 0.1,    // catch a tenth-second wedge; single-frame brushes still reset
+  commitTime: 2,     // sustain the escape around a corner; see docs/bot-movement-tuning.md
+  wallProbeRange: 1, // retained after sweeps: shorter feelers regressed backing away from walls
+  wallPush: 0.5,     // half the heading's weight: ease off, don't abandon the line
+  wallSenseCooldown: 0.5, // sense flips at most twice a second; the contact edge stays ungated
   noProgressTime: 1.5,   // ~2 juke swings would be 4 s; 1.5 s is already patient
   noProgressEpsilon: 0.25, // ≈ 4 frames of full-speed closure
   fleeReset: 2,          // a target 2 m farther than the best seen is running, not stalling
@@ -180,6 +203,14 @@ export interface BrainView {
   selfSpeed: number;
   /** Whether LAST frame's step was rejected by world collision. */
   moveBlocked: boolean;
+  /**
+   * Whether a body may stand at (x, z) at this bot's OWN feet height — the
+   * wall-sense feeler. Executor-backed by the same feet-aware gate the step
+   * obeys (collision.ts:collidesAt at the bot's own radius), so a
+   * "standable" answer means the intended step would survive there too.
+   * Travel reads diagonal feelers; engaged strafing reads the lateral pair.
+   */
+  canStandAt(x: number, z: number): boolean;
   /**
    * Hostile noises heard SINCE the last frame — already filtered by the
    * executor for team and earshot, so an entry here is by construction
@@ -405,6 +436,8 @@ export class DefaultBrain implements BotBrain {
   private blockedFor = 0;
   /** Seconds left on a committed sideways slide past whatever is jamming us. */
   private commitLeft = 0;
+  /** Refractory seconds left before the engage wall-sense may flip again. */
+  private senseCooldown = 0;
   /** Which way the last slide went; the next one takes the other. */
   private slideDir: 1 | -1 = 1;
   /**
@@ -430,6 +463,15 @@ export class DefaultBrain implements BotBrain {
    * pushing in — the wall-grind playtesters watched.
    */
   private wasBlocked = false;
+  /**
+   * True when the previous frame's intent was engage. Jam timers are shared
+   * by routed travel and engaged strafing, but a patrol-armed commit must not
+   * steer an unrelated firefight: entering engage from any non-engage mode
+   * restarts the timers (and the wall-sense cooldown) instead of inheriting
+   * geometry the bot already left behind. Continuing engage frames preserve
+   * them, so a sustained wedge still commits.
+   */
+  private wasEngage = false;
   /**
    * The identity this brain's attention is on: the last observed id, held
    * across temporary sight loss so acquisition probes it first when the
@@ -541,10 +583,12 @@ export class DefaultBrain implements BotBrain {
     this.routing = false;
     this.blockedFor = 0;
     this.commitLeft = 0;
+    this.senseCooldown = 0;
     this.flatRouted = false;
     this.stalledFor = 0;
     this.stallBase = Infinity;
     this.wasBlocked = false;
+    this.wasEngage = false;
     this.focus = null;
     this.memory = null;
     this.searching = false;
@@ -710,7 +754,14 @@ export class DefaultBrain implements BotBrain {
    * sliding one way along whatever blocks it, alternating side between
    * attempts. With it, all four routes complete at zero drift.
    */
-  private travel(step: THREE.Vector3, waypoint: THREE.Vector3, view: BrainView, dt: number): void {
+  /**
+   * Shared jam accumulation for routed travel and engaged strafing: a brush
+   * (isolated rejections) never arms, sustained rejection commits a sideways
+   * slide alternating side between attempts. Returns whether a committed
+   * slide owns this frame's step — the caller steers it along its own axis.
+   * Takes no draws.
+   */
+  private updateJam(view: BrainView, dt: number): boolean {
     if (view.moveBlocked) this.blockedFor += dt;
     else this.blockedFor = 0;
 
@@ -722,12 +773,37 @@ export class DefaultBrain implements BotBrain {
       this.commitLeft = this.params.commitTime;
       this.slideDir = this.slideDir === 1 ? -1 : 1;
     }
+    return this.commitLeft > 0;
+  }
+
+  private travel(step: THREE.Vector3, waypoint: THREE.Vector3, view: BrainView, dt: number): void {
+    const committed = this.updateJam(view, dt);
 
     const heading = waypoint.clone().setY(0).normalize();
-    if (this.commitLeft > 0) {
+    if (committed) {
       step.set(-heading.z * this.slideDir, 0, heading.x * this.slideDir);
     } else {
       step.copy(heading);
+      // Wall-sense: diagonal feelers a step ahead through the view's
+      // standability probe. A wall on ONE side eases the step away before
+      // contact grinds speed off in the executor's slide gate; both sides
+      // blocked (a doorway) holds the line rather than picking a side. Takes
+      // no draws — the per-frame juke sequence is untouched.
+      const range = this.params.wallProbeRange;
+      const px = -heading.z, pz = heading.x;
+      const leftBlocked = !view.canStandAt(
+        view.selfFeet.x + (heading.x + px) * range,
+        view.selfFeet.z + (heading.z + pz) * range,
+      );
+      const rightBlocked = !view.canStandAt(
+        view.selfFeet.x + (heading.x - px) * range,
+        view.selfFeet.z + (heading.z - pz) * range,
+      );
+      if (leftBlocked !== rightBlocked) {
+        const side = leftBlocked ? -1 : 1;
+        step.x += px * side * this.params.wallPush;
+        step.z += pz * side * this.params.wallPush;
+      }
     }
     step.normalize().multiplyScalar(view.selfSpeed * dt);
   }
@@ -779,6 +855,7 @@ export class DefaultBrain implements BotBrain {
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;
       }
+      this.wasEngage = false;
       return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
     }
 
@@ -787,8 +864,13 @@ export class DefaultBrain implements BotBrain {
       // Priority 2: something is actually in sight. Ordinary sound never
       // pulls a bot off an opponent it can see, so this frame's noises go
       // unread — the executor has already advanced the cursor past them.
+      // visualIntent owns the wasEngage latch (entry vs continuation).
       return this.visualIntent(view, vis, dt, jukeDraw);
     }
+    // No visual this frame: every path below is non-engage, so the next
+    // visual frame re-enters engage fresh. Timers are preserved (a patrol
+    // wedge frozen through hold resumes), only the latch flips.
+    this.wasEngage = false;
 
     // Priority 3: a newly heard hostile noise — only when nothing is already
     // committed. A pending bearing and a current visual (the two returns
@@ -1001,6 +1083,10 @@ export class DefaultBrain implements BotBrain {
    * fire cadence — unchanged.
    */
   private visualIntent(view: BrainView, vis: VisualObservation, dt: number, jukeDraw: number): BrainIntent {
+    // Entering engage from any non-engage mode restarts the jam machinery —
+    // a patrol-armed commit must not steer this firefight. Continuing engage
+    // preserves it, so a sustained wedge still commits.
+    const prevEngage = this.wasEngage;
     this.focus = vis.id;
     // Freeze the last-known position: COPIES of the observation's geometry —
     // the observation belongs to the executor and the target moves.
@@ -1085,9 +1171,46 @@ export class DefaultBrain implements BotBrain {
     const step = new THREE.Vector3();
     if (this.routing) {
       this.travel(step, waypoint!, view, dt);
+    } else if (prevEngage && this.updateJam(view, dt)) {
+      // Sustained wedge while engaged: sidestep decisively along the strafe
+      // axis without leaving engage — the band, the facing and the trigger
+      // below all still run, only the steering is overridden. Same
+      // brush-vs-jam timers and alternating sides as travel(). Gated on
+      // continuing engage: the entry frame below restarts instead of sliding
+      // on patrol geometry the bot already left behind.
+      step.set(-toTarget.z * this.slideDir, 0, toTarget.x * this.slideDir)
+        .normalize().multiplyScalar(view.selfSpeed * dt);
     } else {
-      this.blockedFor = 0;
-      this.commitLeft = 0;
+      if (!prevEngage) {
+        // First engage frame after patrol/hold/search/route: zero the shared
+        // timers (and the feeler cooldown) rather than inheriting them.
+        this.blockedFor = 0;
+        this.commitLeft = 0;
+        this.senseCooldown = 0;
+      }
+      // Strafe wall-sense, ahead of the blend: flip away from a walled side
+      // while the other reads open, before contact grinds. Pure lateral
+      // feelers — the radial leg is band policy and owns its own slides.
+      // Debounced so the feelers cannot chatter; the contact edge above stays
+      // the blind-spot backstop. Takes no draws.
+      this.senseCooldown = Math.max(0, this.senseCooldown - dt);
+      const ax = -toTarget.z, az = toTarget.x;
+      const axisLen = Math.hypot(ax, az);
+      if (this.senseCooldown <= 0 && axisLen > 1e-9) {
+        const reach = this.params.wallProbeRange / axisLen;
+        const towardBlocked = !view.canStandAt(
+          view.selfFeet.x + ax * this.strafeDir * reach,
+          view.selfFeet.z + az * this.strafeDir * reach,
+        );
+        const awayBlocked = !view.canStandAt(
+          view.selfFeet.x - ax * this.strafeDir * reach,
+          view.selfFeet.z - az * this.strafeDir * reach,
+        );
+        if (towardBlocked && !awayBlocked) {
+          this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+          this.senseCooldown = this.params.wallSenseCooldown;
+        }
+      }
       // Movement blend: radial band preference plus a perpendicular drift
       // component, normalized and scaled to the realized speed.
       //
@@ -1132,6 +1255,7 @@ export class DefaultBrain implements BotBrain {
     // degenerate (zero planar offset).
     const facing = dist > 1e-9 ? dir.clone() : view.facing.clone();
 
+    this.wasEngage = !this.routing;
     return {
       step,
       wantShoot,

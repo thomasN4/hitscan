@@ -152,6 +152,8 @@ interface ViewOpts {
   heard?: readonly HeardSound[];
   /** Assigned domination flag; default null = TDM or undispatched. */
   objective?: { id: string; pos: THREE.Vector3; radius: number } | null;
+  /** Standability feeler; default open ground — every pre-sense test walks nowhere near a wall. */
+  canStandAt?: (x: number, z: number) => boolean;
 }
 
 /** Canonical view: observed target due +x, mid-band, LEVEL, 4 m/s. */
@@ -177,6 +179,8 @@ function view(o: ViewOpts = {}): BrainView {
     nextPatrolWaypoint: o.nextPatrolWaypoint ?? (() => null),
     // No objective by default: every pre-domination test describes a TDM bot.
     objective: o.objective ?? null,
+    // Open ground by default: the sense tests pass their own walls.
+    canStandAt: o.canStandAt ?? (() => true),
   };
 }
 
@@ -398,11 +402,13 @@ describe('DefaultBrain visual intent', () => {
 
 // Routing — following the executor's path instead of steering at the target.
 //
-// dt 0.1 makes the timers whole frames: stuckTime 0.25 is 3 frames (0.3 > 0.25),
-// commitTime 0.5 is 5. The waypoint points due +z so a routing step reads on
+// Explicit fixture timers: stuckTime 0.25 is 3 frames (0.3 > 0.25),
+// commitTime 0.5 is 5. Shipped tuning is exercised by botMovement.test.ts.
+// The waypoint points due +z so a routing step reads on
 // step.z alone, and any step.x at all would be drift that must not be there.
 describe('DefaultBrain routing', () => {
   const STEP_DT = 0.1;
+  const calmBrain = (): DefaultBrain => brainOf({ ...moveParams(), stuckTime: 0.25, commitTime: 0.5 }, calmRng);
   const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
   /** Target a level up, with a route available. */
   const onRoute = (overrides: ViewOpts = {}): BrainView =>
@@ -529,6 +535,174 @@ describe('DefaultBrain routing', () => {
   });
 });
 
+// The travel wall-sense: diagonal feelers ease a routed step off a wall on
+// one side before contact grinds speed off in the slide gate. Same replay
+// style as the routing describes above — the waypoint is due +z from feet at
+// the origin, so with range 1 the feelers sit at (±1, 0, 1) and a
+// `x >= -0.5` probe walls exactly the -x one.
+describe('DefaultBrain travel wall-sense', () => {
+  const STEP_DT = 0.1;
+  const NORTH = (): THREE.Vector3 => new THREE.Vector3(0, 0, 4);
+  const onRoute = (overrides: ViewOpts = {}): BrainView =>
+    view({ dist: 20, rise: 3.6, nextWaypoint: () => NORTH(), ...overrides });
+
+  it('walks the line untouched when both feelers read open', () => {
+    const { step, mode } = calmBrain().decide(onRoute(), STEP_DT);
+    expect(mode).toBe('route');
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('eases away from a wall on one side, still mostly forward', () => {
+    // Blend = heading (0,0,1) + push 0.5 along +x, normalized to speed·dt.
+    const len = Math.sqrt(1 + 0.5 * 0.5);
+    const { step } = calmBrain().decide(onRoute({ canStandAt: (x) => x >= -0.5 }), STEP_DT);
+    expect(step.x).toBeCloseTo((0.5 / len) * 4 * STEP_DT, 12);
+    expect(step.z).toBeCloseTo((1 / len) * 4 * STEP_DT, 12);
+  });
+
+  it('mirrors: a wall on the other side pushes the other way', () => {
+    const { step } = calmBrain().decide(onRoute({ canStandAt: (x) => x <= 0.5 }), STEP_DT);
+    expect(step.x).toBeLessThan(0);
+    expect(step.z).toBeGreaterThan(0);
+  });
+
+  it('holds the line through a doorway, both feelers blocked', () => {
+    // Picking a side inside a gap would steer into a jamb; the line holds.
+    const { step } = calmBrain().decide(onRoute({ canStandAt: () => false }), STEP_DT);
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('a committed slide ignores the feelers', () => {
+    // First refused frame arms the sideways commit (shipped stuckTime 0.1 at
+    // STEP_DT 0.1); the feelers must not leak a forward component back into
+    // the committed slide.
+    const brain = calmBrain();
+    const jammed = onRoute({ moveBlocked: true, canStandAt: (x) => x >= -0.5 });
+    for (let f = 1; f <= 3; f++) brain.decide(jammed, STEP_DT);
+    const slide = brain.decide(jammed, STEP_DT);
+    expect(Math.abs(slide.step.x)).toBeCloseTo(4 * STEP_DT, 12);
+    expect(slide.step.z).toBeCloseTo(0, 12);
+  });
+
+  it('engage steering reads only the strafe pair', () => {
+    // Scoping pin, widened by the engage wall-sense: a mid-band firefight
+    // takes exactly the two lateral feeler reads per frame — no diagonal
+    // travel feelers, no per-joint wandering.
+    let asked = 0;
+    const v = view({ dist: 10, canStandAt: () => { asked++; return true; } });
+    const { mode } = calmBrain().decide(v, STEP_DT);
+    expect(mode).toBe('engage');
+    expect(asked).toBe(2);
+  });
+});
+
+// The engage wall-sense: corner contact used to flicker moveBlocked, and
+// every flicker edge re-reversed the strafe — vibration with zero net lateral
+// progress while the radial pinned the bot in. Same replay style as above:
+// mid-band target due +x, so the strafe axis is ±z and a `z <= 0.5` probe
+// walls exactly the side the calm brain strafes toward first.
+describe('DefaultBrain engage wall-sense', () => {
+  const STEP_DT = 0.1;
+  /** Mid-band firefight, strafing +z first; never routes, never latches. */
+  const duel = (overrides: ViewOpts = {}): BrainView => view({ dist: 10, ...overrides });
+
+  it('flips the strafe before contact with a walled side', () => {
+    // Blend after the flip: heading (0,0,-1) weighted 0.5 against nothing
+    // radial — pure reversed strafe at full speed, the same frame.
+    const { step, mode } = calmBrain().decide(duel({ canStandAt: (_x, z) => z <= 0.5 }), STEP_DT);
+    expect(mode).toBe('engage');
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(-4 * STEP_DT, 12);
+  });
+
+  it('holds the strafe through a doorway, both feelers blocked', () => {
+    const { step } = calmBrain().decide(duel({ canStandAt: () => false }), STEP_DT);
+    expect(step.z).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('debounces feeler flips so they cannot chatter', () => {
+    // The wall swaps sides every frame; without the refractory period the
+    // strafe would alternate with it. First frame flips, the next 0.4 s hold,
+    // and the flip back lands once the 0.5 s cooldown spends (a frame of
+    // float residue either way — the test polls past it rather than pinning
+    // it).
+    const brain = calmBrain();
+    let wallPlusZ = true;
+    const v = (): BrainView => duel({ canStandAt: (_x, z) => (wallPlusZ ? z <= 0.5 : z >= -0.5) });
+    expect(brain.decide(v(), STEP_DT).step.z).toBeLessThan(0); // flipped
+    for (let f = 1; f <= 4; f++) {
+      wallPlusZ = false; // the far side is walled now — must NOT flip back yet
+      expect(brain.decide(v(), STEP_DT).step.z, `frame ${f}`).toBeLessThan(0);
+    }
+    wallPlusZ = false;
+    let flipped = false;
+    for (let f = 1; f <= 3 && !flipped; f++) {
+      flipped = brain.decide(v(), STEP_DT).step.z > 0;
+    }
+    expect(flipped).toBe(true);
+  });
+
+  it('sidesteps a sustained wedge without leaving engage or holding fire', () => {
+    // First refused frame arms the same commit travel() uses (stuckTime 0.1
+    // at STEP_DT 0.1); the step goes pure lateral while the band, the mode
+    // and the trigger all still run.
+    const fire = new StubFire();
+    fire.readyNow = true;
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    const wedged = duel({ moveBlocked: true });
+    brain.decide(wedged, STEP_DT); // contact edge flips the strafe; already committed
+    brain.decide(wedged, STEP_DT); // committed
+    const slide = brain.decide(wedged, STEP_DT); // still committed
+    expect(slide.mode).toBe('engage');
+    expect(slide.step.x).toBeCloseTo(0, 12);
+    expect(Math.abs(slide.step.z)).toBeCloseTo(4 * STEP_DT, 12);
+    expect(slide.wantShoot).toBe(true);
+    expect(fire.pulls).toBeGreaterThan(0);
+    // …and the commit persists while the wedge does.
+    const held = brain.decide(wedged, STEP_DT);
+    expect(Math.abs(held.step.z)).toBeCloseTo(4 * STEP_DT, 12);
+  });
+
+  it('a patrol-armed commit does not steer the next firefight', () => {
+    // Patrol geometry arms the shared timers, hold freezes them (it never
+    // runs updateJam), and the next visual must re-enter engage fresh rather
+    // than sliding on geometry it already left behind.
+    const brain = brainOf({ ...moveParams(), patrolPause: 0 }, calmRng);
+    const patrolBlocked = view({
+      visual: null,
+      moveBlocked: true,
+      nextPatrolWaypoint: () => new THREE.Vector3(0, 0, 4),
+    });
+    brain.decide(patrolBlocked, STEP_DT); // arms commitLeft
+    brain.decide(view({ visual: null, moveBlocked: true, nextPatrolWaypoint: () => null }), STEP_DT); // hold
+    const { step, mode } = brain.decide(duel({ dist: 20, moveBlocked: false }), STEP_DT);
+    expect(mode).toBe('engage');
+    // Beyond farBand the band blend keeps a forward component; a leaked
+    // commit would read pure lateral (all-z, no x).
+    expect(step.x).toBeGreaterThan(0);
+  });
+
+  it('a brush never sidesteps: isolated rejections keep band steering', () => {
+    // Beyond farBand so the radial leg discriminates: a committed sidestep
+    // would read all-x, while the band blend keeps a forward component.
+    const brain = calmBrain();
+    const far = duel({ dist: 20 });
+    const brush = duel({ dist: 20, moveBlocked: true });
+    brain.decide(brush, DT);
+    // One clean frame resets the jam counter — the wedge below starts over.
+    brain.decide(far, DT);
+    const { step, mode } = brain.decide(brush, DT);
+    expect(mode).toBe('engage');
+    // Radial 1 plus the 0.7 strafe, normalized: forward survives, so no
+    // commit armed.
+    const len = Math.sqrt(1 + 0.7 * 0.7);
+    expect(step.x).toBeCloseTo((1 / len) * 4 * DT, 12);
+    expect(step.z).toBeCloseTo((0.7 / len) * 4 * DT, 12);
+  });
+});
+
 // The flat-routing latch (issue #44): evidence that band steering cannot
 // close hands the problem to the graph. Same replay style as the routing
 // describes; CADENCE_DT makes the hand-computed timer arithmetic exact
@@ -637,7 +811,8 @@ describe('DefaultBrain flat-routing latch', () => {
     brain.decide(stalled(), CADENCE_DT);
     expect(brain.decide(stalled(), CADENCE_DT).mode).toBe('route');
     // Geometry refuses the waypoint step long enough to be a jam, not a
-    // brush: stuckTime 0.25 is one cadence frame…
+    // brush: the shipped stuckTime (0.1) is under one cadence frame (0.25),
+    // so the first refused frame arms the commit…
     const slide = brain.decide(stalled({ moveBlocked: true }), CADENCE_DT);
     // …which commits the slide: perpendicular to the heading, all x.
     expect(Math.abs(slide.step.x)).toBeCloseTo(4 * CADENCE_DT, 12);

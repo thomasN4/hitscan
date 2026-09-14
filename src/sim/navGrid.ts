@@ -112,6 +112,18 @@ export interface NavGridOptions {
   probe: NavProbe;
   /** Level changes too steep for the sampled grid; see NavLink in world.ts. */
   links?: readonly NavLinkSpec[];
+  /**
+   * Fractional extra traversal cost per wall-adjacent side of a node, 0 to
+   * disable (the default: edges cost their pure 3D length). A node counts how
+   * many of its four orthogonal neighbours one `cell` away are unstandable at
+   * its own height, and every edge touching it is charged
+   * `length * (1 + clearanceWeight * blockedSides / 4)` — so a corridor's
+   * middle prices below its wall-grazing edges and A* swings wide where the
+   * detour is cheap, while a narrow-but-valid gap stays routable at a premium
+   * rather than pruning shut. Costs only ever grow above the 3D length, so the
+   * straight-line heuristic stays admissible and A* stays optimal.
+   */
+  clearanceWeight?: number;
 }
 
 /**
@@ -139,7 +151,7 @@ const NEIGHBOURS: readonly (readonly [number, number])[] = [
  * of the build radius does not fit through.
  */
 export function buildNavGrid(opts: NavGridOptions): NavGrid {
-  const { bounds, cell, stepHeight, probe } = opts;
+  const { bounds, cell, stepHeight, probe, clearanceWeight = 0 } = opts;
   const cols = Math.max(1, Math.ceil((bounds.maxX - bounds.minX) / cell));
   const rows = Math.max(1, Math.ceil((bounds.maxZ - bounds.minZ) / cell));
 
@@ -168,6 +180,25 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     }
   }
 
+  // Wall-adjacency penalty per node: the share of its four orthogonal
+  // neighbours one cell away that cannot be stood on at its own height.
+  // Probed, not derived from missing columns — a column can hold a node at
+  // another level while a wall stands at this one. All zeros when disabled,
+  // so the default build prices exactly what it always did.
+  const penalty: number[] = nodes.map(n => {
+    if (clearanceWeight === 0) return 0;
+    let blocked = 0;
+    if (!probe.canStand(n.x + cell, n.z, n.y)) blocked++;
+    if (!probe.canStand(n.x - cell, n.z, n.y)) blocked++;
+    if (!probe.canStand(n.x, n.z + cell, n.y)) blocked++;
+    if (!probe.canStand(n.x, n.z - cell, n.y)) blocked++;
+    return blocked / 4;
+  });
+
+  /** Traversal price of a segment: its 3D length, uplifted by the tighter end's wall adjacency. */
+  const priced = (a: number, b: number, from: NavNode, to: NavNode): number =>
+    edgeLength(from, to) * (1 + clearanceWeight * Math.max(penalty[a]!, penalty[b]!));
+
   const edges: number[][] = nodes.map(() => []);
   const costs: number[][] = nodes.map(() => []);
   const columnOf = (cx: number, cz: number): number[] | undefined =>
@@ -194,7 +225,7 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
             const to = nodes[b]!;
             if (!walkable(from, to, stepHeight, probe)) continue;
             edges[a]!.push(b);
-            costs[a]!.push(edgeLength(from, to));
+            costs[a]!.push(priced(a, b, from, to));
           }
         }
       }
@@ -206,9 +237,10 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     const a = nearestOf(nodes, spec.bottom);
     const b = nearestOf(nodes, spec.top);
     if (a < 0 || b < 0 || a === b) continue;
-    // One DIRECTED edge, charged its true 3D length (see edgeLength).
+    // One DIRECTED edge, charged its priced length (see priced): the 3D
+    // length uplifted by wall adjacency, plus any waiting cost for transport.
     const edge = (i: number, j: number): void => {
-      const cost = edgeLength(nodes[i]!, nodes[j]!) + (spec.extraCost ?? 0);
+      const cost = priced(i, j, nodes[i]!, nodes[j]!) + (spec.extraCost ?? 0);
       if (spec.elevatorId) elevatorEdges.set(`${i}:${j}`, spec.elevatorId);
       edges[i]!.push(j); costs[i]!.push(cost);
     };
@@ -327,13 +359,14 @@ function compact(
 }
 
 /**
- * Cost of traversing between two nodes: the true 3D length of the segment.
+ * Cost of traversing between two nodes: the true 3D length of the segment,
+ * before the clearance uplift priced() applies on top.
  *
- * Every edge cost in the graph MUST be this, links included, and findPath's
- * heuristic must stay the straight-line 3D distance. That pairing is what
- * makes the heuristic admissible — a straight line is never longer than a
- * path of segments — and admissibility is what makes A* return the shortest
- * route rather than merely a route.
+ * Every edge cost in the graph MUST be at least this, links included, and
+ * findPath's heuristic must stay the straight-line 3D distance. That pairing
+ * is what makes the heuristic admissible — a straight line is never longer
+ * than a path of segments — and admissibility is what makes A* return the
+ * shortest route rather than merely a route.
  *
  * Charging only the planar run, as this first did, breaks it the moment a
  * link has any rise at all: at the foot of the elevation map's internal

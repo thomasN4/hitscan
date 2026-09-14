@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import {
-  collidesAt, supportHeightAt, slideMoveXZ, resolveVertical, findFreeSpawn,
+  collidesAt, standableAt, supportHeightAt, slideMoveXZ, resolveVertical, findFreeSpawn,
   STEP_HEIGHT, HEAD_HEIGHT,
 } from './collision';
 
@@ -148,6 +148,55 @@ describe('supportHeightAt', () => {
     const platform = slab(0, 0, 0, 2.4, 5); // spans x -5..5
     expect(supportHeightAt(5 + PLAYER_RADIUS, 0, PLAYER_RADIUS, 5, [platform])).toBe(0);
     expect(supportHeightAt(5 + PLAYER_RADIUS - 0.01, 0, PLAYER_RADIUS, 5, [platform])).toBe(2.4);
+  });
+});
+
+describe('standableAt', () => {
+  // The elevation map's tower-to-bridge corner (maps/elevation.ts): a 4 m
+  // unrailed bridge x 14..30, |z| <= 2 meets the tower deck x 30..40,
+  // |z| <= 6, both at deck height, with a concave corner at (30, 2). A line
+  // cut across that corner samples clear of every wall while hanging over a
+  // 3.6 m drop — the case collidesAt alone cannot see.
+  const DECK = 3.6;
+  const bridge = new THREE.Box3(new THREE.Vector3(14, DECK - 0.4, -2), new THREE.Vector3(30, DECK, 2));
+  const tower = new THREE.Box3(new THREE.Vector3(30, 0, -6), new THREE.Vector3(40, DECK, 6));
+  const deck = [bridge, tower];
+  const R = 0.5;
+
+  test('a point on the deck is standable at deck height', () => {
+    expect(standableAt(at(30.5, 2.5), R, DECK, deck)).toBe(true);  // tower
+    expect(standableAt(at(29.5, 1.5), R, DECK, deck)).toBe(true);  // bridge
+  });
+
+  test('a point past the concave corner is clear of walls but unsupported', () => {
+    // (29.5, 2.5): x + R reaches exactly the tower's edge and z - R exactly
+    // the bridge's, so neither slab overlaps the footprint — mid-air.
+    expect(collidesAt(at(29.5, 2.5), R, DECK, deck)).toBe(false);
+    expect(standableAt(at(29.5, 2.5), R, DECK, deck)).toBe(false);
+  });
+
+  test('support is judged under the centre, not the footprint', () => {
+    // (29.8, 2.3): the footprint overlaps the tower (x + R = 30.3) so the
+    // movement stage would keep a body up here — but the centre hangs past
+    // both slabs. A line sampled every half metre through the corner band
+    // has to fail here, or it clips the falling band between two samples.
+    expect(supportHeightAt(29.8, 2.3, R, DECK + STEP_HEIGHT, deck)).toBe(DECK);
+    expect(standableAt(at(29.8, 2.3), R, DECK, deck)).toBe(false);
+  });
+
+  test('a drop of one step is still standable; deeper is a fall', () => {
+    const lower = slab(0, 0, 0, DECK - STEP_HEIGHT, 5);
+    expect(standableAt(at(0, 0), R, DECK, [lower])).toBe(true);
+    const deeper = slab(0, 0, 0, DECK - STEP_HEIGHT - 0.05, 5);
+    expect(standableAt(at(0, 0), R, DECK, [deeper])).toBe(false);
+  });
+
+  test('blocking geometry is refused even with support underneath', () => {
+    expect(standableAt(at(0, 0), R, 0, [wall(0, 0)])).toBe(false);
+  });
+
+  test('open ground supports feet at ground level', () => {
+    expect(standableAt(at(0, 0), R, 0, [])).toBe(true);
   });
 });
 

@@ -37,14 +37,14 @@ import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, cred
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
-import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, HEAD_HEIGHT } from './collision';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, collidesAt, standableAt, HEAD_HEIGHT } from './collision';
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
 import { sfxEnemyAttack } from './audio';
 import { spawnImpact } from './effects';
 import { addKillfeed, botKillTag, updateScore } from './hud';
-import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode } from './sim/botBrains';
+import { DEFAULT_BRAIN_PARAMS, DefaultBrain, type BrainMode, type BrainParams } from './sim/botBrains';
 import {
   makeBotLoadout, resolveBotSecondary, resolveBotWeapon,
 } from './sim/botWeapons';
@@ -54,7 +54,7 @@ import { acquireVisual, type PerceptionId } from './sim/perception';
 import { GUNSHOT_RADIUS_M, withinEarshot, type HeardSound } from './sim/soundEvents';
 import { NAV_RADIUS, transportRoute, navGrid } from './nav';
 import { nearestNode, navNode, pickPatrolNode, type RouteWaypoint } from './sim/navGrid';
-import { shouldAbandonRoute } from './sim/routeFollow';
+import { consumeReached, furthestWalkable, shouldAbandonRoute } from './sim/routeFollow';
 import { approach } from './sim/smoothing';
 import { botShotKick, createBotWeaponRig, pickBotShoulderOffset, poseBotWeaponRig, type BotWeaponRig } from './core/botWeaponModels';
 
@@ -107,6 +107,22 @@ const WAYPOINT_REACHED = 1;
 const ROUTE_INTERVAL = 1;
 
 /**
+ * How far ahead (m) the route shortcut may look for a walkable line past the
+ * next node — ~3 polyline joints on the 1 m graph. Short on purpose: the
+ * clearance-priced graph already rides off the walls, and this only irons the
+ * joint waggle rather than replanning the line.
+ */
+export const LOOKAHEAD_DISTANCE = 3;
+
+/** Per-instance tuning and optional measurement hooks for repeatable movement trials. */
+export interface BotOptions {
+  brainParams?: BrainParams;
+  lookaheadDistance?: number;
+  onMovement?: (intended: number, realized: number) => void;
+  onRouteBuild?: () => void;
+}
+
+/**
  * How far (m) off its own path a bot may drift before the route is thrown
  * away and rebuilt — it fell, was shoved, or respawned somewhere else.
  */
@@ -134,6 +150,12 @@ const PLAYER_ZONE_FRACTION: Record<HitZone, number> = {
  * per frame in updateBots.
  */
 let routeBudget = 1;
+
+/** Reused walkability probe for the route shortcut — allocation in the frame loop is the thing to avoid here. */
+const shortcutProbe = new THREE.Vector3();
+
+/** Reused feeler probe for the brain's travel wall-sense, for the same reason. */
+const senseProbe = new THREE.Vector3();
 
 /**
  * The sound sequence every bot reads through THIS frame, captured once in
@@ -297,6 +319,12 @@ export class Bot implements BotShape {
   /** How far along `path` the bot has got. */
   private leg = 0;
   /**
+   * The furthest leg the shortcut steered at last frame — the bound on which
+   * legs proximity may consume (sim/routeFollow.ts:consumeReached). Reset
+   * with `leg` whenever the path is replaced.
+   */
+  private aimed = 0;
+  /**
    * World-space point the brain's intent looks at (a copy of the observed
    * eye), for debugView.ts's intent line; null when the brain has nothing
    * to look at (hold).
@@ -340,7 +368,9 @@ export class Bot implements BotShape {
    */
   private patrolGoal: THREE.Vector3 | null = null;
 
-  constructor(team: Team = 'T', weapon: BotPrimaryId = 'smg', secondary: BotSidearmId = 'pistol') {
+  private readonly options: BotOptions;
+
+  constructor(team: Team = 'T', weapon: BotPrimaryId = 'smg', secondary: BotSidearmId = 'pistol', options: BotOptions = {}) {
     // Plain assignments, not parameter properties: the `name` derivation must
     // see the team, and field initializers run before constructor-body
     // parameter-property writes would. The brain is the same case for a
@@ -349,8 +379,9 @@ export class Bot implements BotShape {
     this.team = team;
     this.name = `${team}-${++teamSerials[team]}`;
     this.weapon = weapon;
+    this.options = options;
     this.brain = new DefaultBrain(
-      DEFAULT_BRAIN_PARAMS,
+      options.brainParams ?? DEFAULT_BRAIN_PARAMS,
       Math.random,
       makeBotLoadout(weapon, secondary, id => WEAPONS[id], Math.random),
     );
@@ -573,6 +604,10 @@ export class Bot implements BotShape {
         selfSpeed: this.speed,
         moveBlocked: this.moveBlocked,
         heard,
+        // The travel wall-sense's feeler, answered by the same feet-aware
+        // gate the step below obeys: standable here means the step survives.
+        canStandAt: (x, z) =>
+          !collidesAt(senseProbe.set(x, 0, z), BOT_RADIUS, this.mesh.position.y, colliders),
         // Lazy on purpose: pathfinding is the expensive thing here, so it is
         // only paid when the policy has already decided it wants to travel
         // rather than fight where it stands. The pursuit flag keys the route
@@ -637,8 +672,9 @@ export class Bot implements BotShape {
     // Report rejection for NEXT frame's brain. DefaultBrain consumes the
     // contact's leading edge to reverse once; sustained rejection preserves
     // that committed drift until the bot clears the geometry.
-    this.moveBlocked =
-      Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ) < intended * 0.25;
+    const realized = Math.hypot(this.mesh.position.x - preX, this.mesh.position.z - preZ);
+    this.moveBlocked = realized < intended * 0.25;
+    this.options.onMovement?.(intended, realized);
 
     // Vertical: same swept support resolution as the player, so bots climb
     // stairs mid-chase and land when they walk off an edge.
@@ -808,6 +844,7 @@ export class Bot implements BotShape {
       this.routeKey = key;
       this.path = [];
       this.leg = 0;
+      this.aimed = 0;
     }
     // Drop a path the bot is no longer on: it fell off an edge, got shoved,
     // or respawned across the map still holding last life's route. The
@@ -818,6 +855,7 @@ export class Bot implements BotShape {
     if (this.path.length > 0 && shouldAbandonRoute(this.path, this.leg, here, ROUTE_ABANDON)) {
       this.path = [];
       this.leg = 0;
+      this.aimed = 0;
     }
     const wantsRecompute = this.path.length === 0
       || (!patrolArrival && this.routeCooldown <= 0);
@@ -829,14 +867,17 @@ export class Bot implements BotShape {
       recomputed = true;
       this.routeCooldown = ROUTE_INTERVAL;
       const found = transportRoute(here, goal);
+      this.options.onRouteBuild?.();
       if (found) {
         this.transportPath = found;
         this.path = found.map(w => w.point);
         this.leg = 0;
+        this.aimed = 0;
       } else {
         // A failed recompute must not keep walking a stale path.
         this.path = [];
         this.leg = 0;
+        this.aimed = 0;
       }
     }
     if (this.path.length === 0) {
@@ -846,12 +887,11 @@ export class Bot implements BotShape {
     }
 
     // Consume waypoints already stood on, planar — the step is planar too.
-    while (this.leg < this.path.length - 1) {
-      const w = this.path[this.leg]!;
-      if (this.transportPath[this.leg]?.elevatorId) break;
-      if (Math.hypot(w.x - here.x, w.z - here.z) >= WAYPOINT_REACHED) break;
-      this.leg++;
-    }
+    // Any leg up to the one the shortcut aimed at counts, not only the
+    // current one in strict order: a corner cut or a shove can carry the
+    // bot past `path[leg]` outside the reach radius, and a frozen leg would
+    // starve the abandon check below and never reach a boarding leg.
+    this.leg = consumeReached(this.path, this.transportPath, this.leg, this.aimed, here, WAYPOINT_REACHED);
     const w = this.path[this.leg]!;
     const elevatorId = this.transportPath[this.leg]?.elevatorId;
     if (elevatorId) {
@@ -870,6 +910,25 @@ export class Bot implements BotShape {
       this.clearRouteCache();
       return null;
     }
+    // Shortcut smoothing: steer at the furthest walkable line within a few
+    // metres rather than turning at every 1 m joint. Aiming past a leg does
+    // not mark it reached; consumption above does, by proximity, for legs up
+    // to the one aimed at — so the abandon decision keeps its ground truth
+    // and elevator boardings (which return before this line) are never aimed
+    // past. Samples are gated on collision AND support, the pair the step
+    // itself obeys: between nav nodes there is no floor guarantee, and a
+    // chord across a deck's concave corner samples clear over the drop
+    // (collision.test.ts:standableAt). See sim/routeFollow.ts.
+    this.aimed = furthestWalkable(
+      this.path,
+      this.transportPath,
+      this.leg,
+      here,
+      this.options.lookaheadDistance ?? LOOKAHEAD_DISTANCE,
+      (x, z) => !standableAt(shortcutProbe.set(x, 0, z), BOT_RADIUS, here.y, colliders),
+    );
+    const target = this.path[this.aimed]!;
+    to.set(target.x - here.x, 0, target.z - here.z);
     return to.lengthSq() < 1e-8 ? null : to;
   }
 
@@ -878,6 +937,7 @@ export class Bot implements BotShape {
     this.path = [];
     this.transportPath = [];
     this.leg = 0;
+    this.aimed = 0;
     this.routeKey = null;
   }
 

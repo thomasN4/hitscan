@@ -1379,7 +1379,7 @@ function dispatchDomObjectives(): void {
       x: b.mesh.position.x,
       z: b.mesh.position.z,
     })),
-    dom.flags.map(f => ({ id: f.id, x: f.pos.x, z: f.pos.z, owner: f.owner })),
+    dom.flags.map(f => ({ id: f.id, x: f.pos.x, z: f.pos.z, owner: f.owner, challenger: f.challenger })),
     domAssignments,
   );
   domAssignments.clear();

@@ -185,9 +185,9 @@ describe('decideDomWinner / reachesDomLimit', () => {
 
 describe('assignDomObjectives', () => {
   const flags = [
-    { id: 'A', x: 0, z: -30, owner: null as 'T' | 'CT' | null },
-    { id: 'B', x: 0, z: 0, owner: null as 'T' | 'CT' | null },
-    { id: 'C', x: 0, z: 30, owner: null as 'T' | 'CT' | null },
+    { id: 'A', x: 0, z: -30, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+    { id: 'B', x: 0, z: 0, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+    { id: 'C', x: 0, z: 30, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
   ];
 
   test('bots split across nearby flags instead of stacking', () => {
@@ -202,11 +202,30 @@ describe('assignDomObjectives', () => {
     expect(assigned.get(3)).toBe('C');
   });
 
-  test('a defender stays on the owned flag while attackers take neutral ground', () => {
+  test('a secure owned flag is never stationed while neutral ground is open', () => {
+    // Nobody near A: under stationing the nearest bot would defend it, but
+    // standing on a secure flag ticks nothing, so the whole wave attacks.
     const owned = [
-      { id: 'A', x: 0, z: -30, owner: 'T' as const },
-      { id: 'B', x: 0, z: 0, owner: null as 'T' | 'CT' | null },
-      { id: 'C', x: 0, z: 30, owner: null as 'T' | 'CT' | null },
+      { id: 'A', x: 0, z: -30, owner: 'T' as const, challenger: null as 'T' | 'CT' | null },
+      { id: 'B', x: 0, z: 0, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+      { id: 'C', x: 0, z: 30, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+    ];
+    const bots = [
+      { id: 1, team: 'T' as const, x: 0, z: 0 },
+      { id: 2, team: 'T' as const, x: 0, z: 10 },
+      { id: 3, team: 'T' as const, x: 0, z: 20 },
+      { id: 4, team: 'T' as const, x: 0, z: 30 },
+    ];
+    const assigned = assignDomObjectives(bots, owned, new Map());
+    const onA = [...assigned.values()].filter(v => v === 'A');
+    expect(onA.length).toBe(0);
+  });
+
+  test('a threatened flag keeps its defender while the rest attack', () => {
+    const threatened = [
+      { id: 'A', x: 0, z: -30, owner: 'T' as const, challenger: 'CT' as const },
+      { id: 'B', x: 0, z: 0, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+      { id: 'C', x: 0, z: 30, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
     ];
     const bots = [
       { id: 1, team: 'T' as const, x: 0, z: -30 },
@@ -214,11 +233,43 @@ describe('assignDomObjectives', () => {
       { id: 3, team: 'T' as const, x: 0, z: 0 },
       { id: 4, team: 'T' as const, x: 0, z: 10 },
     ];
-    const assigned = assignDomObjectives(bots, owned, new Map());
+    const assigned = assignDomObjectives(bots, threatened, new Map());
     expect(assigned.get(1)).toBe('A');
-    // Nobody stacks the owned flag past its defender: the rest go neutral.
+    // Nobody stacks the threatened flag past its defender: the rest go neutral.
     const onA = [...assigned.values()].filter(v => v === 'A');
     expect(onA.length).toBe(1);
+  });
+
+  test('a threatened own flag ranks with neutral ground by distance', () => {
+    // Too few bots to spare a defender (a third of two is zero): the nearby
+    // attacker diverts to the back-cap while the far one keeps its attack.
+    const threatened = [
+      { id: 'A', x: 0, z: -30, owner: 'T' as const, challenger: 'CT' as const },
+      { id: 'B', x: 0, z: 0, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+      { id: 'C', x: 0, z: 30, owner: null as 'T' | 'CT' | null, challenger: null as 'T' | 'CT' | null },
+    ];
+    const bots = [
+      { id: 1, team: 'T' as const, x: 0, z: -28 },
+      { id: 2, team: 'T' as const, x: 0, z: 28 },
+    ];
+    const assigned = assignDomObjectives(bots, threatened, new Map());
+    expect(assigned.get(1)).toBe('A');
+    expect(assigned.get(2)).toBe('C');
+  });
+
+  test('all-owned with no threat sits nearest as last resort', () => {
+    const owned = [
+      { id: 'A', x: 0, z: -30, owner: 'T' as const, challenger: null as 'T' | 'CT' | null },
+      { id: 'B', x: 0, z: 0, owner: 'T' as const, challenger: null as 'T' | 'CT' | null },
+      { id: 'C', x: 0, z: 30, owner: 'T' as const, challenger: null as 'T' | 'CT' | null },
+    ];
+    const bots = [
+      { id: 1, team: 'T' as const, x: 0, z: -40 },
+      { id: 2, team: 'T' as const, x: 0, z: 40 },
+    ];
+    const assigned = assignDomObjectives(bots, owned, new Map());
+    expect(assigned.get(1)).toBe('A');
+    expect(assigned.get(2)).toBe('C');
   });
 
   test('stickiness survives a re-dispatch between equidistant flags', () => {

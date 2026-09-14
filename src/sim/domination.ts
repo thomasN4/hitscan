@@ -191,13 +191,31 @@ export interface DispatchFlag {
   x: number;
   z: number;
   owner: Team | null;
+  /**
+   * Live enemy challenge, HUD-public like the rest of the flag state — the
+   * scoreboard shows it, so reacting to it reads the scoreboard, not the
+   * enemy's mind. Null unless a side is actively capturing.
+   */
+  challenger: Team | null;
+}
+
+/**
+ * Whether this flag needs its owner back: owned by `team` with live enemy
+ * challenger progress. `challenger !== null` already means progress > 0
+ * (set on first growth, cleared at zero in updateFlagCapture).
+ */
+function threatenedBy(flag: DispatchFlag, team: Team): boolean {
+  return flag.owner === team && flag.challenger !== null && flag.challenger !== team;
 }
 
 /**
  * Extra cost (in equivalent metres) added when ranking a flag, by ownership
  * from the assigning team's view. Neutral is cheapest (a free point), taking
- * an enemy flag costs a fight, stacking an owned flag is last resort — the
- * defenders it needs are assigned first, below.
+ * an enemy flag costs a fight, and a threatened own flag ranks WITH neutral
+ * — distance decides who diverts, so nearby attackers answer the back-cap
+ * while far ones keep their attack. Stacking a secure owned flag is last
+ * resort; nothing is ever stationed there, only sent when it is threatened
+ * (the defenders below).
  */
 const ENEMY_FLAG_COST = 5;
 const OWNED_FLAG_COST = 15;
@@ -209,11 +227,14 @@ const OWNED_FLAG_COST = 15;
 const STICKY_BONUS = 8;
 
 /**
- * Assign every bot to a flag, per team independently. Defenders first (up to
- * one per owned flag, capped at a third of the team, nearest bots stick),
- * then the rest to the cheapest flag with room under FLAG_CAP — neutral
- * before enemy before owned, nearest before farthest, previous assignment
- * discounted. Deterministic: ties break by bot id, so the suite scripts it
+ * Assign every bot to a flag, per team independently. Defenders first — one
+ * per THREATENED flag only (owned with live enemy progress), capped at a
+ * third of the team, nearest bots stick — then the rest to the cheapest
+ * flag with room under FLAG_CAP: neutral and threatened-own before enemy
+ * before secure-own, nearest before farthest, previous assignment
+ * discounted. Secure owned flags are never stationed: nothing ticks by
+ * standing on them, and a back-cap answers itself through the challenger it
+ * raises. Deterministic: ties break by bot id, so the suite scripts it
  * exactly and the field never visibly churns.
  *
  * @param previous last run's bot-id → flag-id map; unknown ids count as unassigned.
@@ -236,13 +257,15 @@ export function assignDomObjectives(
     const dist = (bot: DispatchBot, flag: DispatchFlag): number =>
       Math.hypot(bot.x - flag.x, bot.z - flag.z) -
       (previous.get(bot.id) === flag.id ? STICKY_BONUS : 0);
-    // Defenders: one per owned flag while the team can spare them.
-    const owned = flags.filter(f => f.owner === team);
-    const defenderSlots = Math.min(owned.length, Math.floor(teamBots.length / 3));
+    // Defenders: one per threatened flag while the team can spare them.
+    // Secure owned flags get nobody — standing on them ticks nothing, and
+    // the challenger a back-cap raises is what summons the next dispatch.
+    const threatened = flags.filter(f => threatenedBy(f, team));
+    const defenderSlots = Math.min(threatened.length, Math.floor(teamBots.length / 3));
     const defenders = new Set<number>();
     for (let s = 0; s < defenderSlots; s++) {
       let best: { bot: DispatchBot; flag: DispatchFlag; d: number } | null = null;
-      for (const flag of owned) {
+      for (const flag of threatened) {
         if ((load.get(flag.id) ?? 0) > 0) continue;
         for (const bot of teamBots) {
           if (defenders.has(bot.id)) continue;
@@ -254,13 +277,17 @@ export function assignDomObjectives(
       defenders.add(best.bot.id);
       take(best.bot, best.flag.id);
     }
-    // Attackers: cheapest flag with room — neutral, then enemy, then owned.
+    // Attackers: cheapest flag with room — neutral and threatened-own, then
+    // enemy, then secure-own. A threatened own flag ranks with neutral so
+    // the response is whoever is close, not the whole team turning around.
     for (const bot of teamBots) {
       if (defenders.has(bot.id)) continue;
       let best: { flag: DispatchFlag; cost: number } | null = null;
       for (const flag of flags) {
         if ((load.get(flag.id) ?? 0) >= FLAG_CAP) continue;
-        const ownership = flag.owner === null ? 0 : flag.owner === team ? OWNED_FLAG_COST : ENEMY_FLAG_COST;
+        const ownership = flag.owner === null || threatenedBy(flag, team)
+          ? 0
+          : flag.owner === team ? OWNED_FLAG_COST : ENEMY_FLAG_COST;
         const cost = Math.hypot(bot.x - flag.x, bot.z - flag.z) + ownership -
           (previous.get(bot.id) === flag.id ? STICKY_BONUS : 0);
         if (best === null || cost < best.cost) best = { flag, cost };

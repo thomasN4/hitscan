@@ -1899,12 +1899,13 @@ describe('DefaultBrain domination objective', () => {
     expect(intent.step.length()).toBeGreaterThan(0);
   });
 
-  it('captures on arrival: holds the ring, watches, never shoots', () => {
+  it('captures on arrival: works the ring, watches, never shoots', () => {
     const brain = calmBrain();
     const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
     const first = brain.decide(view({ visual: null, objective: close }), DT);
     expect(first.mode).toBe('capture');
-    expect(first.step.length()).toBe(0);
+    // Drift, not statue stillness: a small fraction of travel speed.
+    expect(first.step.length()).toBeCloseTo(4 * 0.35 * DT, 12);
     expect(first.wantShoot).toBe(false);
     // The watch rotates: a later frame faces elsewhere.
     const later = brain.decide(view({ visual: null, objective: close }), 2);
@@ -2034,14 +2035,107 @@ describe('DefaultBrain domination objective', () => {
     expect(brain.decide(view({ visual: null }), DT).mode).toBe('hold');
   });
 
-  it('a capper holds through the bearing: no advance, no scan', () => {
+  it('a capper answers a bearing with a sidestep, never a scan', () => {
+    // Bearing due +x, strafe +1: the dodge runs perpendicular at full speed.
     const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
     const brain = calmBrain();
     brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
     const intent = brain.decide(view({ visual: null, objective: close }), DT);
     expect(intent.mode).toBe('capture');
-    expect(intent.step.length()).toBe(0);
+    expect(intent.step.x).toBeCloseTo(0, 12);
+    expect(intent.step.z).toBeCloseTo(4 * DT, 12);
     expect(intent.wantShoot).toBe(false);
+  });
+
+  it('the dodge expires back to drift after its window', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    brain.decide(view({ visual: null, objective: close }), DT); // entry dodges
+    // The 0.5 s window is 30 frames: frames 2..30 still sidestep at speed.
+    for (let f = 2; f <= 30; f++) {
+      const intent = brain.decide(view({ visual: null, objective: close }), DT);
+      expect(intent.mode, `frame ${f}`).toBe('capture');
+      expect(intent.step.length(), `frame ${f}`).toBeCloseTo(4 * DT, 9);
+    }
+    // ...then the drift resumes — polling past one frame of float residue,
+    // since 30 × (1/60) never lands exactly on the 0.5 s boundary.
+    let after = brain.decide(view({ visual: null, objective: close }), DT);
+    if (Math.abs(after.step.length() - 4 * DT) < 1e-9) {
+      after = brain.decide(view({ visual: null, objective: close }), DT);
+    }
+    expect(after.mode).toBe('capture');
+    expect(after.step.length()).toBeCloseTo(4 * 0.35 * DT, 9);
+  });
+
+  it('a blocked dodge step cancels the rest, but never the entry sidestep', () => {
+    // moveBlocked reports on the PREVIOUS step: the entry frame's belonged to
+    // whatever came before the hit, so the first sidestep always moves — the
+    // same contract the damage advance keeps.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const entry = brain.decide(view({ visual: null, objective: close, moveBlocked: true }), DT);
+    expect(entry.mode).toBe('capture');
+    expect(entry.step.z).toBeCloseTo(4 * DT, 12);
+    // The NEXT block describes the dodge step itself: dodge cut, drift resumes.
+    const next = brain.decide(view({ visual: null, objective: close, moveBlocked: true }), DT);
+    expect(next.mode).toBe('capture');
+    expect(next.step.length()).toBeCloseTo(4 * 0.35 * DT, 9);
+  });
+
+  it('onRespawn clears an armed dodge', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    brain.decide(view({ visual: null, objective: close }), DT); // dodging
+    brain.onRespawn();
+    const intent = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(intent.mode).toBe('capture');
+    expect(intent.step.length()).toBeCloseTo(4 * 0.35 * DT, 9);
+  });
+
+  it('drift never walks the holder out of the hold circle', () => {
+    // Ten quiet seconds with the feet integrated by the test: still capping,
+    // still inside, and actually displaced rather than vibrating in place.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    const feet = new THREE.Vector3(0, 0, 1);
+    let travelled = 0;
+    for (let f = 0; f < 600; f++) {
+      const v = view({ visual: null, objective: close });
+      v.selfFeet.copy(feet);
+      const intent = brain.decide(v, DT);
+      expect(intent.mode, `frame ${f}`).toBe('capture');
+      feet.add(intent.step);
+      travelled += intent.step.length();
+      expect(Math.hypot(feet.x - 0, feet.z - 1), `frame ${f}`)
+        .toBeLessThanOrEqual(4.5 * 0.7 + 1e-9);
+    }
+    expect(travelled).toBeGreaterThan(1);
+  });
+
+  it('bearing spam never dodges the holder out of the hold circle', () => {
+    // A fresh bearing every frame: perpetual full-speed dodging, still leashed.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    const feet = new THREE.Vector3(0, 0, 1);
+    const bearings = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 0, -1),
+    ];
+    for (let f = 0; f < 600; f++) {
+      brain.onIncomingFire(bearings[f % 4]!);
+      const v = view({ visual: null, objective: close });
+      v.selfFeet.copy(feet);
+      const intent = brain.decide(v, DT);
+      expect(intent.mode, `frame ${f}`).toBe('capture');
+      feet.add(intent.step);
+      expect(Math.hypot(feet.x - 0, feet.z - 1), `frame ${f}`)
+        .toBeLessThanOrEqual(4.5 * 0.7 + 1e-9);
+    }
   });
 
   it('a capper drops an ongoing damage search instead of serving it', () => {
@@ -2049,23 +2143,38 @@ describe('DefaultBrain domination objective', () => {
     const brain = calmBrain();
     brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
     expect(brain.decide(view({ visual: null }), DT).mode).toBe('search');
-    // Reaching the point mid-search ends the search: the ring owns the bot.
+    // Reaching the point mid-search ends the search: the ring owns the bot,
+    // which drifts rather than stands.
     const held = brain.decide(view({ visual: null, objective: close }), DT);
     expect(held.mode).toBe('capture');
-    expect(held.step.length()).toBe(0);
+    expect(held.step.length()).toBeCloseTo(4 * 0.35 * DT, 12);
   });
 
-  it('a capper shoots a visual in place instead of leaving to engage', () => {
+  it('a capper shoots a visual on the move instead of leaving to engage', () => {
     const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
     const fire = new StubFire();
     fire.readyNow = true;
     const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
     const intent = brain.decide(view({ visual: visualAt(10), objective: close }), DT);
     expect(intent.mode).toBe('capture');
-    expect(intent.step.length()).toBe(0);
+    expect(intent.step.length()).toBeCloseTo(4 * 0.35 * DT, 12);
     expect(intent.wantShoot).toBe(true);
     expect(intent.focusId).toBe('player');
     expect(intent.lookAt!.x).toBeCloseTo(10, 12);
+    expect(fire.pulls).toBe(1);
+  });
+
+  it('a holder shoots while dodging a bearing', () => {
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const fire = new StubFire();
+    fire.readyNow = true;
+    const brain = brainOf(DEFAULT_BRAIN_PARAMS, calmRng, fire);
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const intent = brain.decide(view({ visual: visualAt(10), objective: close }), DT);
+    expect(intent.mode).toBe('capture');
+    expect(intent.wantShoot).toBe(true);
+    // Full-speed sidestep under fire, not the drift.
+    expect(intent.step.length()).toBeCloseTo(4 * DT, 9);
     expect(fire.pulls).toBe(1);
   });
 
@@ -2074,7 +2183,7 @@ describe('DefaultBrain domination objective', () => {
     const brain = eagerBrain(); // the weapon is always willing
     const intent = brain.decide(view({ visual: visualAt(10, 0, 50), objective: close }), DT);
     expect(intent.mode).toBe('capture');
-    expect(intent.step.length()).toBe(0);
+    expect(intent.step.length()).toBeCloseTo(4 * 0.35 * DT, 12);
     expect(intent.wantShoot).toBe(false);
     // ...while still tracking the contact for acquisition and the readout.
     expect(intent.focusId).toBe('player');
@@ -2082,13 +2191,13 @@ describe('DefaultBrain domination objective', () => {
 
   it('the holder keeps holding while higher ranks are present', () => {
     // Rank 0 is the designation, not solitude: cover present changes nothing
-    // for the holder.
+    // for the holder — here mid-dodge, still on the point.
     const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5, cappingMates: 2, holdRank: 0 };
     const brain = calmBrain();
     brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
     const intent = brain.decide(view({ visual: null, objective: close }), DT);
     expect(intent.mode).toBe('capture');
-    expect(intent.step.length()).toBe(0);
+    expect(intent.step.length()).toBeCloseTo(4 * DT, 12);
   });
 
   it('a non-holder standing the ring escorts: bearings own it like cover', () => {
@@ -2111,12 +2220,12 @@ describe('DefaultBrain domination objective', () => {
 
   it('a non-holder idles on the point when nothing live happens', () => {
     // No bearing, no visual: the normal ladder reaches priority 5, which
-    // returns the same capture hold — presence still ticks while idle, and
-    // the next live contact peels it off.
+    // returns the same drifting capture hold — presence still ticks while
+    // idle, and the next live contact peels it off.
     const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5, cappingMates: 1, holdRank: 1 };
     const intent = calmBrain().decide(view({ visual: null, objective: close }), DT);
     expect(intent.mode).toBe('capture');
-    expect(intent.step.length()).toBe(0);
+    expect(intent.step.length()).toBeCloseTo(4 * 0.35 * DT, 12);
     expect(intent.wantShoot).toBe(false);
   });
 });

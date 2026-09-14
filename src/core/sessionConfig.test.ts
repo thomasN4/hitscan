@@ -21,6 +21,7 @@ import {
   type SessionConfig,
 } from './sessionConfig';
 import { SESSION_DEFAULTS } from './state';
+import { SCORE_LIMITS } from '../sim/domination';
 
 /** Bag-style source: absent names behave exactly like URLSearchParams.get. */
 function src(params: Record<string, string>): ParamSource {
@@ -40,6 +41,7 @@ const CFG: SessionConfig = {
   botsT: 10,
   botsCt: 3,
   roundSeconds: 90,
+  scoreLimit: 150,
   botWeaponT: 'sniper',
   botSecondaryT: 'revolver',
   botWeaponCt: 'mixed',
@@ -48,7 +50,7 @@ const CFG: SessionConfig = {
 
 // Each side's pair is adjacent, which is the order configToQuery writes.
 const CFG_QUERY =
-  '?map=range&mode=tdm&side=ct&tbots=10&ctbots=3&time=90&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=mixed';
+  '?map=range&mode=tdm&side=ct&tbots=10&ctbots=3&time=90&scorelimit=150&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=mixed';
 
 describe('parseSessionConfig', () => {
   it('empty source yields every default', () => {
@@ -173,6 +175,7 @@ describe('configsEqual', () => {
     expect(configsEqual(CFG, { ...CFG, map: 'arena' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botsCt: 0 })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, roundSeconds: 91 })).toBe(false);
+    expect(configsEqual(CFG, { ...CFG, scoreLimit: 200 })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botWeaponT: 'smg' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botWeaponCt: 'smg' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botSecondaryT: 'pistol' })).toBe(false);
@@ -324,6 +327,14 @@ describe('mode', () => {
   it('round-trips dom through the query', () => {
     const dom = { ...CFG, map: 'elevation' as const, mode: 'dom' as const };
     expect(parseSessionConfig(srcFromQuery(configToQuery(dom)))).toEqual(dom);
+  });
+
+  it('parses and clamps the score limit', () => {
+    expect(parseSessionConfig(src({ scorelimit: '150' })).scoreLimit).toBe(150);
+    expect(parseSessionConfig(src({})).scoreLimit).toBe(SESSION_DEFAULTS.scoreLimit);
+    expect(parseSessionConfig(src({ scorelimit: 'junk' })).scoreLimit).toBe(SESSION_DEFAULTS.scoreLimit);
+    expect(parseSessionConfig(src({ scorelimit: '1' })).scoreLimit).toBe(SCORE_LIMITS.min);
+    expect(parseSessionConfig(src({ scorelimit: '9999' })).scoreLimit).toBe(SCORE_LIMITS.max);
   });
 });
 

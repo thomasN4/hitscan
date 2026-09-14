@@ -18,7 +18,8 @@
 // screen), pre-filled with lastLoadout either way. Its Deploy click doubles as
 // the user gesture pointer lock requires — see main.ts's onDeploy handler.
 import type { LoadoutState, MapName, MatchMode, Team, WeaponClass, WeaponId } from './core/state';
-import { DOM_FLAGS, bots, dom, score, WEAPONS, lastLoadout, sanitizeLoadout, session } from './core/state';
+import { DOM_FLAGS, bots, dom, score, WEAPONS, lastLoadout, sanitizeLoadout, session, SESSION_DEFAULTS } from './core/state';
+import { SCORE_LIMITS } from './sim/domination';
 import type { MatchWinner } from './sim/match';
 import {
   TIME_LIMITS_S,
@@ -61,10 +62,11 @@ const T_SUBTITLES: Record<MapName, string | null> = {
 
 /**
  * Menu subtitle for a map + side + mode: domination on elevation names the
- * objective; everything else keeps the static line (or its T-side override).
+ * objective and the limit; everything else keeps the static line (or its
+ * T-side override).
  */
-export function subtitleFor(map: MapName, side: Team, mode: MatchMode = 'tdm'): string {
-  if (mode === 'dom' && DOM_FLAGS[map].length > 0) return 'Domination — capture A, B and C; first to 200 points holds the map';
+export function subtitleFor(map: MapName, side: Team, mode: MatchMode = 'tdm', scoreLimit: number = SESSION_DEFAULTS.scoreLimit): string {
+  if (mode === 'dom' && DOM_FLAGS[map].length > 0) return `Domination — capture A, B and C; first to ${scoreLimit} points holds the map`;
   // null is a TABLE ENTRY meaning "no T-side override", not an index miss —
   // T_SUBTITLES is keyed by the full MapName union.
   if (side === 'T') return T_SUBTITLES[map] ?? SUBTITLES[map];
@@ -101,7 +103,7 @@ let mapSel: HTMLSelectElement, sideSel: HTMLSelectElement,
   weaponTSel: HTMLSelectElement, weaponCtSel: HTMLSelectElement,
   secondaryTSel: HTMLSelectElement, secondaryCtSel: HTMLSelectElement,
   botsTIn: HTMLInputElement, botsCtIn: HTMLInputElement,
-  timeMinIn: HTMLInputElement;
+  timeMinIn: HTMLInputElement, scoreIn: HTMLInputElement;
 
 // ---------- Loadout picker state ----------
 // Both columns always hold a valid selection (pre-filled from lastLoadout);
@@ -278,6 +280,7 @@ export function initMenus(handlers: MenuHandlers): void {
   botsTIn = requireEl('cfgBotsT') as HTMLInputElement;
   botsCtIn = requireEl('cfgBotsCt') as HTMLInputElement;
   timeMinIn = requireEl('cfgTimeMin') as HTMLInputElement;
+  scoreIn = requireEl('cfgScoreLimit') as HTMLInputElement;
   weaponTSel = requireEl('cfgWeaponT') as HTMLSelectElement;
   weaponCtSel = requireEl('cfgWeaponCt') as HTMLSelectElement;
   secondaryTSel = requireEl('cfgSecondaryT') as HTMLSelectElement;
@@ -293,10 +296,15 @@ export function initMenus(handlers: MenuHandlers): void {
   botsTIn.value = String(session.botsT);
   botsCtIn.value = String(session.botsCt);
   timeMinIn.value = secondsToMinutesLabel(session.roundSeconds);
+  scoreIn.min = String(SCORE_LIMITS.min);
+  scoreIn.max = String(SCORE_LIMITS.max);
+  scoreIn.value = String(session.scoreLimit);
   applyMapUi();
 
   mapSel.onchange = applyMapUi;
   modeSel.onchange = applyMapUi;
+  // The subtitle names the limit, so it refreshes live like the mode does.
+  scoreIn.onchange = applyMapUi;
   // Flipping sides swaps the two count fields so "enemy 6 / own 5" survives
   // the flip: the numbers are side-fixed (tbots counts Ts), but the DEFAULTS
   // are role-relative. Weapon settings are side-fixed too and stay put.
@@ -349,11 +357,16 @@ function applyMapUi(): void {
   const isRange = mapSel.value === 'range';
   const side = asTeam(sideSel.value, session.playerTeam);
   const map = asMapName(mapSel.value);
-  subtitleEl.textContent = subtitleFor(map, side, asMatchMode(modeSel.value, session.mode));
+  const mode = asMatchMode(modeSel.value, session.mode);
+  subtitleEl.textContent = subtitleFor(map, side, mode,
+    Math.round(clampTo(numOr(scoreIn.value, session.scoreLimit), SCORE_LIMITS)));
   // Domination exists only where flags do (elevation for now): off it the
-  // mode select is pinned to TDM rather than offering a broken choice.
+  // mode select is pinned to TDM rather than offering a broken choice. The
+  // score limit rides with the mode — meaningless in TDM, so it grays out
+  // with it.
   modeSel.disabled = DOM_FLAGS[map].length === 0;
   if (modeSel.disabled) modeSel.value = 'tdm';
+  scoreIn.disabled = mode !== 'dom' || DOM_FLAGS[map].length === 0;
   // Clamp ranges mirror the side: the enemy wave needs ≥1 and caps at 16,
   // the player's own side allows 0 and caps at 15.
   const limits = botLimits(side);
@@ -377,6 +390,7 @@ function appliedConfig(): SessionConfig {
     map: session.map, mode: session.mode, playerTeam: session.playerTeam,
     botsT: session.botsT, botsCt: session.botsCt,
     roundSeconds: session.roundSeconds,
+    scoreLimit: session.scoreLimit,
     botWeaponT: session.botWeaponT, botWeaponCt: session.botWeaponCt,
     botSecondaryT: session.botSecondaryT, botSecondaryCt: session.botSecondaryCt,
   };
@@ -402,6 +416,10 @@ function candidateConfig(): SessionConfig {
     roundSeconds: Math.round(
       clampTo(numOr(timeMinIn.value, session.roundSeconds / 60) * 60, TIME_LIMITS_S),
     ),
+    // A cleared/garbage field keeps the applied limit, clamped like the URL
+    // parser — the same shared SCORE_LIMITS, so the form and the parser
+    // cannot drift apart.
+    scoreLimit: Math.round(clampTo(numOr(scoreIn.value, session.scoreLimit), SCORE_LIMITS)),
     // Same shared narrower the URL parser uses, for the same reason asMapName
     // is shared: a second literal comparison here is how the form and the
     // parser drift apart the next time the weapon catalog widens.

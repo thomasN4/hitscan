@@ -1025,6 +1025,7 @@ export const SESSION_DEFAULTS: Readonly<{
   botsT: number;
   botsCt: number;
   roundSeconds: number;
+  scoreLimit: number;
   botWeaponT: BotWeaponChoice;
   botWeaponCt: BotWeaponChoice;
   botSecondaryT: BotSecondaryChoice;
@@ -1038,6 +1039,10 @@ export const SESSION_DEFAULTS: Readonly<{
   botsT: 6,
   botsCt: 5,
   roundSeconds: 300,
+  // Domination points to win; only read in dom mode (sessionConfig clamps).
+  // A literal like roundSeconds above, matching sim/domination.ts's
+  // DOM_SCORE_LIMIT — change them together.
+  scoreLimit: 200,
   // A varied field by default: the whole point of the tranche is that the
   // enemy's weapon is a fact about the enemy, not a constant. Pinning a
   // single weapon is what smoke phases and playtests do deliberately.
@@ -1066,7 +1071,7 @@ export const SESSION_DEFAULTS: Readonly<{
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
-  // query string (?map=&mode=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
+  // query string (?map=&mode=&side=&tbots=&ctbots=&time=&scorelimit=&tweap=&tsec=&ctweap=&ctsec=) via
   // a full page reload — map
   // switching is a reload and there is deliberately no hot-swapping of scenes
   // at runtime. The key list is spelled out in four places (here, AGENTS.md,
@@ -1086,6 +1091,8 @@ export interface SessionState {
   botsCt: number;
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;
+  /** Domination points to win. Read only in dom mode; TDM matches ignore it. */
+  scoreLimit: number;
   /**
    * PRIMARY firearm every bot on each side starts with (smg/ak47/sniper/shotgun),
    * or 'mixed' to draw one per bot. Read once by main.ts when it spawns the

@@ -9,7 +9,6 @@
 // params — acceptable because the HUD is a pure view of that state.
 import { player, weapon, input, wpn, score, session, bots, dom, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
 import { isLowAmmo } from './sim/ammo';
-import { DOM_SCORE_LIMIT } from './sim/domination';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -111,10 +110,11 @@ export function addKillfeed(text: string): void {
 /** Refresh CT/T round score from score.scoreKills / score.scoreDeaths. */
 export function updateScore(): void {
   // Domination owns the top bar instead: floored tick points toward the
-  // limit, so the bar agrees with the end screen and the limit killfeed.
+  // configured limit, so the bar agrees with the end screen and the limit
+  // killfeed.
   if (session.mode === 'dom') {
-    requireEl('scoreCT').textContent = `CT ${Math.floor(dom.scoreCt)}/${DOM_SCORE_LIMIT}`;
-    requireEl('scoreT').textContent = `${Math.floor(dom.scoreT)}/${DOM_SCORE_LIMIT} T`;
+    requireEl('scoreCT').textContent = `CT ${Math.floor(dom.scoreCt)}/${session.scoreLimit}`;
+    requireEl('scoreT').textContent = `${Math.floor(dom.scoreT)}/${session.scoreLimit} T`;
     return;
   }
   requireEl('scoreCT').textContent = 'CT ' + score.scoreKills;

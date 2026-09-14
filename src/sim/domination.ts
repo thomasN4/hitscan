@@ -18,6 +18,12 @@ export const TICK_POINTS_PER_SEC = 1;
 /** Points that end the match immediately for the side reaching them. */
 export const DOM_SCORE_LIMIT = 200;
 /**
+ * Adjustable score-limit range (points): the menu edits within it and the
+ * parser clamps hand-typed URLs into it, mirroring TIME_LIMITS_S's job for
+ * round length.
+ */
+export const SCORE_LIMITS = { min: 50, max: 500 } as const;
+/**
  * Feet-height window (m) a body must be inside to count toward a flag.
  * Elevation's B sits on the slab at 3.6 over a walkable ground floor: 2.0
  * keeps the deck fight and the room below from ever counting each other.

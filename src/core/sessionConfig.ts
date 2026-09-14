@@ -1,7 +1,7 @@
 // core/sessionConfig.ts — pure parse/serialize for the match-config query.
 //
 // The start menu commits settings by navigating to ONE query string
-// (?map=&mode=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
+// (?map=&mode=&side=&tbots=&ctbots=&time=&scorelimit=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
 // back once at startup and writes the result into `session`. Parsing lives here rather than in
 // main.ts so the clamp/fallback matrix is unit-testable in plain Node: the
 // input is a minimal `{ get(name) }` view (URLSearchParams satisfies it
@@ -19,6 +19,7 @@
 // added after it was written.
 import type { BotSecondaryChoice, BotWeaponChoice, MapName, MatchMode, Team } from './state';
 import { DOM_FLAGS, SESSION_DEFAULTS } from './state';
+import { SCORE_LIMITS } from '../sim/domination';
 
 /** Everything the menu configures about a match; mirrors session's config fields. */
 export interface SessionConfig {
@@ -33,6 +34,8 @@ export interface SessionConfig {
   botsCt: number;
   /** Round length in seconds. */
   roundSeconds: number;
+  /** Domination points to win. Carried on every map but read only in dom mode. */
+  scoreLimit: number;
   /** Weapon every T-side bot carries in its PRIMARY position; 'mixed' draws independently per bot. */
   botWeaponT: BotWeaponChoice;
   /** Same for the CT side. */
@@ -256,6 +259,9 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
     roundSeconds: Math.round(
       clampTo(numOr(src.get('time'), SESSION_DEFAULTS.roundSeconds), TIME_LIMITS_S),
     ),
+    scoreLimit: Math.round(
+      clampTo(numOr(src.get('scorelimit'), SESSION_DEFAULTS.scoreLimit), SCORE_LIMITS),
+    ),
     botWeaponT: asBotWeapon(src.get('tweap'), SESSION_DEFAULTS.botWeaponT),
     botSecondaryT: asBotSecondary(src.get('tsec'), SESSION_DEFAULTS.botSecondaryT),
     botWeaponCt: asBotWeapon(src.get('ctweap'), SESSION_DEFAULTS.botWeaponCt),
@@ -276,6 +282,7 @@ export function configToQuery(cfg: SessionConfig): string {
   p.set('tbots', String(cfg.botsT));
   p.set('ctbots', String(cfg.botsCt));
   p.set('time', String(cfg.roundSeconds));
+  p.set('scorelimit', String(cfg.scoreLimit));
   p.set('tweap', cfg.botWeaponT);
   p.set('tsec', cfg.botSecondaryT);
   p.set('ctweap', cfg.botWeaponCt);
@@ -292,6 +299,7 @@ export function configsEqual(a: SessionConfig, b: SessionConfig): boolean {
     a.botsT === b.botsT &&
     a.botsCt === b.botsCt &&
     a.roundSeconds === b.roundSeconds &&
+    a.scoreLimit === b.scoreLimit &&
     a.botWeaponT === b.botWeaponT &&
     a.botSecondaryT === b.botSecondaryT &&
     a.botWeaponCt === b.botWeaponCt &&

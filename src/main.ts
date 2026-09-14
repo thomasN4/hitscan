@@ -356,7 +356,7 @@ async function start(): Promise<void> {
     get botsT() { return session.botsT; }, set botsT(v: number) { session.botsT = v; },
     get botsCt() { return session.botsCt; }, set botsCt(v: number) { session.botsCt = v; },
     get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
-    get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
+    get scoreLimit() { return session.scoreLimit; }, set scoreLimit(v: number) { session.scoreLimit = v; },    get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
     get botWeaponCt() { return session.botWeaponCt; }, set botWeaponCt(v: BotWeaponChoice) { session.botWeaponCt = v; },
     get botSecondaryT() { return session.botSecondaryT; }, set botSecondaryT(v: BotSecondaryChoice) { session.botSecondaryT = v; },
     get botSecondaryCt() { return session.botSecondaryCt; }, set botSecondaryCt(v: BotSecondaryChoice) { session.botSecondaryCt = v; },

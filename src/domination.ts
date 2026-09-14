@@ -7,7 +7,6 @@
 // like everything else measured in game time, domination freezes on pause.
 import { bots, dom, player, playerFeet, session } from './core/state';
 import {
-  DOM_SCORE_LIMIT,
   countFlagBodies,
   tickDomScores,
   updateFlagCapture,
@@ -48,10 +47,10 @@ export function updateDomination(dt: number): void {
   dom.scoreT = scores.t;
   updateDomFlagColors();
   updateDomHUD();
-  if (reachesDomLimit(dom.scoreCt, DOM_SCORE_LIMIT) || reachesDomLimit(dom.scoreT, DOM_SCORE_LIMIT)) {
+  if (reachesDomLimit(dom.scoreCt, session.scoreLimit) || reachesDomLimit(dom.scoreT, session.scoreLimit)) {
     // Floored like the HUD: the end screen must agree with the top bar.
     const winner = decideDomWinner(Math.floor(dom.scoreCt), Math.floor(dom.scoreT));
-    addKillfeed(winner === 'draw' ? `★ Score limit reached` : `★ ${winner} hit ${DOM_SCORE_LIMIT}!`);
+    addKillfeed(winner === 'draw' ? `★ Score limit reached` : `★ ${winner} hit ${session.scoreLimit}!`);
     endMatch(winner);
   }
 }

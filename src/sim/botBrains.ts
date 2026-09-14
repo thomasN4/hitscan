@@ -15,13 +15,17 @@
 // The default policy: with a current visual observation, engage — approach
 // beyond farBand, back off inside nearBand, drift perpendicular with random
 // jukes, route when the observation sits a level up or band steering
-// demonstrably cannot close, fire on cooldown. On sight loss the LAST KNOWN
-// position is pursued: the brain routes to the frozen remembered feet, and on
-// arrival (or a confirmed dead end) switches to a three-heading scan
-// (`search`) that forgets after `forgetTime`. A direction-only incoming-fire
-// bearing (onIncomingFire) outranks everything for one frame and starts a
-// search where the shot came from. Only a CURRENT visible observation can
-// order a shot — memory, search and damage reactions never fire.
+// demonstrably cannot close, fire on cooldown. A direction-only incoming-fire
+// bearing outranks everything for one frame and starts a damage-armed search
+// where the shot came from. On sight loss WITHOUT standing orders the LAST
+// KNOWN position is pursued: the brain routes to the frozen remembered feet,
+// and on arrival (or a confirmed dead end) switches to a three-heading scan
+// (`search`) that forgets after `forgetTime`. A bot HOLDING a domination
+// objective skips that whole ghost chain — the flag outranks ordinary scans
+// and remembered positions, though never a live visual or a damage-armed
+// search — and walks back to its point. Only a CURRENT visible observation
+// can order a shot — memory, search, damage reactions and objectives never
+// fire.
 //
 // STEERING IS PLANAR, RANGING IS NOT. The steering basis derived from the
 // observation's feet is y-stripped because a step only ever moves in x/z —
@@ -203,11 +207,12 @@ export interface BrainView {
    */
   nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | undefined | null;
   /**
-   * The team's assigned domination flag, or null outside domination matches
+   * The dispatcher's flag assignment, or null outside domination matches
    * (and whenever the dispatcher has nothing to give). A COPY of a static,
    * HUD-public position — flag states are broadcast to both teams, so routing
-   * here reveals nothing a scoreboard wouldn't. Pursued only when no visual,
-   * damage, search or memory commitment outranks it; see decide().
+   * here reveals nothing a scoreboard wouldn't. Outranks ghost-chasing
+   * (ordinary scans, remembered positions, fresh noises) but never a live
+   * visual or a live-fire reaction; see decide().
    */
   objective: { id: string; pos: THREE.Vector3; radius: number } | null;
   /**
@@ -816,11 +821,13 @@ export class DefaultBrain implements BotBrain {
       if (lead !== null) this.adoptHeard(lead);
     }
 
-    // Priority 4: an active scan continues — never shoot, age the forget
-    // timer (which started only at search ENTRY, so route walks and deferred
-    // frames never aged the memory), and advance along the bearing while the
-    // damage search's window is open.
-    if (this.searching) {
+    // Priority 4: a damage-armed scan continues. Being shot at owns the bot
+    // even over standing orders (priority 5): the advance runs its window
+    // along the bearing, then the scan tails to the forget timer. Ordinary
+    // scans — memory arrivals, dead ends — do NOT run here; the objective
+    // preempts them below, so a bot with a flag walks back to its point
+    // instead of sweeping where a ghost was.
+    if (this.searching && this.advanceArmed) {
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;
       }
@@ -828,16 +835,7 @@ export class DefaultBrain implements BotBrain {
       if (this.scanElapsed >= this.params.forgetTime) {
         // Forget: drop memory and every pursuit/scan state, hold facing —
         // and stand down one second before the next patrol request.
-        this.focus = null;
-        this.memory = null;
-        this.searching = false;
-        this.scanBase = null;
-        this.scanElapsed = 0;
-        this.advanceArmed = false;
-        this.advanceCancelled = false;
-        this.advanceRequested = false;
-        this.clearPursuitState();
-        this.patrolPause = this.params.patrolPause;
+        this.clearInvestigation(true);
         return {
           step: new THREE.Vector3(),
           wantShoot: false,
@@ -850,23 +848,52 @@ export class DefaultBrain implements BotBrain {
       return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
     }
 
-    // Priority 5: an investigation goal — sight lost with a remembered
-    // position, or a noise just adopted above. Pursue it.
+    // Priority 5: the assigned domination flag — above ghost-chasing, below
+    // live stimuli. A visible enemy (priority 2) and a live-fire reaction
+    // (priorities 1 and 4) still own the bot, so a capping bot that takes
+    // contact fights first; but a lost sighting or an ordinary scan never
+    // diverts it — the remembered ghost is dropped here and the bot walks
+    // back to its point (the assignment is sticky across fights).
+    if (view.objective !== null) {
+      if (this.searching || this.memory !== null) this.clearInvestigation(false);
+      return this.objectiveIntent(view, dt, jukeDraw);
+    }
+
+    // Priority 6: an ordinary scan continues — never shoot, age the forget
+    // timer (which started only at search ENTRY, so route walks and deferred
+    // frames never aged the memory), and advance along the bearing while the
+    // damage search's window is open. Reached only with no objective: a bot
+    // holding one was already returned above.
+    if (this.searching) {
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      this.scanElapsed += dt;
+      if (this.scanElapsed >= this.params.forgetTime) {
+        // Forget: drop memory and every pursuit/scan state, hold facing —
+        // and stand down one second before the next patrol request.
+        this.clearInvestigation(true);
+        return {
+          step: new THREE.Vector3(),
+          wantShoot: false,
+          mode: 'hold',
+          focusId: null,
+          lookAt: null,
+          facing: view.facing.clone(),
+        };
+      }
+      return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
+    }
+
+    // Priority 7: an investigation goal — sight lost with a remembered
+    // position, or a noise just adopted above. Pursue it. Reached only with
+    // no objective: a bot holding one dropped this memory at priority 5.
     if (this.memory !== null) {
       return this.memoryIntent(view, dt, jukeDraw);
     }
 
-    // Priority 6: the assigned domination flag — only when nothing above
-    // owns the bot. A visible enemy, a damage reaction, a live search and a
-    // remembered position all outrank the flag, so a capping bot that takes
-    // contact fights first and walks back afterwards (the assignment is
-    // sticky across fights).
-    if (view.objective !== null) {
-      return this.objectiveIntent(view, dt, jukeDraw);
-    }
-
-    // Priority 7 — strictly lowest: nothing seen, nothing remembered, no
-    // live search. Patrol. The pause gates the request: hold for
+    // Priority 8 — strictly lowest: nothing seen, nothing remembered, no
+    // live search, no objective. Patrol. The pause gates the request: hold for
     // `patrolPause` seconds first (spawn, respawn, search expiry, patrol
     // arrival and failed selection all land here), then ask the executor for
     // a patrol waypoint — lazily, so the shared route budget is untouched
@@ -875,7 +902,29 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 7 — strictly lowest: patrol. After the one-second pause the
+   * Drop the whole investigation stack — active scan, remembered position,
+   * damage-reaction state and pursuit machinery.
+   *
+   * Both the forget-expiry path and the objective-preemption path land here.
+   * Forgetting pauses patrol afterwards (the stand-down before the next
+   * patrol request); preemption does not (the flag owns the next frame, not
+   * the patrol selector — and pausing would only delay the walk back).
+   */
+  private clearInvestigation(pausePatrol: boolean): void {
+    this.focus = null;
+    this.memory = null;
+    this.searching = false;
+    this.scanBase = null;
+    this.scanElapsed = 0;
+    this.advanceArmed = false;
+    this.advanceCancelled = false;
+    this.advanceRequested = false;
+    this.clearPursuitState();
+    if (pausePatrol) this.patrolPause = this.params.patrolPause;
+  }
+
+  /**
+   * Priority 8 — strictly lowest: patrol. After the one-second pause the
    * brain asks the executor for a patrol waypoint: a vector means travel at
    * normal speed (mode `patrol`, never shoot, null focus, looking one metre
    * along the next waypoint at eye height); `undefined` means the route
@@ -1094,7 +1143,7 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 5: pursue the investigation goal. Route to the remembered or
+   * Priority 7: pursue the investigation goal. Route to the remembered or
    * heard FEET — never a candidate's live position — face that point, and
    * NEVER shoot: neither a memory nor a noise is sight, and no ray was spent
    * to confirm anything is still there. A deferred route waits in `route`
@@ -1157,7 +1206,7 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 6: walk the assigned domination flag, then hold its ring.
+   * Priority 5: walk the assigned domination flag, then hold its ring.
    *
    * Travel reuses the shared route walker under the executor's pursuit cache:
    * the flag is a static goal with no focus id, so it keys on its own

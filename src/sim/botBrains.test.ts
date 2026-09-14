@@ -1757,4 +1757,49 @@ describe('DefaultBrain domination objective', () => {
       expect(intent.step.length()).toBe(0);
     }
   });
+
+  it('sight loss with an objective skips the memory pursuit', () => {
+    const brain = calmBrain();
+    expect(brain.decide(view({ dist: 10 }), DT).mode).toBe('engage');
+    // No memory route: straight back to the flag.
+    const back = brain.decide(view({
+      visual: null,
+      objective: flag,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(back.mode).toBe('objective');
+    // And the ghost is dropped, not shelved: with no objective the next
+    // frame holds instead of routing to the remembered position.
+    expect(brain.decide(view({ visual: null }), DT).mode).toBe('hold');
+  });
+
+  it('an ordinary scan yields to the objective and forgets the ghost', () => {
+    const brain = calmBrain();
+    brain.decide(view({ dist: 10 }), DT);
+    // Dead end on the memory route: an ordinary (non-damage) search begins.
+    const searching = brain.decide(view({ visual: null, nextWaypoint: () => null }), DT);
+    expect(searching.mode).toBe('search');
+    const preempted = brain.decide(view({
+      visual: null,
+      objective: flag,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(preempted.mode).toBe('objective');
+    // The scan and the memory behind it are gone: no objective means the
+    // patrol pause, not a resumed search.
+    expect(brain.decide(view({ visual: null }), DT).mode).toBe('hold');
+  });
+
+  it('a damage-armed search keeps priority over the objective', () => {
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    expect(brain.decide(view({ visual: null }), DT).mode).toBe('search');
+    // Being shot at matters more than standing orders.
+    const reacting = brain.decide(view({
+      visual: null,
+      objective: flag,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 1),
+    }), DT);
+    expect(reacting.mode).toBe('search');
+  });
 });

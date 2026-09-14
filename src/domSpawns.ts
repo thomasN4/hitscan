@@ -1,8 +1,8 @@
 // domSpawns.ts — CoD-style respawn director for domination matches.
 //
-// Initial spawns stay exactly as before (BOT_SPAWNS zones via
-// Bot.spawnAtRandom, combat.ts:SPAWN for the player). RESPAWNS in dom mode
-// come through here instead: half the candidates ring team-owned flags,
+// Initial spawns stay exactly as before (BOT_SPAWNS zones: bots via
+// Bot.spawnAtRandom, the player via the same draw in combat.ts:respawn).
+// RESPAWNS in dom mode come through here instead: half the candidates ring team-owned flags,
 // half come from the team's initial zone, the standable ones are ranked by
 // sim/domination.ts:scoreDomSpawn (far from enemies, near owned flags) and
 // the winner is returned as a feet position.

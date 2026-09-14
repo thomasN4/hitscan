@@ -5,13 +5,16 @@
 // makes the kill/score/respawn rules easy to audit. It also owns endMatch,
 // the one transition into the finished state both win conditions converge
 // on (clock expiry from main.ts, elimination from checkRoundEnd).
-import type { Bot as BotShape, HitZone, MapName, Team } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing, creditKill } from './core/state';
+import type { Bot as BotShape, HitZone, Team } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing, creditKill, BOT_SPAWNS } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
 import { sfxHurt } from './audio';
 import { pickDomRespawn } from './domSpawns';
+import { playerSpawnYaw } from './sim/spawn';
+import { findFreeSpawn } from './collision';
+import { colliders } from './world';
 import { flashDamageVignette, clearVignette, botKillTag, addKillfeed, updateScore, updateHUD } from './hud';
 import { showLoadoutPicker, showEndScreen } from './menu';
 
@@ -113,44 +116,23 @@ export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerNam
 }
 
 /**
- * Player spawn per side per map, on the map's centre line (x = 0).
- *
- * A full Record rather than a ternary chain on purpose: adding a MapName now
- * fails to compile until the new map declares where EACH side starts, instead
- * of silently inheriting the arena's coordinates. T spawns mirror CT across
- * -z (facing +z) with ONE exception: warehouse2's T side starts on the -z
- * catwalk band (z -16), not the mirrored +z yard — the mirrored yard has no
- * T presence, the catwalk is the T half of that map (BOT_SPAWNS -19..-13).
- * The range is side-agnostic (no bots), so both entries face downrange.
- * feetY is the floor under the spawn — 0 everywhere except warehouse2's
- * T-side catwalk (5.1, matching BOT_SPAWNS). yaw is the spawn facing: into
- * the map on combat maps, downrange on the range for both sides.
+ * The range's firing line: the one fixed player spawn left. The range has no
+ * bots and no band worth drawing from, so both sides start behind the line
+ * facing downrange.
  */
-const SPAWN: Record<Team, Record<MapName, { z: number; feetY: number; yaw: number }>> = {
-  CT: {
-    arena: { z: 48, feetY: 0, yaw: 0 },
-    range: { z: 8, feetY: 0, yaw: 0 },       // behind the firing line
-    elevation: { z: 48, feetY: 0, yaw: 0 },  // open ground south of the two-story building
-    warehouse1: { z: 40, feetY: 0, yaw: 0 }, // dock yard floor, 5 m clear of the south dock's face at z = 45
-    warehouse2: { z: 27, feetY: 0, yaw: 0 }, // the +z yard, between the shell wall at 20.5 and the fence at 34
-  },
-  T: {
-    arena: { z: -48, feetY: 0, yaw: Math.PI },
-    range: { z: 8, feetY: 0, yaw: 0 },       // side-agnostic lane: same firing line, same facing
-    elevation: { z: -48, feetY: 0, yaw: Math.PI },
-    warehouse1: { z: -40, feetY: 0, yaw: Math.PI },
-    warehouse2: { z: -16, feetY: 5.1, yaw: Math.PI }, // the -z catwalk band (BOT_SPAWNS -19..-13)
-  },
-};
+const RANGE_SPAWN = { x: 0, z: 8, feetY: 0, yaw: 0 };
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
 export function respawn(useDirector = false): void {
   cancelPendingReloadSfx();
-  const spawn = SPAWN[session.playerTeam][session.map];
-  // Domination redeploys (death → picker → Deploy) come through the director
-  // — near owned flags, far from enemies — while the match opening keeps the
-  // fixed SPAWN: main.ts passes false at startup and true on death deploys.
-  const feetY = spawn.feetY;
+  // Placement mirrors the bots' exactly. Domination redeploys (death → picker
+  // → Deploy) come through the director — near owned flags, far from enemies —
+  // while the match opening and every TDM (re)spawn draw from the team's
+  // BOT_SPAWNS zone through the same rejection sampling Bot.spawnAtRandom
+  // uses, at the player's own radius and the zone's feet height (which is what
+  // puts a warehouse2 T on the catwalk). main.ts passes false at startup and
+  // true on death deploys. The range keeps its fixed firing line: no bots, no
+  // band worth drawing.
   if (useDirector && session.mode === 'dom') {
     const foeTeam = opposing(session.playerTeam);
     const enemies = bots
@@ -159,19 +141,34 @@ export function respawn(useDirector = false): void {
     const p = pickDomRespawn(session.playerTeam, enemies);
     player.pos.set(p.x, p.y + player.eyeHeight, p.z);
     motion.groundSmoothY = p.y;
+  } else if (session.map === 'range') {
+    player.pos.set(RANGE_SPAWN.x, RANGE_SPAWN.feetY + player.eyeHeight, RANGE_SPAWN.z);
+    motion.groundSmoothY = RANGE_SPAWN.feetY;
   } else {
-    player.pos.set(0, feetY + player.eyeHeight, spawn.z);
+    const zone = BOT_SPAWNS[session.map][session.playerTeam];
+    const p = findFreeSpawn(
+      () => new THREE.Vector3(
+        zone.minX + Math.random() * (zone.maxX - zone.minX),
+        zone.y,
+        zone.minZ + Math.random() * (zone.maxZ - zone.minZ),
+      ),
+      player.radius,
+      colliders,
+      32,
+      zone.y,
+    );
+    player.pos.set(p.x, p.y + player.eyeHeight, p.z);
     // The camera rides a smoothed ground height (player.ts eases it toward the
     // physics feet), so seed it AT the spawn floor — not 0. Dying on platform
     // geometry with a stale height would otherwise ease the view down from it
     // over the first ~100 ms, and a 5.1 m spawn (warehouse2 T-side) would climb
     // up from the shed floor instead of starting on the catwalk.
-    motion.groundSmoothY = feetY;
+    motion.groundSmoothY = p.y;
   }
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;
-  aim.yaw = spawn.yaw;
+  aim.yaw = session.map === 'range' ? RANGE_SPAWN.yaw : playerSpawnYaw(session.playerTeam);
   aim.pitch = 0;
   wpn.recoil = 0;    // else the view punch would spawn the camera mid-climb
   wpn.recoilYaw = 0; // and mid-wander, off to one side

@@ -109,7 +109,7 @@ async function start(): Promise<void> {
     if (session.botsT > 0) spawnBots(session.botsT, 'T', session.botWeaponT, session.botSecondaryT);
     if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt, session.botSecondaryCt);
   }
-  respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
+  respawn(); // draw the player's opening spawn from their team's zone, with fresh HP/ammo/yaw
   const illustration = ligneClaire ? initLigneClaire(scene, renderer) : null;
   initMenus({
     onStart: () => showLoadoutPicker('start'),
@@ -133,7 +133,7 @@ async function start(): Promise<void> {
       setLoadout(primary, secondary);
       // Death deploys in domination respawn through the director (near owned
       // flags, far from enemies); the match-opening deploy finds the player
-      // alive and keeps the fixed SPAWN.
+      // alive and keeps the zone-drawn opening spawn.
       if (!player.alive) respawn(session.mode === 'dom');
       lock();
     },

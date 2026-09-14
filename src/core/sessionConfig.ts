@@ -127,7 +127,7 @@ export function secondsToMinutesLabel(seconds: number): string {
  * next time a map is added.
  *
  * Membership goes through an exhaustive Record rather than a literal chain so
- * widening MapName fails to compile HERE too, not just at BUILDERS / SPAWN /
+ * widening MapName fails to compile HERE too, not just at BUILDERS / BOT_SPAWNS /
  * SUBTITLES. The cast is the unavoidable cost of runtime narrowing (`in` can't
  * narrow a bare string); hasOwn rather than `in` keeps prototype keys like
  * 'toString' from passing the guard and reaching the builder lookup.

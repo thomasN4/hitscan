@@ -10,7 +10,7 @@
 // Indexing needs no miss guard: a Record over a union is a mapped type with
 // explicit properties, not an index signature, so noUncheckedIndexedAccess
 // does not apply and BUILDERS[session.map] is a plain () => void — the same
-// reason combat.ts:SPAWN[session.playerTeam][session.map] needs none.
+// reason core/engine.ts:AMBIENCE[map] needs none.
 //
 // Builders are browser-only (they touch the scene through world.ts) and each
 // assumes a FRESH scene: map switching is a full page reload, never a runtime

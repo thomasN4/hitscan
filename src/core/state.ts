@@ -839,7 +839,7 @@ export const DESERT_AMBIENCE: Ambience = {
 };
 
 /**
- * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN /
+ * Per-map ambience. A full Record for the same reason as BUILDERS / BOT_SPAWNS /
  * SUBTITLES: adding a MapName must fail to compile until the new map says what
  * it looks like, rather than silently inheriting the desert.
  */
@@ -922,13 +922,15 @@ export interface SpawnZone {
  * (maps/warehouse1.ts:25-27). A map smaller than that band strands bots
  * outside its own geometry.
  *
- * A full Record for the same reason as BUILDERS / SPAWN / AMBIENCE: adding a
+ * A full Record for the same reason as BUILDERS / DOM_FLAGS / AMBIENCE: adding a
  * MapName must fail to compile until the new map says where its bots start.
  *
- * The first four entries reproduce that old band exactly — `x ∈ [-45, 45]`,
- * `|z| ∈ [20, 55]`, Ts on -z away from the player spawn and CTs mirrored —
- * so making this per-map changed nothing about the maps that predate it.
- * state.test.ts pins that.
+ * The arena, range and warehouse1 entries reproduce that old band exactly —
+ * `x ∈ [-45, 45]`, `|z| ∈ [20, 55]`, Ts on -z away from the player spawn and
+ * CTs mirrored — so making this per-map changed nothing about the maps that
+ * predate it. Elevation instead uses diagonal corner pockets (T northeast, CT
+ * southwest), so neither side opens looking straight down the middle.
+ * state.test.ts pins both shapes.
  */
 export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
   arena: {
@@ -940,8 +942,11 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
     CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
   },
   elevation: {
-    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
-    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+    // Diagonal corner pockets: T northeast, CT southwest. Both are open
+    // ground — no crates, plateau, tower or walls intersect either band, and
+    // both keep >= 4 m off the perimeter inner faces.
+    T:  { minX: 10, maxX: 50, minZ: -55, maxZ: -30, y: 0 },
+    CT: { minX: -50, maxX: 5, minZ: 35, maxZ: 55, y: 0 },
   },
   warehouse1: {
     T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
@@ -985,7 +990,7 @@ export interface FlagDef {
 
 /**
  * Domination flags per map. A full Record for the same reason as BUILDERS /
- * SPAWN / BOT_SPAWNS: adding a MapName must fail to compile until the new map
+ * BOT_SPAWNS: adding a MapName must fail to compile until the new map
  * says where its flags are. An EMPTY array means "no domination on this map" —
  * sessionConfig's parser falls back to `tdm` there, so `?mode=dom` on any
  * other map degrades safely instead of booting a flagless match.
@@ -994,17 +999,19 @@ export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
   arena: [],
   range: [],
   // A (-38,3.0,-30): the plateau top's centre (22 x 22 at maps/elevation.ts,
-  // so a 4.5 ring sits well inside), reached only up the east stair — the
-  // home flag is a chokepoint. C (35,0,22): open ground at the foot of the
-  // tower stair (whose base stands at z = 15.5), deep in CT territory in the
-  // north-south lane the bridge/tower deck overlooks — the T sniper view
-  // down that lane is the point. B (0,3.6,0): the second-floor slab west of
-  // the stairwell hole (x[2,6], z[-9,0]) — the deck fight the map was built
-  // to observe. Each home flag sits inside its side's spawn band.
+  // so a 4.5 ring sits well inside), reached only up the east stair. C
+  // (35,0,38): open ground south down the tower lane (whose stair base stands
+  // at z = 15.5), deep in CT territory in the north-south lane the
+  // bridge/tower deck overlooks — the T sniper view down that lane is the
+  // point. B (0,3.6,0): the second-floor slab west of the stairwell hole
+  // (x[2,6], z[-9,0]) — the deck fight the map was built to observe. The
+  // spawn pockets sit in the opposite corners from the lane flags, so neither
+  // home flag starts inside its side's band: the openers are a ~48 m T run to
+  // A and a ~30 m CT run to C.
   elevation: [
     { id: 'A', x: -38, feetY: 3.0, z: -30, radius: 4.5 },
     { id: 'B', x: 0, feetY: 3.6, z: 0, radius: 4.5 },
-    { id: 'C', x: 35, feetY: 0, z: 22, radius: 4.5 },
+    { id: 'C', x: 35, feetY: 0, z: 38, radius: 4.5 },
   ],
   warehouse1: [],
   warehouse2: [],

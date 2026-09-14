@@ -993,15 +993,18 @@ export interface FlagDef {
 export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
   arena: [],
   range: [],
-  // A (0,0,-30) and C (0,0,30): open ground between the spawn bands and the
-  // central building, clear of the crate clusters beside them. B (0,3.6,0):
-  // the second-floor slab west of the stairwell hole (x[2,6], z[-9,0]) — the
-  // deck fight the map was built to observe. Radius 4.5 keeps A's ring clear
-  // of the plateau's east face (x = -27) and the crates around both points.
+  // A (-38,3.0,-30): the plateau top's centre (22 x 22 at maps/elevation.ts,
+  // so a 4.5 ring sits well inside), reached only up the east stair — the
+  // home flag is a chokepoint. C (35,0,22): open ground at the foot of the
+  // tower stair (whose base stands at z = 15.5), deep in CT territory in the
+  // north-south lane the bridge/tower deck overlooks — the T sniper view
+  // down that lane is the point. B (0,3.6,0): the second-floor slab west of
+  // the stairwell hole (x[2,6], z[-9,0]) — the deck fight the map was built
+  // to observe. Each home flag sits inside its side's spawn band.
   elevation: [
-    { id: 'A', x: 0, feetY: 0, z: -30, radius: 4.5 },
+    { id: 'A', x: -38, feetY: 3.0, z: -30, radius: 4.5 },
     { id: 'B', x: 0, feetY: 3.6, z: 0, radius: 4.5 },
-    { id: 'C', x: 0, feetY: 0, z: 30, radius: 4.5 },
+    { id: 'C', x: 35, feetY: 0, z: 22, radius: 4.5 },
   ],
   warehouse1: [],
   warehouse2: [],

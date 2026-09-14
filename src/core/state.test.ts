@@ -331,13 +331,14 @@ describe('creditKill', () => {
 describe('DOM_FLAGS', () => {
   test('elevation holds three flags with B on the building deck', () => {
     expect(DOM_FLAGS.elevation.map(f => f.id)).toEqual(['A', 'B', 'C']);
-    const b = DOM_FLAGS.elevation[1]!;
-    expect(b.feetY).toBe(3.6);
-    // A and C sit on open ground between the spawn bands and the building.
-    expect(DOM_FLAGS.elevation[0]!.feetY).toBe(0);
-    expect(DOM_FLAGS.elevation[2]!.feetY).toBe(0);
-    expect(DOM_FLAGS.elevation[0]!.z).toBeLessThan(0);
-    expect(DOM_FLAGS.elevation[2]!.z).toBeGreaterThan(0);
+    const [a, b, c] = [DOM_FLAGS.elevation[0]!, DOM_FLAGS.elevation[1]!, DOM_FLAGS.elevation[2]!];
+    expect(b).toMatchObject({ x: 0, feetY: 3.6, z: 0 });
+    // A crowns the T-side plateau (3.0 top at maps/elevation.ts); C stands
+    // at the foot of the tower stair, deep in CT territory in the lane the
+    // bridge overlooks. Pinned exactly: moving a flag is a layout decision,
+    // and the reachability/capture checks below assume these spots.
+    expect(a).toMatchObject({ x: -38, feetY: 3.0, z: -30 });
+    expect(c).toMatchObject({ x: 35, feetY: 0, z: 22 });
   });
 
   test('every other map has no flags (domination falls back to TDM there)', () => {

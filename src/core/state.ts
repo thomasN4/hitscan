@@ -191,25 +191,23 @@ export function opposing(team: Team): Team {
 
 /**
  * The domination flag a bot is assigned to. The position is the flag's own
- * static point (it never moves); `assignedMates` is how many live SAME-team
- * bots share this assignment, excluding the holder — the dispatcher's answer
- * to "who is supposed to be here with me", refreshed on its slow tick.
+ * static point (it never moves). Intent is deliberately absent: who is
+ * *supposed* to be here never outranked who *is* here in any policy, so the
+ * dispatcher deals the point and the per-frame census reports the company.
  */
 export interface DomObjective {
   id: string;
   pos: THREE.Vector3;
   radius: number;
-  /** Live same-team bots sharing this assignment, excluding the holder. */
-  assignedMates: number;
 }
 
 /**
  * What the brain sees of its assignment each frame: the static dispatch
- * above plus `cappingMates` — live same-team bodies (bots AND the player)
- * currently inside the same ring, excluding the viewer. Counts, never
- * identities or positions: flag states are broadcast to both teams, so this
- * reveals nothing a scoreboard wouldn't. The executor recomputes it every
- * frame; the dispatch half stays sticky between dispatcher runs.
+ * above plus live teammate cover — `cappingMates` bodies (bots AND the
+ * player) inside the same ring and the bots-only `holdRank` ladder, both
+ * excluding the viewer. Counts, never identities or positions: flag states
+ * are broadcast to both teams, so this reveals nothing a scoreboard
+ * wouldn't. The executor recomputes both every frame.
  */
 export interface ObjectiveView extends DomObjective {
   /** Live same-team bodies inside this flag's ring, excluding the viewer. */

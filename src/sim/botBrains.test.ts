@@ -151,15 +151,14 @@ interface ViewOpts {
   /** Hostile noises this frame, executor-filtered; default none. */
   heard?: readonly HeardSound[];
   /**
-   * Assigned domination flag; default null = TDM or undispatched. Mates
-   * default to zero — an uncovered push — and rank to zero — the designated
-   * holder — unless the test says otherwise.
+   * Assigned domination flag; default null = TDM or undispatched. Cover
+   * defaults to zero — an uncovered push by the designated holder — unless
+   * the test says otherwise.
    */
   objective?: {
     id: string;
     pos: THREE.Vector3;
     radius: number;
-    assignedMates?: number;
     cappingMates?: number;
     holdRank?: number;
   } | null;
@@ -189,13 +188,12 @@ function view(o: ViewOpts = {}): BrainView {
     // thunk, and the pause-before-patrol tests want a goalless answer (null).
     nextPatrolWaypoint: o.nextPatrolWaypoint ?? (() => null),
     // No objective by default: every pre-domination test describes a TDM bot.
-    // Mates default to zero — an uncovered push — and rank to zero — the
-    // designated holder — unless the test says otherwise.
+    // Cover defaults to zero — an uncovered push by the designated holder —
+    // unless the test says otherwise.
     objective: o.objective === undefined || o.objective === null ? null : {
       id: o.objective.id,
       pos: o.objective.pos,
       radius: o.objective.radius,
-      assignedMates: o.objective.assignedMates ?? 0,
       cappingMates: o.objective.cappingMates ?? 0,
       holdRank: o.objective.holdRank ?? 0,
     },

@@ -376,9 +376,8 @@ export class Bot implements BotShape {
    * updateBots' dispatcher via assignObjective(); read once per frame as
    * BrainView.objective. The position is the flag's own — it never moves, so
    * sharing the reference is safe, and the view clones it on the way in.
-   * `assignedMates` is the dispatch half of the teammate cover (same-team
-   * bots sharing the assignment); the live half, `cappingMates`, is computed
-   * per frame in update() from the ring census updateBots keeps.
+   * Teammate cover (`cappingMates`, `holdRank`) is computed per frame in
+   * update() from the ring census updateBots keeps.
    */
   private domObjective: DomObjective | null = null;
 
@@ -671,7 +670,6 @@ export class Bot implements BotShape {
           id: this.domObjective.id,
           pos: this.domObjective.pos.clone(),
           radius: this.domObjective.radius,
-          assignedMates: this.domObjective.assignedMates,
           cappingMates: cappingMatesFor(this, this.domObjective.id),
           holdRank: holdRankFor(this, this.domObjective.id),
         },
@@ -1386,25 +1384,9 @@ function dispatchDomObjectives(): void {
   );
   domAssignments.clear();
   for (const [id, flagId] of assigned) domAssignments.set(id, flagId);
-  // Teammate cover, dispatch half: same-team bots sharing each assignment,
-  // counted from the FRESH map so a re-dispatch never reports last second's
-  // company. Keyed per team — opposite sides converging on one flag are not
-  // each other's cover.
-  const byId = new Map(alive.map(b => [b.id, b.team] as const));
-  const groups = new Map<string, number[]>();
-  for (const [id, flagId] of assigned) {
-    const team = byId.get(id);
-    if (team === undefined) continue;
-    const key = `${team}:${flagId}`;
-    const ids = groups.get(key);
-    if (ids) ids.push(id);
-    else groups.set(key, [id]);
-  }
-  const mates = new Map<number, number>();
-  for (const ids of groups.values()) for (const id of ids) mates.set(id, ids.length - 1);
   for (const b of bots) {
     const flagId = b.alive ? domAssignments.get(b.id) : undefined;
     const flag = flagId === undefined ? undefined : dom.flags.find(f => f.id === flagId);
-    b.assignObjective(flag ? { id: flag.id, pos: flag.pos, radius: flag.radius, assignedMates: mates.get(b.id) ?? 0 } : null);
+    b.assignObjective(flag ? { id: flag.id, pos: flag.pos, radius: flag.radius } : null);
   }
 }

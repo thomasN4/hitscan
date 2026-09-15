@@ -1969,8 +1969,10 @@ describe('DefaultBrain domination objective', () => {
       objective: flag,
       nextWaypoint: () => new THREE.Vector3(0, 0, 1),
     }), DT);
-    // Sight loss with a remembered position pursues memory first...
-    expect(['route', 'objective']).toContain(back.mode);
+    // Sight loss with an objective does NOT pursue the memory: priority 5
+    // drops the remembered ghost and walks back to the flag, so `route` is
+    // unreachable here and accepting it would hide the priority regressing.
+    expect(back.mode).toBe('objective');
   });
 
   it('hearing never pulls a bot off its flag', () => {
@@ -2223,6 +2225,38 @@ describe('DefaultBrain domination objective', () => {
     // Full-speed sidestep under fire, not the drift.
     expect(intent.step.length()).toBeCloseTo(4 * DT, 9);
     expect(fire.pulls).toBe(1);
+  });
+
+  it('a holder drops the focus when the sighting is lost', () => {
+    // A focus outliving its sighting blinds the bot: the executor spends its
+    // one LOS ray per frame on the focused candidate and probes nobody else
+    // when that look fails (perception.ts:acquireVisual), so a target that
+    // steps behind cover would hide every other attacker behind it.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    const seen = brain.decide(view({ visual: visualAt(10), objective: close }), DT);
+    expect(seen.mode).toBe('capture');
+    expect(brain.focusId).toBe('player');
+    const lost = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(lost.mode).toBe('capture');
+    expect(lost.focusId).toBeNull();
+    expect(brain.focusId).toBeNull();
+  });
+
+  it('a dodge does not outlive the hold that armed it', () => {
+    // The dodge clock is only spent on the hold path, so a bot that stops
+    // holding mid-dodge must lose it rather than freeze it — otherwise the
+    // leftover sidestep fires the next time it caps, from a stale bearing.
+    const close = { id: 'B', pos: new THREE.Vector3(0, 0, 1), radius: 4.5 };
+    const brain = calmBrain();
+    brain.onIncomingFire(new THREE.Vector3(1, 0, 0));
+    const dodging = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(dodging.step.length()).toBeCloseTo(4 * DT, 12); // full-speed sidestep
+    // One frame away from the point (no objective at all), then back on it.
+    brain.decide(view({ visual: null, nextPatrolWaypoint: () => null }), DT);
+    const back = brain.decide(view({ visual: null, objective: close }), DT);
+    expect(back.mode).toBe('capture');
+    expect(back.step.length()).toBeCloseTo(4 * 0.35 * DT, 12); // the drift, not a dodge
   });
 
   it('a capper holds fire beyond engage range but still holds the ring', () => {

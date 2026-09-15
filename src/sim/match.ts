@@ -1,16 +1,19 @@
 // sim/match.ts — match-end decision rules.
 //
-// Pure. Kept out of combat.ts/main.ts so the two ways a match can end are
-// unit-testable without a browser: the clock expiring (winner by score) and
-// the last enemy falling (immediate win for the player's side, except the 1v1 case).
+// Pure. Kept out of combat.ts/main.ts so the ways a match can end are
+// unit-testable without a browser: the clock expiring (winner by score in
+// either mode), the last enemy falling (immediate win for the player's side,
+// except the 1v1 case — TDM only), and a domination side reaching the score
+// limit (reachesDomLimit, checked by the tick updater every frame).
 
 /** Which side took the match, or nobody. */
 export type MatchWinner = 'CT' | 'T' | 'draw';
 
 /**
- * Winner when the round clock expires: higher kill score takes it. The CT
- * score is `scoreKills`, the T score is `scoreDeaths` — the same pair the
- * HUD top bar renders.
+ * Winner when a TDM round clock expires: higher kill score takes it. The CT
+ * score is `scoreKills`, the T score is `scoreDeaths` — the pair the HUD top
+ * bar renders in TDM. Domination expiry goes through decideDomWinner over the
+ * `dom` slice instead, which is also what its top bar shows.
  */
 export function decideWinner(scoreKills: number, scoreDeaths: number): MatchWinner {
   if (scoreKills > scoreDeaths) return 'CT';

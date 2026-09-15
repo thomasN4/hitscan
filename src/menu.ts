@@ -65,8 +65,17 @@ const T_SUBTITLES: Record<MapName, string | null> = {
  * objective and the limit; everything else keeps the static line (or its
  * T-side override).
  */
-export function subtitleFor(map: MapName, side: Team, mode: MatchMode = 'tdm', scoreLimit: number = SESSION_DEFAULTS.scoreLimit): string {
-  if (mode === 'dom' && DOM_FLAGS[map].length > 0) return `Domination — capture A, B and C; first to ${scoreLimit} points holds the map`;
+export function subtitleFor(map: MapName, side: Team, mode: MatchMode = SESSION_DEFAULTS.mode, scoreLimit: number = SESSION_DEFAULTS.scoreLimit): string {
+  // Flag names come from the map's own table, not a literal: a map with two
+  // or four points would otherwise be advertised as "A, B and C".
+  const flags = DOM_FLAGS[map];
+  if (mode === 'dom' && flags.length > 0) {
+    const ids = flags.map(f => f.id);
+    const list = ids.length > 1
+      ? `${ids.slice(0, -1).join(', ')} and ${ids[ids.length - 1]}`
+      : ids[0];
+    return `Domination — capture ${list}; first to ${scoreLimit} points holds the map`;
+  }
   // null is a TABLE ENTRY meaning "no T-side override", not an index miss —
   // T_SUBTITLES is keyed by the full MapName union.
   if (side === 'T') return T_SUBTITLES[map] ?? SUBTITLES[map];

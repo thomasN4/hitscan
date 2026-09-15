@@ -14,6 +14,9 @@ import * as THREE from 'three';
 import { GameClock, type ScheduledHandle } from '../sim/gameClock';
 import { SoundRing } from '../sim/soundEvents';
 import type { BrainMode } from '../sim/botBrains';
+// A value import, like GameClock and SoundRing above: sim/domination.ts takes
+// only `type Team` back, so nothing is circular at runtime.
+import { DOM_SCORE_LIMIT } from '../sim/domination';
 
 // ---------- Domain vocabulary ----------
 /**
@@ -215,9 +218,13 @@ export interface ObjectiveView extends DomObjective {
   /**
    * Holder rank among the same-team BOTS standing this point (hold circle,
    * not the full ring — see sim/domination.ts:holderRanks; bots only, the
-   * player never outranks): how many hold it with a lower id. 0 designates
-   * the holder, who sits the point; higher ranks escort. Read only while
-   * capping; 0 elsewhere, which is exactly "nobody ahead of me".
+   * player never outranks) AND assigned to it: how many hold it with a lower
+   * id. 0 designates the holder, who sits the point; higher ranks escort.
+   * Ranking is per assignment because acting on rank 0 is — a bot only ever
+   * reads the ladder of its OWN flag, so one ranked on a flag it was sent
+   * nowhere near could never hold that flag while still demoting the bot that
+   * was. Read only while capping; 0 elsewhere, which is exactly "nobody ahead
+   * of me".
    */
   holdRank: number;
 }
@@ -312,6 +319,12 @@ export interface Bot {
    * view, so sharing the reference here is safe.
    */
   assignObjective(o: DomObjective | null): void;
+  /**
+   * Id of that assignment, or undefined with none. Read by the ring census,
+   * which ranks holders per flag and must exclude bots assigned elsewhere —
+   * only the bot a flag was dealt to can ever hold it.
+   */
+  readonly objectiveId: string | undefined;
 }
 
 /** One transient impact puff tracked by effects.ts. */
@@ -1049,6 +1062,7 @@ export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
   warehouse1: [],
   warehouse2: [],
 };
+
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every
  * garbage/out-of-range ?time= value falls back to (see
@@ -1080,9 +1094,9 @@ export const SESSION_DEFAULTS: Readonly<{
   botsCt: 5,
   roundSeconds: 300,
   // Domination points to win; only read in dom mode (sessionConfig clamps).
-  // A literal like roundSeconds above, matching sim/domination.ts's
-  // DOM_SCORE_LIMIT — change them together.
-  scoreLimit: 200,
+  // Taken from the rules module rather than repeated as a literal, so the
+  // default and the rule it belongs to cannot drift.
+  scoreLimit: DOM_SCORE_LIMIT,
   // A varied field by default: the whole point of the tranche is that the
   // enemy's weapon is a fact about the enemy, not a constant. Pinning a
   // single weapon is what smoke phases and playtests do deliberately.
@@ -1370,17 +1384,22 @@ export function cancelPendingReloadSfx(): void {
 /**
  * Match bookkeeping. The team counters' rule lives in creditKill() (a
  * CT-side kill — player or ally — bumps scoreKills, a T-side kill bumps
- * scoreDeaths), called from bots.ts on a bot's death and from combat.ts
- * when the player dies; main.ts's loop counts roundTime down (arena only).
+ * scoreDeaths — and nothing at all in domination), called from bots.ts on a
+ * bot's death and from combat.ts when the player dies; main.ts's loop counts
+ * roundTime down (arena only).
  * The player counters are the scoreboard's "You" row: bots.ts bumps
  * playerKills on the player's own kills and combat.ts bumps playerDeaths
  * when the player dies. hud.ts renders the top bar; menu.ts renders the
  * end screen.
  */
 export interface ScoreState {
-  /** Shown as the CT score: CT-side kills — the player's (on CT-side) plus CT allies'. */
+  /**
+   * CT-side kills — the player's (on CT-side) plus CT allies'. Shown as the
+   * CT score in TDM only: domination renders `dom.scoreCt` in that slot and
+   * never bumps this one (see creditKill).
+   */
   scoreKills: number;
-  /** Shown as the T score: T-side kills — the player's (on T-side) plus T allies'. */
+  /** T-side kills — the player's (on T-side) plus T allies'. The T half of the pair above, same TDM-only caveat. */
   scoreDeaths: number;
   /** Kills credited to YOU personally (excludes ally kills). */
   playerKills: number;
@@ -1407,9 +1426,12 @@ export const score: ScoreState = {
  * same-team casualties where those are possible; the mapping itself lives
  * only here.
  *
- * Domination matches never call this: kills score nothing there (team points
- * tick from owned flags into the `dom` slice instead), while personal K/D
- * counters are still bumped by the same callers.
+ * In DOMINATION this is a no-op, and the guard lives here rather than at the
+ * callers: both of them (combat.ts:damagePlayer, bots.ts:Bot.die) still call
+ * it unconditionally on every casualty, and the mode test below drops the
+ * team counters on the floor. Kills score nothing in domination — team points
+ * tick from owned flags into the `dom` slice instead — while the personal K/D
+ * counters those same callers bump are untouched by the mode.
  */
 export function creditKill(killerTeam: Team): void {
   if (session.mode === 'dom') return;

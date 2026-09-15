@@ -17,9 +17,9 @@ export const CAPTURE_TIME_S = 8;
 export const TICK_POINTS_PER_SEC = 1;
 /**
  * Default domination points to win. The live limit is session.scoreLimit
- * (menu-editable, parser-clamped); this constant only anchors the default —
- * SESSION_DEFAULTS.scoreLimit mirrors it, change them together — and is
- * never read by runtime code.
+ * (menu-editable, parser-clamped); this constant is where its default comes
+ * from — core/state.ts:SESSION_DEFAULTS.scoreLimit reads it rather than
+ * repeating the number, so there is one place to change.
  */
 export const DOM_SCORE_LIMIT = 200;
 /**
@@ -114,15 +114,24 @@ export interface RankedBody extends DomBody {
 
 /**
  * Holder rank per bot id: among each team's bodies STANDING the point (see
- * isHoldingPoint), how many have a LOWER id. Rank 0 is the designated
- * holder and sits the point; higher ranks escort — free to leave the ring
- * after live contact while the holder keeps ticking the capture. Per team
- * independently, so opposite sides converging on one flag rank against
- * their own mates only. Bots outside the hold circle are absent (their rank
- * is read as 0, which is exactly "nobody ahead of me" and is only ever
- * read while capping anyway) — ranking the full ring instead would hand
- * rank 0 to an outer-annulus bot the brain does not recognize as capping
- * while the bot actually at the center escorts away, leaving no holder.
+ * isHoldingPoint), how many have a LOWER id. Rank 0 is the designated holder
+ * and sits the point; higher ranks escort — free to leave the ring after live
+ * contact while the holder keeps ticking the capture. Per team independently,
+ * so opposite sides converging on one flag rank against their own mates only.
+ *
+ * Who is eligible is TWICE narrowed, both times for the same reason — rank 0
+ * is only worth handing to a bot that will act on it:
+ *
+ * - by geometry, here: bots outside the hold circle are absent (their rank
+ *   reads as 0, which is exactly "nobody ahead of me", and is only ever read
+ *   while capping anyway). Ranking the full ring would hand rank 0 to an
+ *   outer-annulus bot the brain does not recognize as capping while the bot
+ *   actually at the centre escorts away, leaving no holder.
+ * - by assignment, at the caller: bots.ts passes only the bots dispatched to
+ *   THIS flag, because a brain reads the ladder of its own objective alone. A
+ *   passer-by ranked here could never hold the flag, yet its lower id would
+ *   still demote the bot that was sent to hold it — the same "nobody holds a
+ *   point two bodies are standing on" failure, by the other route.
  */
 export function holderRanks(
   flag: Pick<MutableDomFlag, 'pos' | 'radius'>,

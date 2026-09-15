@@ -304,7 +304,15 @@ async function start(): Promise<void> {
       // Domination capture + tick scoring, after every body has moved. The
       // updater also ends the match on the score limit; the clock below
       // stays the second way out.
-      if (!RANGE && session.mode === 'dom') updateDomination(dt);
+      //
+      // Clamped to the time actually left on that clock, because the block
+      // below subtracts the same dt from it: an unclamped last frame ticks
+      // capture progress and flag points for game time the round no longer
+      // has, and the score limit it can push a side past is checked HERE,
+      // before expiry is noticed. With 0.01 s left, a 0.05 s frame and CT on
+      // 199.96/200 behind T, that awards CT the match on points it could
+      // never have earned.
+      if (!RANGE && session.mode === 'dom') updateDomination(Math.min(dt, score.roundTime));
 
       // Round clock: arena only — meaningless on the range, so freeze it there.
       // Clamped at 0 rather than reset: expiry ENDS the match (combat.ts:endMatch),
@@ -357,7 +365,8 @@ async function start(): Promise<void> {
     get botsT() { return session.botsT; }, set botsT(v: number) { session.botsT = v; },
     get botsCt() { return session.botsCt; }, set botsCt(v: number) { session.botsCt = v; },
     get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
-    get scoreLimit() { return session.scoreLimit; }, set scoreLimit(v: number) { session.scoreLimit = v; },    get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
+    get scoreLimit() { return session.scoreLimit; }, set scoreLimit(v: number) { session.scoreLimit = v; },
+    get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
     get botWeaponCt() { return session.botWeaponCt; }, set botWeaponCt(v: BotWeaponChoice) { session.botWeaponCt = v; },
     get botSecondaryT() { return session.botSecondaryT; }, set botSecondaryT(v: BotSecondaryChoice) { session.botSecondaryT = v; },
     get botSecondaryCt() { return session.botSecondaryCt; }, set botSecondaryCt(v: BotSecondaryChoice) { session.botSecondaryCt = v; },

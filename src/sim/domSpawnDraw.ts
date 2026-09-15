@@ -19,8 +19,12 @@ export interface SpawnCandidate {
 }
 
 /**
- * Flag-ring band (m): inside the capture radius would spawn onto the fight,
- * outside 10 m is not "near" it.
+ * Flag-ring band (m). The inner bound is a FLOOR, not the band itself: a
+ * draw inside the capture radius would land on the point and start counting
+ * toward the capture the respawn was supposed to reinforce, so the caller
+ * widens this to the flag's own radius whenever that is larger
+ * (domSpawns.ts). Kept as a constant because radius is per-flag while the
+ * minimum standoff is not. Outside 10 m is not "near" the flag.
  */
 export const DOM_RING_INNER = 4;
 export const DOM_RING_OUTER = 10;

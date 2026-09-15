@@ -107,8 +107,12 @@ export function updateDomFlagColors(): void {
   });
 }
 
-/** Remove every marker (and free its geometry/materials). Tests only. */
-export function clearDomFlags(): void {
+/**
+ * Remove every marker and free its geometry/materials. Called by
+ * buildDomFlags before it rebuilds — module-private, because rebuilding is
+ * the only thing that ever needs it.
+ */
+function clearDomFlags(): void {
   for (const rig of rigs) {
     scene.remove(rig.ring, rig.pole, rig.sprite);
     rig.ring.geometry.dispose();

@@ -390,6 +390,15 @@ export class Bot implements BotShape {
     this.domObjective = o;
   }
 
+  /**
+   * Read-only exposure of the assignment for the ring census, which ranks
+   * holders per flag and must exclude every bot that was sent somewhere else
+   * (see refreshDomCensus). Undefined with no assignment.
+   */
+  get objectiveId(): string | undefined {
+    return this.domObjective?.id;
+  }
+
   private readonly options: BotOptions;
 
   constructor(team: Team = 'T', weapon: BotPrimaryId = 'smg', secondary: BotSidearmId = 'pistol', options: BotOptions = {}) {
@@ -817,9 +826,13 @@ export class Bot implements BotShape {
    *
    * Mechanism, not policy: this keeps and refreshes the path and decides which
    * waypoint is "next", while the brain decides whether to walk it at all —
-   * and only ever names the goal, which is whatever it currently SEES or last
-   * remembered. Same split as the old seeTarget: the executor owns the
-   * raycast and the graph, the brain owns the trigger and the route decision.
+   * and only ever names the goal. Three kinds of goal reach it: what the brain
+   * currently SEES, what it last remembered (a lost sighting or a heard
+   * noise), and — since domination — the assigned flag, which
+   * botBrains.ts:objectiveIntent routes to through this same
+   * BrainView.nextWaypoint callback. Same split as the old seeTarget: the
+   * executor owns the raycast and the graph, the brain owns the trigger and
+   * the route decision.
    */
   private waypointToward(goal: THREE.Vector3, visualPursuit: boolean): THREE.Vector3 | undefined | null {
     // A remembered goal must not inherit a path computed for a different
@@ -829,7 +842,9 @@ export class Bot implements BotShape {
     // so it keys on the GOAL itself, rounded to a decimetre. Without that,
     // two successive noises would share the owner `m:*` and the second would
     // walk the first one's cached path until ROUTE_INTERVAL happened to
-    // expire.
+    // expire. An objective goal keys the same way, and for the same reason: a
+    // flag is a place, so objectiveIntent holds no focus while it routes to
+    // one (botBrains.ts) and the coordinates own the key.
     const owner = this.brain.focusId ?? `${goal.x.toFixed(1)},${goal.y.toFixed(1)},${goal.z.toFixed(1)}`;
     const key = `${visualPursuit ? 'v' : 'm'}:${owner}`;
     return this.waypointOnRoute(goal, key, false);
@@ -1188,7 +1203,8 @@ export class Bot implements BotShape {
     this.mesh.visible = false;
     this.deaths++;
     // Team scores are side-fixed (creditKill): scoreKills is the CT score,
-    // scoreDeaths the T score. Credit the killer's side for an opposing
+    // scoreDeaths the T score — in TDM; the call is a no-op in domination,
+    // where kills are worth nothing. Credit the killer's side for an opposing
     // casualty only — a player kill counts for the player's side, whatever
     // it is.
     const killer = killerName === undefined
@@ -1273,10 +1289,6 @@ export function updateBots(dt: number, player: PlayerState): void {
   // after it in this array and not to the ones before — hearing would depend
   // on registry order. With it, every bot hears it on the next frame.
   soundHighWater = soundEvents.latestSeq;
-  // Domination ring census, EVERY frame (unlike the 1 s dispatch below):
-  // cover is a live fact — a mate stepping onto or off the point must reach
-  // the brains this frame, not after the next dispatch.
-  refreshDomCensus(player);
   // Domination assignments refresh on a slow tick, not per frame: the pure
   // dispatcher is sticky across runs, and re-running it per frame would
   // churn the route cache owner keys for nothing.
@@ -1285,6 +1297,13 @@ export function updateBots(dt: number, player: PlayerState): void {
     domDispatchIn = DISPATCH_INTERVAL_S;
     dispatchDomObjectives();
   }
+  // Domination ring census, EVERY frame (unlike the 1 s dispatch above):
+  // cover is a live fact — a mate stepping onto or off the point must reach
+  // the brains this frame, not after the next dispatch. It runs AFTER the
+  // dispatch because the holder ladders are keyed by assignment: censusing
+  // first would rank a just-reassigned bot on the flag it was dealt last
+  // second, for the one frame the brains read it.
+  refreshDomCensus(player);
   bots.forEach(b => b.update(dt, player));
 }
 
@@ -1322,18 +1341,38 @@ function refreshDomCensus(player: PlayerState): void {
   // but never takes a rank (see holderRanks).
   const ranked = bots
     .filter(b => b.alive)
-    .map(b => ({ id: b.id, team: b.team, x: b.mesh.position.x, feetY: b.mesh.position.y, z: b.mesh.position.z }));
+    .map(b => ({
+      id: b.id,
+      team: b.team,
+      x: b.mesh.position.x,
+      feetY: b.mesh.position.y,
+      z: b.mesh.position.z,
+      objective: b.objectiveId,
+    }));
   for (const f of dom.flags) {
     domCensus.set(f.id, countFlagBodies(f, bodies));
-    domHolders.set(f.id, holderRanks(f, ranked));
+    // Only bots ASSIGNED here may take a rank on this ladder. Rank 0 is a
+    // designation the brain acts on, and it acts on it only for its OWN
+    // objective — so a bot ranked on a flag it was not sent to can never
+    // hold that flag, while its lower id still demotes the bot that WAS sent
+    // (to rank 1, an escort that leaves on the first bearing or visual),
+    // leaving a point two bodies are standing on with nobody holding it. A
+    // freshly respawned bot has no objective until the next dispatch and is
+    // excluded by the same test.
+    domHolders.set(f.id, holderRanks(f, ranked.filter(r => r.objective === f.id)));
   }
 }
 
 /**
- * Live same-team bodies inside `flagId`'s ring, excluding `bot` itself —
- * the capping half of BrainView.objective. Zero with no census or no live
- * flag of that id (flags never leave mid-match; the guard is what proves it
- * to noUncheckedIndexedAccess).
+ * Live same-team bodies inside `flagId`'s RING, excluding `bot` itself — the
+ * cover half of BrainView.objective. The ring, not the narrower hold circle
+ * the holder ladder ranks: the question this answers is "is my flag being
+ * worked without me", and the capture census counts the whole ring, so a mate
+ * in the outer annulus is contributing to the capture even though it is not
+ * standing the point. The gap is deliberate but real — such a mate is cover
+ * that no brain has designated as the holder, so it may leave on its own
+ * first contact. Zero with no census or no live flag of that id (flags never
+ * leave mid-match; the guard is what proves it to noUncheckedIndexedAccess).
  */
 function cappingMatesFor(bot: Bot, flagId: string): number {
   const counts = domCensus.get(flagId);

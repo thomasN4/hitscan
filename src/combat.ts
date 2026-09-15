@@ -19,8 +19,10 @@ import { flashDamageVignette, clearVignette, botKillTag, addKillfeed, updateScor
 import { showLoadoutPicker, showEndScreen } from './menu';
 
 /**
- * Apply damage to the player. On death: awards the killer's side its score,
- * releases pointer lock (which pauses the loop) and shows the death screen.
+ * Apply damage to the player. On death: awards the killer's side its score
+ * (TDM only — creditKill is a no-op in domination, where kills are worth
+ * nothing), releases pointer lock (which pauses the loop) and shows the death
+ * screen.
  * @param dmg raw damage; caller decides falloff/accuracy
  * @param attackerName display name for the killfeed — required so the
  *   compiler flags any future caller that would revive the anonymous
@@ -44,8 +46,9 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     cancelPendingReloadSfx();
     const attacker = bots.find(b => b.name === attackerName);
     // Side-fixed scores via creditKill: a CT kill is a CT point, a T kill a
-    // T point. The attacker is always the enemy; the fallback covers an
-    // unresolvable name by crediting the opposing side.
+    // T point — in TDM; the call is a no-op in domination. The attacker is
+    // always the enemy; the fallback covers an unresolvable name by crediting
+    // the opposing side.
     const killerTeam: Team = attacker?.team ?? opposing(session.playerTeam);
     creditKill(killerTeam);
     score.playerDeaths++;
@@ -130,9 +133,10 @@ export function respawn(useDirector = false): void {
   // at equal shares — while the match opening and every TDM (re)spawn draw from the team's
   // BOT_SPAWNS zone through the same rejection sampling Bot.spawnAtRandom
   // uses, at the player's own radius and the zone's feet height (which is what
-  // puts a warehouse2 T on the catwalk). main.ts passes false at startup and
-  // true on death deploys. The range keeps its fixed firing line: no bots, no
-  // band worth drawing.
+  // puts a warehouse2 T on the catwalk). main.ts passes the director flag only
+  // for a domination death deploy — false at startup and on every TDM deploy —
+  // so the mode test below is what the flag actually rides on. The range keeps
+  // its fixed firing line: no bots, no band worth drawing.
   if (useDirector && session.mode === 'dom') {
     const p = pickDomRespawn(session.playerTeam);
     player.pos.set(p.x, p.y + player.eyeHeight, p.z);
@@ -222,11 +226,13 @@ export function checkRoundEnd(): void {
 }
 
 /**
- * End the match and move to the score screen. One-shot: both win conditions
- * converge here, and whichever fires first owns the transition. Winner is
- * decided by the caller — the player's side outright on elimination, or by
- * kill score when the clock runs out (sim/match.ts:decideWinner); callers
- * announce their own killfeed line first.
+ * End the match and move to the score screen. One-shot: every win condition
+ * converges here, and whichever fires first owns the transition. Winner is
+ * decided by the caller — the player's side outright on elimination (TDM
+ * only), by kill score when a TDM clock runs out (sim/match.ts:decideWinner),
+ * or by ticked flag points in domination, whether the score limit landed
+ * (domination.ts:updateDomination) or the clock did (decideDomWinner);
+ * callers announce their own killfeed line first.
  *
  * Pointer lock is released first so the loop stops simulating; the screen
  * then reveals on a WALL-clock delay for the same reason damagePlayer's

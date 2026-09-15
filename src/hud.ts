@@ -107,7 +107,11 @@ export function addKillfeed(text: string): void {
   setTimeout(() => entry.remove(), 4500);
 }
 
-/** Refresh CT/T round score from score.scoreKills / score.scoreDeaths. */
+/**
+ * Refresh the CT/T round score in the top bar: kills (score.scoreKills /
+ * score.scoreDeaths) in TDM, floored tick points out of the limit in
+ * domination.
+ */
 export function updateScore(): void {
   // Domination owns the top bar instead: floored tick points toward the
   // configured limit, so the bar agrees with the end screen and the limit
@@ -121,6 +125,7 @@ export function updateScore(): void {
   requireEl('scoreT').textContent = 'T ' + score.scoreDeaths;
 }
 
+let lastDomHUD = '';
 /**
  * Refresh the domination flag chips (owner colour + live capture percent).
  * Called from the domination updater each sim frame; the chips are cached
@@ -129,7 +134,6 @@ export function updateScore(): void {
  * refreshes every frame regardless.
  * Hidden outside dom matches.
  */
-let lastDomHUD = '';
 export function updateDomHUD(): void {
   if (session.mode !== 'dom' || dom.flags.length === 0) {
     if (lastDomHUD !== '') {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import { BOT_SPAWNS, DOM_FLAGS, dom, resetDom, session } from './core/state';
 import { pickDomRespawn } from './domSpawns';
+import { DOM_RING_INNER, DOM_RING_OUTER } from './sim/domSpawnDraw';
 import { colliders, resetWorld } from './world';
 
 /** Deterministic PRNG (LCG) for share checks. */
@@ -19,6 +20,10 @@ function lcg(seed: number): () => number {
 // respawn by planar distance is unambiguous.
 const A = { x: -38, y: 3.0, z: -30 };
 const B = { x: 0, y: 3.6, z: 0 };
+// The band's inner edge is the wider of the global floor and the flag's own
+// capture radius (4.5 on elevation), so a respawn never lands on the point it
+// is reinforcing — derived here rather than hardcoded so the two cannot drift.
+const INNER = Math.max(DOM_RING_INNER, DOM_FLAGS.elevation[0]!.radius);
 
 beforeEach(() => {
   session.map = 'elevation';
@@ -31,12 +36,15 @@ describe('pickDomRespawn', () => {
   test('a constant stream pins the zone pick and the point draw', () => {
     // 0 selects owned[0] (A); angle 0 and radius fraction 0 hug the inner edge.
     const a = pickDomRespawn('T', () => 0, () => true);
-    expect([a.x, a.y, a.z]).toEqual([A.x + 4, A.y, A.z]);
+    expect([a.x, a.y, a.z]).toEqual([A.x + INNER, A.y, A.z]);
   });
 
   test('0.5 selects the second owned flag (B)', () => {
     const b = pickDomRespawn('T', () => 0.5, () => true);
-    expect(b.x).toBeCloseTo(B.x - Math.sqrt(58), 9);
+    // Radius fraction 0.5 of an area-uniform band: r = sqrt((outer^2+inner^2)/2).
+    expect(b.x).toBeCloseTo(
+      B.x - Math.sqrt((DOM_RING_OUTER * DOM_RING_OUTER + INNER * INNER) / 2), 9,
+    );
     expect(b.y).toBe(B.y);
     expect(b.z).toBeCloseTo(B.z, 9);
   });

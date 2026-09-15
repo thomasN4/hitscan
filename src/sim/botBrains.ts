@@ -270,7 +270,10 @@ export interface BrainView {
    * against live stimuli the cover decides: the designated holder (rank 0)
    * holds through everything and shoots in place, higher ranks escort, an
    * uncovered pusher walks on through potshots, and only an escort (cover
-   * present) still hunts bearings and visuals; see decide().
+   * present) still hunts bearings and visuals; see decide(). "Cover" is
+   * `cappingMates` — mates anywhere in the RING, which is what the capture
+   * census counts — while "holder" is the narrower rank-0 seat inside the
+   * hold circle; the two are not the same body.
    */
   objective: ObjectiveView | null;
   /**
@@ -564,9 +567,11 @@ export class DefaultBrain implements BotBrain {
    * Normalized planar dodge direction of a holder reacting to incoming fire,
    * or null when not dodging. Armed from the bearing by the flag-hold (a
    * sidestep, never a departure — the ring leash keeps it on the point) and
-   * expired by the clock or a blocked step. Short-lived by construction, so
-   * only onRespawn resets it besides its own expiry; the investigation
-   * stack never owns it.
+   * expired by the clock or a blocked step. Spent ONLY on the hold path, so
+   * the clock only ticks there: decide() clears it on every frame that is not
+   * this bot holding its point, which is what keeps it short-lived even when
+   * the bot stops holding mid-dodge. onRespawn clears it with the rest of the
+   * per-life state; the investigation stack never owns it.
    */
   private dodgeDir: THREE.Vector3 | null = null;
   /** Seconds left on the current dodge; arms DODGE_TIME_S per bearing. */
@@ -646,9 +651,7 @@ export class DefaultBrain implements BotBrain {
     this.advanceCancelled = false;
     this.advanceRequested = false;
     this.objectiveHeading = 0;
-    this.dodgeDir = null;
-    this.dodgeLeft = 0;
-    this.dodgeRequested = false;
+    this.clearDodge();
   }
 
   /** See BotBrain.onIncomingFire. The bearing is copied and planar-normalized. */
@@ -711,6 +714,16 @@ export class DefaultBrain implements BotBrain {
    * on the point. Re-arming refreshes the window; the bearing is already
    * planar-normalized by onIncomingFire, so no degenerate direction arrives.
    */
+  /**
+   * Drop any live dodge. Called by decide() on every non-holding frame and
+   * by onRespawn; expiry inside dodgeStep clears the same three fields.
+   */
+  private clearDodge(): void {
+    this.dodgeDir = null;
+    this.dodgeLeft = 0;
+    this.dodgeRequested = false;
+  }
+
   private startDodge(bearing: THREE.Vector3): void {
     const side = this.strafeDir;
     this.dodgeDir = new THREE.Vector3(-bearing.z * side, 0, bearing.x * side);
@@ -984,9 +997,19 @@ export class DefaultBrain implements BotBrain {
     // agreement. Ghosts are dropped with the same call priority 5 uses.
     // wasEngage is cleared so the next real firefight elsewhere re-enters
     // fresh. Higher ranks skip all of this and fall through to the normal
-    // ladder as escorts: covered (a rank-0 mate holds the ring), so bearings
+    // ladder as escorts: covered (a rank-0 mate holds the point), so bearings
     // and visuals own them until the fight is over.
-    if (view.objective !== null && this.isCapping(view) && view.objective.holdRank === 0) {
+    const holding = view.objective !== null && this.isCapping(view)
+      && view.objective.holdRank === 0;
+    // A dodge is spent only on the hold path, so its clock only runs there:
+    // any frame that is not this bot holding its point ends the dodge outright
+    // rather than freezing it. Without this a holder that stops holding
+    // mid-dodge — stepping off the point, losing rank 0 to a mate, being
+    // dispatched elsewhere — parks a live dodge indefinitely and fires the
+    // leftover sidestep the next time it caps, in a direction taken from a
+    // bearing arbitrarily far in the past.
+    if (!holding) this.clearDodge();
+    if (holding) {
       if (this.searching || this.memory !== null) this.clearInvestigation(false);
       if (this.pendingBearing !== null) {
         this.startDodge(this.pendingBearing);
@@ -1004,11 +1027,11 @@ export class DefaultBrain implements BotBrain {
     // first seconds (the damage frame itself included) while still facing the
     // scan headings.
     //
-    // Exception: an uncovered pusher — walking to a flag nobody holds — is
-    // not kited off the push by potshots. The bearing is dropped and the bot
-    // walks on; a live visual below still outranks, and an escort (cover
-    // present) keeps the damage search. Facing stays on the push: the point
-    // is the destination, not the bearing.
+    // Exception: an uncovered pusher — walking to a flag no mate is working,
+    // anywhere in its ring — is not kited off the push by potshots. The
+    // bearing is dropped and the bot walks on; a live visual below still
+    // outranks, and an escort (cover present) keeps the damage search. Facing
+    // stays on the push: the point is the destination, not the bearing.
     if (this.pendingBearing !== null) {
       const bearing = this.pendingBearing;
       this.pendingBearing = null;
@@ -1077,9 +1100,9 @@ export class DefaultBrain implements BotBrain {
     // scans — memory arrivals, dead ends — do NOT run here; the objective
     // preempts them below, so a bot with a flag walks back to its point
     // instead of sweeping where a ghost was. The one exception is the
-    // uncovered pusher from priority 1: with nobody holding its flag the
-    // scan is dropped and the push resumes, while an escort (cover present)
-    // serves the search normally.
+    // uncovered pusher from priority 1: with no mate working its flag's ring
+    // the scan is dropped and the push resumes, while an escort (cover
+    // present) serves the search normally.
     if (this.searching && this.advanceArmed) {
       if (view.objective !== null && view.objective.cappingMates === 0) {
         this.clearInvestigation(false);
@@ -1528,9 +1551,25 @@ export class DefaultBrain implements BotBrain {
    * stepping out to engage would hand the point over. A
    * confirmed-unreachable flag holds facing it rather than searching: a
    * search would age out and patrol away from the assignment.
+   *
+   * The focus lives exactly as long as the sighting that set it: every entry
+   * drops it and only a live visual takes it back (see below). Unlike a
+   * memory pursuit there is nothing here for a tracked identity to outlive
+   * the look FOR — the bot is going nowhere either way.
    */
   private objectiveIntent(view: BrainView, dt: number, jukeDraw: number): BrainIntent {
     const obj = view.objective!;
+    // The objective is a PLACE, not an identity: no path here tracks an enemy
+    // across frames, so the only focus that may survive this frame is the live
+    // visual the capture branch re-sets below. Dropping it FIRST is what makes
+    // that true. Without the drop a focus set while capturing outlives its
+    // sighting, and the executor spends its one LOS ray per frame on the
+    // focused candidate and probes nobody else when that look fails
+    // (perception.ts:acquireVisual) — a holder whose target steps behind cover
+    // would go blind to every other attacker. It also keeps the travel
+    // branch's cache key honest: bots.ts:waypointToward keys on
+    // `focusId ?? goal coordinates`, and a flag is a coordinate goal.
+    this.focus = null;
     const toObj = new THREE.Vector3(obj.pos.x - view.selfFeet.x, 0, obj.pos.z - view.selfFeet.z);
     const dist = toObj.length();
     const toward = dist > 1e-9 ? toObj.clone().multiplyScalar(1 / dist) : view.facing.clone();

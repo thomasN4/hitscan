@@ -1,7 +1,9 @@
 // domSpawns.ts — uniform-share respawn director for domination matches.
 //
-// Initial spawns stay exactly as before (BOT_SPAWNS zones: bots via
-// Bot.spawnAtRandom, the player via the same draw in combat.ts:respawn).
+// Initial spawns do not come through here at all: bots draw their BOT_SPAWNS
+// zone via Bot.spawnAtRandom and the player draws the same zone the same way
+// in combat.ts:respawn. (The zones themselves are not untouched — this branch
+// moved elevation's to corner pockets — but the opening draw is.)
 // RESPAWNS in dom mode come through here instead: one zone is picked uniformly
 // from the team's owned flags plus its initial zone (1/(k+1) each — with A+B
 // owned that is 1/3 A, 1/3 B, 1/3 home), then a point is drawn uniformly
@@ -69,7 +71,12 @@ export function pickDomRespawn(
         ? drawRingPoint(
           { x: flag.pos.x, y: flag.pos.y, z: flag.pos.z },
           rng,
-          DOM_RING_INNER,
+          // The band must clear the CAPTURE ring, which is per-flag while
+          // DOM_RING_INNER is a single floor: every elevation flag has
+          // radius 4.5, so the bare constant would put ~5% of ring draws
+          // inside the point and freeze the capture with a body that just
+          // respawned there.
+          Math.max(DOM_RING_INNER, flag.radius),
           DOM_RING_OUTER,
         )
         : drawZonePoint(zone, rng);

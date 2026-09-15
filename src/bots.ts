@@ -24,8 +24,10 @@
 // cooldown expires AND the bot currently SEES its focus — the observation is
 // the LOS proof, so a bot that sees nothing holds instead of shooting
 // through walls. On sight loss it pursues the FROZEN last-known position
-// (brain-owned memory) and scans on arrival; the executor keeps its route
-// cache only while it still belongs to the same active goal.
+// (brain-owned memory) and scans on arrival — except a bot HOLDING a
+// domination objective, which drops the ghost and walks back to its flag
+// instead (sim/botBrains.ts documents the exception); the executor keeps
+// its route cache only while it still belongs to the same active goal.
 //
 // Hit zones: each body part is its own mesh with `userData.bot` pointing at
 // this instance — weapons.ts raycasts against head/torso/legs directly and

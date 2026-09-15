@@ -3,8 +3,9 @@
 // This module is the single place where HP crosses 0: bots call
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit. It also owns endMatch,
-// the one transition into the finished state both win conditions converge
-// on (clock expiry from main.ts, elimination from checkRoundEnd).
+// the one transition into the finished state every win condition converges
+// on (clock expiry from main.ts, elimination from checkRoundEnd, score
+// limit from domination.ts:updateDomination).
 import type { Bot as BotShape, HitZone, Team } from './core/state';
 import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing, creditKill, BOT_SPAWNS } from './core/state';
 import type { MatchWinner } from './sim/match';

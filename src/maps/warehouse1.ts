@@ -35,7 +35,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
-import { addSolidBox, addStairs, registerSolid } from '../world';
+import { addSolidBox, addStairs, colliders, coplanarTopOverlaps, registerSolid } from '../world';
 
 const matFloor   = createCelMaterial({ color: 0x7a7c80 }); // sealed concrete
 const matShell   = createCelMaterial({ color: 0x8d9199 }); // corrugated shed wall
@@ -85,8 +85,8 @@ export function buildWarehouse1(): void {
 
   addSolidBox(0, 0,  W, 2*W+T*2, H, T, matShell);
   addSolidBox(0, 0, -W, 2*W+T*2, H, T, matShell);
-  addSolidBox( W, 0, 0, T, H, 2*W, matShell);
-  addSolidBox(-W, 0, 0, T, H, 2*W, matShell);
+  addSolidBox( W, 0, 0, T, H, 2*(W-T/2), matShell);
+  addSolidBox(-W, 0, 0, T, H, 2*(W-T/2), matShell);
 
   buildMezzanine();
   buildRacking();
@@ -118,10 +118,12 @@ function buildMezzanine(): void {
   addSolidBox( 6, 0,  OFF_Z - 0.5, 8, OFF_WALL_H, 1, matOffice);
   addSolidBox(-6, 0, -OFF_Z + 0.5, 8, OFF_WALL_H, 1, matOffice);
   addSolidBox( 6, 0, -OFF_Z + 0.5, 8, OFF_WALL_H, 1, matOffice);
-  addSolidBox(-OFF_X + 0.5, 0, -5, 1, OFF_WALL_H, 6, matOffice);
-  addSolidBox(-OFF_X + 0.5, 0,  5, 1, OFF_WALL_H, 6, matOffice);
-  addSolidBox( OFF_X - 0.5, 0, -5, 1, OFF_WALL_H, 6, matOffice);
-  addSolidBox( OFF_X - 0.5, 0,  5, 1, OFF_WALL_H, 6, matOffice);
+  // East/west runs stop at the north/south inner faces (z=±7) so the corner
+  // tops butt-join instead of overlapping (issue #74).
+  addSolidBox(-OFF_X + 0.5, 0, -4.5, 1, OFF_WALL_H, 5, matOffice);
+  addSolidBox(-OFF_X + 0.5, 0,  4.5, 1, OFF_WALL_H, 5, matOffice);
+  addSolidBox( OFF_X - 0.5, 0, -4.5, 1, OFF_WALL_H, 5, matOffice);
+  addSolidBox( OFF_X - 0.5, 0,  4.5, 1, OFF_WALL_H, 5, matOffice);
 
   // One slab over the whole footprint. Its edges are flush with the walls'
   // outer faces at x +-10 / z +-8, which is what lets both flights join it
@@ -146,7 +148,9 @@ function buildMezzanine(): void {
   addSolidBox( 6, DECK_Y, -OFF_Z + PAR_T/2, 8, PAR_H, PAR_T, matStair);
   // East railed; WEST deliberately open over a 3.6 m drop — a one-way exit
   // under pressure, and the reason the deck is not a safe place to camp.
-  addSolidBox(OFF_X - PAR_T/2, DECK_Y, 0, PAR_T, PAR_H, 2*OFF_Z, matStair);
+  // The east run stops at the north/south inner faces (z=±7.5) so the corner
+  // tops butt-join instead of overlapping (issue #74).
+  addSolidBox(OFF_X - PAR_T/2, DECK_Y, 0, PAR_T, PAR_H, 2*(OFF_Z - PAR_T), matStair);
 }
 
 // ---------- B. Racking — the map's lanes ----------
@@ -231,14 +235,16 @@ function buildConveyors(): void {
 // Typed as pairs so the destructured x/z are numbers, not number | undefined
 // under noUncheckedIndexedAccess (same reason as arena.ts).
 function buildPallets(): void {
+  // The third crate in each trio is offset so its top butt-joins rather than
+  // overlapping the pair — same cover silhouette, no shared top area (issue #74).
   const spots: [number, number][] = [
     // South dock yard
-    [-14, 30], [-11, 33], [-12.5, 31.5],
-    [ 14, 30], [ 17, 33], [ 15.5, 31.5],
+    [-14, 30], [-11, 33], [-11, 30],
+    [ 14, 30], [ 17, 33], [ 17, 30],
     [  0, 26], [  3, 24],
     // North dock yard
-    [-14, -30], [-11, -33], [-12.5, -31.5],
-    [ 14, -30], [ 17, -33], [ 15.5, -31.5],
+    [-14, -30], [-11, -33], [-11, -30],
+    [ 14, -30], [ 17, -33], [ 17, -30],
     [  0, -26], [  3, -24],
     // Flank lanes
     [ 46, 30], [-46, 30], [ 46, -30], [-46, -30],
@@ -247,9 +253,10 @@ function buildPallets(): void {
   spots.forEach(([x, z]) => addSolidBox(x, 0, z, 3, 3, 3, matCrate));
   // Second tier, reachable by jump only, so bots stay on the ground beside
   // them. A 6 m perch sees over the 4.0 m rows into the mid — strong, and
-  // paid for with no cover of its own.
-  addSolidBox(-12.5, 3,  31.5, 3, 3, 3, matCrate);
-  addSolidBox( 15.5, 3, -31.5, 3, 3, 3, matCrate);
+  // paid for with no cover of its own. Moved with their ground trio so they
+  // stay stacked on it.
+  addSolidBox(-11, 3,  30, 3, 3, 3, matCrate);
+  addSolidBox( 17, 3, -30, 3, 3, 3, matCrate);
 }
 
 // ---------- Aisle check ----------
@@ -284,5 +291,9 @@ function checkAisles(): void {
       console.error(`[warehouse1] ${name} is ${width} m, under AISLE_MIN ${AISLE_MIN}`
         + ' — bots will not route through it');
     }
+  }
+  for (const o of coplanarTopOverlaps(colliders)) {
+    console.error(`[warehouse1] coplanar top faces at y=${o.y.toFixed(2)} over ${o.area.toFixed(2)} m2 ` +
+      `(x ${o.minX.toFixed(2)}..${o.maxX.toFixed(2)}, z ${o.minZ.toFixed(2)}..${o.maxZ.toFixed(2)})`);
   }
 }

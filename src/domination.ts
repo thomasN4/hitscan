@@ -34,6 +34,13 @@ export function updateDomination(dt: number): void {
     if (!b.alive) continue;
     bodies.push({ team: b.team, x: b.mesh.position.x, feetY: b.mesh.position.y, z: b.mesh.position.z });
   }
+  // Ownership as it stood at the START of the slice, snapshotted before the
+  // capture loop below can change it. A capture completes at the END of its
+  // slice, so a flag that flips inside this frame was held by its new owner
+  // for none of the seconds being paid out — ticking the post-flip list would
+  // hand them the whole frame retroactively, and (with the limit checked
+  // below, in this same frame) could end the match on it.
+  const ticking = dom.flags.map(f => ({ owner: f.owner }));
   for (const flag of dom.flags) {
     const { t, ct } = countFlagBodies(flag, bodies);
     const flipped = updateFlagCapture(flag, t, ct, dt);
@@ -42,7 +49,7 @@ export function updateDomination(dt: number): void {
     }
   }
   const scores = { ct: dom.scoreCt, t: dom.scoreT };
-  tickDomScores(dom.flags, scores, dt);
+  tickDomScores(ticking, scores, dt);
   dom.scoreCt = scores.ct;
   dom.scoreT = scores.t;
   updateDomFlagColors();

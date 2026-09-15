@@ -1018,10 +1018,11 @@ export type MatchMode = 'tdm' | 'dom';
  * Static definition of one domination capture point.
  *
  * `feetY` is the walk surface the flag sits on (like SpawnZone.y), so a flag
- * can live on a deck — elevation's B sits on the building slab at 3.6 while A
- * and C sit on open ground. Capture counts bodies whose feet are within
- * VERTICAL_TOL of the flag (sim/domination.ts), so the deck fight and the
- * ground floor below it never bleed into each other.
+ * need not sit at grade — on elevation only C does (0), while B stands on the
+ * building slab at 3.6 and A on the plateau crown at 3.0. Capture counts
+ * bodies whose feet are within VERTICAL_TOL of the flag (sim/domination.ts),
+ * so the deck fight and the ground floor below it never bleed into each
+ * other.
  */
 export interface FlagDef {
   /** Display id: 'A', 'B' or 'C'. */

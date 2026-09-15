@@ -6,6 +6,7 @@ import {
   countFlagBodies,
   holderRanks,
   isBodyInRing,
+  isHoldingPoint,
   tickDomScores,
   updateFlagCapture,
   type MutableDomFlag,
@@ -76,6 +77,22 @@ describe('isBodyInRing', () => {
   });
 });
 
+describe('isHoldingPoint', () => {
+  const f = flag();
+  test('the hold circle (70% of the ring) binds, on the flag level', () => {
+    expect(isHoldingPoint(f, { x: 0, feetY: 0, z: 0 })).toBe(true);
+    // 3.5 m is inside the 4.5 m ring but outside the 3.15 m hold.
+    expect(isHoldingPoint(f, { x: 3.5, feetY: 0, z: 0 })).toBe(false);
+    expect(isHoldingPoint(f, { x: 40, feetY: 0, z: 0 })).toBe(false);
+  });
+
+  test('a floor below the deck flag is not holding', () => {
+    const deck = flag({ pos: { x: 0, y: 3.6, z: 0 } });
+    expect(isHoldingPoint(deck, { x: 0, feetY: 3.6, z: 0 })).toBe(true);
+    expect(isHoldingPoint(deck, { x: 0, feetY: 0, z: 0 })).toBe(false);
+  });
+});
+
 describe('holderRanks', () => {
   const f = flag();
   const body = (id: number, team: 'T' | 'CT', x = 0, feetY = 0, z = 0) => ({ id, team, x, feetY, z });
@@ -107,6 +124,16 @@ describe('holderRanks', () => {
     expect(ranks.get(1)).toBe(0);
     expect(ranks.has(2)).toBe(false);
     expect(ranks.has(3)).toBe(false);
+  });
+
+  test('the outer annulus ranks nobody: rank 0 always caps', () => {
+    // Id 1 at 3.5 m stands in the 4.5 m ring but outside the 3.15 m hold;
+    // id 2 holds the center. Full-ring ranking would crown id 1 — a holder
+    // the brain never recognizes, since isCapping fails it — while id 2
+    // escorts away under contact and the point sits holderless.
+    const ranks = holderRanks(f, [body(1, 'T', 3.5), body(2, 'T')]);
+    expect(ranks.has(1)).toBe(false);
+    expect(ranks.get(2)).toBe(0);
   });
 
   test('an empty ring ranks nobody', () => {

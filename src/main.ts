@@ -46,7 +46,7 @@ import { initLigneClaire } from './core/ligneClaire';
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
 // core/state.ts stays free of browser globals, so the committed match-config
-// query (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) is parsed here and written
+// query (?map=&mode=&side=&tbots=&ctbots=&time=&scorelimit=&tweap=&tsec=&ctweap=&ctsec=) is parsed here and written
 // into the shared state before anything reads session — initMenus initializes
 // the form from it.
 type DebugGame = SessionState & InputState & AimState & Omit<WeaponDynamics, 'reloadSfxHandle' | 'animation'> & MotionState & ScoreState & LoadoutState;

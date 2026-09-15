@@ -9,7 +9,7 @@
 // missing id is a named startup error via hud.ts:requireEl.
 //
 // Commit model: match settings ride ONE query string
-// (?map=&mode=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=).
+// (?map=&mode=&side=&tbots=&ctbots=&time=&scorelimit=&tweap=&tsec=&ctweap=&ctsec=).
 // Play compares the form against the applied session config — equal means the
 // page already matches, so it opens the loadout picker; different means
 // navigate-and-reload (map switching is a full reload, and pointer lock needs
@@ -189,8 +189,8 @@ export function showEndScreen(winner: MatchWinner): void {
   endTitle.classList.toggle('ct', winner === 'CT');
   endTitle.classList.toggle('t', winner === 'T');
   endTitle.classList.toggle('draw', winner === 'draw');
-  // Domination is decided on ticked flag points (first to DOM_SCORE_LIMIT or
-  // highest at the clock); kills score nothing there, so the kill counters
+  // Domination is decided on ticked flag points (first to session.scoreLimit
+  // or highest at the clock); kills score nothing there, so the kill counters
   // would show a 0 — 0 line under a decided banner.
   if (session.mode === 'dom') {
     endScoreCT.textContent = `CT ${Math.floor(dom.scoreCt)}`;

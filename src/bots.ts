@@ -1347,9 +1347,9 @@ function cappingMatesFor(bot: Bot, flagId: string): number {
 
 /**
  * This bot's holder rank on `flagId`'s ladder (0 designates the holder).
- * Absent — no census, no live flag, or the bot outside the ring — reads as
- * 0, which is exactly "nobody ahead of me" and is only ever read while the
- * brain is capping anyway.
+ * Absent — no census, no live flag, or the bot outside the hold circle —
+ * reads as 0, which is exactly "nobody ahead of me" and is only ever read
+ * while the brain is capping anyway.
  */
 function holdRankFor(bot: Bot, flagId: string): number {
   return domHolders.get(flagId)?.get(bot.id) ?? 0;

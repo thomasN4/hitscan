@@ -15,7 +15,12 @@ import type { Team } from '../core/state';
 export const CAPTURE_TIME_S = 8;
 /** Points ticked per second per owned flag. */
 export const TICK_POINTS_PER_SEC = 1;
-/** Points that end the match immediately for the side reaching them. */
+/**
+ * Default domination points to win. The live limit is session.scoreLimit
+ * (menu-editable, parser-clamped); this constant only anchors the default —
+ * SESSION_DEFAULTS.scoreLimit mirrors it, change them together — and is
+ * never read by runtime code.
+ */
 export const DOM_SCORE_LIMIT = 200;
 /**
  * Adjustable score-limit range (points): the menu edits within it and the
@@ -29,6 +34,14 @@ export const SCORE_LIMITS = { min: 50, max: 2000 } as const;
  * keeps the deck fight and the room below from ever counting each other.
  */
 export const VERTICAL_TOL_M = 2;
+/**
+ * Fraction of a flag's ring inside which a bot counts as STANDING its
+ * point (the hold circle). Moved here from botBrains.ts so the holder
+ * ladder below and the brain's capture gate read ONE constant: the brain
+ * honors rank 0 only while capping, so ranking a wider circle would crown
+ * a holder the brain never recognizes.
+ */
+export const CAPTURE_HOLD_FRACTION = 0.7;
 /** How often updateBots re-runs the dispatcher (s); assignments are sticky between runs. */
 export const DISPATCH_INTERVAL_S = 1;
 /** Max bots of one team piling onto a single flag before the dispatcher spreads them. */
@@ -70,6 +83,26 @@ export function isBodyInRing(
 }
 
 /**
+ * Whether one body stands its point: inside the HOLD circle (the
+ * CAPTURE_HOLD_FRACTION fraction of the ring) on the flag's level. The
+ * single hold test behind the brain's capture gate (botBrains.ts:
+ * isCapping and objectiveIntent's arrival) and the holder ladder below, so
+ * the two can never disagree about who holds. Deliberately narrower than
+ * isBodyInRing: the outer annulus still counts toward the capture census,
+ * but only a bot the brain recognizes as capping may take rank 0.
+ */
+export function isHoldingPoint(
+  flag: Pick<MutableDomFlag, 'pos' | 'radius'>,
+  body: Pick<DomBody, 'x' | 'feetY' | 'z'>,
+): boolean {
+  const dx = body.x - flag.pos.x;
+  const dz = body.z - flag.pos.z;
+  const holdR = flag.radius * CAPTURE_HOLD_FRACTION;
+  if (dx * dx + dz * dz > holdR * holdR) return false;
+  return Math.abs(body.feetY - flag.pos.y) <= VERTICAL_TOL_M;
+}
+
+/**
  * A ring body with identity, for holder ranking. Bots only — the player has
  * no bot id and never appears here (though they still count in
  * countFlagBodies): rank is bots-only by design, so a player passing through
@@ -80,13 +113,16 @@ export interface RankedBody extends DomBody {
 }
 
 /**
- * Holder rank per bot id: among each team's bodies inside the ring, how many
- * have a LOWER id. Rank 0 is the designated holder and sits the point;
- * higher ranks escort — free to leave the ring after live contact while the
- * holder keeps ticking the capture. Per team independently, so opposite
- * sides converging on one flag rank against their own mates only. Bots
- * outside the ring are absent (their rank is read as 0, which is exactly
- * "nobody ahead of me" and is only ever read while capping anyway).
+ * Holder rank per bot id: among each team's bodies STANDING the point (see
+ * isHoldingPoint), how many have a LOWER id. Rank 0 is the designated
+ * holder and sits the point; higher ranks escort — free to leave the ring
+ * after live contact while the holder keeps ticking the capture. Per team
+ * independently, so opposite sides converging on one flag rank against
+ * their own mates only. Bots outside the hold circle are absent (their rank
+ * is read as 0, which is exactly "nobody ahead of me" and is only ever
+ * read while capping anyway) — ranking the full ring instead would hand
+ * rank 0 to an outer-annulus bot the brain does not recognize as capping
+ * while the bot actually at the center escorts away, leaving no holder.
  */
 export function holderRanks(
   flag: Pick<MutableDomFlag, 'pos' | 'radius'>,
@@ -94,7 +130,7 @@ export function holderRanks(
 ): Map<number, number> {
   const ids: Record<Team, number[]> = { T: [], CT: [] };
   for (const b of bodies) {
-    if (isBodyInRing(flag, b)) ids[b.team].push(b.id);
+    if (isHoldingPoint(flag, b)) ids[b.team].push(b.id);
   }
   const ranks = new Map<number, number>();
   for (const team of ['T', 'CT'] as const) {

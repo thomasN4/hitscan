@@ -213,7 +213,8 @@ export interface ObjectiveView extends DomObjective {
   /** Live same-team bodies inside this flag's ring, excluding the viewer. */
   cappingMates: number;
   /**
-   * Holder rank among the same-team BOTS in this ring (bots only — the
+   * Holder rank among the same-team BOTS standing this point (hold circle,
+   * not the full ring — see sim/domination.ts:holderRanks; bots only, the
    * player never outranks): how many hold it with a lower id. 0 designates
    * the holder, who sits the point; higher ranks escort. Read only while
    * capping; 0 elsewhere, which is exactly "nobody ahead of me".

@@ -45,7 +45,7 @@ import * as THREE from 'three';
 import type { PerceptionId, VisualObservation } from './perception';
 import type { HeardSound } from './soundEvents';
 import type { FireController, ShotOutcome } from './botWeapons';
-import { VERTICAL_TOL_M } from './domination';
+import { CAPTURE_HOLD_FRACTION, isHoldingPoint } from './domination';
 import type { BotWeaponId, ObjectiveView } from '../core/state';
 
 /** Shared +Y axis for the scan rotation (Three.js positive-Y convention). */
@@ -58,15 +58,6 @@ const UP_Y = new THREE.Vector3(0, 1, 0);
  * the barrel tips level rather than at the floor.
  */
 const LOOK_EYE_HEIGHT = 1.9;
-
-/**
- * Fraction of a flag's ring inside which a bot counts as standing its point:
- * arrival is `capture` rather than a search, and a capping bot holds through
- * live stimuli (see decide) instead of leaving to fight them. Shared by
- * objectiveIntent and the capper-hold check so the two can never disagree
- * about who is holding.
- */
-const CAPTURE_HOLD_FRACTION = 0.7;
 
 /**
  * Fraction of travel speed a capping bot drifts at: weight-shifting inside
@@ -695,20 +686,21 @@ export class DefaultBrain implements BotBrain {
   /**
    * Whether this frame's view has the bot standing its point: an assigned
    * objective with own feet inside the capture hold, planar AND vertical.
-   * The planar test mirrors objectiveIntent's arrival (same fraction, same
-   * height window — the census's VERTICAL_TOL_M, so the brain and the ring
-   * can never disagree about who is "on" a flag). A bot under Elevation's
-   * deck flag is planar-inside but a floor away: it must keep routing to
-   * the stairs, not sit in the holder branch. A capping bot holds through
-   * live stimuli; see decide.
+   * Delegates to domination.ts:isHoldingPoint — the same gate behind
+   * objectiveIntent's arrival below and the holder ladder — so the brain,
+   * the arrival and the rank can never disagree about who is "on" a flag.
+   * A bot under Elevation's deck flag is planar-inside but a floor away: it
+   * must keep routing to the stairs, not sit in the holder branch. A
+   * capping bot holds through live stimuli; see decide.
    */
   private isCapping(view: BrainView): boolean {
     const obj = view.objective;
     if (obj === null) return false;
-    const dx = obj.pos.x - view.selfFeet.x;
-    const dz = obj.pos.z - view.selfFeet.z;
-    if (Math.hypot(dx, dz) > obj.radius * CAPTURE_HOLD_FRACTION) return false;
-    return Math.abs(obj.pos.y - view.selfFeet.y) <= VERTICAL_TOL_M;
+    return isHoldingPoint(obj, {
+      x: view.selfFeet.x,
+      feetY: view.selfFeet.y,
+      z: view.selfFeet.z,
+    });
   }
 
   /**
@@ -1542,12 +1534,14 @@ export class DefaultBrain implements BotBrain {
     const toObj = new THREE.Vector3(obj.pos.x - view.selfFeet.x, 0, obj.pos.z - view.selfFeet.z);
     const dist = toObj.length();
     const toward = dist > 1e-9 ? toObj.clone().multiplyScalar(1 / dist) : view.facing.clone();
-    // Same gate as isCapping (hold fraction + VERTICAL_TOL_M): planar-only
+    // Same gate as isCapping above (domination.ts:isHoldingPoint): planar-only
     // arrival would capture-spot a bot standing a floor below the flag and
     // strand it there instead of routing it up the stairs.
-
-    if (dist <= obj.radius * CAPTURE_HOLD_FRACTION &&
-        Math.abs(obj.pos.y - view.selfFeet.y) <= VERTICAL_TOL_M) {
+    if (isHoldingPoint(obj, {
+      x: view.selfFeet.x,
+      feetY: view.selfFeet.y,
+      z: view.selfFeet.z,
+    })) {
       this.routing = false;
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;

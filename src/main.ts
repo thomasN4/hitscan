@@ -13,9 +13,9 @@
 // and is load-bearing — see the comment there before reordering anything.
 import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, ScoreState,
                LoadoutState, Team,
-               MapName, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
+               MapName, MatchMode, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, loadout, setLoadout, equippedId } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout, equippedId } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders, elevators, updateElevators } from './world';
 import { HEAD_HEIGHT } from './collision';
@@ -28,10 +28,12 @@ import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeap
 import { updateEffects } from './effects';
 import { toggleDebugView, updateDebugView } from './debugView';
 import { respawn, endMatch } from './combat';
+import { updateDomination } from './domination';
+import { buildDomFlags } from './domFlags';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, addKillfeed } from './hud';
 import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout, setAssetStatus } from './menu';
 import { sfxZoom } from './audio';
-import { decideWinner } from './sim/match';
+import { decideWinner, decideDomWinner } from './sim/match';
 import { isDeploying } from './sim/weaponSwap';
 import { validateWeapons } from './sim/validateWeapons';
 import { loadWeaponAssets } from './core/weaponAssets';
@@ -44,7 +46,7 @@ import { initLigneClaire } from './core/ligneClaire';
 // touch those singletons at module scope. Each init* function is safe to
 // call exactly once, here.
 // core/state.ts stays free of browser globals, so the committed match-config
-// query (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) is parsed here and written
+// query (?map=&mode=&side=&tbots=&ctbots=&time=&scorelimit=&tweap=&tsec=&ctweap=&ctsec=) is parsed here and written
 // into the shared state before anything reads session — initMenus initializes
 // the form from it.
 type DebugGame = SessionState & InputState & AimState & Omit<WeaponDynamics, 'reloadSfxHandle' | 'animation'> & MotionState & ScoreState & LoadoutState;
@@ -94,13 +96,20 @@ async function start(): Promise<void> {
   // which the builder is what fills. Map switching is a full page reload, so
   // this runs once per session.
   buildNav();
+  // Domination flags reset before the wave: the respawn director reads owned
+  // flags, and a stale slice from a previous match would aim it at ghosts.
+  // (Module scope initializes empty, so this is Reload-proofing, not TDM.)
+  if (session.mode === 'dom') {
+    resetDom(DOM_FLAGS[session.map]);
+    buildDomFlags();
+  }
   if (!RANGE) {
     // Either count may be 0 when it is the player's own side; the enemy side
     // always has ≥1 (enforced by botLimits in sessionConfig).
     if (session.botsT > 0) spawnBots(session.botsT, 'T', session.botWeaponT, session.botSecondaryT);
     if (session.botsCt > 0) spawnBots(session.botsCt, 'CT', session.botWeaponCt, session.botSecondaryCt);
   }
-  respawn(); // place player at the map's spawn with fresh HP/ammo/yaw
+  respawn(); // draw the player's opening spawn from their team's zone, with fresh HP/ammo/yaw
   const illustration = ligneClaire ? initLigneClaire(scene, renderer) : null;
   initMenus({
     onStart: () => showLoadoutPicker('start'),
@@ -122,7 +131,11 @@ async function start(): Promise<void> {
     // is the user gesture pointer lock needs.
     onDeploy: (primary, secondary) => {
       setLoadout(primary, secondary);
-      if (!player.alive) respawn();
+      // Death deploys in domination respawn through the director (an owned
+      // flag's ring or the home zone at equal shares — enemy positions play
+      // no part, so a camped flag keeps full odds); the match-opening deploy
+      // finds the player alive and keeps the zone-drawn opening spawn.
+      if (!player.alive) respawn(session.mode === 'dom');
       lock();
     },
   });
@@ -288,10 +301,24 @@ async function start(): Promise<void> {
       updateCamera();
       updateViewmodel();
       if (!RANGE) updateBots(dt, player);
+      // Domination capture + tick scoring, after every body has moved. The
+      // updater also ends the match on the score limit; the clock below
+      // stays the second way out.
+      //
+      // Clamped to the time actually left on that clock, because the block
+      // below subtracts the same dt from it: an unclamped last frame ticks
+      // capture progress and flag points for game time the round no longer
+      // has, and the score limit it can push a side past is checked HERE,
+      // before expiry is noticed. With 0.01 s left, a 0.05 s frame and CT on
+      // 199.96/200 behind T, that awards CT the match on points it could
+      // never have earned.
+      if (!RANGE && session.mode === 'dom') updateDomination(Math.min(dt, score.roundTime));
 
       // Round clock: arena only — meaningless on the range, so freeze it there.
       // Clamped at 0 rather than reset: expiry ENDS the match (combat.ts:endMatch),
-      // winner by kill score (sim/match.ts:decideWinner). The matchOver check is
+      // winner by kill score in TDM (sim/match.ts:decideWinner) and by ticked
+      // flag points in domination (decideDomWinner, floored like the HUD).
+      // The matchOver check is
       // redundant with the lock gate in the normal flow (endMatch releases the
       // pointer), but keeps a same-frame double-fire impossible if lock release
       // ever becomes async.
@@ -300,7 +327,9 @@ async function start(): Promise<void> {
         setTimer(score.roundTime);
         if (score.roundTime <= 0 && !session.matchOver) {
           addKillfeed('⏱ Time expired');
-          endMatch(decideWinner(score.scoreKills, score.scoreDeaths));
+          endMatch(session.mode === 'dom'
+            ? decideDomWinner(Math.floor(dom.scoreCt), Math.floor(dom.scoreT))
+            : decideWinner(score.scoreKills, score.scoreDeaths));
         }
       }
 
@@ -329,12 +358,14 @@ async function start(): Promise<void> {
 
   const game: DebugGame = {
     get map() { return session.map; }, set map(v: MapName) { session.map = v; },
+    get mode() { return session.mode; }, set mode(v: MatchMode) { session.mode = v; },
     get playerTeam() { return session.playerTeam; }, set playerTeam(v: Team) { session.playerTeam = v; },
     get primary() { return loadout.primary; }, set primary(v: WeaponId) { loadout.primary = v; },
     get secondary() { return loadout.secondary; }, set secondary(v: WeaponId) { loadout.secondary = v; },
     get botsT() { return session.botsT; }, set botsT(v: number) { session.botsT = v; },
     get botsCt() { return session.botsCt; }, set botsCt(v: number) { session.botsCt = v; },
     get roundSeconds() { return session.roundSeconds; }, set roundSeconds(v: number) { session.roundSeconds = v; },
+    get scoreLimit() { return session.scoreLimit; }, set scoreLimit(v: number) { session.scoreLimit = v; },
     get botWeaponT() { return session.botWeaponT; }, set botWeaponT(v: BotWeaponChoice) { session.botWeaponT = v; },
     get botWeaponCt() { return session.botWeaponCt; }, set botWeaponCt(v: BotWeaponChoice) { session.botWeaponCt = v; },
     get botSecondaryT() { return session.botSecondaryT; }, set botSecondaryT(v: BotSecondaryChoice) { session.botSecondaryT = v; },
@@ -374,7 +405,7 @@ async function start(): Promise<void> {
     get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
   };
 
-  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, nav: { route, transportRoute, grid: navGrid } };
+  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, dom, nav: { route, transportRoute, grid: navGrid } };
 }
 
 void start().catch((error: unknown) => {
@@ -394,6 +425,8 @@ declare global {
       elevators: typeof elevators;
       /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */
       gameTime: typeof gameTime;
+      /** Domination slice — flags, ticked scores; empty flags outside dom matches. */
+      dom: typeof dom;
       /**
        * Navigation graph queries. The graph is the one part of the AI whose
        * correctness can be checked without watching a bot move, so the smoke

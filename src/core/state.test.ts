@@ -7,7 +7,7 @@
 import { describe, expect, test, beforeEach } from 'vitest';
 import { WEAPONS, ammoStore, weapon, loadout, lastLoadout, setLoadout, armLoadout,
          sanitizeLoadout, session, player, playerFeet, equippedId,
-         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, keys, keyHeld, input,
+         AMBIENCE, DESERT_AMBIENCE, BOT_SPAWNS, DOM_FLAGS, keys, keyHeld, input,
          effectiveCrouching, wpn, opposing, score, creditKill,
          cancelPendingReloadSfx } from './state';
 
@@ -261,12 +261,24 @@ describe('BOT_SPAWNS', () => {
     CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
   };
 
-  test.each(['arena', 'range', 'elevation', 'warehouse1'] as const)(
+  test.each(['arena', 'range', 'warehouse1'] as const)(
     '%s reproduces the pre-refactor band exactly',
     map => {
       expect(BOT_SPAWNS[map]).toEqual(OLD_BAND);
     },
   );
+
+  test('elevation uses diagonal corner pockets instead of the old band', () => {
+    // T northeast, CT southwest: neither side opens looking down the middle.
+    // Both stay on their own half (z) and their own side (x), on the floor.
+    expect(BOT_SPAWNS.elevation).toEqual({
+      T:  { minX: 10, maxX: 50, minZ: -55, maxZ: -30, y: 0 },
+      CT: { minX: -50, maxX: 5, minZ: 35, maxZ: 55, y: 0 },
+    });
+    expect(BOT_SPAWNS.elevation.T.maxZ).toBeLessThan(0);
+    expect(BOT_SPAWNS.elevation.CT.minZ).toBeGreaterThan(0);
+    expect(BOT_SPAWNS.elevation.T.minX).toBeGreaterThan(BOT_SPAWNS.elevation.CT.maxX);
+  });
 
   test('warehouse2 spawns one team on the catwalk and one in the yard', () => {
     // The asymmetry is the map, not an oversight: CTs have to come through a
@@ -314,5 +326,36 @@ describe('creditKill', () => {
     creditKill('T');
     expect(score.scoreKills).toBe(1);
     expect(score.scoreDeaths).toBe(1);
+  });
+
+  test('kills score nothing in domination — flags own the team points', () => {
+    session.mode = 'dom';
+    score.scoreKills = 0;
+    score.scoreDeaths = 0;
+    creditKill('CT');
+    creditKill('T');
+    expect(score.scoreKills).toBe(0);
+    expect(score.scoreDeaths).toBe(0);
+    session.mode = 'tdm';
+  });
+});
+
+describe('DOM_FLAGS', () => {
+  test('elevation holds three flags with B on the building deck', () => {
+    expect(DOM_FLAGS.elevation.map(f => f.id)).toEqual(['A', 'B', 'C']);
+    const [a, b, c] = [DOM_FLAGS.elevation[0]!, DOM_FLAGS.elevation[1]!, DOM_FLAGS.elevation[2]!];
+    expect(b).toMatchObject({ x: 0, feetY: 3.6, z: 0 });
+    // A crowns the T-side plateau (3.0 top at maps/elevation.ts); C stands
+    // south down the tower lane, deep in CT territory in the lane the bridge
+    // overlooks. Pinned exactly: moving a flag is a layout decision,
+    // and the reachability/capture checks below assume these spots.
+    expect(a).toMatchObject({ x: -38, feetY: 3.0, z: -30 });
+    expect(c).toMatchObject({ x: 35, feetY: 0, z: 38 });
+  });
+
+  test('every other map has no flags (domination falls back to TDM there)', () => {
+    for (const map of ['arena', 'range', 'warehouse1', 'warehouse2'] as const) {
+      expect(DOM_FLAGS[map]).toEqual([]);
+    }
   });
 });

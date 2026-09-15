@@ -21,6 +21,7 @@ import {
   type SessionConfig,
 } from './sessionConfig';
 import { SESSION_DEFAULTS } from './state';
+import { SCORE_LIMITS } from '../sim/domination';
 
 /** Bag-style source: absent names behave exactly like URLSearchParams.get. */
 function src(params: Record<string, string>): ParamSource {
@@ -33,10 +34,14 @@ function srcFromQuery(q: string): ParamSource {
 
 const CFG: SessionConfig = {
   map: 'range',
+  // The range has no flags, so even an explicit dom request falls back —
+  // the round trip below pins mode=tdm surviving the query.
+  mode: 'tdm',
   playerTeam: 'CT',
   botsT: 10,
   botsCt: 3,
   roundSeconds: 90,
+  scoreLimit: 150,
   botWeaponT: 'sniper',
   botSecondaryT: 'revolver',
   botWeaponCt: 'mixed',
@@ -45,7 +50,7 @@ const CFG: SessionConfig = {
 
 // Each side's pair is adjacent, which is the order configToQuery writes.
 const CFG_QUERY =
-  '?map=range&side=ct&tbots=10&ctbots=3&time=90&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=mixed';
+  '?map=range&mode=tdm&side=ct&tbots=10&ctbots=3&time=90&scorelimit=150&tweap=sniper&tsec=revolver&ctweap=mixed&ctsec=mixed';
 
 describe('parseSessionConfig', () => {
   it('empty source yields every default', () => {
@@ -170,10 +175,12 @@ describe('configsEqual', () => {
     expect(configsEqual(CFG, { ...CFG, map: 'arena' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botsCt: 0 })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, roundSeconds: 91 })).toBe(false);
+    expect(configsEqual(CFG, { ...CFG, scoreLimit: 200 })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botWeaponT: 'smg' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botWeaponCt: 'smg' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botSecondaryT: 'pistol' })).toBe(false);
     expect(configsEqual(CFG, { ...CFG, botSecondaryCt: 'pistol' })).toBe(false);
+    expect(configsEqual(CFG, { ...CFG, mode: 'dom' })).toBe(false);
   });
 });
 
@@ -298,6 +305,36 @@ describe('asBotWeapon', () => {
 
   it('still falls back for genuine garbage', () => {
     expect(parseSessionConfig(src({ tweap: 'rocket' })).botWeaponT).toBe(SESSION_DEFAULTS.botWeaponT);
+  });
+});
+
+describe('mode', () => {
+  it('parses dom on a map with flags', () => {
+    expect(parseSessionConfig(src({ map: 'elevation', mode: 'dom' })).mode).toBe('dom');
+  });
+
+  it('falls back to tdm on a map without flags', () => {
+    // Arena has no DOM_FLAGS entry with flags: an explicit dom request must
+    // not boot a flagless domination match.
+    expect(parseSessionConfig(src({ map: 'arena', mode: 'dom' })).mode).toBe('tdm');
+  });
+
+  it('falls back for absent/garbage values', () => {
+    expect(parseSessionConfig(src({ map: 'elevation' })).mode).toBe(SESSION_DEFAULTS.mode);
+    expect(parseSessionConfig(src({ map: 'elevation', mode: 'koth' })).mode).toBe(SESSION_DEFAULTS.mode);
+  });
+
+  it('round-trips dom through the query', () => {
+    const dom = { ...CFG, map: 'elevation' as const, mode: 'dom' as const };
+    expect(parseSessionConfig(srcFromQuery(configToQuery(dom)))).toEqual(dom);
+  });
+
+  it('parses and clamps the score limit', () => {
+    expect(parseSessionConfig(src({ scorelimit: '150' })).scoreLimit).toBe(150);
+    expect(parseSessionConfig(src({})).scoreLimit).toBe(SESSION_DEFAULTS.scoreLimit);
+    expect(parseSessionConfig(src({ scorelimit: 'junk' })).scoreLimit).toBe(SESSION_DEFAULTS.scoreLimit);
+    expect(parseSessionConfig(src({ scorelimit: '1' })).scoreLimit).toBe(SCORE_LIMITS.min);
+    expect(parseSessionConfig(src({ scorelimit: '9999' })).scoreLimit).toBe(SCORE_LIMITS.max);
   });
 });
 

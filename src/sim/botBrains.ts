@@ -16,13 +16,24 @@
 // beyond farBand, back off inside nearBand, drift perpendicular with random
 // jukes and a debounced wall-sense flip, sidestepping a sustained wedge
 // without leaving engage, route when the observation sits a level up or band
-// steering demonstrably cannot close, fire on cooldown. On sight loss the LAST KNOWN
-// position is pursued: the brain routes to the frozen remembered feet, and on
-// arrival (or a confirmed dead end) switches to a three-heading scan
-// (`search`) that forgets after `forgetTime`. A direction-only incoming-fire
-// bearing (onIncomingFire) outranks everything for one frame and starts a
-// search where the shot came from. Only a CURRENT visible observation can
-// order a shot — memory, search and damage reactions never fire.
+// steering demonstrably cannot close, fire on cooldown. A direction-only incoming-fire
+// bearing outranks everything for one frame and starts a damage-armed search
+// where the shot came from. On sight loss WITHOUT standing orders the LAST
+// KNOWN position is pursued: the brain routes to the frozen remembered feet,
+// and on arrival (or a confirmed dead end) switches to a three-heading scan
+// (`search`) that forgets after `forgetTime`. A bot HOLDING a domination
+// objective skips that whole ghost chain — the flag outranks ordinary scans
+// and remembered positions — and walks back to its point. Against LIVE
+// stimuli the teammate cover decides: the designated holder (rank 0 among
+// the same-team bots standing its point) works the point — drifting inside
+// it, dodging bearings along it, shooting at a current visual on the move —
+// rather than leaving to fight any of them, while higher ranks escort, free
+// to leave the ring after live contact; a pusher walking to an UNCOVERED
+// flag walks on through potshots the same way; only an escort (a mate
+// already holding) still hunts bearings and visuals. Only a CURRENT
+// visible observation can order a shot — memory, search and damage reactions
+// never fire — and a capture shot is still gated on one, through the same
+// executor agreement.
 //
 // STEERING IS PLANAR, RANGING IS NOT. The steering basis derived from the
 // observation's feet is y-stripped because a step only ever moves in x/z —
@@ -34,7 +45,8 @@ import * as THREE from 'three';
 import type { PerceptionId, VisualObservation } from './perception';
 import type { HeardSound } from './soundEvents';
 import type { FireController, ShotOutcome } from './botWeapons';
-import type { BotWeaponId } from '../core/state';
+import { CAPTURE_HOLD_FRACTION, isHoldingPoint } from './domination';
+import type { BotWeaponId, ObjectiveView } from '../core/state';
 
 /** Shared +Y axis for the scan rotation (Three.js positive-Y convention). */
 const UP_Y = new THREE.Vector3(0, 1, 0);
@@ -46,6 +58,21 @@ const UP_Y = new THREE.Vector3(0, 1, 0);
  * the barrel tips level rather than at the floor.
  */
 const LOOK_EYE_HEIGHT = 1.9;
+
+/**
+ * Fraction of travel speed a capping bot drifts at: weight-shifting inside
+ * the ring, not pacing — a statue-still holder reads broken in playtests,
+ * but the point owns the feet, so the drift stays small and leashed.
+ */
+const CAPTURE_DRIFT_FRACTION = 0.35;
+
+/**
+ * Seconds a holder's dodge sidestep runs after an incoming-fire bearing:
+ * long enough to read as a reaction (~2 m at full speed), short enough to
+ * stay a flinch rather than a repositioning. The ring leash bounds it
+ * whatever the geometry does.
+ */
+const DODGE_TIME_S = 0.5;
 
 /** Tunables of a reactive policy. Lengths in metres, times in seconds. */
 export interface BrainParams {
@@ -234,6 +261,22 @@ export interface BrainView {
    */
   nextWaypoint(goal: THREE.Vector3): THREE.Vector3 | undefined | null;
   /**
+   * The dispatcher's flag assignment plus live teammate cover, or null
+   * outside domination matches (and whenever the dispatcher has nothing to
+   * give). A COPY of HUD-public state — flag states are broadcast to both
+   * teams, so routing here reveals nothing a scoreboard wouldn't, and the
+   * mates are bare counts, never identities or positions. Outranks
+   * ghost-chasing (ordinary scans, remembered positions, fresh noises);
+   * against live stimuli the cover decides: the designated holder (rank 0)
+   * holds through everything and shoots in place, higher ranks escort, an
+   * uncovered pusher walks on through potshots, and only an escort (cover
+   * present) still hunts bearings and visuals; see decide(). "Cover" is
+   * `cappingMates` — mates anywhere in the RING, which is what the capture
+   * census counts — while "holder" is the narrower rank-0 seat inside the
+   * hold circle; the two are not the same body.
+   */
+  objective: ObjectiveView | null;
+  /**
    * Lazy patrol waypoint request — the patrol analogue of `nextWaypoint`,
    * same three-way contract and the same lazy on purpose: pathfinding still
    * obeys the shared one-A-star-per-frame budget, so the callback is only
@@ -257,14 +300,16 @@ export interface BrainView {
  * `engage` and `route` are the two active modes; `search` scans in place
  * from a remembered position's arrival, a routing dead end, or a
  * direction-only incoming-fire bearing (the damage search advances for its
- * first seconds); `patrol` walks a map-wide route with no target knowledge
+ * first seconds); `objective` walks the domination flag the dispatcher
+ * assigned, and `capture` holds inside its ring watching for contact;
+ * `patrol` walks a map-wide route with no target knowledge
  * at all; `hold` stands still on forget, on plain sight loss (pre-memory),
  * or inside the one-second patrol pause. Reported for OBSERVABILITY, not
  * consumed by the executor: hud.ts renders it in the DEV bot readout,
  * because "why is that bot doing that" is otherwise only answerable by
  * pausing in devtools.
  */
-export type BrainMode = 'hold' | 'search' | 'route' | 'engage' | 'patrol';
+export type BrainMode = 'hold' | 'search' | 'route' | 'engage' | 'patrol' | 'objective' | 'capture';
 
 /** What a brain wants done this frame. */
 export interface BrainIntent {
@@ -512,6 +557,33 @@ export class DefaultBrain implements BotBrain {
    * about the new advance, and must not cut it on the entry frame.
    */
   private advanceRequested = false;
+  /**
+   * Watch-rotation angle (radians) of an active flag capture. Advanced while
+   * holding inside the objective ring so a capping bot surveys rather than
+   * staring one way; reset by onRespawn with the rest of the per-life state.
+   */
+  private objectiveHeading = 0;
+  /**
+   * Normalized planar dodge direction of a holder reacting to incoming fire,
+   * or null when not dodging. Armed from the bearing by the flag-hold (a
+   * sidestep, never a departure — the ring leash keeps it on the point) and
+   * expired by the clock or a blocked step. Spent ONLY on the hold path, so
+   * the clock only ticks there: decide() clears it on every frame that is not
+   * this bot holding its point, which is what keeps it short-lived even when
+   * the bot stops holding mid-dodge. onRespawn clears it with the rest of the
+   * per-life state; the investigation stack never owns it.
+   */
+  private dodgeDir: THREE.Vector3 | null = null;
+  /** Seconds left on the current dodge; arms DODGE_TIME_S per bearing. */
+  private dodgeLeft = 0;
+  /**
+   * Whether the LAST requested movement step was a dodge step of the current
+   * dodge. Same contract as advanceRequested: `moveBlocked` reports on the
+   * PREVIOUS step, so only a block arriving while this is set may cancel the
+   * dodge — a block inherited from the step before the hit must not cut the
+   * entry sidestep.
+   */
+  private dodgeRequested = false;
 
   /**
    * @param base the weapon-independent policy. The per-weapon bands, engage
@@ -578,6 +650,8 @@ export class DefaultBrain implements BotBrain {
     this.advanceArmed = false;
     this.advanceCancelled = false;
     this.advanceRequested = false;
+    this.objectiveHeading = 0;
+    this.clearDodge();
   }
 
   /** See BotBrain.onIncomingFire. The bearing is copied and planar-normalized. */
@@ -610,6 +684,102 @@ export class DefaultBrain implements BotBrain {
     // feedback may still be in flight belonged to whatever came before.
     this.advanceRequested = false;
     this.clearPursuitState();
+  }
+
+  /**
+   * Whether this frame's view has the bot standing its point: an assigned
+   * objective with own feet inside the capture hold, planar AND vertical.
+   * Delegates to domination.ts:isHoldingPoint — the same gate behind
+   * objectiveIntent's arrival below and the holder ladder — so the brain,
+   * the arrival and the rank can never disagree about who is "on" a flag.
+   * A bot under Elevation's deck flag is planar-inside but a floor away: it
+   * must keep routing to the stairs, not sit in the holder branch. A
+   * capping bot holds through live stimuli; see decide.
+   */
+  private isCapping(view: BrainView): boolean {
+    const obj = view.objective;
+    if (obj === null) return false;
+    return isHoldingPoint(obj, {
+      x: view.selfFeet.x,
+      feetY: view.selfFeet.y,
+      z: view.selfFeet.z,
+    });
+  }
+
+  /**
+   * Arm a holder's dodge from an incoming-fire bearing: a full-speed
+   * sidestep perpendicular to the shot line, side from the strafe direction
+   * (which the juke keeps flipping, so repeated hits weave rather than
+   * march). A sidestep, never a departure — objectiveIntent's leash keeps it
+   * on the point. Re-arming refreshes the window; the bearing is already
+   * planar-normalized by onIncomingFire, so no degenerate direction arrives.
+   */
+  /**
+   * Drop any live dodge. Called by decide() on every non-holding frame and
+   * by onRespawn; expiry inside dodgeStep clears the same three fields.
+   */
+  private clearDodge(): void {
+    this.dodgeDir = null;
+    this.dodgeLeft = 0;
+    this.dodgeRequested = false;
+  }
+
+  private startDodge(bearing: THREE.Vector3): void {
+    const side = this.strafeDir;
+    this.dodgeDir = new THREE.Vector3(-bearing.z * side, 0, bearing.x * side);
+    this.dodgeLeft = DODGE_TIME_S;
+    // A fresh dodge re-arms the block tracking for the same reason a fresh
+    // search does: the pre-hit step whose feedback may still be in flight
+    // belonged to whatever the bot was doing before the hit.
+    this.dodgeRequested = false;
+  }
+
+  /**
+   * This frame's dodge step, or null when no dodge is owed: full-speed along
+   * the stored sidestep while its window runs. A blocked step cancels the
+   * remainder permanently for this dodge — drift the rest — but only when
+   * the blocked report describes a step this dodge itself requested: the
+   * entry frame must move even if the step before the hit was refused.
+   */
+  private dodgeStep(view: BrainView, dt: number): THREE.Vector3 | null {
+    if (this.dodgeDir === null || this.dodgeLeft <= 0) {
+      this.dodgeRequested = false;
+      return null;
+    }
+    if (this.dodgeRequested && view.moveBlocked) {
+      this.dodgeRequested = false;
+      this.dodgeDir = null;
+      this.dodgeLeft = 0;
+      return null;
+    }
+    this.dodgeRequested = true;
+    this.dodgeLeft -= dt;
+    const step = this.dodgeDir.clone().multiplyScalar(view.selfSpeed * dt);
+    if (this.dodgeLeft <= 0) {
+      this.dodgeDir = null;
+      this.dodgeRequested = false;
+    }
+    return step;
+  }
+
+  /**
+   * Leash a capture step to the hold circle: drift and dodge own the feet,
+   * but the point owns the leash. A step landing inside passes through; one
+   * reaching outside keeps only its tangential part, so motion slides along
+   * the inside of the circle instead of sticking on it. Holding can never
+   * flap itself out of capping by walking.
+   */
+  private leashStep(step: THREE.Vector3, view: BrainView): THREE.Vector3 {
+    const obj = view.objective!;
+    const holdR = obj.radius * CAPTURE_HOLD_FRACTION;
+    const nx = view.selfFeet.x + step.x - obj.pos.x;
+    const nz = view.selfFeet.z + step.z - obj.pos.z;
+    if (nx * nx + nz * nz <= holdR * holdR) return step;
+    const len = Math.hypot(nx, nz);
+    const radial = new THREE.Vector3(nx / len, 0, nz / len);
+    const outward = step.dot(radial);
+    if (outward <= 0) return step;
+    return step.clone().addScaledVector(radial, -outward);
   }
 
   /**
@@ -817,6 +987,38 @@ export class DefaultBrain implements BotBrain {
       this.params = this.fire.params(this.base);
     }
 
+    // Flag-hold: the designated holder (rank 0 on its ring's ladder) never
+    // leaves its point — not for a bearing, not for a visual, not for an
+    // ongoing damage search. A bearing arms a leashed dodge rather than a
+    // search (a flinch, not a departure — presence is what ticks the
+    // capture, and stepping out to chase a bearing hands the point over); a
+    // live visual is shot at while drifting by objectiveIntent rather than
+    // engaged, so the trigger still runs through the executor's focus
+    // agreement. Ghosts are dropped with the same call priority 5 uses.
+    // wasEngage is cleared so the next real firefight elsewhere re-enters
+    // fresh. Higher ranks skip all of this and fall through to the normal
+    // ladder as escorts: covered (a rank-0 mate holds the point), so bearings
+    // and visuals own them until the fight is over.
+    const holding = view.objective !== null && this.isCapping(view)
+      && view.objective.holdRank === 0;
+    // A dodge is spent only on the hold path, so its clock only runs there:
+    // any frame that is not this bot holding its point ends the dodge outright
+    // rather than freezing it. Without this a holder that stops holding
+    // mid-dodge — stepping off the point, losing rank 0 to a mate, being
+    // dispatched elsewhere — parks a live dodge indefinitely and fires the
+    // leftover sidestep the next time it caps, in a direction taken from a
+    // bearing arbitrarily far in the past.
+    if (!holding) this.clearDodge();
+    if (holding) {
+      if (this.searching || this.memory !== null) this.clearInvestigation(false);
+      if (this.pendingBearing !== null) {
+        this.startDodge(this.pendingBearing);
+        this.pendingBearing = null;
+      }
+      this.wasEngage = false;
+      return this.objectiveIntent(view, dt, jukeDraw);
+    }
+
     // Priority 1: a pending incoming-fire bearing — even over a same-frame
     // visual. The shot's direction is ALL that is known: no identity, no
     // distance, no destination. Drop the focus and any remembered position,
@@ -824,9 +1026,20 @@ export class DefaultBrain implements BotBrain {
     // replaces this normally. The search ADVANCES along the bearing for its
     // first seconds (the damage frame itself included) while still facing the
     // scan headings.
+    //
+    // Exception: an uncovered pusher — walking to a flag no mate is working,
+    // anywhere in its ring — is not kited off the push by potshots. The
+    // bearing is dropped and the bot walks on; a live visual below still
+    // outranks, and an escort (cover present) keeps the damage search. Facing
+    // stays on the push: the point is the destination, not the bearing.
     if (this.pendingBearing !== null) {
       const bearing = this.pendingBearing;
       this.pendingBearing = null;
+      if (view.objective !== null && view.objective.cappingMates === 0) {
+        if (this.searching || this.memory !== null) this.clearInvestigation(false);
+        this.wasEngage = false;
+        return this.objectiveIntent(view, dt, jukeDraw);
+      }
       this.focus = null;
       this.memory = null;
       this.enterSearch(bearing, true);
@@ -872,17 +1085,29 @@ export class DefaultBrain implements BotBrain {
     // establish a new place to investigate.
     //
     // Ignored sounds are NOT queued: the executor cursor has already consumed
-    // them, so a noise that arrives mid-pursuit is simply discarded.
-    if (this.memory === null && !this.searching) {
+    // them, so a noise that arrives mid-pursuit is simply discarded. An
+    // assigned objective counts as a commitment like memory and search: flag
+    // states are fresher evidence than a stale footstep, so hearing never
+    // pulls a bot off its flag — only hold and patrol stay interruptible.
+    if (this.memory === null && !this.searching && view.objective === null) {
       const lead = pickHeardLead(view.heard, view.selfFeet);
       if (lead !== null) this.adoptHeard(lead);
     }
 
-    // Priority 4: an active scan continues — never shoot, age the forget
-    // timer (which started only at search ENTRY, so route walks and deferred
-    // frames never aged the memory), and advance along the bearing while the
-    // damage search's window is open.
-    if (this.searching) {
+    // Priority 4: a damage-armed scan continues. Being shot at owns the bot
+    // even over standing orders (priority 5): the advance runs its window
+    // along the bearing, then the scan tails to the forget timer. Ordinary
+    // scans — memory arrivals, dead ends — do NOT run here; the objective
+    // preempts them below, so a bot with a flag walks back to its point
+    // instead of sweeping where a ghost was. The one exception is the
+    // uncovered pusher from priority 1: with no mate working its flag's ring
+    // the scan is dropped and the push resumes, while an escort (cover
+    // present) serves the search normally.
+    if (this.searching && this.advanceArmed) {
+      if (view.objective !== null && view.objective.cappingMates === 0) {
+        this.clearInvestigation(false);
+        return this.objectiveIntent(view, dt, jukeDraw);
+      }
       if (jukeDraw < dt * this.params.jukeRate) {
         this.strafeDir = this.strafeDir === 1 ? -1 : 1;
       }
@@ -890,16 +1115,7 @@ export class DefaultBrain implements BotBrain {
       if (this.scanElapsed >= this.params.forgetTime) {
         // Forget: drop memory and every pursuit/scan state, hold facing —
         // and stand down one second before the next patrol request.
-        this.focus = null;
-        this.memory = null;
-        this.searching = false;
-        this.scanBase = null;
-        this.scanElapsed = 0;
-        this.advanceArmed = false;
-        this.advanceCancelled = false;
-        this.advanceRequested = false;
-        this.clearPursuitState();
-        this.patrolPause = this.params.patrolPause;
+        this.clearInvestigation(true);
         return {
           step: new THREE.Vector3(),
           wantShoot: false,
@@ -912,14 +1128,56 @@ export class DefaultBrain implements BotBrain {
       return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
     }
 
-    // Priority 5: an investigation goal — sight lost with a remembered
-    // position, or a noise just adopted above. Pursue it.
+    // Priority 5: the assigned domination flag — above ghost-chasing. What
+    // still outranks it depends on the cover: an escort (a mate already
+    // holding — an en-route pusher with cover, or a non-holder standing the
+    // ring) hunts bearings (priorities 1 and 4) and visuals (priority 2)
+    // like a TDM bot, while an uncovered pusher walks on through bearings
+    // and only visuals divert it. Only the designated holder never reaches
+    // this line — the flag-hold above returns first. A lost sighting or an
+    // ordinary scan never diverts either way — the remembered ghost is
+    // dropped here and the bot walks back to its point (the assignment is
+    // sticky across fights).
+    if (view.objective !== null) {
+      if (this.searching || this.memory !== null) this.clearInvestigation(false);
+      return this.objectiveIntent(view, dt, jukeDraw);
+    }
+
+    // Priority 6: an ordinary scan continues — never shoot, age the forget
+    // timer (which started only at search ENTRY, so route walks and deferred
+    // frames never aged the memory), and advance along the bearing while the
+    // damage search's window is open. Reached only with no objective: a bot
+    // holding one was already returned above.
+    if (this.searching) {
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      this.scanElapsed += dt;
+      if (this.scanElapsed >= this.params.forgetTime) {
+        // Forget: drop memory and every pursuit/scan state, hold facing —
+        // and stand down one second before the next patrol request.
+        this.clearInvestigation(true);
+        return {
+          step: new THREE.Vector3(),
+          wantShoot: false,
+          mode: 'hold',
+          focusId: null,
+          lookAt: null,
+          facing: view.facing.clone(),
+        };
+      }
+      return this.searchFrameIntent(view, this.scanHeading(), this.advanceStep(view, dt));
+    }
+
+    // Priority 7: an investigation goal — sight lost with a remembered
+    // position, or a noise just adopted above. Pursue it. Reached only with
+    // no objective: a bot holding one dropped this memory at priority 5.
     if (this.memory !== null) {
       return this.memoryIntent(view, dt, jukeDraw);
     }
 
-    // Priority 6 — strictly lowest: nothing seen, nothing remembered, no
-    // live search. Patrol. The pause gates the request: hold for
+    // Priority 8 — strictly lowest: nothing seen, nothing remembered, no
+    // live search, no objective. Patrol. The pause gates the request: hold for
     // `patrolPause` seconds first (spawn, respawn, search expiry, patrol
     // arrival and failed selection all land here), then ask the executor for
     // a patrol waypoint — lazily, so the shared route budget is untouched
@@ -928,7 +1186,29 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 6 — strictly lowest: patrol. After the one-second pause the
+   * Drop the whole investigation stack — active scan, remembered position,
+   * damage-reaction state and pursuit machinery.
+   *
+   * Both the forget-expiry path and the objective-preemption path land here.
+   * Forgetting pauses patrol afterwards (the stand-down before the next
+   * patrol request); preemption does not (the flag owns the next frame, not
+   * the patrol selector — and pausing would only delay the walk back).
+   */
+  private clearInvestigation(pausePatrol: boolean): void {
+    this.focus = null;
+    this.memory = null;
+    this.searching = false;
+    this.scanBase = null;
+    this.scanElapsed = 0;
+    this.advanceArmed = false;
+    this.advanceCancelled = false;
+    this.advanceRequested = false;
+    this.clearPursuitState();
+    if (pausePatrol) this.patrolPause = this.params.patrolPause;
+  }
+
+  /**
+   * Priority 8 — strictly lowest: patrol. After the one-second pause the
    * brain asks the executor for a patrol waypoint: a vector means travel at
    * normal speed (mode `patrol`, never shoot, null focus, looking one metre
    * along the next waypoint at eye height); `undefined` means the route
@@ -1189,7 +1469,7 @@ export class DefaultBrain implements BotBrain {
   }
 
   /**
-   * Priority 5: pursue the investigation goal. Route to the remembered or
+   * Priority 7: pursue the investigation goal. Route to the remembered or
    * heard FEET — never a candidate's live position — face that point, and
    * NEVER shoot: neither a memory nor a noise is sight, and no ray was spent
    * to confirm anything is still there. A deferred route waits in `route`
@@ -1247,6 +1527,159 @@ export class DefaultBrain implements BotBrain {
       mode: 'route',
       focusId: this.focus,
       lookAt: this.goalLookAt(mem),
+      facing: toward.clone(),
+    };
+  }
+
+  /**
+   * Priority 5 (and the flag-hold): walk the assigned domination flag, then
+   * hold its ring.
+   *
+   * Travel reuses the shared route walker under the executor's pursuit cache:
+   * the flag is a static goal with no focus id, so it keys on its own
+   * coordinates and never inherits a memory route (memory is null on every
+   * path that reaches here). The routing latch is raised like a memory
+   * pursuit's, so the climb hysteresis survives into the next visible frame
+   * on the way up to the deck flag.
+   *
+    * Arrival (inside the hold fraction of the ring, on the flag's level)
+    * is `capture`, not a search: the bot works the point — drifting inside
+   * along it — and advances its watch rotation. With no current visual
+   * nothing shoots — there is no observation behind the trigger, exactly
+   * like a memory pursuit — but a visual inside engage range IS shot at on
+   * the move: the hold owns the leash, the trigger owns the round, and
+   * stepping out to engage would hand the point over. A
+   * confirmed-unreachable flag holds facing it rather than searching: a
+   * search would age out and patrol away from the assignment.
+   *
+   * The focus lives exactly as long as the sighting that set it: every entry
+   * drops it and only a live visual takes it back (see below). Unlike a
+   * memory pursuit there is nothing here for a tracked identity to outlive
+   * the look FOR — the bot is going nowhere either way.
+   */
+  private objectiveIntent(view: BrainView, dt: number, jukeDraw: number): BrainIntent {
+    const obj = view.objective!;
+    // The objective is a PLACE, not an identity: no path here tracks an enemy
+    // across frames, so the only focus that may survive this frame is the live
+    // visual the capture branch re-sets below. Dropping it FIRST is what makes
+    // that true. Without the drop a focus set while capturing outlives its
+    // sighting, and the executor spends its one LOS ray per frame on the
+    // focused candidate and probes nobody else when that look fails
+    // (perception.ts:acquireVisual) — a holder whose target steps behind cover
+    // would go blind to every other attacker. It also keeps the travel
+    // branch's cache key honest: bots.ts:waypointToward keys on
+    // `focusId ?? goal coordinates`, and a flag is a coordinate goal.
+    this.focus = null;
+    const toObj = new THREE.Vector3(obj.pos.x - view.selfFeet.x, 0, obj.pos.z - view.selfFeet.z);
+    const dist = toObj.length();
+    const toward = dist > 1e-9 ? toObj.clone().multiplyScalar(1 / dist) : view.facing.clone();
+    // Same gate as isCapping above (domination.ts:isHoldingPoint): planar-only
+    // arrival would capture-spot a bot standing a floor below the flag and
+    // strand it there instead of routing it up the stairs.
+    if (isHoldingPoint(obj, {
+      x: view.selfFeet.x,
+      feetY: view.selfFeet.y,
+      z: view.selfFeet.z,
+    })) {
+      this.routing = false;
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      this.objectiveHeading += dt * 0.6;
+      const heading = new THREE.Vector3(
+        Math.sin(this.objectiveHeading), 0, Math.cos(this.objectiveHeading),
+      );
+      // Feet: a fresh dodge first, else the idle drift — both leashed to the
+      // hold circle, so holding can never walk itself out of capping. Facing
+      // stays independent: the watch rotation, or the visual when one owns
+      // the trigger.
+      const raw = this.dodgeStep(view, dt) ?? new THREE.Vector3(
+        -heading.z * this.strafeDir, 0, heading.x * this.strafeDir,
+      ).multiplyScalar(view.selfSpeed * CAPTURE_DRIFT_FRACTION * dt);
+      const step = this.leashStep(raw, view);
+      // Contact while holding: shoot it on the move. The focus is the
+      // observed identity either way (so acquisition keeps probing the
+      // threat and the executor's agreement can pass); the round only goes
+      // when the range gate and the weapon agree, exactly like engage.
+      const vis = view.visual;
+      if (vis !== null) {
+        this.focus = vis.id;
+        const toVis = new THREE.Vector3(vis.feet.x - view.selfFeet.x, 0, vis.feet.z - view.selfFeet.z);
+        const visDist = toVis.length();
+        const visDir = visDist > 1e-9 ? toVis.clone().multiplyScalar(1 / visDist) : view.facing.clone();
+        let wantShoot = false;
+        if (this.inRange(vis.dist3) && this.fire.ready()) {
+          this.fire.pull();
+          wantShoot = true;
+        }
+        return {
+          step,
+          wantShoot,
+          mode: 'capture',
+          focusId: this.focus,
+          lookAt: vis.eye.clone(),
+          facing: visDir,
+        };
+      }
+      return {
+        step,
+        wantShoot: false,
+        mode: 'capture',
+        focusId: null,
+        lookAt: new THREE.Vector3(
+          view.selfFeet.x + heading.x,
+          view.selfFeet.y + LOOK_EYE_HEIGHT,
+          view.selfFeet.z + heading.z,
+        ),
+        facing: heading,
+      };
+    }
+
+    const waypoint = view.nextWaypoint(obj.pos);
+    if (waypoint === undefined) {
+      // Budget deferred: wait in place, still `objective` — the goal is not
+      // going anywhere, unlike a fleeing memory.
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'objective',
+        focusId: null,
+        lookAt: new THREE.Vector3(
+          obj.pos.x, obj.pos.y + LOOK_EYE_HEIGHT, obj.pos.z,
+        ),
+        facing: toward.clone(),
+      };
+    }
+    if (waypoint === null) {
+      // The graph confirmed there is no way there: hold facing the flag.
+      // Searching would forget the assignment and patrol away from it.
+      if (jukeDraw < dt * this.params.jukeRate) {
+        this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      }
+      return {
+        step: new THREE.Vector3(),
+        wantShoot: false,
+        mode: 'objective',
+        focusId: null,
+        lookAt: new THREE.Vector3(
+          obj.pos.x, obj.pos.y + LOOK_EYE_HEIGHT, obj.pos.z,
+        ),
+        facing: toward.clone(),
+      };
+    }
+    this.routing = true;
+    const step = new THREE.Vector3();
+    this.travel(step, waypoint, view, dt);
+    return {
+      step,
+      wantShoot: false,
+      mode: 'objective',
+      focusId: null,
+      lookAt: new THREE.Vector3(
+        view.selfFeet.x + toward.x,
+        view.selfFeet.y + LOOK_EYE_HEIGHT,
+        view.selfFeet.z + toward.z,
+      ),
       facing: toward.clone(),
     };
   }

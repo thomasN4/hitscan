@@ -27,7 +27,7 @@ function corner(params: BrainParams, hz: number): { loss: number; stall: number 
       visual: { id: 'player', feet: target, eye: target.clone().setY(1.7), dist, dist3: Math.hypot(dist, 0.2), rise: 0 },
       onGround: true, selfSpeed: 3.9, moveBlocked: blocked, heard: [],
       canStandAt: (x, z) => !collidesAt(new THREE.Vector3(x, 0, z), 0.5, 0, walls),
-      nextWaypoint: () => null, nextPatrolWaypoint: () => null,
+      nextWaypoint: () => null, nextPatrolWaypoint: () => null, objective: null,
     }, dt);
     expect(intent.mode).toBe('engage');
     const before = feet.clone();

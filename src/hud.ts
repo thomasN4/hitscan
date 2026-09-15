@@ -7,7 +7,7 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, session, bots, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, dom, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
 import { isLowAmmo } from './sim/ammo';
 
 /**
@@ -33,7 +33,8 @@ const el = requireEl;
 let hitmarkerEl: HTMLElement, killfeedEl: HTMLElement, hpText: HTMLElement,
   healthFill: HTMLElement, magText: HTMLElement, ammoSep: HTMLElement,
   ammoReserve: HTMLElement, reloadHint: HTMLElement, scopeOverlay: HTMLElement,
-  zoomText: HTMLElement, weaponName: HTMLElement, botDebug: HTMLElement;
+  zoomText: HTMLElement, weaponName: HTMLElement, botDebug: HTMLElement,
+  domFlagsEl: HTMLElement;
 
 // Declared non-optional on purpose: like engine.ts's singletons, the
 // contract is "read only after init*()" — typing them optional would push
@@ -60,6 +61,7 @@ export function initHUD(): void {
   zoomText = el('zoomText');
   weaponName = el('weaponName');
   botDebug = el('botDebug');
+  domFlagsEl = el('domFlags');
 }
 
 let hitmarkerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,10 +107,56 @@ export function addKillfeed(text: string): void {
   setTimeout(() => entry.remove(), 4500);
 }
 
-/** Refresh CT/T round score from score.scoreKills / score.scoreDeaths. */
+/**
+ * Refresh the CT/T round score in the top bar: kills (score.scoreKills /
+ * score.scoreDeaths) in TDM, floored tick points out of the limit in
+ * domination.
+ */
 export function updateScore(): void {
+  // Domination owns the top bar instead: floored tick points toward the
+  // configured limit, so the bar agrees with the end screen and the limit
+  // killfeed.
+  if (session.mode === 'dom') {
+    requireEl('scoreCT').textContent = `CT ${Math.floor(dom.scoreCt)}/${session.scoreLimit}`;
+    requireEl('scoreT').textContent = `${Math.floor(dom.scoreT)}/${session.scoreLimit} T`;
+    return;
+  }
   requireEl('scoreCT').textContent = 'CT ' + score.scoreKills;
   requireEl('scoreT').textContent = 'T ' + score.scoreDeaths;
+}
+
+let lastDomHUD = '';
+/**
+ * Refresh the domination flag chips (owner colour + live capture percent).
+ * Called from the domination updater each sim frame; the chips are cached
+ * so a steady flag state never touches the DOM, but the score bar is NOT
+ * part of that cache — tick points accrue with no flag change, so it
+ * refreshes every frame regardless.
+ * Hidden outside dom matches.
+ */
+export function updateDomHUD(): void {
+  if (session.mode !== 'dom' || dom.flags.length === 0) {
+    if (lastDomHUD !== '') {
+      lastDomHUD = '';
+      domFlagsEl.style.display = 'none';
+    }
+    return;
+  }
+  if (domFlagsEl.style.display !== 'flex') domFlagsEl.style.display = 'flex';
+  updateScore();
+  const text = dom.flags
+    .map(f => `${f.id}:${f.owner ?? '-'}:${f.challenger ?? '-'}:${Math.floor(f.progress * 100)}`)
+    .join('|');
+  if (text === lastDomHUD) return;
+  lastDomHUD = text;
+  for (const f of dom.flags) {
+    const chip = requireEl(`flag${f.id}`);
+    chip.textContent = f.challenger !== null
+      ? `${f.id} ${Math.floor(f.progress * 100)}%`
+      : f.id;
+    chip.classList.toggle('t', f.owner === 'T');
+    chip.classList.toggle('ct', f.owner === 'CT');
+  }
 }
 
 /** Format remaining seconds as m:ss in the top-bar timer. */
@@ -219,7 +267,7 @@ export function updateHUD(): void {
 // flag) because both answer the same question, "what is this bot thinking",
 // and the overlay is the explicit opt-in; on any map, since nothing here is
 // elevation-specific.
-// Modes are hold/search/route/engage/patrol (botBrains.ts:BrainMode). `search`
+// Modes are hold/search/route/engage/patrol/objective/capture (botBrains.ts:BrainMode). `search`
 // is a memory scan — arrival at a remembered position, a routing dead end, or
 // a direction-only incoming-fire reaction (the damage search advances along
 // its bearing for its first seconds, so it may show motion). `route` with
@@ -227,8 +275,8 @@ export function updateHUD(): void {
 // becomes `engage` means it is not arriving. `patrol` is a goalless walk to a
 // map-wide node. Rendered as one cached string because updateHUD runs
 // every frame; a bot standing still must not touch the DOM. Mesh y IS the
-// bot's feet height (bots.ts positions by feet). padEnd(6) fits the widest
-// mode.
+// bot's feet height (bots.ts positions by feet). padEnd(9) fits the widest
+// mode (`objective`).
 //
 // The r/s pair restates the shot gates as text, because the overlay's
 // brightness tiers are hard to tell apart at a glance and not
@@ -279,7 +327,7 @@ function updateBotDebug(): void {
     .map(b => `${b.name.padEnd(5)} y=${b.mesh.position.y.toFixed(2).padStart(5)}` +
               `${b.onGround ? '  G' : '  -'}${b.moveBlocked ? ' blk' : '    '}` +
               ` ${b.targetInRange ? 'r' : '-'}${b.targetLOS === true ? 's' : '-'}` +
-              ` ${b.mode.padEnd(6)}` +
+              ` ${b.mode.padEnd(9)}` +
               ` ${WEAPONS[b.weapon].name.padEnd(8)}` +
               botAmmoCell(b) +
               `${b.alive ? '' : ' dead'}`)

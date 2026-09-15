@@ -3,20 +3,27 @@
 // This module is the single place where HP crosses 0: bots call
 // damagePlayer, weapons.ts calls damageBot. Keeping the two flows together
 // makes the kill/score/respawn rules easy to audit. It also owns endMatch,
-// the one transition into the finished state both win conditions converge
-// on (clock expiry from main.ts, elimination from checkRoundEnd).
-import type { Bot as BotShape, HitZone, MapName, Team } from './core/state';
-import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing, creditKill } from './core/state';
+// the one transition into the finished state every win condition converges
+// on (clock expiry from main.ts, elimination from checkRoundEnd, score
+// limit from domination.ts:updateDomination).
+import type { Bot as BotShape, HitZone, Team } from './core/state';
+import { player, session, aim, wpn, motion, score, bots, input, gameTime, armLoadout, playerFeet, cancelPendingReloadSfx, opposing, creditKill, BOT_SPAWNS } from './core/state';
 import type { MatchWinner } from './sim/match';
 import { eliminationEndsMatch } from './sim/match';
 import * as THREE from 'three';
 import { sfxHurt } from './audio';
+import { pickDomRespawn } from './domSpawns';
+import { playerSpawnYaw } from './sim/spawn';
+import { findFreeSpawn } from './collision';
+import { colliders } from './world';
 import { flashDamageVignette, clearVignette, botKillTag, addKillfeed, updateScore, updateHUD } from './hud';
 import { showLoadoutPicker, showEndScreen } from './menu';
 
 /**
- * Apply damage to the player. On death: awards the killer's side its score,
- * releases pointer lock (which pauses the loop) and shows the death screen.
+ * Apply damage to the player. On death: awards the killer's side its score
+ * (TDM only — creditKill is a no-op in domination, where kills are worth
+ * nothing), releases pointer lock (which pauses the loop) and shows the death
+ * screen.
  * @param dmg raw damage; caller decides falloff/accuracy
  * @param attackerName display name for the killfeed — required so the
  *   compiler flags any future caller that would revive the anonymous
@@ -40,8 +47,9 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     cancelPendingReloadSfx();
     const attacker = bots.find(b => b.name === attackerName);
     // Side-fixed scores via creditKill: a CT kill is a CT point, a T kill a
-    // T point. The attacker is always the enemy; the fallback covers an
-    // unresolvable name by crediting the opposing side.
+    // T point — in TDM; the call is a no-op in domination. The attacker is
+    // always the enemy; the fallback covers an unresolvable name by crediting
+    // the opposing side.
     const killerTeam: Team = attacker?.team ?? opposing(session.playerTeam);
     creditKill(killerTeam);
     score.playerDeaths++;
@@ -112,45 +120,56 @@ export function damageBot(bot: BotShape, dmg: number, part: HitZone, attackerNam
 }
 
 /**
- * Player spawn per side per map, on the map's centre line (x = 0).
- *
- * A full Record rather than a ternary chain on purpose: adding a MapName now
- * fails to compile until the new map declares where EACH side starts, instead
- * of silently inheriting the arena's coordinates. T spawns mirror CT across
- * -z (facing +z) with ONE exception: warehouse2's T side starts on the -z
- * catwalk band (z -16), not the mirrored +z yard — the mirrored yard has no
- * T presence, the catwalk is the T half of that map (BOT_SPAWNS -19..-13).
- * The range is side-agnostic (no bots), so both entries face downrange.
- * feetY is the floor under the spawn — 0 everywhere except warehouse2's
- * T-side catwalk (5.1, matching BOT_SPAWNS). yaw is the spawn facing: into
- * the map on combat maps, downrange on the range for both sides.
+ * The range's firing line: the one fixed player spawn left. The range has no
+ * bots and no band worth drawing from, so both sides start behind the line
+ * facing downrange.
  */
-const SPAWN: Record<Team, Record<MapName, { z: number; feetY: number; yaw: number }>> = {
-  CT: {
-    arena: { z: 48, feetY: 0, yaw: 0 },
-    range: { z: 8, feetY: 0, yaw: 0 },       // behind the firing line
-    elevation: { z: 48, feetY: 0, yaw: 0 },  // open ground south of the two-story building
-    warehouse1: { z: 40, feetY: 0, yaw: 0 }, // dock yard floor, 5 m clear of the south dock's face at z = 45
-    warehouse2: { z: 27, feetY: 0, yaw: 0 }, // the +z yard, between the shell wall at 20.5 and the fence at 34
-  },
-  T: {
-    arena: { z: -48, feetY: 0, yaw: Math.PI },
-    range: { z: 8, feetY: 0, yaw: 0 },       // side-agnostic lane: same firing line, same facing
-    elevation: { z: -48, feetY: 0, yaw: Math.PI },
-    warehouse1: { z: -40, feetY: 0, yaw: Math.PI },
-    warehouse2: { z: -16, feetY: 5.1, yaw: Math.PI }, // the -z catwalk band (BOT_SPAWNS -19..-13)
-  },
-};
+const RANGE_SPAWN = { x: 0, z: 8, feetY: 0, yaw: 0 };
 
 /** Reset player + ammo to round-start values. Called from the Respawn button. */
-export function respawn(): void {
+export function respawn(useDirector = false): void {
   cancelPendingReloadSfx();
-  const spawn = SPAWN[session.playerTeam][session.map];
-  player.pos.set(0, spawn.feetY + player.eyeHeight, spawn.z);
+  // Placement mirrors the bots' exactly. Domination redeploys (death → picker
+  // → Deploy) come through the director — an owned-flag ring or the home zone
+  // at equal shares — while the match opening and every TDM (re)spawn draw from the team's
+  // BOT_SPAWNS zone through the same rejection sampling Bot.spawnAtRandom
+  // uses, at the player's own radius and the zone's feet height (which is what
+  // puts a warehouse2 T on the catwalk). main.ts passes the director flag only
+  // for a domination death deploy — false at startup and on every TDM deploy —
+  // so the mode test below is what the flag actually rides on. The range keeps
+  // its fixed firing line: no bots, no band worth drawing.
+  if (useDirector && session.mode === 'dom') {
+    const p = pickDomRespawn(session.playerTeam);
+    player.pos.set(p.x, p.y + player.eyeHeight, p.z);
+    motion.groundSmoothY = p.y;
+  } else if (session.map === 'range') {
+    player.pos.set(RANGE_SPAWN.x, RANGE_SPAWN.feetY + player.eyeHeight, RANGE_SPAWN.z);
+    motion.groundSmoothY = RANGE_SPAWN.feetY;
+  } else {
+    const zone = BOT_SPAWNS[session.map][session.playerTeam];
+    const p = findFreeSpawn(
+      () => new THREE.Vector3(
+        zone.minX + Math.random() * (zone.maxX - zone.minX),
+        zone.y,
+        zone.minZ + Math.random() * (zone.maxZ - zone.minZ),
+      ),
+      player.radius,
+      colliders,
+      32,
+      zone.y,
+    );
+    player.pos.set(p.x, p.y + player.eyeHeight, p.z);
+    // The camera rides a smoothed ground height (player.ts eases it toward the
+    // physics feet), so seed it AT the spawn floor — not 0. Dying on platform
+    // geometry with a stale height would otherwise ease the view down from it
+    // over the first ~100 ms, and a 5.1 m spawn (warehouse2 T-side) would climb
+    // up from the shed floor instead of starting on the catwalk.
+    motion.groundSmoothY = p.y;
+  }
   player.vel.set(0, 0, 0);
   player.hp = 100;
   player.alive = true;
-  aim.yaw = spawn.yaw;
+  aim.yaw = session.map === 'range' ? RANGE_SPAWN.yaw : playerSpawnYaw(session.playerTeam);
   aim.pitch = 0;
   wpn.recoil = 0;    // else the view punch would spawn the camera mid-climb
   wpn.recoilYaw = 0; // and mid-wander, off to one side
@@ -162,12 +181,6 @@ export function respawn(): void {
   // (0.08 rad, ~15x the standing cone) until airLerp bleeds out.
   motion.airLerp = 0;
   motion.crouchLerp = 0;
-  // The camera rides a smoothed ground height (player.ts eases it toward the
-  // physics feet), so seed it AT the spawn floor — not 0. Dying on platform
-  // geometry with a stale height would otherwise ease the view down from it
-  // over the first ~100 ms, and a 5.1 m spawn (warehouse2 T-side) would climb
-  // up from the shed floor instead of starting on the catwalk.
-  motion.groundSmoothY = spawn.feetY;
   input.crouching = false; // else a death while crouch-toggled respawns you crouched
   wpn.adsLerp = 0;
   armLoadout();   // refills both loadout positions and mirrors the primary into `weapon`
@@ -188,8 +201,13 @@ export function respawn(): void {
  * a 1v1 there is no wave to speak of — the arena would end seconds after
  * every spawn — so the old behavior stays: announce the clear and bring
  * everyone back after 2.5s, leaving only the clock to end the match.
+ *
+ * TDM only: domination has no wipe win (flags own the points), so this
+ * returns immediately there and the wave simply self-revives on its 6 s
+ * schedule.
  */
 export function checkRoundEnd(): void {
+  if (session.mode === 'dom') return;
   const foeTeam: Team = opposing(session.playerTeam);
   const foes = bots.filter(b => b.team === foeTeam);
   if (foes.length > 0 && foes.every(b => !b.alive)) {
@@ -209,11 +227,13 @@ export function checkRoundEnd(): void {
 }
 
 /**
- * End the match and move to the score screen. One-shot: both win conditions
- * converge here, and whichever fires first owns the transition. Winner is
- * decided by the caller — the player's side outright on elimination, or by
- * kill score when the clock runs out (sim/match.ts:decideWinner); callers
- * announce their own killfeed line first.
+ * End the match and move to the score screen. One-shot: every win condition
+ * converges here, and whichever fires first owns the transition. Winner is
+ * decided by the caller — the player's side outright on elimination (TDM
+ * only), by kill score when a TDM clock runs out (sim/match.ts:decideWinner),
+ * or by ticked flag points in domination, whether the score limit landed
+ * (domination.ts:updateDomination) or the clock did (decideDomWinner);
+ * callers announce their own killfeed line first.
  *
  * Pointer lock is released first so the loop stops simulating; the screen
  * then reveals on a WALL-clock delay for the same reason damagePlayer's

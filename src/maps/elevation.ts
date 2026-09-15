@@ -60,8 +60,8 @@ export function buildElevation(): void {
   scene.add(ground);
   registerSolid(ground); // raycast target only — walking is bounded by the perimeter walls
 
-  // Perimeter walls, same footprint as the arena so the hardcoded bot spawn
-  // bands in bots.ts (x +-45, |z| 20..55) stay valid without a code change.
+  // Perimeter walls, same footprint as the arena; the bot spawn pockets
+  // (core/state.ts:BOT_SPAWNS) sit inside it.
   const W = 60, T = 2, H = 8;
   addSolidBox(0, 0,  W, 2*W+T*2, H, T, matWall2);
   addSolidBox(0, 0, -W, 2*W+T*2, H, T, matWall2);
@@ -148,7 +148,7 @@ function buildBridgeAndTower(): void {
   addStairs(35, 0, 15.5, 4, STEP_H, STEP_D, 12, matWall2, 'z-');
 }
 
-// ---------- C. West plateau — long shallow ascent over the T spawn band ----------
+// ---------- C. West plateau — long shallow ascent to flag A's deck ----------
 function buildPlateau(): void {
   // 3.0 m rather than DECK_Y: a second, lower tier makes "bot shooting down at
   // a bot on another tier" testable without either being at deck height.

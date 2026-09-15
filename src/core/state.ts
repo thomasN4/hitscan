@@ -14,6 +14,9 @@ import * as THREE from 'three';
 import { GameClock, type ScheduledHandle } from '../sim/gameClock';
 import { SoundRing } from '../sim/soundEvents';
 import type { BrainMode } from '../sim/botBrains';
+// A value import, like GameClock and SoundRing above: sim/domination.ts takes
+// only `type Team` back, so nothing is circular at runtime.
+import { DOM_SCORE_LIMIT } from '../sim/domination';
 
 // ---------- Domain vocabulary ----------
 /**
@@ -189,6 +192,43 @@ export function opposing(team: Team): Team {
   return team === 'CT' ? 'T' : 'CT';
 }
 
+/**
+ * The domination flag a bot is assigned to. The position is the flag's own
+ * static point (it never moves). Intent is deliberately absent: who is
+ * *supposed* to be here never outranked who *is* here in any policy, so the
+ * dispatcher deals the point and the per-frame census reports the company.
+ */
+export interface DomObjective {
+  id: string;
+  pos: THREE.Vector3;
+  radius: number;
+}
+
+/**
+ * What the brain sees of its assignment each frame: the static dispatch
+ * above plus live teammate cover — `cappingMates` bodies (bots AND the
+ * player) inside the same ring and the bots-only `holdRank` ladder, both
+ * excluding the viewer. Counts, never identities or positions: flag states
+ * are broadcast to both teams, so this reveals nothing a scoreboard
+ * wouldn't. The executor recomputes both every frame.
+ */
+export interface ObjectiveView extends DomObjective {
+  /** Live same-team bodies inside this flag's ring, excluding the viewer. */
+  cappingMates: number;
+  /**
+   * Holder rank among the same-team BOTS standing this point (hold circle,
+   * not the full ring — see sim/domination.ts:holderRanks; bots only, the
+   * player never outranks) AND assigned to it: how many hold it with a lower
+   * id. 0 designates the holder, who sits the point; higher ranks escort.
+   * Ranking is per assignment because acting on rank 0 is — a bot only ever
+   * reads the ladder of its OWN flag, so one ranked on a flag it was sent
+   * nowhere near could never hold that flag while still demoting the bot that
+   * was. Read only while capping; 0 elsewhere, which is exactly "nobody ahead
+   * of me".
+   */
+  holdRank: number;
+}
+
 /** Structural shape of one bot (see bots.ts for the concrete class). */
 export interface Bot {
   /** Per-match serial (1-based), stamped at construction — stable across deaths. */
@@ -272,6 +312,19 @@ export interface Bot {
    * but can never know (or shoot at) what sent it.
    */
   onIncomingFire(bearing: THREE.Vector3): void;
+  /**
+   * Take (or clear) the domination dispatcher's flag assignment, consumed as
+   * BrainView.objective on the next update. Null outside dom matches. The
+   * position is the flag's own static point; the executor clones it into the
+   * view, so sharing the reference here is safe.
+   */
+  assignObjective(o: DomObjective | null): void;
+  /**
+   * Id of that assignment, or undefined with none. Read by the ring census,
+   * which ranks holders per flag and must exclude bots assigned elsewhere —
+   * only the bot a flag was dealt to can ever hold it.
+   */
+  readonly objectiveId: string | undefined;
 }
 
 /** One transient impact puff tracked by effects.ts. */
@@ -832,7 +885,7 @@ export const DESERT_AMBIENCE: Ambience = {
 };
 
 /**
- * Per-map ambience. A full Record for the same reason as BUILDERS / SPAWN /
+ * Per-map ambience. A full Record for the same reason as BUILDERS / BOT_SPAWNS /
  * SUBTITLES: adding a MapName must fail to compile until the new map says what
  * it looks like, rather than silently inheriting the desert.
  */
@@ -915,13 +968,15 @@ export interface SpawnZone {
  * (maps/warehouse1.ts:25-27). A map smaller than that band strands bots
  * outside its own geometry.
  *
- * A full Record for the same reason as BUILDERS / SPAWN / AMBIENCE: adding a
+ * A full Record for the same reason as BUILDERS / DOM_FLAGS / AMBIENCE: adding a
  * MapName must fail to compile until the new map says where its bots start.
  *
- * The first four entries reproduce that old band exactly — `x ∈ [-45, 45]`,
- * `|z| ∈ [20, 55]`, Ts on -z away from the player spawn and CTs mirrored —
- * so making this per-map changed nothing about the maps that predate it.
- * state.test.ts pins that.
+ * The arena, range and warehouse1 entries reproduce that old band exactly —
+ * `x ∈ [-45, 45]`, `|z| ∈ [20, 55]`, Ts on -z away from the player spawn and
+ * CTs mirrored — so making this per-map changed nothing about the maps that
+ * predate it. Elevation instead uses diagonal corner pockets (T northeast, CT
+ * southwest), so neither side opens looking straight down the middle.
+ * state.test.ts pins both shapes.
  */
 export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
   arena: {
@@ -933,8 +988,11 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
     CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
   },
   elevation: {
-    T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
-    CT: { minX: -45, maxX: 45, minZ:  20, maxZ:  55, y: 0 },
+    // Diagonal corner pockets: T northeast, CT southwest. Both are open
+    // ground — no crates, plateau, tower or walls intersect either band, and
+    // both keep >= 4 m off the perimeter inner faces.
+    T:  { minX: 10, maxX: 50, minZ: -55, maxZ: -30, y: 0 },
+    CT: { minX: -50, maxX: 5, minZ: 35, maxZ: 55, y: 0 },
   },
   warehouse1: {
     T:  { minX: -45, maxX: 45, minZ: -55, maxZ: -20, y: 0 },
@@ -953,6 +1011,59 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
   },
 };
 
+/** Match ruleset. `tdm` is kill-score team deathmatch; `dom` is domination (flag capture ticks points, kills score nothing). */
+export type MatchMode = 'tdm' | 'dom';
+
+/**
+ * Static definition of one domination capture point.
+ *
+ * `feetY` is the walk surface the flag sits on (like SpawnZone.y), so a flag
+ * need not sit at grade — on elevation only C does (0), while B stands on the
+ * building slab at 3.6 and A on the plateau crown at 3.0. Capture counts
+ * bodies whose feet are within VERTICAL_TOL of the flag (sim/domination.ts),
+ * so the deck fight and the ground floor below it never bleed into each
+ * other.
+ */
+export interface FlagDef {
+  /** Display id: 'A', 'B' or 'C'. */
+  id: string;
+  x: number;
+  /** Feet height of the flag's walk surface. */
+  feetY: number;
+  z: number;
+  /** Planar capture radius in metres. */
+  radius: number;
+}
+
+/**
+ * Domination flags per map. A full Record for the same reason as BUILDERS /
+ * BOT_SPAWNS: adding a MapName must fail to compile until the new map
+ * says where its flags are. An EMPTY array means "no domination on this map" —
+ * sessionConfig's parser falls back to `tdm` there, so `?mode=dom` on any
+ * other map degrades safely instead of booting a flagless match.
+ */
+export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
+  arena: [],
+  range: [],
+  // A (-38,3.0,-30): the plateau top's centre (22 x 22 at maps/elevation.ts,
+  // so a 4.5 ring sits well inside), reached only up the east stair. C
+  // (35,0,38): open ground south down the tower lane (whose stair base stands
+  // at z = 15.5), deep in CT territory in the north-south lane the
+  // bridge/tower deck overlooks — the T sniper view down that lane is the
+  // point. B (0,3.6,0): the second-floor slab west of the stairwell hole
+  // (x[2,6], z[-9,0]) — the deck fight the map was built to observe. The
+  // spawn pockets sit in the opposite corners from the lane flags, so neither
+  // home flag starts inside its side's band: the openers are a ~48 m T run to
+  // A and a ~30 m CT run to C.
+  elevation: [
+    { id: 'A', x: -38, feetY: 3.0, z: -30, radius: 4.5 },
+    { id: 'B', x: 0, feetY: 3.6, z: 0, radius: 4.5 },
+    { id: 'C', x: 35, feetY: 0, z: 38, radius: 4.5 },
+  ],
+  warehouse1: [],
+  warehouse2: [],
+};
+
 /**
  * Match-config defaults: what a bare URL (no params) means, and what every
  * garbage/out-of-range ?time= value falls back to (see
@@ -964,21 +1075,29 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
  */
 export const SESSION_DEFAULTS: Readonly<{
   map: MapName;
+  mode: MatchMode;
   playerTeam: Team;
   botsT: number;
   botsCt: number;
   roundSeconds: number;
+  scoreLimit: number;
   botWeaponT: BotWeaponChoice;
   botWeaponCt: BotWeaponChoice;
   botSecondaryT: BotSecondaryChoice;
   botSecondaryCt: BotSecondaryChoice;
 }> = {
   map: 'arena',
+  // TDM preserves every historical bare-URL match; domination is opt-in per match.
+  mode: 'tdm',
   // CT default preserves the historical bare-URL match: 6 enemy Ts, 5 allied CTs.
   playerTeam: 'CT',
   botsT: 6,
   botsCt: 5,
   roundSeconds: 300,
+  // Domination points to win; only read in dom mode (sessionConfig clamps).
+  // Taken from the rules module rather than repeated as a literal, so the
+  // default and the rule it belongs to cannot drift.
+  scoreLimit: DOM_SCORE_LIMIT,
   // A varied field by default: the whole point of the tranche is that the
   // enemy's weapon is a fact about the enemy, not a constant. Pinning a
   // single weapon is what smoke phases and playtests do deliberately.
@@ -1007,7 +1126,7 @@ export const SESSION_DEFAULTS: Readonly<{
  */
 export interface SessionState {
   // Match settings are chosen pre-game in the start menu and committed as ONE
-  // query string (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=) via
+  // query string (?map=&mode=&side=&tbots=&ctbots=&time=&scorelimit=&tweap=&tsec=&ctweap=&ctsec=) via
   // a full page reload — map
   // switching is a reload and there is deliberately no hot-swapping of scenes
   // at runtime. The key list is spelled out in four places (here, AGENTS.md,
@@ -1017,6 +1136,8 @@ export interface SessionState {
   // parse of the URL at startup — reading `location` here would break this
   // module's importability in Node.
   map: MapName;
+  /** Match ruleset: kill-score TDM, or domination when the map has flags. */
+  mode: MatchMode;
   /** Which side the player fights for. The other side is the enemy wave. */
   playerTeam: Team;
   /** T-side bot count. Enemy (1..16) on CT-side, allied (0..15) on T-side; clamped by botLimits() in sessionConfig. */
@@ -1025,6 +1146,8 @@ export interface SessionState {
   botsCt: number;
   /** Round length in seconds. score.roundTime starts here AND resets here. */
   roundSeconds: number;
+  /** Domination points to win. Read only in dom mode; TDM matches ignore it. */
+  scoreLimit: number;
   /**
    * PRIMARY firearm every bot on each side starts with (smg/ak47/sniper/shotgun),
    * or 'mixed' to draw one per bot. Read once by main.ts when it spawns the
@@ -1262,17 +1385,22 @@ export function cancelPendingReloadSfx(): void {
 /**
  * Match bookkeeping. The team counters' rule lives in creditKill() (a
  * CT-side kill — player or ally — bumps scoreKills, a T-side kill bumps
- * scoreDeaths), called from bots.ts on a bot's death and from combat.ts
- * when the player dies; main.ts's loop counts roundTime down (arena only).
+ * scoreDeaths — and nothing at all in domination), called from bots.ts on a
+ * bot's death and from combat.ts when the player dies; main.ts's loop counts
+ * roundTime down (arena only).
  * The player counters are the scoreboard's "You" row: bots.ts bumps
  * playerKills on the player's own kills and combat.ts bumps playerDeaths
  * when the player dies. hud.ts renders the top bar; menu.ts renders the
  * end screen.
  */
 export interface ScoreState {
-  /** Shown as the CT score: CT-side kills — the player's (on CT-side) plus CT allies'. */
+  /**
+   * CT-side kills — the player's (on CT-side) plus CT allies'. Shown as the
+   * CT score in TDM only: domination renders `dom.scoreCt` in that slot and
+   * never bumps this one (see creditKill).
+   */
   scoreKills: number;
-  /** Shown as the T score: T-side kills — the player's (on T-side) plus T allies'. */
+  /** T-side kills — the player's (on T-side) plus T allies'. The T half of the pair above, same TDM-only caveat. */
   scoreDeaths: number;
   /** Kills credited to YOU personally (excludes ally kills). */
   playerKills: number;
@@ -1298,10 +1426,79 @@ export const score: ScoreState = {
  * an unresolvable attacker to the victim's opposing side) and guard against
  * same-team casualties where those are possible; the mapping itself lives
  * only here.
+ *
+ * In DOMINATION this is a no-op, and the guard lives here rather than at the
+ * callers: both of them (combat.ts:damagePlayer, bots.ts:Bot.die) still call
+ * it unconditionally on every casualty, and the mode test below drops the
+ * team counters on the floor. Kills score nothing in domination — team points
+ * tick from owned flags into the `dom` slice instead — while the personal K/D
+ * counters those same callers bump are untouched by the mode.
  */
 export function creditKill(killerTeam: Team): void {
+  if (session.mode === 'dom') return;
   if (killerTeam === 'CT') score.scoreKills++;
   else score.scoreDeaths++;
+}
+
+/**
+ * Live state of one domination capture point. Written by the domination
+ * updater (see domination.ts, driven from main.ts); read by the HUD, the flag
+ * visuals and the bot objective dispatcher. `pos` is the flag centre at its
+ * walk-surface height — bots route to it like any other goal.
+ */
+export interface DomFlagState {
+  /** Display id from the FlagDef ('A', 'B', 'C'). */
+  id: string;
+  /** Flag centre: x/z from the def, y at the def's walk-surface height. */
+  pos: THREE.Vector3;
+  /** Planar capture radius in metres, from the def. */
+  radius: number;
+  /** Owning side, or null while neutral. */
+  owner: Team | null;
+  /**
+   * 0..1 capture progress toward `challenger`. Frozen while contested;
+   * decays while the point sits empty or securely owned (stepping off
+   * briefly costs little, abandoning wipes); restarts from 0 on a
+   * challenger switch and on a completed ownership flip.
+   */
+  progress: number;
+  /** Which side the progress belongs to; null when no side is capturing. */
+  challenger: Team | null;
+}
+
+/**
+ * Domination match bookkeeping. Written by the domination updater in main.ts's
+ * loop (capture + tick scoring); read by the HUD, the end screen and the bot
+ * dispatcher. Scores accumulate fractionally and render floored — a per-frame
+ * `dt` tick would otherwise never move an integer counter visibly.
+ */
+export interface DomState {
+  /** Live flag states, in A/B/C order; empty when the match is not domination. */
+  flags: DomFlagState[];
+  /** Points ticked by CT-owned flags (fractional internally). */
+  scoreCt: number;
+  /** Points ticked by T-owned flags (fractional internally). */
+  scoreT: number;
+}
+
+export const dom: DomState = {
+  flags: [],
+  scoreCt: 0,
+  scoreT: 0,
+};
+
+/** Reset the domination slice to a fresh match over `defs` (or to empty outside dom mode). */
+export function resetDom(defs: FlagDef[]): void {
+  dom.flags = defs.map(d => ({
+    id: d.id,
+    pos: new THREE.Vector3(d.x, d.feetY, d.z),
+    radius: d.radius,
+    owner: null,
+    progress: 0,
+    challenger: null,
+  }));
+  dom.scoreCt = 0;
+  dom.scoreT = 0;
 }
 
 /** Raw keyboard state by `event.code`. Written in main.ts, read through keyHeld. */

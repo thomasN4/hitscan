@@ -1,7 +1,7 @@
 // core/sessionConfig.ts — pure parse/serialize for the match-config query.
 //
 // The start menu commits settings by navigating to ONE query string
-// (?map=&side=&tbots=&ctbots=&time=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
+// (?map=&mode=&side=&tbots=&ctbots=&time=&scorelimit=&tweap=&tsec=&ctweap=&ctsec=); main.ts parses it
 // back once at startup and writes the result into `session`. Parsing lives here rather than in
 // main.ts so the clamp/fallback matrix is unit-testable in plain Node: the
 // input is a minimal `{ get(name) }` view (URLSearchParams satisfies it
@@ -17,12 +17,15 @@
 // menu.ts. asMapName is shared for the same reason: menu.ts used to open-code
 // its own `=== 'range' ? 'range' : 'arena'`, which silently drops any map
 // added after it was written.
-import type { BotSecondaryChoice, BotWeaponChoice, MapName, Team } from './state';
-import { SESSION_DEFAULTS } from './state';
+import type { BotSecondaryChoice, BotWeaponChoice, MapName, MatchMode, Team } from './state';
+import { DOM_FLAGS, SESSION_DEFAULTS } from './state';
+import { SCORE_LIMITS } from '../sim/domination';
 
 /** Everything the menu configures about a match; mirrors session's config fields. */
 export interface SessionConfig {
   map: MapName;
+  /** Match ruleset: kill-score TDM, or domination when the map has flags. */
+  mode: MatchMode;
   /** Which side the player fights for; the other side is the enemy wave. */
   playerTeam: Team;
   /** T-side bot count (enemy on CT-side, allied on T-side). */
@@ -31,6 +34,8 @@ export interface SessionConfig {
   botsCt: number;
   /** Round length in seconds. */
   roundSeconds: number;
+  /** Domination points to win. Carried on every map but read only in dom mode. */
+  scoreLimit: number;
   /** Weapon every T-side bot carries in its PRIMARY position; 'mixed' draws independently per bot. */
   botWeaponT: BotWeaponChoice;
   /** Same for the CT side. */
@@ -122,7 +127,7 @@ export function secondsToMinutesLabel(seconds: number): string {
  * next time a map is added.
  *
  * Membership goes through an exhaustive Record rather than a literal chain so
- * widening MapName fails to compile HERE too, not just at BUILDERS / SPAWN /
+ * widening MapName fails to compile HERE too, not just at BUILDERS / BOT_SPAWNS /
  * SUBTITLES. The cast is the unavoidable cost of runtime narrowing (`in` can't
  * narrow a bare string); hasOwn rather than `in` keeps prototype keys like
  * 'toString' from passing the guard and reaching the builder lookup.
@@ -215,6 +220,23 @@ export function asBotSecondary(
     : fallback;
 }
 
+/**
+ * Narrow an untrusted string to MatchMode, falling back for anything
+ * unrecognized. Shared with the start menu's candidateConfig() like
+ * asMapName: the form's <select> and the URL parser must agree on what
+ * counts as a mode.
+ */
+const IS_MATCH_MODE: Record<MatchMode, true> = {
+  tdm: true,
+  dom: true,
+};
+
+export function asMatchMode(raw: string | null | undefined, fallback: MatchMode): MatchMode {
+  return typeof raw === 'string' && Object.hasOwn(IS_MATCH_MODE, raw)
+    ? (raw as MatchMode)
+    : fallback;
+}
+
 /** Parse the committed query into a fully-clamped SessionConfig. */
 export function parseSessionConfig(src: ParamSource): SessionConfig {
   // Side first: bot-count fallbacks AND clamp ranges both mirror off it, so
@@ -222,13 +244,23 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
   const playerTeam = asTeam(src.get('side'), SESSION_DEFAULTS.playerTeam);
   const limits = botLimits(playerTeam);
   const defaults = defaultBotCounts(playerTeam);
+  const map = asMapName(src.get('map'));
+  // Domination needs flags: a map with none (every map but elevation for now)
+  // falls back to TDM rather than booting a flagless domination match.
+  const mode = DOM_FLAGS[map].length > 0
+    ? asMatchMode(src.get('mode'), SESSION_DEFAULTS.mode)
+    : 'tdm';
   return {
-    map: asMapName(src.get('map')),
+    map,
+    mode,
     playerTeam,
     botsT: Math.round(clampTo(numOr(src.get('tbots'), defaults.botsT), limits.limitT)),
     botsCt: Math.round(clampTo(numOr(src.get('ctbots'), defaults.botsCt), limits.limitCt)),
     roundSeconds: Math.round(
       clampTo(numOr(src.get('time'), SESSION_DEFAULTS.roundSeconds), TIME_LIMITS_S),
+    ),
+    scoreLimit: Math.round(
+      clampTo(numOr(src.get('scorelimit'), SESSION_DEFAULTS.scoreLimit), SCORE_LIMITS),
     ),
     botWeaponT: asBotWeapon(src.get('tweap'), SESSION_DEFAULTS.botWeaponT),
     botSecondaryT: asBotSecondary(src.get('tsec'), SESSION_DEFAULTS.botSecondaryT),
@@ -245,10 +277,12 @@ export function parseSessionConfig(src: ParamSource): SessionConfig {
 export function configToQuery(cfg: SessionConfig): string {
   const p = new URLSearchParams();
   p.set('map', cfg.map);
+  p.set('mode', cfg.mode);
   p.set('side', cfg.playerTeam.toLowerCase());
   p.set('tbots', String(cfg.botsT));
   p.set('ctbots', String(cfg.botsCt));
   p.set('time', String(cfg.roundSeconds));
+  p.set('scorelimit', String(cfg.scoreLimit));
   p.set('tweap', cfg.botWeaponT);
   p.set('tsec', cfg.botSecondaryT);
   p.set('ctweap', cfg.botWeaponCt);
@@ -260,10 +294,12 @@ export function configToQuery(cfg: SessionConfig): string {
 export function configsEqual(a: SessionConfig, b: SessionConfig): boolean {
   return (
     a.map === b.map &&
+    a.mode === b.mode &&
     a.playerTeam === b.playerTeam &&
     a.botsT === b.botsT &&
     a.botsCt === b.botsCt &&
     a.roundSeconds === b.roundSeconds &&
+    a.scoreLimit === b.scoreLimit &&
     a.botWeaponT === b.botWeaponT &&
     a.botSecondaryT === b.botSecondaryT &&
     a.botWeaponCt === b.botWeaponCt &&

@@ -8,8 +8,10 @@
 // The whole file honours one visual rule: NO alpha blending anywhere. No
 // `opacity`/`fill-opacity`/`stroke-opacity` attributes, no rgba()/hsla(), no
 // transparent paint — every pixel's colour is decided by overpaint order, so
-// the drawings print and photocopy exactly as they read on screen. Upper
-// levels (decks, slabs, bridges) are HATCHED but fully opaque: the hatch
+// the drawings print and photocopy exactly as they read on screen. A white
+// paper rect covers the whole viewBox first, so nothing is unpainted even
+// outside the ground rect. Upper levels (decks, slabs, bridges) are HATCHED
+// but fully opaque: the hatch
 // pattern tile carries its own solid background, and whatever stands beneath
 // a deck (ground-floor walls) is drawn OVER the deck fill in paint order —
 // never seen through a gap. Unpainted shape interiors (`fill="none"` outlines
@@ -46,6 +48,7 @@ const C = {
   stairOutline: '#7d5a29',
   stairArrow: '#7d3c00',
   marker: '#3a3226',
+  paper: '#ffffff',
   target: '#6b5320',
   lift: '#e08b28',
   liftStroke: '#7a4a12',
@@ -504,6 +507,9 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     `Stair arrows point UPHILL. No alpha anywhere: upper levels are opaque hatched slabs. ${COM_CLOSE}`,
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 ${fmt(totalH)}" font-family="${FONT}">`,
     `<title>${esc(displayName)} — top-down map</title>`,
+    // Opaque paper behind the whole viewBox: outside the ground rect the SVG
+    // would otherwise show the viewer's default (transparent).
+    `<rect x="0" y="0" width="960" height="${fmt(totalH)}" fill="${C.paper}"/>`,
     '<defs>',
     `<pattern id="hatchW" width="1.1" height="1.1" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">` +
     `<rect width="1.1" height="1.1" fill="${C.deckFill}"/>` +

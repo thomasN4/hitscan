@@ -73,9 +73,15 @@ const ENTRY_COUNTS = {
 };
 
 // Transparency, in every spelling the renderer could emit by accident. `none`
-// (unpainted hatch gaps, outlines) is NOT banned — bare paper showing the
-// layer below is deterministic overpaint, not alpha.
+// (unpainted hatch gaps, outlines) is NOT banned — over the paper rect it is
+// deterministic overpaint, not alpha.
 const TRANSPARENCY = /opacity|rgba\(|hsla\(|transparent/i;
+
+// The paper rect: first painted element, covering the whole viewBox. Without
+// it the drawing outside the ground rect shows the viewer's default
+// (transparent), which is the alpha the opaque-only rule forbids.
+const VIEWBOX = /viewBox="0 0 (\S+) (\S+)"/;
+const PAPER = /^<rect x="0" y="0" width="\1" height="\2" fill="#ffffff"\/>$/m;
 
 if (WRITE) {
   mkdirSync(MAPS_DIR, { recursive: true });
@@ -111,6 +117,9 @@ describe('reference maps', () => {
     // Non-vacuous: a collapsed generator must fail here, not byte-match empty.
     expect(committed.length).toBeGreaterThan(2048);
     expect(committed).not.toMatch(TRANSPARENCY);
+    const box = committed.match(VIEWBOX);
+    expect(box).not.toBeNull();
+    expect(committed).toMatch(new RegExp(PAPER.source.replace('\\1', box[1]).replace('\\2', box[2]), 'm'));
     expect(committed).toContain('npm run maps:regen');
     expect(committed).toContain(row.sources);
     if (!WRITE) expect(committed).toBe(render(row));

@@ -1,6 +1,6 @@
 // scripts/mapSvg.mjs — top-down reference maps, rendered from the map specs.
 //
-// Pure string building, zero dependencies: (displayName, spec, spawns, flags)
+// Pure string building, zero dependencies: (displayName, spec, spawns|null, flags)
 // in, one SVG document out. The SVG is never committed: mapPng.mjs rasterises
 // it to docs/maps/*.png, and those files are this pipeline's output
 // byte-for-byte — regenerate with `npm run maps:regen`, never by hand
@@ -136,7 +136,8 @@ const MASS_STROKE = {
  *
  * @param displayName pretty title ("Elevation")
  * @param spec MapSpec from the map's *Spec.ts module
- * @param spawns BOT_SPAWNS entry for the map ({ T, CT } SpawnZones)
+ * @param spawns BOT_SPAWNS entry for the map ({ T, CT } SpawnZones), or null
+ *   for a map with no bots (the range): no pockets are drawn or legended
  * @param flags DOM_FLAGS entry for the map (FlagDef[], possibly empty)
  * @param sources short source line for the header comment, e.g.
  *   "src/maps/elevationSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts"
@@ -147,10 +148,15 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   const gH = g.maxZ - g.minZ;
   const margin = Math.max(gW, gH) * 0.06;
 
-  // Fit the ground (plus margin) into ~880 px; cap the height so the lane map
-  // (30 x 130) stays on one screen.
+  // Fit the ground (plus margin) into ~880 px; cap the height so a tall map
+  // stays on one screen. A map that ends up narrow (the 30 x 130 lane) would
+  // strand most of the width, so it moves the legend into a right-hand column
+  // and takes a taller cap instead — the lane is drawn wider, not the page.
   let scale = 880 / (gW + margin * 2);
   if (gH * scale > 860) scale = 860 / (gH + margin * 2);
+  const sideLegend = (gW + margin * 2) * scale <= 480;
+  if (sideLegend) scale = Math.min(880 / (gW + margin * 2), 1100 / (gH + margin * 2));
+  const mapW = (gW + margin * 2) * scale;
   const mapH = (gH + margin * 2) * scale;
   const originX = 40 + margin * scale;
   const originY = 108 + margin * scale;
@@ -189,10 +195,10 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   // collected separately and drawn late, so no wall clips a zone's name. ----
   const pocketRects = [];
   const pocketLabels = [];
-  const pocketDefs = [
+  const pocketDefs = spawns ? [
     { zone: spawns.T, fill: C.spawnT, stroke: C.spawnTStroke, tag: 'T pocket' },
     { zone: spawns.CT, fill: C.spawnCT, stroke: C.spawnCTStroke, tag: 'CT pocket' },
-  ];
+  ] : [];
   for (const p of pocketDefs) {
     const z = p.zone;
     pocketRects.push(
@@ -361,8 +367,10 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   // ---- spec labels (range distance markers) ----
   const labels = [];
   for (const l of spec.labels) {
+    // Text hangs just below its world point: range targets stand on their
+    // own distance labels, and a centred label would hide the target mark.
     labels.push(text(
-      X(l.x), Y(l.z) + 4, l.text,
+      X(l.x), Y(l.z) + 19, l.text,
       `text-anchor="middle" font-size="11" fill="${C.text}" ` +
       `paint-order="stroke" stroke="${C.halo}" stroke-width="3"`,
     ));
@@ -458,14 +466,16 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
       'painted floor marker (no collision)',
     ));
   }
-  items.push(row(
-    swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnT}" stroke="${C.spawnTStroke}" stroke-dasharray="3 2"/>`),
-    'T spawn pocket',
-  ));
-  items.push(row(
-    swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnCT}" stroke="${C.spawnCTStroke}" stroke-dasharray="3 2"/>`),
-    'CT spawn pocket',
-  ));
+  if (spawns) {
+    items.push(row(
+      swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnT}" stroke="${C.spawnTStroke}" stroke-dasharray="3 2"/>`),
+      'T spawn pocket',
+    ));
+    items.push(row(
+      swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnCT}" stroke="${C.spawnCTStroke}" stroke-dasharray="3 2"/>`),
+      'CT spawn pocket',
+    ));
+  }
   if (flags.length > 0) {
     items.push(row(
       swatch(`<circle cx="9" cy="6.5" r="6" fill="#ffffff" stroke="${C.flagInk[1 % C.flagInk.length]}" stroke-width="1.6"/>`),
@@ -485,27 +495,35 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     ));
   }
 
-  // Single column: long labels run into a second column.
-  const legendY = originY + mapH + 60;
+  // Single column: long labels run into a second column. Below the map, or
+  // beside it (top-aligned with the drawing) when the map is narrow.
+  const legendX = sideLegend ? 40 + mapW + 40 : 70;
+  const legendY = sideLegend ? originY + 24 : originY + mapH + 60;
   const legendRows = items.map((it, i) => {
     const rowY = legendY + 24 + i * 24;
-    return `<g transform="translate(70 ${fmt(rowY)})"><g>${it.sample}</g>` +
+    return `<g transform="translate(${fmt(legendX)} ${fmt(rowY)})"><g>${it.sample}</g>` +
       `<text x="28" y="0" font-size="13" fill="${C.text}">${esc(it.label)}</text></g>`;
   });
   const notesY = legendY + 24 + items.length * 24 + 14;
   const legendH = 24 + items.length * 24 + 14 + spec.notes.length * 19 + 44;
 
   const noteLines = spec.notes.map((n, i) => text(
-    70, notesY + i * 19, n,
+    legendX, notesY + i * 19, n,
     `font-size="12" fill="${C.muted}"`,
   ));
 
-  const totalH = legendY + legendH;
+  // Where (0, 0) sits: the range lane runs from its firing line, not around it.
+  const centred = Math.abs(g.minX + g.maxX) < 1e-9 && Math.abs(g.minZ + g.maxZ) < 1e-9;
+  const originNote = centred ? 'origin at map centre' : 'origin where the dashed axes cross';
+
+  const totalH = sideLegend
+    ? Math.max(barY + 50, notesY + spec.notes.length * 19) + 44
+    : legendY + legendH;
   parts.push(
     '<?xml version="1.0" encoding="UTF-8"?>',
     `${COM_OPEN} ${displayName} — top-down reference, north up. Sources: ${sources}. ` +
     'Generated by scripts/mapSvg.mjs — do not edit by hand, run npm run maps:regen. ' +
-    'Units are meters. Origin at map centre. +x east, +z south, north = -z (up). ' +
+    `Units are meters. ${originNote[0].toUpperCase()}${originNote.slice(1)}. +x east, +z south, north = -z (up). ` +
     `Stair arrows point UPHILL. No alpha anywhere: upper levels are opaque hatched slabs. ${COM_CLOSE}`,
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 ${fmt(totalH)}" font-family="${FONT}">`,
     `<title>${esc(displayName)} — top-down map</title>`,
@@ -522,7 +540,7 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     '</defs>',
     text(480, 36, `${displayName} — top-down (north up)`,
       `text-anchor="middle" font-size="22" font-weight="700" fill="${C.text}"`),
-    text(480, 58, 'meters · origin at map centre · +x east · +z south · north = -z (up)',
+    text(480, 58, `meters · ${originNote} · +x east · +z south · north = -z (up)`,
       `text-anchor="middle" font-size="12" fill="${C.muted}"`),
     // North arrow (screen space, top right).
     '<g transform="translate(922 150)">',
@@ -545,7 +563,7 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     ...pocketLabels,
     ...flagMarks,
     ...scaleBar,
-    `<text x="70" y="${fmt(legendY - 14)}" font-size="15" font-weight="700" fill="${C.text}">Legend</text>`,
+    `<text x="${fmt(legendX)}" y="${fmt(legendY - 14)}" font-size="15" font-weight="700" fill="${C.text}">Legend</text>`,
     ...legendRows,
     ...noteLines,
     text(70, totalH - 12, `Source: ${sources} · generated — do not edit by hand.`,

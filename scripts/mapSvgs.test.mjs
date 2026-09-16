@@ -43,14 +43,19 @@ const WRITE = process.env.WRITE_MAPS === '1';
 // One row per map: the spec behind both the builder and the drawing.
 const MAPS = [
   { name: 'arena', display: 'Arena', spec: arenaSpec, sources: 'src/maps/arenaSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
-  { name: 'range', display: 'Range', spec: rangeSpec, sources: 'src/maps/rangeSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'range', display: 'Range', spec: rangeSpec, sources: 'src/maps/rangeSpec.ts' },
   { name: 'elevation', display: 'Elevation', spec: elevationSpec, sources: 'src/maps/elevationSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
   { name: 'warehouse1', display: 'Warehouse 1', spec: warehouse1Spec, sources: 'src/maps/warehouse1Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
   { name: 'warehouse2', display: 'Warehouse 2', spec: warehouse2Spec, sources: 'src/maps/warehouse2Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
 ];
 
 const pngPath = (name) => join(MAPS_DIR, `${name}.png`);
-const renderSvg = (row) => renderMapSvg(row.display, row.spec(), BOT_SPAWNS[row.name], DOM_FLAGS[row.name], row.sources);
+// Range matches run without bots (menu.ts), so its BOT_SPAWNS band — the old
+// arena band, wider than the lane — is not drawn.
+const NO_BOTS = new Set(['range']);
+const renderSvg = (row) => renderMapSvg(
+  row.display, row.spec(), NO_BOTS.has(row.name) ? null : BOT_SPAWNS[row.name], DOM_FLAGS[row.name], row.sources,
+);
 
 // Flight landings the maps promise in their own docs: [x, topY, z] per flight,
 // in spec order. The arithmetic is world.ts:stairLink's; the numbers are the

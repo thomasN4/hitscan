@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "maps:regen": "WRITE_MAPS=1 vitest run scripts/mapSvgs.test.mjs",
     "tune:bots": "node scripts/tune-bot-movement.mjs",
     "assets:export": "node scripts/assets/weapon-pipeline.mjs export",
     "assets:check": "node scripts/assets/weapon-pipeline.mjs check"

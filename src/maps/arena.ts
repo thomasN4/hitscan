@@ -49,14 +49,14 @@ export function buildArena(): void {
   // The third crate in each trio is offset so its top butt-joins rather than
   // overlapping the pair — same cover silhouette, no shared top area (issue #74).
   const crateSpots: [number, number][] = [
-    [-12,-20],[ -8,-23],[ -9,-19.9], [15,-18], [18,-15],
+    [-12,-20],[ -8,-23],[ -9,-20], [15,-18], [18,-15],
     [ 25, 20],[ 28, 17],[ 28, 20], [-20, 25], [-24, 22],
     [ 5, 38], [ 8, 35], [ 8, 38], [-32,-8], [30,-30]
   ];
   crateSpots.forEach(([x,z]) => addSolidBox(x, 0, z, 3, 3, 3, matCrate));
   // Stacked crates (second tier, reachable by jump) — moved with their ground
   // trio so they stay stacked on it.
-  addSolidBox(-8, 3, -19.9, 3, 3, 3, matCrate);
+  addSolidBox(-8, 3, -20, 3, 3, 3, matCrate);
   addSolidBox(28.5, 3, 19.5, 3, 3, 3, matCrate);
 
   // Raised platform with two access routes — the arena's elevation feature:

@@ -26,7 +26,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
-import { addSolidBox, addStairs, registerSolid } from '../world';
+import { addSolidBox, addStairs, colliders, coplanarTopOverlaps, registerSolid } from '../world';
 
 const matWall   = createCelMaterial({ color: 0xc9a86c });
 const matWall2  = createCelMaterial({ color: 0xa8895a });
@@ -65,14 +65,26 @@ export function buildElevation(): void {
   const W = 60, T = 2, H = 8;
   addSolidBox(0, 0,  W, 2*W+T*2, H, T, matWall2);
   addSolidBox(0, 0, -W, 2*W+T*2, H, T, matWall2);
-  addSolidBox( W, 0, 0, T, H, 2*W, matWall2);
-  addSolidBox(-W, 0, 0, T, H, 2*W, matWall2);
+  addSolidBox( W, 0, 0, T, H, 2*(W-T/2), matWall2);
+  addSolidBox(-W, 0, 0, T, H, 2*(W-T/2), matWall2);
 
   buildTwoStoryBuilding();
   buildBridgeAndTower();
   buildPlateau();
   buildJumpOnlyRoute();
   buildCover();
+
+  if (import.meta.env.DEV) checkCoplanarTops();
+}
+
+// DEV-only: two up-facing tops sharing a plane and a footprint z-fight.
+// Loud, not fatal, and statically dead in production — same shape as
+// maps/warehouse2.ts:checkClearances.
+function checkCoplanarTops(): void {
+  for (const o of coplanarTopOverlaps(colliders)) {
+    console.error(`[elevation] coplanar top faces at y=${o.y.toFixed(2)} over ${o.area.toFixed(2)} m2 ` +
+      `(x ${o.minX.toFixed(2)}..${o.maxX.toFixed(2)}, z ${o.minZ.toFixed(2)}..${o.maxZ.toFixed(2)})`);
+  }
 }
 
 // ---------- A. Two-story building — map centre, x [-14,14], z [-12,12] ----------
@@ -90,9 +102,11 @@ function buildTwoStoryBuilding(): void {
   addSolidBox( 8, 0, -BLD_Z, 12, BLD_WALL_H, 1, matWall);
   addSolidBox(-8, 0,  BLD_Z, 12, BLD_WALL_H, 1, matWall);
   addSolidBox( 8, 0,  BLD_Z, 12, BLD_WALL_H, 1, matWall);
-  addSolidBox(-BLD_X, 0, -7, 1, BLD_WALL_H, 10, matWall);
-  addSolidBox(-BLD_X, 0,  7, 1, BLD_WALL_H, 10, matWall);
-  addSolidBox( BLD_X, 0,  0, 1, BLD_WALL_H, 24, matWall);
+  // East/west runs stop at the north/south inner faces so the corner tops
+  // butt-join instead of overlapping (issue #74).
+  addSolidBox(-BLD_X, 0, -6.75, 1, BLD_WALL_H, 9.5, matWall);
+  addSolidBox(-BLD_X, 0,  6.75, 1, BLD_WALL_H, 9.5, matWall);
+  addSolidBox( BLD_X, 0,  0, 1, BLD_WALL_H, 23, matWall);
 
   // Second-floor slab, in four pieces around a stairwell hole at
   // x [2,6], z [-9,0]. The slab edges either side of the hole act as
@@ -125,11 +139,13 @@ function buildTwoStoryBuilding(): void {
   // North and west gaps are OPEN EDGES over a 3.6 m drop — the fall test.
   addSolidBox(-8, DECK_Y, -BLD_Z, 12, PARAPET_H, PARAPET_T, matWall2);
   addSolidBox( 8, DECK_Y, -BLD_Z, 12, PARAPET_H, PARAPET_T, matWall2);
-  addSolidBox(-BLD_X, DECK_Y, -7, PARAPET_T, PARAPET_H, 10, matWall2);
-  addSolidBox(-BLD_X, DECK_Y,  7, PARAPET_T, PARAPET_H, 10, matWall2);
+  // East/west runs stop at the north/south inner faces (z=±11.75) so the
+  // corner tops butt-join instead of overlapping (issue #74).
+  addSolidBox(-BLD_X, DECK_Y, -6.875, PARAPET_T, PARAPET_H, 9.75, matWall2);
+  addSolidBox(-BLD_X, DECK_Y,  6.875, PARAPET_T, PARAPET_H, 9.75, matWall2);
   // East gap z [-2,2] is the bridge mouth.
-  addSolidBox( BLD_X, DECK_Y, -7, PARAPET_T, PARAPET_H, 10, matWall2);
-  addSolidBox( BLD_X, DECK_Y,  7, PARAPET_T, PARAPET_H, 10, matWall2);
+  addSolidBox( BLD_X, DECK_Y, -6.875, PARAPET_T, PARAPET_H, 9.75, matWall2);
+  addSolidBox( BLD_X, DECK_Y,  6.875, PARAPET_T, PARAPET_H, 9.75, matWall2);
 }
 
 // ---------- B. Bridge + tower — narrow high traverse ----------
@@ -171,16 +187,19 @@ function buildJumpOnlyRoute(): void {
 function buildCover(): void {
   // Typed as pairs so the destructured x/z are numbers, not number | undefined
   // under noUncheckedIndexedAccess (same reason as arena.ts).
+  // The third crate in each trio is offset so its top butt-joins rather than
+  // overlapping the pair — same cover silhouette, no shared top area (issue #74).
   const crateSpots: [number, number][] = [
-    [-22, -14], [-25, -11], [-23.5, -12.5],
+    [-22, -14], [-25, -11], [-22, -11],
     [ 24, -18], [ 27, -21],
-    [-30,  16], [-33,  19], [-31.5, 17.5],
+    [-30,  16], [-33,  19], [-30, 19],
     [ 40,  26], [ 43,  23],
     [ -6,  30], [ -3,  33],
     [ 46, -14], [-46,   4],
   ];
   crateSpots.forEach(([x, z]) => addSolidBox(x, 0, z, 3, 3, 3, matCrate));
   // Second tier, reachable by jump only — bots stay on the ground beside them.
-  addSolidBox(-23.5, 3, -12.5, 3, 3, 3, matCrate);
-  addSolidBox(-31.5, 3,  17.5, 3, 3, 3, matCrate);
+  // Moved with their ground trio so they stay stacked on it.
+  addSolidBox(-22, 3, -11, 3, 3, 3, matCrate);
+  addSolidBox(-30, 3,  19, 3, 3, 3, matCrate);
 }

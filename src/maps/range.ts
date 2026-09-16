@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
-import { addSolidBox, registerSolid, registerGroupParts } from '../world';
+import { addSolidBox, colliders, coplanarTopOverlaps, registerSolid, registerGroupParts } from '../world';
 
 const matWall   = createCelMaterial({ color: 0xb0a48c });
 const matWall2  = createCelMaterial({ color: 0x968a72 });
@@ -148,8 +148,10 @@ export function buildRange(): void {
 
   // Lane walls run continuously from the backstop (z=-80.5) to the rear wall
   // (z=20) — no gaps, so no void is visible anywhere from inside the lane.
-  addSolidBox(-10, 0, -30, 1, 4, 101, matWall2);  // left wall
-  addSolidBox( 10, 0, -30, 1, 4, 101, matWall2);  // right wall
+  // The rear wall owns the corners; the side walls stop at its inner face
+  // (z=19.5) so the corner tops butt-join instead of overlapping (issue #74).
+  addSolidBox(-10, 0, -30.25, 1, 4, 99.5, matWall2);  // left wall
+  addSolidBox( 10, 0, -30.25, 1, 4, 99.5, matWall2);  // right wall
   addSolidBox(0, 0, 20, 21, 4, 1, matWall2);      // rear wall behind firing line
   addSolidBox(0, 0, -80.5, 21, 5, 1, matWall);    // backstop
 
@@ -173,4 +175,16 @@ export function buildRange(): void {
   addTarget(-5.5, -25);             // 30 m
   addTarget( 5.5, -35, { height: 0.6 });  // 40 m, slightly raised
   addTarget( 0,   -55);             // 60 m — full-lane accuracy test
+
+  if (import.meta.env.DEV) checkCoplanarTops();
+}
+
+// DEV-only: two up-facing tops sharing a plane and a footprint z-fight.
+// Loud, not fatal, and statically dead in production — same shape as
+// maps/warehouse2.ts:checkClearances.
+function checkCoplanarTops(): void {
+  for (const o of coplanarTopOverlaps(colliders)) {
+    console.error(`[range] coplanar top faces at y=${o.y.toFixed(2)} over ${o.area.toFixed(2)} m2 ` +
+      `(x ${o.minX.toFixed(2)}..${o.maxX.toFixed(2)}, z ${o.minZ.toFixed(2)}..${o.maxZ.toFixed(2)})`);
+  }
 }

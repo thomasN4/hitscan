@@ -2,7 +2,7 @@
 //
 // Placement lives in ./elevationSpec.ts: buildElevation attaches that spec to
 // the world (kind -> material), scripts/mapSvg.mjs draws it to
-// docs/maps/elevation.svg. All geometry still goes through world.ts, as
+// docs/maps/elevation.png. All geometry still goes through world.ts, as
 // always — never scene.add a solid here.
 import * as THREE from 'three';
 import { createCelMaterial } from '../core/materials';

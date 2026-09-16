@@ -2,7 +2,7 @@
 //
 // The single source of truth for two consumers: maps/warehouse2.ts attaches it
 // to the world (kind -> material), scripts/mapSvg.mjs draws it to
-// docs/maps/warehouse2.svg. See maps/mapSpec.ts for the contract.
+// docs/maps/warehouse2.png. See maps/mapSpec.ts for the contract.
 //
 // Spatial grammar: VERTICAL. An 8 m catwalk ring runs the full perimeter at
 // 5.1 m around a 44 x 24 void cut to the floor, so the ring looks down on the

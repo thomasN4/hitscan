@@ -2,7 +2,7 @@
 //
 // Placement lives in ./warehouse1Spec.ts: buildWarehouse1 attaches that spec
 // to the world (kind -> material), scripts/mapSvg.mjs draws it to
-// docs/maps/warehouse1.svg. All geometry still goes through world.ts. Every
+// docs/maps/warehouse1.png. All geometry still goes through world.ts. Every
 // staircase still goes through addStairs specifically, which is also what
 // publishes its NavLink — a hand-built flight is one bots cannot see.
 import * as THREE from 'three';

@@ -5,7 +5,7 @@
 // body-part dimensions as Bot in bots.ts, so headshot practice transfers)
 // decorated with elliptical bullseye rings. Nothing here shoots back.
 // Geometry positions and extents live in ./rangeSpec.ts: buildRange attaches
-// that spec to the world, scripts/mapSvg.mjs draws it to docs/maps/range.svg.
+// that spec to the world, scripts/mapSvg.mjs draws it to docs/maps/range.png.
 // Canvas-only detail (label/bullseye textures, silhouette part dims matching
 // bots.ts) stays here.
 //

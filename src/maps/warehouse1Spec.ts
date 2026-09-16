@@ -2,7 +2,7 @@
 //
 // The single source of truth for two consumers: maps/warehouse1.ts attaches it
 // to the world (kind -> material), scripts/mapSvg.mjs draws it to
-// docs/maps/warehouse1.svg. See maps/mapSpec.ts for the contract.
+// docs/maps/warehouse1.png. See maps/mapSpec.ts for the contract.
 //
 // Spatial grammar: an AISLE GRID. Six racking rows run north-south, cut by two
 // cross-aisles per side, so almost every fight happens along a lane with a

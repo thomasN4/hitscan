@@ -2,7 +2,7 @@
 //
 // The single source of truth for two consumers: maps/arena.ts:buildArena
 // attaches it to the world (kind -> material), and scripts/mapSvg.mjs draws it
-// to docs/maps/arena.svg. Change the numbers here, never at a use site — a
+// to docs/maps/arena.png. Change the numbers here, never at a use site — a
 // named constant that nothing imports, or placement arithmetic surviving in
 // the builder beside this file, is two sources of truth plus a comment that
 // lies (maps/mapSpec.ts).

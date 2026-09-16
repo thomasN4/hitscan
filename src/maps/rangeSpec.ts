@@ -1,7 +1,7 @@
 // maps/rangeSpec.ts — the shooting range's geometry as pure data.
 //
 // The single source of truth for two consumers: maps/range.ts:buildRange
-// attaches it to the world, scripts/mapSvg.mjs draws it to docs/maps/range.svg.
+// attaches it to the world, scripts/mapSvg.mjs draws it to docs/maps/range.png.
 // Visual-only detail stays in the builder (canvas label textures, bullseye
 // rings, silhouette part dims matching bots.ts) — positions and extents live
 // here. See maps/mapSpec.ts for the contract.

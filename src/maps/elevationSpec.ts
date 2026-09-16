@@ -2,7 +2,7 @@
 //
 // The single source of truth for two consumers: maps/elevation.ts:buildElevation
 // attaches it to the world (kind -> material), scripts/mapSvg.mjs draws it to
-// docs/maps/elevation.svg. See maps/mapSpec.ts for the contract.
+// docs/maps/elevation.png. See maps/mapSpec.ts for the contract.
 //
 // Unlike arena.ts (a place to fight) this is an INSTRUMENT: every feature exists
 // to make one bot behavior observable (which staircase a bot finds, what it

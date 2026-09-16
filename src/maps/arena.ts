@@ -1,7 +1,7 @@
 // arena.ts — builds the de_dust-inspired arena geometry.
 //
 // Placement lives in ./arenaSpec.ts: buildArena attaches that spec to the
-// world (kind -> material), scripts/mapSvg.mjs draws it to docs/maps/arena.svg.
+// world (kind -> material), scripts/mapSvg.mjs draws it to docs/maps/arena.png.
 // All geometry still goes through world.ts, which registers each solid as both
 // a raycast target and a movement AABB. Do not add meshes to the scene
 // directly: that is how you get walk-through / shoot-through bugs.

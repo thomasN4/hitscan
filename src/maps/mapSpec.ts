@@ -2,10 +2,10 @@
 //
 // Each map's placement arithmetic lives in its `<name>Spec.ts` sibling as plain
 // data (no scene, no materials, no DOM), and the `<name>.ts` builder attaches
-// that data to the world. scripts/mapSvg.mjs renders the same data to
-// docs/maps/*.svg. One source of truth, two consumers — a map cannot drift
+// that data to the world. scripts/mapSvg.mjs + mapPng.mjs render the same data to
+// docs/maps/*.png. One source of truth, two consumers — a map cannot drift
 // from its reference drawing without also moving its own geometry, and the
-// scripts/mapSvgs.test.mjs gate fails while a committed SVG is stale.
+// scripts/mapSvgs.test.mjs gate fails while a committed PNG is stale.
 //
 // The split follows the sim/recoil.ts:convertOnSwap precedent: rather than
 // mocking the browser for the suite, the pure half moves behind a seam the
@@ -104,7 +104,7 @@ export interface GroundRect {
 
 /** Everything one reference map draws, in build order. */
 export interface MapSpec {
-  /** MapName key: docs/maps/<name>.svg. Must match a BUILDERS key. */
+  /** MapName key: docs/maps/<name>.png. Must match a BUILDERS key. */
   name: string;
   ground: GroundRect;
   boxes: MapBox[];

@@ -3,7 +3,7 @@
 //
 // Placement lives in ./warehouse2Spec.ts: buildWarehouse2 attaches that spec
 // to the world (kind -> material), scripts/mapSvg.mjs draws it to
-// docs/maps/warehouse2.svg. All geometry still goes through world.ts.
+// docs/maps/warehouse2.png. All geometry still goes through world.ts.
 //
 // The third full combat map, and the first whose spatial grammar is VERTICAL:
 // an 8 m catwalk ring runs the full perimeter at 5.1 m, and the 44 x 24 middle

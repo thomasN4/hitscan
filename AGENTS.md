@@ -501,7 +501,7 @@ npm run lint                   # ESLint (flat config); no-undef for .js, type-aw
 npm run typecheck              # tsc --noEmit; strict + noUncheckedIndexedAccess
 npm test                       # Vitest: unit tests + the doc gates (no browser, ~200 ms)
 node scripts/smoke-test.mjs    # headless E2E check (requires dev server running)
-npm run maps:regen             # re-emit docs/maps/*.svg from src/maps/*Spec.ts (WRITE_MAPS=1 gate)
+npm run maps:regen             # re-emit docs/maps/*.png from src/maps/*Spec.ts (WRITE_MAPS=1 gate)
 ```
 
 Four static/sim layers, deliberately split:

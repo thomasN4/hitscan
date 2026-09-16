@@ -1,9 +1,10 @@
 // scripts/mapSvg.mjs — top-down reference maps, rendered from the map specs.
 //
 // Pure string building, zero dependencies: (displayName, spec, spawns, flags)
-// in, one SVG document out. The committed docs/maps/*.svg files are this
-// function's output byte-for-byte — regenerate with `npm run maps:regen`,
-// never by hand (scripts/mapSvgs.test.mjs fails while a file is stale).
+// in, one SVG document out. The SVG is never committed: mapPng.mjs rasterises
+// it to docs/maps/*.png, and those files are this pipeline's output
+// byte-for-byte — regenerate with `npm run maps:regen`, never by hand
+// (scripts/mapSvgs.test.mjs fails while a file is stale).
 //
 // The whole file honours one visual rule: NO alpha blending anywhere. No
 // `opacity`/`fill-opacity`/`stroke-opacity` attributes, no rgba()/hsla(), no
@@ -16,7 +17,8 @@
 // a deck (ground-floor walls) is drawn OVER the deck fill in paint order —
 // never seen through a gap. Unpainted shape interiors (`fill="none"` outlines
 // for stairs, roofs, targets) always sit over an opaque layer below.
-const FONT = 'system-ui, -apple-system, sans-serif';
+// Resolved only against the vendored files in scripts/assets/fonts (mapPng.mjs).
+const FONT = 'Noto Sans';
 
 // Opaque palette. Halo is the light label backing (solid paint-order stroke).
 const C = {

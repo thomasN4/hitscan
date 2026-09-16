@@ -1,15 +1,17 @@
 // scripts/mapSvgs.test.mjs — the reference-map sync gate.
 //
-// docs/maps/*.svg are GENERATED from the map specs (scripts/mapSvg.mjs over
-// src/maps/*Spec.ts plus BOT_SPAWNS/DOM_FLAGS), and the builders attach those
+// docs/maps/*.png are GENERATED from the map specs (scripts/mapSvg.mjs over
+// src/maps/*Spec.ts plus BOT_SPAWNS/DOM_FLAGS, rasterised by
+// scripts/mapPng.mjs), and the builders attach those
 // same specs to the world — one source of truth, two consumers. This gate is
 // what makes that claim enforceable rather than aspirational:
 //
-// - every BUILDERS key has a spec and a committed SVG (a new map with no
+// - every BUILDERS key has a spec and a committed PNG (a new map with no
 //   drawing fails here, the way a new MapName without a builder fails tsc);
 // - the committed bytes equal a fresh render (a spec change with no regen
 //   fails — run `npm run maps:regen`, i.e. WRITE_MAPS=1, to re-emit);
-// - no transparency attribute survives anywhere (the opaque-only rule);
+// - no transparency attribute survives anywhere in the SVG (the opaque-only
+//   rule), and every rasterised pixel is fully opaque;
 // - flight landings and entry counts are pinned, so a spec edit that moves a
 //   stair mouth or drops a box reads as a named diff, not a silent redraw.
 //
@@ -32,6 +34,7 @@ import { elevationSpec } from '../src/maps/elevationSpec';
 import { warehouse1Spec } from '../src/maps/warehouse1Spec';
 import { warehouse2Spec } from '../src/maps/warehouse2Spec';
 import { flightTop, renderMapSvg } from './mapSvg.mjs';
+import { MAP_PNG_WIDTH, renderMapPng, renderMapRaster } from './mapPng.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MAPS_DIR = join(ROOT, 'docs', 'maps');
@@ -46,8 +49,8 @@ const MAPS = [
   { name: 'warehouse2', display: 'Warehouse 2', spec: warehouse2Spec, sources: 'src/maps/warehouse2Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
 ];
 
-const svgPath = (name) => join(MAPS_DIR, `${name}.svg`);
-const render = (row) => renderMapSvg(row.display, row.spec(), BOT_SPAWNS[row.name], DOM_FLAGS[row.name], row.sources);
+const pngPath = (name) => join(MAPS_DIR, `${name}.png`);
+const renderSvg = (row) => renderMapSvg(row.display, row.spec(), BOT_SPAWNS[row.name], DOM_FLAGS[row.name], row.sources);
 
 // Flight landings the maps promise in their own docs: [x, topY, z] per flight,
 // in spec order. The arithmetic is world.ts:stairLink's; the numbers are the
@@ -83,9 +86,11 @@ const TRANSPARENCY = /opacity|rgba\(|hsla\(|transparent/i;
 const VIEWBOX = /viewBox="0 0 (\S+) (\S+)"/;
 const PAPER = /^<rect x="0" y="0" width="\1" height="\2" fill="#ffffff"\/>$/m;
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 if (WRITE) {
   mkdirSync(MAPS_DIR, { recursive: true });
-  for (const row of MAPS) writeFileSync(svgPath(row.name), render(row));
+  for (const row of MAPS) writeFileSync(pngPath(row.name), renderMapPng(renderSvg(row)));
 }
 
 describe('reference maps', () => {
@@ -112,16 +117,27 @@ describe('reference maps', () => {
     });
   });
 
-  test.each(MAPS)('$name committed SVG is fresh, opaque and sourced', (row) => {
-    const committed = readFileSync(svgPath(row.name), 'utf8');
-    // Non-vacuous: a collapsed generator must fail here, not byte-match empty.
-    expect(committed.length).toBeGreaterThan(2048);
-    expect(committed).not.toMatch(TRANSPARENCY);
-    const box = committed.match(VIEWBOX);
+  test.each(MAPS)('$name SVG source is opaque and sourced', (row) => {
+    const svg = renderSvg(row);
+    // Non-vacuous: a collapsed generator must fail here, not rasterise empty.
+    expect(svg.length).toBeGreaterThan(2048);
+    expect(svg).not.toMatch(TRANSPARENCY);
+    const box = svg.match(VIEWBOX);
     expect(box).not.toBeNull();
-    expect(committed).toMatch(new RegExp(PAPER.source.replace('\\1', box[1]).replace('\\2', box[2]), 'm'));
-    expect(committed).toContain('npm run maps:regen');
-    expect(committed).toContain(row.sources);
-    if (!WRITE) expect(committed).toBe(render(row));
+    expect(svg).toMatch(new RegExp(PAPER.source.replace('\\1', box[1]).replace('\\2', box[2]), 'm'));
+    expect(svg).toContain('npm run maps:regen');
+    expect(svg).toContain(row.sources);
+  });
+
+  test.each(MAPS)('$name committed PNG is fresh and opaque', (row) => {
+    const committed = readFileSync(pngPath(row.name));
+    expect(committed.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true);
+    // IHDR width sits at byte 16.
+    expect(committed.readUInt32BE(16)).toBe(MAP_PNG_WIDTH);
+    const { png, pixels } = renderMapRaster(renderSvg(row));
+    let minAlpha = 255;
+    for (let i = 3; i < pixels.length; i += 4) minAlpha = Math.min(minAlpha, pixels[i]);
+    expect(minAlpha).toBe(255);
+    if (!WRITE) expect(committed.equals(png)).toBe(true);
   });
 });

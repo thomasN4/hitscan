@@ -3,9 +3,11 @@
 // A fully enclosed lane (floor, side walls, rear wall, back berm) with
 // distance markers painted on the floor and bot-silhouette targets (same
 // body-part dimensions as Bot in bots.ts, so headshot practice transfers)
-// decorated with elliptical bullseye rings.
-// All target parts are registered as `solids` so bullet-hole decals work
-// on them; nothing here shoots back.
+// decorated with elliptical bullseye rings. Nothing here shoots back.
+// Geometry positions and extents live in ./rangeSpec.ts: buildRange attaches
+// that spec to the world, scripts/mapSvg.mjs draws it to docs/maps/range.png.
+// Canvas-only detail (label/bullseye textures, silhouette part dims matching
+// bots.ts) stays here.
 //
 // Geometry goes through world.ts. This file used to keep its own copy of the
 // registration logic, and that copy shipped without the `colliders` push —
@@ -15,11 +17,29 @@ import * as THREE from 'three';
 import { createCelMaterial } from '../core/materials';
 import { scene } from '../core/engine';
 import { addSolidBox, colliders, coplanarTopOverlaps, registerSolid, registerGroupParts } from '../world';
+import { LANE_CZ, LANE_D, LANE_W, rangeSpec } from './rangeSpec';
+import type { MapBoxKind } from './mapSpec';
 
 const matWall   = createCelMaterial({ color: 0xb0a48c });
 const matWall2  = createCelMaterial({ color: 0x968a72 });
 const matGround = createCelMaterial({ color: 0xb59a67 });
 const matPost   = createCelMaterial({ color: 0x6b5a3e });
+
+/**
+ * Spec kinds to the materials they wear in game. Partial on purpose: a kind
+ * the spec grows that this map cannot paint is a loud startup error, not a
+ * fallback material nobody chose.
+ */
+const RANGE_MATS: Partial<Record<MapBoxKind, THREE.Material>> = {
+  wall: matWall,
+  wall2: matWall2,
+};
+
+function materialFor(kind: MapBoxKind): THREE.Material {
+  const mat = RANGE_MATS[kind];
+  if (!mat) throw new Error(`[range] spec box kind '${kind}' has no material — extend RANGE_MATS`);
+  return mat;
+}
 
 /** Options for makeTextTexture — all optional, with the shipped defaults. */
 interface TextTextureOpts {
@@ -137,44 +157,28 @@ function addTarget(x: number, z: number, { height = 0, yaw = 0 }: TargetOpts = {
 
 /** Build the shooting range. Called once, via the maps/index.ts registry. */
 export function buildRange(): void {
-  // Floor spans the full lane: z from -95 to +35, so every wall, target and
-  // marker stands on it; the far edge stays hidden behind the backstop + fog.
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 130), matGround);
+  const spec = rangeSpec();
+  // The far edge stays hidden behind the backstop + fog.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(LANE_W, LANE_D), matGround);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.z = -30;
+  ground.position.z = LANE_CZ;
   ground.receiveShadow = true;
   scene.add(ground);
   registerSolid(ground); // raycast target only — the lane walls bound movement
 
-  // Lane walls run continuously from the backstop (z=-80.5) to the rear wall
-  // (z=20) — no gaps, so no void is visible anywhere from inside the lane.
-  // The rear wall owns the corners; the side walls stop at its inner face
-  // (z=19.5) so the corner tops butt-join instead of overlapping (issue #74).
-  addSolidBox(-10, 0, -30.25, 1, 4, 99.5, matWall2);  // left wall
-  addSolidBox( 10, 0, -30.25, 1, 4, 99.5, matWall2);  // right wall
-  addSolidBox(0, 0, 20, 21, 4, 1, matWall2);      // rear wall behind firing line
-  addSolidBox(0, 0, -80.5, 21, 5, 1, matWall);    // backstop
-
-  // Firing-line marker strip across the floor
-  const line = new THREE.Mesh(new THREE.BoxGeometry(18, 0.02, 0.4), createCelMaterial({ color: 0x3a3226 }));
-  line.position.set(0, 0.01, 5);
-  scene.add(line);
-
-  // Distance markers down the center of each half-lane (60 M flanks the
-  // centered far target like the closer pairs do).
-  for (const d of [10, 20, 30, 40, 50, 60]) {
-    addFloorLabel(`${d} M`, -5, 5 - d);
-    addFloorLabel(`${d} M`,  5, 5 - d);
+  for (const b of spec.boxes) {
+    // The firing-line strip is paint, not geometry: unregistered, as before.
+    if (b.kind === 'marker') {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), createCelMaterial({ color: 0x3a3226 }));
+      line.position.set(b.x, b.y + b.h / 2, b.z);
+      scene.add(line);
+      continue;
+    }
+    addSolidBox(b.x, b.y, b.z, b.w, b.h, b.d, materialFor(b.kind));
   }
 
-  // Targets: staggered distances and heights on both halves of the lane,
-  // angled slightly toward the firing line. Near ones for spray control,
-  // far ones for accuracy.
-  addTarget(-4.5, -5);              // 10 m
-  addTarget( 4.5, -15, { height: 1.0 });  // 20 m, raised
-  addTarget(-5.5, -25);             // 30 m
-  addTarget( 5.5, -35, { height: 0.6 });  // 40 m, slightly raised
-  addTarget( 0,   -55);             // 60 m — full-lane accuracy test
+  for (const l of spec.labels) addFloorLabel(l.text, l.x, l.z);
+  for (const t of spec.targets) addTarget(t.x, t.z, { height: t.height, yaw: t.yaw });
 
   if (import.meta.env.DEV) checkCoplanarTops();
 }

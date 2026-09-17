@@ -1,0 +1,195 @@
+// scripts/mapSvgs.test.mjs — the reference-map sync gate.
+//
+// docs/maps/*.png are GENERATED from the map specs (scripts/mapSvg.mjs over
+// src/maps/*Spec.ts plus BOT_SPAWNS/DOM_FLAGS, rasterised by
+// scripts/mapPng.mjs), and the builders attach those
+// same specs to the world — one source of truth, two consumers. This gate is
+// what makes that claim enforceable rather than aspirational:
+//
+// - every BUILDERS key has a spec and a committed PNG (a new map with no
+//   drawing fails here, the way a new MapName without a builder fails tsc);
+// - the committed bytes equal a fresh render (a spec change with no regen
+//   fails — run `npm run maps:regen`, i.e. WRITE_MAPS=1, to re-emit);
+// - no unsanctioned transparency survives in the SVG: geometry is fully
+//   opaque, and every `fill-opacity` must be one of the two named washes
+//   (spawn pockets, flag discs) — while every rasterised pixel stays fully
+//   opaque, composited over the paper rect;
+// - flight landings and entry counts are pinned, so a spec edit that moves a
+//   stair mouth or drops a box reads as a named diff, not a silent redraw.
+//
+// This is a repo-hygiene check, not a simulation test: it reads specs and
+// committed PNGs off disk (the SVGs live only in memory — they are generated
+// fresh per render and never committed) and asserts nothing about game
+// behavior. It lives in scripts/
+// so src/ stays game code, and rides in `npm test` like the lesson-numbering
+// and plan-relay-log gates. Builders contain no placement numbers of their own
+// — every number lives in the spec — so builder/spec drift would mean deleting
+// the consumption loop, which review catches; the byte-match here catches
+// everything else.
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, test } from 'vitest';
+import { BUILDERS } from '../src/maps/index';
+import { BOT_SPAWNS, DOM_FLAGS } from '../src/core/state';
+import { arenaSpec } from '../src/maps/arenaSpec';
+import { rangeSpec } from '../src/maps/rangeSpec';
+import { elevationSpec } from '../src/maps/elevationSpec';
+import { warehouse1Spec } from '../src/maps/warehouse1Spec';
+import { warehouse2Spec } from '../src/maps/warehouse2Spec';
+import { FLAG_OPACITY, POCKET_OPACITY, flightTop, renderMapSvg } from './mapSvg.mjs';
+import { stairLink } from '../src/world';
+import { MAP_PNG_WIDTH, renderMapPng, renderMapRaster } from './mapPng.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const MAPS_DIR = join(ROOT, 'docs', 'maps');
+const WRITE = process.env.WRITE_MAPS === '1';
+
+// One row per map: the spec behind both the builder and the drawing, plus the
+// legend words for the two wall fills. The paper fills are fixed, but the game
+// finish is per-map (dust masonry, lane walls, shed/office, steel shell), so a
+// renderer-owned global string would lie about some map — the words travel
+// with the row, next to `sources`.
+const MAPS = [
+  { name: 'arena', display: 'Arena', spec: arenaSpec, walls: { wall: 'masonry wall', wall2: 'masonry wall, darker' }, sources: 'src/maps/arenaSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'range', display: 'Range', spec: rangeSpec, walls: { wall: 'lane wall', wall2: 'lane wall, darker' }, sources: 'src/maps/rangeSpec.ts' },
+  { name: 'elevation', display: 'Elevation', spec: elevationSpec, walls: { wall: 'masonry wall', wall2: 'masonry wall, darker' }, sources: 'src/maps/elevationSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'warehouse1', display: 'Warehouse 1', spec: warehouse1Spec, walls: { wall: 'corrugated shed wall', wall2: 'office wall (drawn darker)' }, sources: 'src/maps/warehouse1Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'warehouse2', display: 'Warehouse 2', spec: warehouse2Spec, walls: { wall: 'corrugated steel shell' }, sources: 'src/maps/warehouse2Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+];
+
+const pngPath = (name) => join(MAPS_DIR, `${name}.png`);
+// Range matches run without bots (menu.ts), so its BOT_SPAWNS band — the old
+// arena band, wider than the lane — is not drawn.
+const NO_BOTS = new Set(['range']);
+const renderSvg = (row) => renderMapSvg(
+  row.display, row.spec(), NO_BOTS.has(row.name) ? null : BOT_SPAWNS[row.name], DOM_FLAGS[row.name], row.sources,
+  row.walls,
+);
+
+// Flight landings the maps promise in their own docs: [x, topY, z] per flight,
+// in spec order. The arithmetic is sim/stairs.ts:stairTop's, shared by
+// world.ts:stairLink and mapSvg.mjs:flightTop; the numbers are the
+// builders' (elevation's "flush with the slab's south edge at z = 0", the
+// warehouse2 lip join, ...). A landing that moves without its map's join
+// moving routes bots at a point no staircase reaches.
+const FLIGHT_TOPS = {
+  arena: [[26, 2.4, 30]],
+  range: [],
+  elevation: [[4, 3.6, 0], [8, 3.6, 12.5], [35, 3.6, 6.5], [-27, 3.0, -30]],
+  warehouse1: [[0, 3.6, 8], [0, 3.6, -8], [24, 1.2, 45], [-24, 1.2, 45], [24, 1.2, -45], [-24, 1.2, -45]],
+  warehouse2: [[-22, 5.1, -8], [22, 5.1, 8], [32.5, 5.1, 3]],
+};
+
+// Entry counts per map: [boxes, flights, lifts, targets, labels]. A dropped
+// box reads here as a number, not as a silently thinner drawing.
+const ENTRY_COUNTS = {
+  arena: [29, 1, 0, 0, 0],
+  range: [5, 0, 0, 5, 12],
+  elevation: [44, 4, 0, 0, 0],
+  warehouse1: [66, 6, 0, 0, 0],
+  warehouse2: [111, 3, 2, 0, 0],
+};
+
+// Transparency, in every spelling the renderer could emit by accident —
+// except the two sanctioned washes. `fill-opacity` is matched separately
+// below and pinned to its named constants; `none` (unpainted hatch gaps,
+// outlines) is NOT banned — over the paper rect it is deterministic
+// overpaint, not alpha.
+const TRANSPARENCY = /stroke-opacity|rgba\(|hsla\(|transparent/i;
+// A bare `opacity` attribute (as opposed to `fill-opacity`) would wash whole
+// groups including their strokes and text — never what a wash is for.
+const BARE_OPACITY = /(^|[\s"';])opacity="/m;
+
+// The paper rect: first painted element, covering the whole viewBox. Without
+// it the drawing outside the ground rect shows the viewer's default
+// (transparent) — and the pocket/flag washes composite over it to fully
+// opaque pixels, which the PNG alpha check below enforces.
+const VIEWBOX = /viewBox="0 0 (\S+) (\S+)"/;
+const PAPER = /^<rect x="0" y="0" width="\1" height="\2" fill="#ffffff"\/>$/m;
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+if (WRITE) {
+  mkdirSync(MAPS_DIR, { recursive: true });
+  for (const row of MAPS) writeFileSync(pngPath(row.name), renderMapPng(renderSvg(row)));
+}
+
+describe('reference maps', () => {
+  test('every BUILDERS map has a spec row and vice versa', () => {
+    expect(MAPS.map((m) => m.name).sort()).toEqual(Object.keys(BUILDERS).sort());
+  });
+
+  test('arena spec tags its four buildings for the ligne-claire pass', () => {
+    // The builder assigns MapBox.name onto the mesh; core/ligneClaire.ts
+    // selects facades on 'arena-building'. A spec edit that drops a tag
+    // silently unpaints a building, so the count is pinned here.
+    const tagged = arenaSpec().boxes.filter((b) => b.name === 'arena-building');
+    expect(tagged).toHaveLength(4);
+  });
+
+  test.each(MAPS)('$name wall legend labels its wall kinds', (row) => {
+    // The renderer falls back to structural labels ('wall mass'); a row that
+    // relies on the fallback reintroduces the generic wording this gate
+    // exists to prevent — every used wall kind needs its map's own words.
+    const kinds = new Set(row.spec().boxes.map((b) => b.kind));
+    if (kinds.has('wall')) expect(row.walls?.wall).toBeDefined();
+    if (kinds.has('wall2')) expect(row.walls?.wall2).toBeDefined();
+  });
+
+  test.each(MAPS)('$name spec carries the pinned entries', (row) => {
+    const spec = row.spec();
+    expect(spec.name).toBe(row.name);
+    expect([spec.boxes.length, spec.flights.length, spec.lifts.length, spec.targets.length, spec.labels.length])
+      .toEqual(ENTRY_COUNTS[row.name]);
+  });
+
+  test.each(MAPS)('$name flights land where the map promises', (row) => {
+    const spec = row.spec();
+    expect(spec.flights.length).toBe(FLIGHT_TOPS[row.name].length);
+    spec.flights.forEach((f, i) => {
+      const top = flightTop(f);
+      const [x, y, z] = FLIGHT_TOPS[row.name][i];
+      expect(top.x).toBeCloseTo(x, 9);
+      expect(top.y).toBeCloseTo(y, 9);
+      expect(top.z).toBeCloseTo(z, 9);
+      // The drawing and navigation share sim/stairs.ts:stairTop, but nothing
+      // stops a future edit from bypassing it on one side — so pin the two
+      // entry points against each other for every spec flight.
+      const link = stairLink(f.x, f.y, f.z, f.width, f.stepH, f.stepD, f.count, f.dir);
+      expect(top.x).toBeCloseTo(link.top.x, 12);
+      expect(top.y).toBeCloseTo(link.top.y, 12);
+      expect(top.z).toBeCloseTo(link.top.z, 12);
+    });
+  });
+
+  test.each(MAPS)('$name SVG source is sanctioned-only and sourced', (row) => {
+    const svg = renderSvg(row);
+    // Non-vacuous: a collapsed generator must fail here, not rasterise empty.
+    expect(svg.length).toBeGreaterThan(2048);
+    expect(svg).not.toMatch(TRANSPARENCY);
+    expect(svg).not.toMatch(BARE_OPACITY);
+    // New translucency arrives as a named decision, not a drift: every wash
+    // must be one of the two constants mapSvg.mjs exports.
+    for (const m of svg.matchAll(/fill-opacity="([^"]+)"/g)) {
+      expect([String(POCKET_OPACITY), String(FLAG_OPACITY)]).toContain(m[1]);
+    }
+    const box = svg.match(VIEWBOX);
+    expect(box).not.toBeNull();
+    expect(svg).toMatch(new RegExp(PAPER.source.replace('\\1', box[1]).replace('\\2', box[2]), 'm'));
+    expect(svg).toContain('npm run maps:regen');
+    expect(svg).toContain(row.sources);
+  });
+
+  test.each(MAPS)('$name committed PNG is fresh and opaque', (row) => {
+    const committed = readFileSync(pngPath(row.name));
+    expect(committed.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true);
+    // IHDR width sits at byte 16.
+    expect(committed.readUInt32BE(16)).toBe(MAP_PNG_WIDTH);
+    const { png, pixels } = renderMapRaster(renderSvg(row));
+    let minAlpha = 255;
+    for (let i = 3; i < pixels.length; i += 4) minAlpha = Math.min(minAlpha, pixels[i]);
+    expect(minAlpha).toBe(255);
+    if (!WRITE) expect(committed.equals(png)).toBe(true);
+  });
+});

@@ -1,7 +1,7 @@
 // scripts/mapSvg.mjs — top-down reference maps, rendered from the map specs.
 //
-// Pure string building, zero dependencies: (displayName, spec, spawns|null, flags)
-// in, one SVG document out. The SVG is never committed: mapPng.mjs rasterises
+// Pure string building with one pure import (the stair-landing helper below):
+// (displayName, spec, spawns|null, flags) in, one SVG document out. The SVG is never committed: mapPng.mjs rasterises
 // it to docs/maps/*.png, and those files are this pipeline's output
 // byte-for-byte — regenerate with `npm run maps:regen`, never by hand
 // (scripts/mapSvgs.test.mjs fails while a file is stale).
@@ -18,6 +18,12 @@
 // never seen through a gap. Unpainted shape interiors (`fill="none"` outlines
 // for stairs, roofs, targets) always sit over an opaque layer below.
 // Resolved only against the vendored files in scripts/assets/fonts (mapPng.mjs).
+//
+// The one runtime import is the pure stair-landing helper shared with
+// navigation (src/sim/stairs.ts:stairTop): extensionless like every other
+// intra-repo specifier, resolved by vitest, which is the only runner —
+// `npm run maps:regen` is a vitest run, never plain `node`.
+import { stairTop } from '../src/sim/stairs';
 const FONT = 'Noto Sans';
 
 // Opaque palette. Halo is the light label backing (solid paint-order stroke).
@@ -91,14 +97,9 @@ function flightRect(f) {
   return { x0, x1, z0, z1 };
 }
 
-/** Top landing of one flight: the point navigation aims at (world.ts:stairLink). */
+/** Top landing of one flight: the point navigation aims at (sim/stairs.ts). */
 export function flightTop(f) {
-  const run = f.count * f.stepD;
-  return {
-    x: f.dir === 'x+' ? f.x + run : f.dir === 'x-' ? f.x - run : f.x,
-    y: f.y + f.count * f.stepH,
-    z: f.dir === 'z+' ? f.z + run : f.dir === 'z-' ? f.z - run : f.z,
-  };
+  return stairTop(f.x, f.y, f.z, f.stepH, f.stepD, f.count, f.dir);
 }
 
 /** Kinds drawn as solid ground-level masses, and their fills. */
@@ -217,7 +218,36 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   const masses = [];
   const decks = [];
   const roofBoxes = [];
-  const placedHeights = [];
+  // One height label per deck cluster: pieces whose footprints touch (within
+  // a 0.1 m tolerance) at the same top height are one walking surface, so
+  // they share a label anchored on the cluster's largest piece. Centre
+  // distance cannot decide this — elevation's four slab pieces around the
+  // stairwell hole and warehouse2's ring slabs have distant centres but
+  // connected footprints, and each printed the same number four times.
+  const deckBoxes = spec.boxes.filter((b) => b.kind === 'deck' && b.w * b.d >= 12);
+  const deckRoot = deckBoxes.map((_, i) => i);
+  const deckFind = (i) => {
+    while (deckRoot[i] !== i) {
+      deckRoot[i] = deckRoot[deckRoot[i]];
+      i = deckRoot[i];
+    }
+    return i;
+  };
+  deckBoxes.forEach((a, i) => {
+    const ax0 = a.x - a.w / 2;
+    const ax1 = a.x + a.w / 2;
+    const az0 = a.z - a.d / 2;
+    const az1 = a.z + a.d / 2;
+    const atop = a.y + a.h;
+    deckBoxes.forEach((c, j) => {
+      if (j <= i || Math.abs(atop - (c.y + c.h)) >= 1e-9) return;
+      const TOL = 0.1;
+      if (ax0 - TOL <= c.x + c.w / 2 && c.x - c.w / 2 - TOL <= ax1 &&
+          az0 - TOL <= c.z + c.d / 2 && c.z - c.d / 2 - TOL <= az1) {
+        deckRoot[deckFind(i)] = deckFind(j);
+      }
+    });
+  });
   for (const b of spec.boxes) {
     const x = X(b.x - b.w / 2);
     const y = Y(b.z - b.d / 2);
@@ -225,22 +255,10 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     const h = b.d * scale;
     if (b.kind === 'beam') continue; // roof structure: the roofline stands for it (see legend)
     if (b.kind === 'deck') {
-      const top = b.y + b.h;
       decks.push(
         `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" ` +
         `fill="url(#hatchW)" stroke="${C.deckOutline}" stroke-width="1.6" stroke-dasharray="7 4"/>`,
       );
-      // One height label per deck cluster: slab pieces around one another
-      // would otherwise pile the same number four deep (elevation's four
-      // second-floor pieces around flag B).
-      if (b.w * b.d >= 12 && !placedHeights.some((p) => Math.abs(p.y - top) < 1e-9 && Math.hypot(p.x - b.x, p.z - b.z) < 7)) {
-        placedHeights.push({ x: b.x, z: b.z, y: top });
-        decks.push(text(
-          X(b.x), Y(b.z) + 5, fmt(top),
-          `text-anchor="middle" font-size="13" font-weight="700" fill="${C.deckOutline}" ` +
-          `paint-order="stroke" stroke="${C.halo}" stroke-width="4"`,
-        ));
-      }
       continue;
     }
     if (b.kind === 'roof' || b.kind === 'glass') {
@@ -255,6 +273,34 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
       `fill="${MASS_FILL[b.kind]}" stroke="${stroke}" stroke-width="1.2"${dash}/>`,
     );
   }
+
+  // One label per cluster, anchored on its largest piece (a bbox centre could
+  // land in the hole the cluster surrounds — elevation's stairwell, the
+  // warehouse2 void). The anchor must also stay legible: spawn pockets paint
+  // OVER decks by design, and flag circles too, so a centre buried in either
+  // (warehouse2's north ring band sits inside the T pocket) would print a
+  // number nobody can read. Prefer the largest piece whose centre clears both,
+  // falling back to the largest outright. Labels sit after the rects so no
+  // fill clips a number.
+  const pocketZones = spawns ? [spawns.T, spawns.CT] : [];
+  const buried = (x, z) =>
+    pocketZones.some((p) => x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ) ||
+    flags.some((fl) => Math.hypot(x - fl.x, z - fl.z) < fl.radius + 0.5);
+  const deckSeen = new Set();
+  deckBoxes.forEach((b, i) => {
+    const root = deckFind(i);
+    if (deckSeen.has(root)) return;
+    deckSeen.add(root);
+    const group = deckBoxes.filter((_, j) => deckFind(j) === root);
+    const clear = group.filter((c) => !buried(c.x, c.z));
+    const pool = clear.length > 0 ? clear : group;
+    const anchor = pool.reduce((m, c) => (c.w * c.d > m.w * m.d ? c : m));
+    decks.push(text(
+      X(anchor.x), Y(anchor.z) + 5, fmt(anchor.y + anchor.h),
+      `text-anchor="middle" font-size="13" font-weight="700" fill="${C.deckOutline}" ` +
+      `paint-order="stroke" stroke="${C.halo}" stroke-width="4"`,
+    ));
+  });
 
   // ---- roofline: one dashed bounding outline for all roof/glass slabs, not
   // one rect per band — five overlapping dashes would stripe the whole plan.
@@ -284,10 +330,12 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
       `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" ` +
       `fill="none" stroke="${C.stairOutline}" stroke-width="1.8"${dash}/>`,
     );
-    // Tread ticks, one per step.
+    // Tread ticks, one per step. Tread i spans [i, i + 1] treads along the
+    // run (its centre is at (i + 0.5) * stepD, as world.ts:addStairs builds
+    // it), so internal boundaries sit at i * stepD.
     const ticks = [];
     for (let i = 1; i < f.count; i++) {
-      const t = (i + 0.5) * f.stepD;
+      const t = i * f.stepD;
       if (f.dir === 'z+' || f.dir === 'z-') {
         const zz = f.dir === 'z+' ? f.z + t : f.z - t;
         ticks.push(`M${fmt(X(f.x - f.width / 2))} ${fmt(Y(zz))}H${fmt(X(f.x + f.width / 2))}`);
@@ -427,7 +475,7 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   if (kinds.has('crate')) {
     items.push(row(
       swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.crate}" stroke="${C.crateStroke}"/>`),
-      'crate 3×3 (dashed outline = stacked 2nd tier)',
+      'crate / pallet / container (dashed outline = stacked 2nd tier)',
     ));
   }
   if (kinds.has('rack')) {

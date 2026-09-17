@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import { scene } from './core/engine';
 import type { LiftPad } from './sim/lift';
 import { elevatorSample, elevatorBlocked, elevatorSupports, type ElevatorBody, type ElevatorMotion } from './sim/elevator';
+import { stairTop } from './sim/stairs';
 
 /** Meshes that block bullets AND bot line-of-sight. */
 export const solids: THREE.Object3D[] = [];
@@ -497,15 +498,13 @@ export function stairLink(
   // (x, z) is the flight's origin — step 0's centre sits half a tread along
   // dir from it — so the origin itself is the floor immediately at the mouth.
   // The far edge of the last step is count treads along, at count risers up.
-  const run = count * stepD;
+  // The landing itself is sim/stairs.ts:stairTop, shared with the reference
+  // maps (scripts/mapSvg.mjs:flightTop) so the two cannot drift apart.
+  const top = stairTop(x, y, z, stepH, stepD, count, dir);
   return {
     halfWidth: width / 2,
     bottom: new THREE.Vector3(x, y, z),
-    top: new THREE.Vector3(
-      dir === 'x+' ? x + run : dir === 'x-' ? x - run : x,
-      y + count * stepH,
-      dir === 'z+' ? z + run : dir === 'z-' ? z - run : z,
-    ),
+    top: new THREE.Vector3(top.x, top.y, top.z),
   };
 }
 

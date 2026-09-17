@@ -59,11 +59,13 @@ export function arenaSpec(): MapSpec {
     // bots spawn on the far side and path through the gap toward the player.
     { x: -25, y: 0, z: 0, w: 55, h: 6, d: 2, kind: 'wall' },
     { x: 35, y: 0, z: 0, w: 40, h: 6, d: 2, kind: 'wall' },
-    // Buildings / corner blocks.
-    { x: -42, y: 0, z: -42, w: 24, h: 10, d: 24, kind: 'wall' },
-    { x: 42, y: 0, z: -42, w: 20, h: 12, d: 20, kind: 'wall2' },
-    { x: -42, y: 0, z: 42, w: 26, h: 9, d: 26, kind: 'wall2' },
-    { x: 44, y: 0, z: 44, w: 22, h: 11, d: 22, kind: 'wall' },
+    // Buildings / corner blocks. Each carries the mesh name the ligne-claire
+    // illustration pass selects on (core/ligneClaire.ts) — the builder assigns
+    // it from MapBox.name, so the tag travels with the placement, not the loop.
+    { x: -42, y: 0, z: -42, w: 24, h: 10, d: 24, kind: 'wall', name: 'arena-building' },
+    { x: 42, y: 0, z: -42, w: 20, h: 12, d: 20, kind: 'wall2', name: 'arena-building' },
+    { x: -42, y: 0, z: 42, w: 26, h: 9, d: 26, kind: 'wall2', name: 'arena-building' },
+    { x: 44, y: 0, z: 44, w: 22, h: 11, d: 22, kind: 'wall', name: 'arena-building' },
     // Raised platform x[21,31] z[30,40] and its west-face jump-up ledge.
     { x: PLATFORM.x, y: 0, z: PLATFORM.z, w: PLATFORM.w, h: PLATFORM.h, d: PLATFORM.d, kind: 'wall2' },
     { x: LEDGE.x, y: 0, z: LEDGE.z, w: LEDGE.w, h: LEDGE.h, d: LEDGE.d, kind: 'crate' },

@@ -46,7 +46,12 @@ export function buildArena(): void {
   scene.add(ground);
   registerSolid(ground); // raycast target only — walking is bounded by the perimeter walls
 
-  for (const b of spec.boxes) addSolidBox(b.x, b.y, b.z, b.w, b.h, b.d, materialFor(b.kind));
+  for (const b of spec.boxes) {
+    const mesh = addSolidBox(b.x, b.y, b.z, b.w, b.h, b.d, materialFor(b.kind));
+    // Semantic mesh tags travel with the spec (MapBox.name): the four
+    // buildings keep the 'arena-building' name core/ligneClaire.ts selects on.
+    if (b.name !== undefined) mesh.name = b.name;
+  }
   for (const f of spec.flights) {
     // This map builds solid flights only; an open flight in the spec is a
     // spec/builder disagreement, not a second code path.

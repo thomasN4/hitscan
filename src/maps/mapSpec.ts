@@ -9,8 +9,11 @@
 //
 // The split follows the sim/recoil.ts:convertOnSwap precedent: rather than
 // mocking the browser for the suite, the pure half moves behind a seam the
-// suite can reach. Spec modules import nothing at runtime (only `import type`),
-// so they stay importable anywhere — vitest, a plain-node script, or the game.
+// suite can reach. Spec modules import no scene, materials, DOM or engine at
+// runtime — only `import type`, plus pure helpers from this module
+// (mapSpec.ts:segmentRun) — so they stay importable wherever Vite resolves
+// extensionless specifiers: vitest and the game. Plain `node` resolves none
+// of those specifiers, so it was never a supported host.
 import type { StairDir } from '../world';
 
 /**
@@ -38,6 +41,13 @@ export interface MapBox {
   h: number;
   d: number;
   kind: MapBoxKind;
+  /**
+   * Mesh name the builder assigns after attaching the box. Semantic tags for
+   * opt-in passes only, never gameplay: arena's buildings carry
+   * 'arena-building' for the core/ligneClaire.ts facade branch. Absent means
+   * no tag (addSolidBox's default empty name).
+   */
+  name?: string;
 }
 
 /** One stair flight, in world.ts:addStairs/addOpenStairs argument order. */

@@ -34,6 +34,7 @@ import { elevationSpec } from '../src/maps/elevationSpec';
 import { warehouse1Spec } from '../src/maps/warehouse1Spec';
 import { warehouse2Spec } from '../src/maps/warehouse2Spec';
 import { flightTop, renderMapSvg } from './mapSvg.mjs';
+import { stairLink } from '../src/world';
 import { MAP_PNG_WIDTH, renderMapPng, renderMapRaster } from './mapPng.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -58,7 +59,8 @@ const renderSvg = (row) => renderMapSvg(
 );
 
 // Flight landings the maps promise in their own docs: [x, topY, z] per flight,
-// in spec order. The arithmetic is world.ts:stairLink's; the numbers are the
+// in spec order. The arithmetic is sim/stairs.ts:stairTop's, shared by
+// world.ts:stairLink and mapSvg.mjs:flightTop; the numbers are the
 // builders' (elevation's "flush with the slab's south edge at z = 0", the
 // warehouse2 lip join, ...). A landing that moves without its map's join
 // moving routes bots at a point no staircase reaches.
@@ -103,6 +105,14 @@ describe('reference maps', () => {
     expect(MAPS.map((m) => m.name).sort()).toEqual(Object.keys(BUILDERS).sort());
   });
 
+  test('arena spec tags its four buildings for the ligne-claire pass', () => {
+    // The builder assigns MapBox.name onto the mesh; core/ligneClaire.ts
+    // selects facades on 'arena-building'. A spec edit that drops a tag
+    // silently unpaints a building, so the count is pinned here.
+    const tagged = arenaSpec().boxes.filter((b) => b.name === 'arena-building');
+    expect(tagged).toHaveLength(4);
+  });
+
   test.each(MAPS)('$name spec carries the pinned entries', (row) => {
     const spec = row.spec();
     expect(spec.name).toBe(row.name);
@@ -119,6 +129,13 @@ describe('reference maps', () => {
       expect(top.x).toBeCloseTo(x, 9);
       expect(top.y).toBeCloseTo(y, 9);
       expect(top.z).toBeCloseTo(z, 9);
+      // The drawing and navigation share sim/stairs.ts:stairTop, but nothing
+      // stops a future edit from bypassing it on one side — so pin the two
+      // entry points against each other for every spec flight.
+      const link = stairLink(f.x, f.y, f.z, f.width, f.stepH, f.stepD, f.count, f.dir);
+      expect(top.x).toBeCloseTo(link.top.x, 12);
+      expect(top.y).toBeCloseTo(link.top.y, 12);
+      expect(top.z).toBeCloseTo(link.top.z, 12);
     });
   });
 

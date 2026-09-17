@@ -45,13 +45,17 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MAPS_DIR = join(ROOT, 'docs', 'maps');
 const WRITE = process.env.WRITE_MAPS === '1';
 
-// One row per map: the spec behind both the builder and the drawing.
+// One row per map: the spec behind both the builder and the drawing, plus the
+// legend words for the two wall fills. The paper fills are fixed, but the game
+// finish is per-map (dust masonry, lane walls, shed/office, steel shell), so a
+// renderer-owned global string would lie about some map — the words travel
+// with the row, next to `sources`.
 const MAPS = [
-  { name: 'arena', display: 'Arena', spec: arenaSpec, sources: 'src/maps/arenaSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
-  { name: 'range', display: 'Range', spec: rangeSpec, sources: 'src/maps/rangeSpec.ts' },
-  { name: 'elevation', display: 'Elevation', spec: elevationSpec, sources: 'src/maps/elevationSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
-  { name: 'warehouse1', display: 'Warehouse 1', spec: warehouse1Spec, sources: 'src/maps/warehouse1Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
-  { name: 'warehouse2', display: 'Warehouse 2', spec: warehouse2Spec, sources: 'src/maps/warehouse2Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'arena', display: 'Arena', spec: arenaSpec, walls: { wall: 'masonry wall', wall2: 'masonry wall, darker' }, sources: 'src/maps/arenaSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'range', display: 'Range', spec: rangeSpec, walls: { wall: 'lane wall', wall2: 'lane wall, darker' }, sources: 'src/maps/rangeSpec.ts' },
+  { name: 'elevation', display: 'Elevation', spec: elevationSpec, walls: { wall: 'masonry wall', wall2: 'masonry wall, darker' }, sources: 'src/maps/elevationSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'warehouse1', display: 'Warehouse 1', spec: warehouse1Spec, walls: { wall: 'corrugated shed wall', wall2: 'office wall (drawn darker)' }, sources: 'src/maps/warehouse1Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
+  { name: 'warehouse2', display: 'Warehouse 2', spec: warehouse2Spec, walls: { wall: 'corrugated steel shell' }, sources: 'src/maps/warehouse2Spec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts' },
 ];
 
 const pngPath = (name) => join(MAPS_DIR, `${name}.png`);
@@ -60,6 +64,7 @@ const pngPath = (name) => join(MAPS_DIR, `${name}.png`);
 const NO_BOTS = new Set(['range']);
 const renderSvg = (row) => renderMapSvg(
   row.display, row.spec(), NO_BOTS.has(row.name) ? null : BOT_SPAWNS[row.name], DOM_FLAGS[row.name], row.sources,
+  row.walls,
 );
 
 // Flight landings the maps promise in their own docs: [x, topY, z] per flight,
@@ -121,6 +126,15 @@ describe('reference maps', () => {
     // silently unpaints a building, so the count is pinned here.
     const tagged = arenaSpec().boxes.filter((b) => b.name === 'arena-building');
     expect(tagged).toHaveLength(4);
+  });
+
+  test.each(MAPS)('$name wall legend labels its wall kinds', (row) => {
+    // The renderer falls back to structural labels ('wall mass'); a row that
+    // relies on the fallback reintroduces the generic wording this gate
+    // exists to prevent — every used wall kind needs its map's own words.
+    const kinds = new Set(row.spec().boxes.map((b) => b.kind));
+    if (kinds.has('wall')) expect(row.walls?.wall).toBeDefined();
+    if (kinds.has('wall2')) expect(row.walls?.wall2).toBeDefined();
   });
 
   test.each(MAPS)('$name spec carries the pinned entries', (row) => {

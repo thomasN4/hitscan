@@ -157,8 +157,14 @@ const MASS_STROKE = {
  * @param flags DOM_FLAGS entry for the map (FlagDef[], possibly empty)
  * @param sources short source line for the header comment, e.g.
  *   "src/maps/elevationSpec.ts + BOT_SPAWNS/DOM_FLAGS in src/core/state.ts"
+ * @param wallLabels legend text for the two wall fills, e.g.
+ *   `{ wall: 'corrugated shed wall', wall2: 'office wall (drawn darker)' }`.
+ *   The paper fills are fixed (wall2 the darker), but the game finish varies
+ *   per map — dust masonry, lane walls, shed/office, steel shell — so the
+ *   words travel with the map, not the renderer. Rows render only for kinds
+ *   the spec uses; a missing entry falls back to a structural label.
  */
-export function renderMapSvg(displayName, spec, spawns, flags, sources) {
+export function renderMapSvg(displayName, spec, spawns, flags, sources, wallLabels = {}) {
   const g = spec.ground;
   const gW = g.maxX - g.minX;
   const gH = g.maxZ - g.minZ;
@@ -224,7 +230,8 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
       `stroke="${p.stroke}" stroke-width="1.6" stroke-dasharray="8 5"/>`,
     );
     pocketLabels.push(text(
-      X((z.minX + z.maxX) / 2), Y(z.minZ) - 8, `${p.tag} · x ${z.minX}…${z.maxX}, z ${z.minZ}…${z.maxZ}`,
+      X((z.minX + z.maxX) / 2), Y(z.minZ) - 8,
+      `${p.tag} · x ${z.minX}…${z.maxX}, z ${z.minZ}…${z.maxZ}, y ${z.y}`,
       `text-anchor="middle" font-size="13" font-weight="700" fill="${p.stroke}" ` +
       `paint-order="stroke" stroke="${C.halo}" stroke-width="4"`,
     ));
@@ -473,13 +480,13 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   if (kinds.has('wall')) {
     items.push(row(
       swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.wall}" stroke="${C.masonryStroke}"/>`),
-      'masonry wall (buildings, towers, platforms)',
+      wallLabels.wall ?? 'wall mass',
     ));
   }
   if (kinds.has('wall2')) {
     items.push(row(
       swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.wall2}" stroke="${C.masonryStroke}"/>`),
-      'masonry wall2 (darker shade of the same masonry)',
+      wallLabels.wall2 ?? 'second wall mass',
     ));
   }
   if (kinds.has('deck')) {

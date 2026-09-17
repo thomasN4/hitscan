@@ -10,13 +10,17 @@
 //   drawing fails here, the way a new MapName without a builder fails tsc);
 // - the committed bytes equal a fresh render (a spec change with no regen
 //   fails — run `npm run maps:regen`, i.e. WRITE_MAPS=1, to re-emit);
-// - no transparency attribute survives anywhere in the SVG (the opaque-only
-//   rule), and every rasterised pixel is fully opaque;
+// - no unsanctioned transparency survives in the SVG: geometry is fully
+//   opaque, and every `fill-opacity` must be one of the two named washes
+//   (spawn pockets, flag discs) — while every rasterised pixel stays fully
+//   opaque, composited over the paper rect;
 // - flight landings and entry counts are pinned, so a spec edit that moves a
 //   stair mouth or drops a box reads as a named diff, not a silent redraw.
 //
-// This is a repo-hygiene check, not a simulation test: it reads specs and SVG
-// files off disk and asserts nothing about game behavior. It lives in scripts/
+// This is a repo-hygiene check, not a simulation test: it reads specs and
+// committed PNGs off disk (the SVGs live only in memory — they are generated
+// fresh per render and never committed) and asserts nothing about game
+// behavior. It lives in scripts/
 // so src/ stays game code, and rides in `npm test` like the lesson-numbering
 // and plan-relay-log gates. Builders contain no placement numbers of their own
 // — every number lives in the spec — so builder/spec drift would mean deleting
@@ -33,7 +37,7 @@ import { rangeSpec } from '../src/maps/rangeSpec';
 import { elevationSpec } from '../src/maps/elevationSpec';
 import { warehouse1Spec } from '../src/maps/warehouse1Spec';
 import { warehouse2Spec } from '../src/maps/warehouse2Spec';
-import { flightTop, renderMapSvg } from './mapSvg.mjs';
+import { FLAG_OPACITY, POCKET_OPACITY, flightTop, renderMapSvg } from './mapSvg.mjs';
 import { stairLink } from '../src/world';
 import { MAP_PNG_WIDTH, renderMapPng, renderMapRaster } from './mapPng.mjs';
 
@@ -82,14 +86,20 @@ const ENTRY_COUNTS = {
   warehouse2: [111, 3, 2, 0, 0],
 };
 
-// Transparency, in every spelling the renderer could emit by accident. `none`
-// (unpainted hatch gaps, outlines) is NOT banned — over the paper rect it is
-// deterministic overpaint, not alpha.
-const TRANSPARENCY = /opacity|rgba\(|hsla\(|transparent/i;
+// Transparency, in every spelling the renderer could emit by accident —
+// except the two sanctioned washes. `fill-opacity` is matched separately
+// below and pinned to its named constants; `none` (unpainted hatch gaps,
+// outlines) is NOT banned — over the paper rect it is deterministic
+// overpaint, not alpha.
+const TRANSPARENCY = /stroke-opacity|rgba\(|hsla\(|transparent/i;
+// A bare `opacity` attribute (as opposed to `fill-opacity`) would wash whole
+// groups including their strokes and text — never what a wash is for.
+const BARE_OPACITY = /(^|[\s"';])opacity="/m;
 
 // The paper rect: first painted element, covering the whole viewBox. Without
 // it the drawing outside the ground rect shows the viewer's default
-// (transparent), which is the alpha the opaque-only rule forbids.
+// (transparent) — and the pocket/flag washes composite over it to fully
+// opaque pixels, which the PNG alpha check below enforces.
 const VIEWBOX = /viewBox="0 0 (\S+) (\S+)"/;
 const PAPER = /^<rect x="0" y="0" width="\1" height="\2" fill="#ffffff"\/>$/m;
 
@@ -139,11 +149,17 @@ describe('reference maps', () => {
     });
   });
 
-  test.each(MAPS)('$name SVG source is opaque and sourced', (row) => {
+  test.each(MAPS)('$name SVG source is sanctioned-only and sourced', (row) => {
     const svg = renderSvg(row);
     // Non-vacuous: a collapsed generator must fail here, not rasterise empty.
     expect(svg.length).toBeGreaterThan(2048);
     expect(svg).not.toMatch(TRANSPARENCY);
+    expect(svg).not.toMatch(BARE_OPACITY);
+    // New translucency arrives as a named decision, not a drift: every wash
+    // must be one of the two constants mapSvg.mjs exports.
+    for (const m of svg.matchAll(/fill-opacity="([^"]+)"/g)) {
+      expect([String(POCKET_OPACITY), String(FLAG_OPACITY)]).toContain(m[1]);
+    }
     const box = svg.match(VIEWBOX);
     expect(box).not.toBeNull();
     expect(svg).toMatch(new RegExp(PAPER.source.replace('\\1', box[1]).replace('\\2', box[2]), 'm'));

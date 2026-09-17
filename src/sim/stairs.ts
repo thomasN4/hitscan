@@ -5,11 +5,13 @@
 // Both used to compute the landing inline from the same formula, so the
 // reference map could drift from the graph it documents without any gate
 // noticing. This module owns the formula — pure numbers in, plain numbers
-// out, no engine, no DOM — and both call sites delegate to it.
-//
-// The single `import type` below is erased, so nothing is pulled into Node at
-// runtime (the sim/damage.ts seam).
-import type { StairDir } from '../world';
+// out, no engine, no DOM — and both call sites delegate to it. It also owns
+// StairDir: world.ts re-exports the type so existing import paths keep
+// working, and the source edge runs one way only (world -> sim), per the
+// AGENTS.md no-cycles rule.
+
+/** Cardinal directions a stair flight can ascend along. */
+export type StairDir = 'x+' | 'x-' | 'z+' | 'z-';
 
 /** A flight landing in world coordinates, as plain numbers (no THREE). */
 export interface StairTop {

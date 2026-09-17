@@ -6,17 +6,26 @@
 // byte-for-byte — regenerate with `npm run maps:regen`, never by hand
 // (scripts/mapSvgs.test.mjs fails while a file is stale).
 //
-// The whole file honours one visual rule: NO alpha blending anywhere. No
-// `opacity`/`fill-opacity`/`stroke-opacity` attributes, no rgba()/hsla(), no
-// transparent paint — every pixel's colour is decided by overpaint order, so
-// the drawings print and photocopy exactly as they read on screen. A white
-// paper rect covers the whole viewBox first, so nothing is unpainted even
-// outside the ground rect. Upper levels (decks, slabs, bridges) are HATCHED
-// but fully opaque: the hatch
+// Geometry keeps one visual rule: NO alpha blending — no `opacity` or
+// `stroke-opacity` attributes, no rgba()/hsla(), no transparent paint. Every
+// wall, deck, stair, crate and rail is decided by overpaint order, so the plan
+// prints and photocopies exactly as it reads on screen. A white paper rect
+// covers the whole viewBox first, so nothing is unpainted even outside the
+// ground rect. Upper levels (decks, slabs, bridges) are HATCHED but fully
+// opaque: the hatch
 // pattern tile carries its own solid background, and whatever stands beneath
 // a deck (ground-floor walls) is drawn OVER the deck fill in paint order —
 // never seen through a gap. Unpainted shape interiors (`fill="none"` outlines
 // for stairs, roofs, targets) always sit over an opaque layer below.
+//
+// Two annotation washes are the deliberate exception: spawn pockets
+// (POCKET_OPACITY) and domination flag discs (FLAG_OPACITY) use a flat
+// `fill-opacity` so the plan shows through instead of being buried —
+// warehouse2's T pocket would otherwise hide the catwalk ring it musters on.
+// Text, strokes and the legend's geometry swatches stay fully opaque, and the
+// gate (scripts/mapSvgs.test.mjs) pins every `fill-opacity` to one of the two
+// constants below: new translucency arrives as a named decision, not a drift.
+// Over the paper rect every pixel still composites to alpha 255.
 // Resolved only against the vendored files in scripts/assets/fonts (mapPng.mjs).
 //
 // The one runtime import is the pure stair-landing helper shared with
@@ -25,6 +34,11 @@
 // `npm run maps:regen` is a vitest run, never plain `node`.
 import { stairTop } from '../src/sim/stairs';
 const FONT = 'Noto Sans';
+
+/** Wash strength of the spawn-pocket rects: the plan stays readable through them. */
+export const POCKET_OPACITY = 0.5;
+/** Wash strength of the domination flag discs: the deck hatch shows through. */
+export const FLAG_OPACITY = 0.55;
 
 // Opaque palette. Halo is the light label backing (solid paint-order stroke).
 const C = {
@@ -85,8 +99,9 @@ function fmt(n) {
 
 /**
  * Footprint of one stair flight in world x/z: the rect its steps cover.
- * (x, z) is the first step's centre, half a tread along `dir` from the mouth;
- * the far edge of the last step sits `count` treads along.
+ * (x, z) is the flight's mouth — the origin step 0's centre sits half a
+ * tread along `dir` from; the far edge of the last step sits `count` treads
+ * along.
  */
 function flightRect(f) {
   const run = f.count * f.stepD;
@@ -190,9 +205,10 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     `stroke="${C.axis}" stroke-width="1.2" stroke-dasharray="7 5"/>`,
   );
 
-  // ---- spawn pockets: rects paint over decks (a zone is an annotation, and
+  // ---- spawn pockets: washes paint over decks (a zone is an annotation, and
   // the T zone on warehouse2's ring would otherwise vanish under the opaque
-  // deck fill), but under walls and crates — geometry always wins. Labels are
+  // deck fill), but under walls and crates — geometry always wins. The wash
+  // (POCKET_OPACITY) keeps the plan legible through the tint. Labels are
   // collected separately and drawn late, so no wall clips a zone's name. ----
   const pocketRects = [];
   const pocketLabels = [];
@@ -204,8 +220,8 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     const z = p.zone;
     pocketRects.push(
       `<rect x="${fmt(X(z.minX))}" y="${fmt(Y(z.minZ))}" width="${fmt((z.maxX - z.minX) * scale)}" ` +
-      `height="${fmt((z.maxZ - z.minZ) * scale)}" fill="${p.fill}" stroke="${p.stroke}" ` +
-      `stroke-width="1.6" stroke-dasharray="8 5"/>`,
+      `height="${fmt((z.maxZ - z.minZ) * scale)}" fill="${p.fill}" fill-opacity="${POCKET_OPACITY}" ` +
+      `stroke="${p.stroke}" stroke-width="1.6" stroke-dasharray="8 5"/>`,
     );
     pocketLabels.push(text(
       X((z.minX + z.maxX) / 2), Y(z.minZ) - 8, `${p.tag} · x ${z.minX}…${z.maxX}, z ${z.minZ}…${z.maxZ}`,
@@ -424,13 +440,14 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     ));
   }
 
-  // ---- domination flags (capture radius to scale, solid white) ----
+  // ---- domination flags (capture radius to scale, washed white so the deck
+  // hatch shows through; letter and height stay fully opaque) ----
   const flagMarks = [];
   flags.forEach((fl, i) => {
     const ink = C.flagInk[i % C.flagInk.length];
     flagMarks.push(
       `<circle cx="${fmt(X(fl.x))}" cy="${fmt(Y(fl.z))}" r="${fmt(fl.radius * scale)}" ` +
-      `fill="#ffffff" stroke="${ink}" stroke-width="2.2"/>`,
+      `fill="#ffffff" fill-opacity="${FLAG_OPACITY}" stroke="${ink}" stroke-width="2.2"/>`,
     );
     flagMarks.push(text(
       X(fl.x), Y(fl.z) + 8, fl.id,
@@ -453,10 +470,16 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   const items = [];
   const swatch = (inner) => `<svg x="0" y="-13" width="20" height="15">${inner}</svg>`;
   const row = (sample, label) => ({ sample, label });
-  if (kinds.has('wall') || kinds.has('wall2')) {
+  if (kinds.has('wall')) {
     items.push(row(
       swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.wall}" stroke="${C.masonryStroke}"/>`),
-      'masonry (walls, buildings, towers, platforms)',
+      'masonry wall (buildings, towers, platforms)',
+    ));
+  }
+  if (kinds.has('wall2')) {
+    items.push(row(
+      swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.wall2}" stroke="${C.masonryStroke}"/>`),
+      'masonry wall2 (darker shade of the same masonry)',
     ));
   }
   if (kinds.has('deck')) {
@@ -516,18 +539,18 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
   }
   if (spawns) {
     items.push(row(
-      swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnT}" stroke="${C.spawnTStroke}" stroke-dasharray="3 2"/>`),
-      'T spawn pocket',
+      swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnT}" fill-opacity="${POCKET_OPACITY}" stroke="${C.spawnTStroke}" stroke-dasharray="3 2"/>`),
+      'T spawn pocket (wash — plan shows through)',
     ));
     items.push(row(
-      swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnCT}" stroke="${C.spawnCTStroke}" stroke-dasharray="3 2"/>`),
-      'CT spawn pocket',
+      swatch(`<rect x="0" y="0" width="18" height="13" fill="${C.spawnCT}" fill-opacity="${POCKET_OPACITY}" stroke="${C.spawnCTStroke}" stroke-dasharray="3 2"/>`),
+      'CT spawn pocket (wash — plan shows through)',
     ));
   }
   if (flags.length > 0) {
     items.push(row(
-      swatch(`<circle cx="9" cy="6.5" r="6" fill="#ffffff" stroke="${C.flagInk[1 % C.flagInk.length]}" stroke-width="1.6"/>`),
-      `dom flag to scale, r ${flags.map((f) => fmt(f.radius)).join('/')} m (letter + walk-surface height)`,
+      swatch(`<circle cx="9" cy="6.5" r="6" fill="#ffffff" fill-opacity="${FLAG_OPACITY}" stroke="${C.flagInk[1 % C.flagInk.length]}" stroke-width="1.6"/>`),
+      `dom flag to scale, r ${flags.map((f) => fmt(f.radius)).join('/')} m (washed disc; letter + walk-surface height)`,
     ));
   }
   if (spec.targets.length > 0) {
@@ -572,11 +595,13 @@ export function renderMapSvg(displayName, spec, spawns, flags, sources) {
     `${COM_OPEN} ${displayName} — top-down reference, north up. Sources: ${sources}. ` +
     'Generated by scripts/mapSvg.mjs — do not edit by hand, run npm run maps:regen. ' +
     `Units are meters. ${originNote[0].toUpperCase()}${originNote.slice(1)}. +x east, +z south, north = -z (up). ` +
-    `Stair arrows point UPHILL. No alpha anywhere: upper levels are opaque hatched slabs. ${COM_CLOSE}`,
+    `Stair arrows point UPHILL. Geometry is fully opaque (upper levels are hatched slabs); ` +
+    `spawn pockets and flag discs are flat washes so the plan shows through. ${COM_CLOSE}`,
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 ${fmt(totalH)}" font-family="${FONT}">`,
     `<title>${esc(displayName)} — top-down map</title>`,
     // Opaque paper behind the whole viewBox: outside the ground rect the SVG
-    // would otherwise show the viewer's default (transparent).
+    // would otherwise show the viewer's default (transparent), and the pocket
+    // and flag washes composite over it to fully opaque pixels.
     `<rect x="0" y="0" width="960" height="${fmt(totalH)}" fill="${C.paper}"/>`,
     '<defs>',
     `<pattern id="hatchW" width="1.1" height="1.1" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">` +

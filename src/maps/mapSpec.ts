@@ -20,7 +20,8 @@ import type { StairDir } from '../world';
  * Render semantics for one placed box: what the reference map draws, and (via
  * each builder's kind -> material switch) what the game builds.
  *
- * `wall`/`wall2` are the same masonry fill on paper in two builder materials;
+ * `wall`/`wall2` share the masonry stroke on paper in two builder-material
+ * shades (light/dark);
  * `deck` is a walkable surface with air beneath it (slabs, bridges, docks);
  * `rail` is a low edge wall (parapets, void rails); `stair` is step paint —
  * flights that match their map's trim share its kind, flights with their own

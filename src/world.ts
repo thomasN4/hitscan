@@ -259,8 +259,10 @@ export function addSolidBox(x: number, y: number, z: number, w: number, h: numbe
   return mesh;
 }
 
-/** Cardinal directions a stair flight can ascend along. */
-export type StairDir = 'x+' | 'x-' | 'z+' | 'z-';
+// StairDir lives in sim/stairs.ts beside the endpoint arithmetic it feeds;
+// re-exported here so existing `from '../world'` paths keep working.
+import type { StairDir } from './sim/stairs';
+export type { StairDir };
 
 /**
  * Build a flight of stairs ascending along one cardinal direction from (x, z).

@@ -20,8 +20,9 @@ export const MAP_PNG_WIDTH = 1920;
 
 /**
  * Render one map SVG document. `png` is the committed file's bytes; `pixels`
- * is the raw RGBA buffer (resvg always encodes RGBA, so the opaque-only rule
- * is checked on the alpha bytes, not the PNG colour type).
+ * is the raw RGBA buffer (resvg always encodes RGBA, so the alpha bytes are
+ * where the gate checks that the pocket/flag washes composited over the paper
+ * rect to fully opaque pixels — translucency in, transparency never out).
  */
 export function renderMapRaster(svg) {
   const resvg = new Resvg(svg, {

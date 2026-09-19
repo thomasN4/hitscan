@@ -166,6 +166,8 @@ interface ViewOpts {
   } | null;
   /** Standability feeler; default open ground — every pre-sense test walks nowhere near a wall. */
   canStandAt?: (x: number, z: number) => boolean;
+  /** Footing probe; default ground everywhere — every pre-guard test stands on a floor. */
+  hasFootingAt?: (x: number, z: number) => boolean;
 }
 
 /** Canonical view: observed target due +x, mid-band, LEVEL, 4 m/s. */
@@ -201,6 +203,8 @@ function view(o: ViewOpts = {}): BrainView {
     },
     // Open ground by default: the sense tests pass their own walls.
     canStandAt: o.canStandAt ?? (() => true),
+    // Ground everywhere by default: the footing tests pass their own edges.
+    hasFootingAt: o.hasFootingAt ?? (() => true),
   };
 }
 
@@ -720,6 +724,102 @@ describe('DefaultBrain engage wall-sense', () => {
     const len = Math.sqrt(1 + 0.7 * 0.7);
     expect(step.x).toBeCloseTo((1 / len) * 4 * DT, 12);
     expect(step.z).toBeCloseTo((0.7 / len) * 4 * DT, 12);
+  });
+});
+
+// The footing guard (#127): canStandAt reads true over a void, so a strafe or
+// a back-off used to carry bots off flights and out of windows. Same geometry
+// as the wall-sense above — target due +x, calm brain strafing +z first — with
+// `hasFootingAt` cutting the ground away on one side.
+describe('DefaultBrain engage footing', () => {
+  const STEP_DT = 0.1;
+  const SPEED_STEP = 4 * STEP_DT;
+  const duel = (overrides: ViewOpts = {}): BrainView => view({ dist: 10, ...overrides });
+  const noGroundPlusZ = (_x: number, z: number): boolean => z <= 0;
+
+  it('drops a strafe that would leave the ground and reverses it next frame', () => {
+    // In-band: the strafe is the whole step, so dropping it stands the bot
+    // still for one frame; the next frame steps the other way at full speed.
+    const brain = calmBrain();
+    const first = brain.decide(duel({ hasFootingAt: noGroundPlusZ }), STEP_DT);
+    expect(first.mode).toBe('engage');
+    expect(first.step.length()).toBeCloseTo(0, 12);
+    const next = brain.decide(duel({ hasFootingAt: noGroundPlusZ }), STEP_DT);
+    expect(next.step.x).toBeCloseTo(0, 12);
+    expect(next.step.z).toBeCloseTo(-SPEED_STEP, 12);
+  });
+
+  it('keeps the approach when the strafe is dropped, renormalized to full speed', () => {
+    const { step } = calmBrain().decide(duel({ dist: 20, hasFootingAt: noGroundPlusZ }), STEP_DT);
+    expect(step.x).toBeCloseTo(SPEED_STEP, 12);
+    expect(step.z).toBeCloseTo(0, 12);
+  });
+
+  it('drops a back-off that would leave the ground and keeps the strafe', () => {
+    // Inside nearBand the radial leg points -x, straight out of a window
+    // behind the bot; the ground is only cut away behind it.
+    const { step } = calmBrain().decide(duel({ dist: 5, hasFootingAt: (x) => x >= 0 }), STEP_DT);
+    expect(step.x).toBeCloseTo(0, 12);
+    expect(step.z).toBeCloseTo(SPEED_STEP, 12);
+  });
+
+  it('backs off as before while there is ground behind', () => {
+    // Blend (-1, 0, 0.7) normalized: the guard changes nothing on a floor.
+    const len = Math.sqrt(1 + 0.7 * 0.7);
+    const { step } = calmBrain().decide(duel({ dist: 5, hasFootingAt: (x) => x <= 0 }), STEP_DT);
+    expect(step.x).toBeCloseTo(-SPEED_STEP / len, 12);
+    expect(step.z).toBeCloseTo((0.7 * SPEED_STEP) / len, 12);
+  });
+
+  it('never guards the approach: a bot may drop off a deck toward a target below', () => {
+    const len = Math.sqrt(1 + 0.7 * 0.7);
+    const { step } = calmBrain().decide(duel({ dist: 20, hasFootingAt: (x) => x <= 0 }), STEP_DT);
+    expect(step.x).toBeCloseTo(SPEED_STEP / len, 12);
+    expect(step.z).toBeCloseTo((0.7 * SPEED_STEP) / len, 12);
+  });
+
+  it('a wedge slide never steps onto the footless side, and still slides the other way', () => {
+    // Both jam-slide sides and both strafe sides get exercised across the
+    // replay; whichever the commit picks first, nothing may land on +z.
+    const brain = calmBrain();
+    let movedAway = false;
+    for (let f = 0; f < 8; f++) {
+      const { step, mode } = brain.decide(duel({ moveBlocked: true, hasFootingAt: noGroundPlusZ }), STEP_DT);
+      expect(mode).toBe('engage');
+      expect(step.z, `frame ${f}`).toBeLessThanOrEqual(1e-12);
+      if (step.z < -1e-9) movedAway = true;
+    }
+    expect(movedAway).toBe(true);
+  });
+
+  it('a routed jam slide never steps onto the footless side', () => {
+    // Waypoint due +z, so the committed slide runs along ±x.
+    const brain = calmBrain();
+    const jammed = view({
+      dist: 20, rise: 3.6, moveBlocked: true,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 4),
+      hasFootingAt: (x) => x <= 0,
+    });
+    let slid = false;
+    for (let f = 0; f < 8; f++) {
+      const { step, mode } = brain.decide(jammed, STEP_DT);
+      expect(mode).toBe('route');
+      expect(step.x, `frame ${f}`).toBeLessThanOrEqual(1e-12);
+      if (step.x < -1e-9) slid = true;
+    }
+    expect(slid).toBe(true);
+  });
+
+  it('leaves the route heading to the graph: travel walks it with no ground probed', () => {
+    let asked = 0;
+    const { step, mode } = calmBrain().decide(view({
+      dist: 20, rise: 3.6,
+      nextWaypoint: () => new THREE.Vector3(0, 0, 4),
+      hasFootingAt: () => { asked++; return false; },
+    }), STEP_DT);
+    expect(mode).toBe('route');
+    expect(step.z).toBeCloseTo(SPEED_STEP, 12);
+    expect(asked).toBe(0);
   });
 });
 

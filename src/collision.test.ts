@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import {
-  collidesAt, standableAt, supportHeightAt, slideMoveXZ, resolveVertical, findFreeSpawn,
+  collidesAt, standableAt, supportedAt, supportHeightAt, slideMoveXZ, resolveVertical, findFreeSpawn,
   STEP_HEIGHT, HEAD_HEIGHT,
 } from './collision';
 
@@ -197,6 +197,34 @@ describe('standableAt', () => {
 
   test('open ground supports feet at ground level', () => {
     expect(standableAt(at(0, 0), R, 0, [])).toBe(true);
+  });
+});
+
+describe('supportedAt', () => {
+  // The same deck corner as standableAt's, asked for the ground alone: this
+  // is the bot footing guard's probe, which leaves walls to the feelers.
+  const DECK = 3.6;
+  const bridge = new THREE.Box3(new THREE.Vector3(14, DECK - 0.4, -2), new THREE.Vector3(30, DECK, 2));
+  const tower = new THREE.Box3(new THREE.Vector3(30, 0, -6), new THREE.Vector3(40, DECK, 6));
+  const deck = [bridge, tower];
+
+  test('over a deck at deck height', () => {
+    expect(supportedAt(at(30.5, 2.5), DECK, deck)).toBe(true);
+    expect(supportedAt(at(29.5, 1.5), DECK, deck)).toBe(true);
+  });
+
+  test('a centre past the edge is unsupported even while the footprint still overlaps', () => {
+    expect(supportedAt(at(29.8, 2.3), DECK, deck)).toBe(false);
+  });
+
+  test('one step down is supported; deeper is a fall', () => {
+    expect(supportedAt(at(0, 0), DECK, [slab(0, 0, 0, DECK - STEP_HEIGHT, 5)])).toBe(true);
+    expect(supportedAt(at(0, 0), DECK, [slab(0, 0, 0, DECK - STEP_HEIGHT - 0.05, 5)])).toBe(false);
+  });
+
+  test('ignores walls: blocking geometry over support still reads supported', () => {
+    expect(standableAt(at(0, 0), 0.5, 0, [wall(0, 0)])).toBe(false);
+    expect(supportedAt(at(0, 0), 0, [wall(0, 0)])).toBe(true);
   });
 });
 

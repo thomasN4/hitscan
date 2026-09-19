@@ -39,7 +39,7 @@ import { bots, score, session, gameTime, soundEvents, playerFeet, opposing, cred
 import { solids, colliders, liftPads, elevators, elevatorCarry } from './world';
 import { elevatorSupports } from './sim/elevator';
 import { elevatorTravel, committedTrip, type ElevatorTrip } from './sim/elevatorTravel';
-import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, collidesAt, standableAt, HEAD_HEIGHT } from './collision';
+import { slideMoveXZ, resolveVertical, hasLineOfSight, findFreeSpawn, collidesAt, standableAt, supportedAt, HEAD_HEIGHT } from './collision';
 import { GRAVITY } from './sim/movement';
 import { launchFrom } from './sim/lift';
 import { damagePlayer, damageBot, checkRoundEnd } from './combat';
@@ -663,6 +663,10 @@ export class Bot implements BotShape {
         // gate the step below obeys: standable here means the step survives.
         canStandAt: (x, z) =>
           !collidesAt(senseProbe.set(x, 0, z), BOT_RADIUS, this.mesh.position.y, colliders),
+        // The footing guard's probe: ground within one riser under the point,
+        // walls ignored (those are canStandAt's). See DefaultBrain.hasFooting.
+        hasFootingAt: (x, z) =>
+          supportedAt(senseProbe.set(x, 0, z), this.mesh.position.y, colliders),
         // Lazy on purpose: pathfinding is the expensive thing here, so it is
         // only paid when the policy has already decided it wants to travel
         // rather than fight where it stands. The pursuit flag keys the route

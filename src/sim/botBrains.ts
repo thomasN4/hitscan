@@ -16,7 +16,10 @@
 // beyond farBand, back off inside nearBand, drift perpendicular with random
 // jukes and a debounced wall-sense flip, sidestepping a sustained wedge
 // without leaving engage, route when the observation sits a level up or band
-// steering demonstrably cannot close, fire on cooldown. A direction-only incoming-fire
+// steering demonstrably cannot close, fire on cooldown. Sideways motion (drift,
+// juke, jam slides) and the back-off are footing-guarded — a leg that would
+// leave the ground is dropped rather than walked off an edge (#127); only the
+// approach may drop off a deck on purpose. A direction-only incoming-fire
 // bearing outranks everything for one frame and starts a damage-armed search
 // where the shot came from. On sight loss WITHOUT standing orders the LAST
 // KNOWN position is pursued: the brain routes to the frozen remembered feet,
@@ -234,6 +237,15 @@ export interface BrainView {
    * Travel reads diagonal feelers; engaged strafing reads the lateral pair.
    */
   canStandAt(x: number, z: number): boolean;
+  /**
+   * Whether (x, z) has ground within one riser below this bot's OWN feet —
+   * the footing guard's probe (collision.ts:supportedAt). Walls are ignored:
+   * canStandAt and the contact edge already own them, and a wall tripping
+   * this too would re-tune every wall slide. canStandAt, conversely, reads
+   * true over a void — air has no collider — which is how strafes and
+   * back-offs used to carry bots off flights and out of windows (#127).
+   */
+  hasFootingAt(x: number, z: number): boolean;
   /**
    * Hostile noises heard SINCE the last frame — already filtered by the
    * executor for team and earshot, so an entry here is by construction
@@ -924,12 +936,42 @@ export class DefaultBrain implements BotBrain {
     return this.commitLeft > 0;
   }
 
+  /**
+   * The footing guard (#127): whether a step component `dir` (a planar
+   * direction, any length) scaled to this frame's full step still lands on
+   * ground. Probing only the destination is enough: the probe is
+   * centre-strict (collision.ts:supportedAt) and a frame's step is far
+   * shorter than the body's radius, so a passing destination cannot drop the
+   * body even when the executor's slide realizes one axis of it. Guards the
+   * sideways moves and the back-off only — the approach may drop off a deck
+   * on purpose, and a route heading is the graph's call. Takes no draws.
+   */
+  private hasFooting(view: BrainView, dir: THREE.Vector3, dt: number): boolean {
+    const len = Math.hypot(dir.x, dir.z);
+    if (len < 1e-9) return true;
+    const reach = (view.selfSpeed * dt) / len;
+    return view.hasFootingAt(view.selfFeet.x + dir.x * reach, view.selfFeet.z + dir.z * reach);
+  }
+
+  /**
+   * A committed jam slide, footing-guarded: a slide that would leave the
+   * ground reverses side instead — the other way along the same obstacle —
+   * and stands still for this frame. Returns the (unscaled) slide direction,
+   * or a zero vector for the standing frame.
+   */
+  private guardedSlide(view: BrainView, axisX: number, axisZ: number, dt: number): THREE.Vector3 {
+    const slide = new THREE.Vector3(axisX * this.slideDir, 0, axisZ * this.slideDir);
+    if (this.hasFooting(view, slide, dt)) return slide;
+    this.slideDir = this.slideDir === 1 ? -1 : 1;
+    return slide.set(0, 0, 0);
+  }
+
   private travel(step: THREE.Vector3, waypoint: THREE.Vector3, view: BrainView, dt: number): void {
     const committed = this.updateJam(view, dt);
 
     const heading = waypoint.clone().setY(0).normalize();
     if (committed) {
-      step.set(-heading.z * this.slideDir, 0, heading.x * this.slideDir);
+      step.copy(this.guardedSlide(view, -heading.z, heading.x, dt));
     } else {
       step.copy(heading);
       // Wall-sense: diagonal feelers a step ahead through the view's
@@ -1380,7 +1422,7 @@ export class DefaultBrain implements BotBrain {
       // brush-vs-jam timers and alternating sides as travel(). Gated on
       // continuing engage: the entry frame below restarts instead of sliding
       // on patrol geometry the bot already left behind.
-      step.set(-toTarget.z * this.slideDir, 0, toTarget.x * this.slideDir)
+      step.copy(this.guardedSlide(view, -toTarget.z, toTarget.x, dt))
         .normalize().multiplyScalar(view.selfSpeed * dt);
     } else {
       if (!prevEngage) {
@@ -1422,13 +1464,22 @@ export class DefaultBrain implements BotBrain {
       // Back-off is suppressed outright while the target is a level above —
       // you cannot reverse away from something overhead, and trying only
       // widens the gap to whatever flight reaches it.
+      //
+      // Footing guard (#127): each leg is probed on its own, so a strafe
+      // along an edge survives a back-off that points off it and vice versa.
+      // A footless strafe is dropped and reversed for the next frame; a
+      // footless back-off is dropped (hold the radius — nothing to reverse).
+      // The approach is never guarded: dropping off a deck toward a target
+      // below is a legitimate way to close.
       const overhead = rise > this.params.climbThreshold;
       if (dist3 > this.params.farBand || overhead) step.add(dir);
-      else if (dist3 < this.params.nearBand) step.sub(dir);
+      else if (dist3 < this.params.nearBand && this.hasFooting(view, dir.clone().negate(), dt)) step.sub(dir);
       const strafe = new THREE.Vector3(-toTarget.z, 0, toTarget.x)
         .normalize()
         .multiplyScalar(this.strafeDir * this.params.strafeFactor);
-      step.add(strafe).normalize().multiplyScalar(view.selfSpeed * dt);
+      if (this.hasFooting(view, strafe, dt)) step.add(strafe);
+      else this.strafeDir = this.strafeDir === 1 ? -1 : 1;
+      step.normalize().multiplyScalar(view.selfSpeed * dt);
     }
 
     // Random juke (~jukeRate flips/sec). The draw was hoisted to the top of

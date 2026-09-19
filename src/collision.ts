@@ -78,7 +78,19 @@ export function collidesAt(pos: THREE.Vector3, radius: number, feetY: number, co
  * to err on for a shortcut; the nodes themselves stay reachable.
  */
 export function standableAt(pos: THREE.Vector3, radius: number, feetY: number, colliders: THREE.Box3[]): boolean {
-  if (collidesAt(pos, radius, feetY, colliders)) return false;
+  return !collidesAt(pos, radius, feetY, colliders) && supportedAt(pos, feetY, colliders);
+}
+
+/**
+ * The support half of standableAt alone: a surface within one step below
+ * `feetY` sits under the point (x, z) itself, walls ignored. Centre-strict
+ * for the reason standableAt gives, which is what lets a bot's footing guard
+ * probe only a step's destination: a body whose centre stays over support
+ * keeps a full radius of overlap in hand, so no partial slide can drop it.
+ * Walls are left out on purpose — a caller that already handles contact
+ * (the bot brains' feelers and jam commits) asks this for the ground only.
+ */
+export function supportedAt(pos: THREE.Vector3, feetY: number, colliders: THREE.Box3[]): boolean {
   const support = supportHeightAt(pos.x, pos.z, 0, feetY + STEP_HEIGHT, colliders);
   return support >= feetY - STEP_HEIGHT - COLLISION_EPSILON;
 }

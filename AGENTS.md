@@ -8,7 +8,32 @@ Browser FPS demo: Three.js + Vite, TypeScript throughout `src/`, no framework. A
 
 The canonical remote is a self-hosted Gitea instance on the LAN:
 `http://192.168.2.161:3000/thomasN4/another-cs-clone` (`origin`). GitHub is no
-longer the source of truth — `gh` is the wrong tool here; use `tea`.
+longer the source of truth — for anything that is part of developing this
+repository (branches, PRs, issues, reviews, CI), `gh` is the wrong tool; use
+`tea`.
+
+There is **one** exception, and it is not a development remote: a public
+read-only mirror at `https://github.com/thomasN4/hitscan` (`hitscan`), which
+exists so the project has a public face. `gh` is the right tool for it and only
+for it — repository settings, visibility, description. It mirrors `main` and
+nothing else, by hand:
+
+```sh
+git push hitscan main
+```
+
+Nothing pushes it automatically, so it is stale by default; push it when you
+want the public copy current. Never develop against it, never open a PR there,
+and do not treat a divergence as something to reconcile — `origin` wins by
+construction.
+
+**The mirror's Issues and Pull requests tabs are a frozen artifact, not a
+backlog.** The GitHub repo predates the move to Gitea; flipping it public in
+September 2026 carried its old issues and PRs along, and they stopped being
+updated when development moved. Numbers there do NOT correspond to the Gitea
+issue numbers this document and the commit log cite — issue #87 in a comment
+means the Gitea one. Read the mirror's tabs as history only, and do not answer
+or close anything in them without the user saying so.
 
 **Every repository-scoped `tea` command here needs
 `--repo thomasN4/another-cs-clone`** — `tea pr`, `tea comments`, `tea issues`,

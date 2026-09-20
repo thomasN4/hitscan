@@ -1,6 +1,18 @@
 # Hitscan
 
-A browser-based FPS demo inspired by Counter-Strike, built with [Three.js](https://threejs.org/) and Vite. Fight waves of AI bots in a dust-style arena with hitscan gunplay, iron sights, crouching, and synthesized audio — no asset files required.
+A browser-based FPS demo inspired by Counter-Strike, built with
+[Three.js](https://threejs.org/), Vite and TypeScript. Fight AI bots across five
+maps — team deathmatch or domination — with hitscan gunplay, iron sights,
+crouching, a primary/secondary loadout and multi-level bot navigation. Levels
+and effects are procedural, audio is synthesized in WebAudio, and the only
+binary assets are the seven weapon models.
+
+> **On GitHub, this repository is a read-only mirror.** Development happens on a
+> self-hosted Gitea instance; the GitHub copy tracks `main` only and is pushed by
+> hand, so it can lag. Its **Issues** and **Pull requests** tabs are frozen
+> history from before the move and are no longer maintained — the numbers there
+> do not match the issue and PR numbers referenced in commit messages and docs.
+> Treat them as an archive rather than a backlog.
 
 ## Quick start
 
@@ -98,10 +110,10 @@ src/
 
 Key design points:
 
-- **`core/state.js` owns shared state.** Player, weapon, and transient flags are plain exported objects that modules mutate directly. Dependencies flow one way (`core` ← everything); there are no import cycles.
-- **State is separated from the engine so the simulation is testable.** `core/state.js` touches no browser API, so it imports in plain Node; `core/engine.js` holds the renderer/scene/camera and is built by `initEngine()`. Modules that need the engine or the DOM expose an `init*()` function called in order from `main.js` rather than wiring themselves up on import.
-- **Gameplay math is pure and lives in `src/sim/`.** Spread, recoil, shot direction, damage zones and speed tiers take every input as a parameter, so they are unit-tested in milliseconds without a browser. `weapons.js` and `player.js` are thin bindings that feed live state in.
-- **The frame's stage order is explicit in `main.js:animate()`** — `updateMovement → updateWeapon → updateCamera → updateViewmodel` — because it is load-bearing: the camera and viewmodel read the recoil that `updateWeapon` decays, so the crosshair and the bullets agree within a frame.
+- **`core/state.ts` owns shared state.** Player, weapon, and transient flags are plain exported objects that modules mutate directly. Dependencies flow one way (`core` ← everything); there are no import cycles.
+- **State is separated from the engine so the simulation is testable.** `core/state.ts` touches no browser API, so it imports in plain Node; `core/engine.ts` holds the renderer/scene/camera and is built by `initEngine()`. Modules that need the engine or the DOM expose an `init*()` function called in order from `main.ts` rather than wiring themselves up on import.
+- **Gameplay math is pure and lives in `src/sim/`.** Spread, recoil, shot direction, damage zones and speed tiers take every input as a parameter, so they are unit-tested in milliseconds without a browser. `weapons.ts` and `player.ts` are thin bindings that feed live state in.
+- **The frame's stage order is explicit in `main.ts:animate()`** — `updateElevators → updateMovement → updateWeapon → updateCamera → updateViewmodel → updateBots → updateDomination → updateHUD` — because it is load-bearing: the camera and viewmodel read the recoil that `updateWeapon` decays, so the crosshair and the bullets agree within a frame, and the domination census runs after every body has moved.
 - **Two collision registries, one registration path.** Every level solid is registered as an AABB in `colliders` (cheap per-frame movement tests) and as a mesh in `solids` (raycast targets for bullets and bot LOS). Both live in `src/world.ts`, which is the only place geometry may be registered — the map builders in `src/maps/` once carried separate copies of that logic, and the range copy shipped without the `colliders` push, making the whole map no-clip.
 - **Hitscan bullets resolve by nearest hit** across walls *and* bot body parts in a single raycast, so cover always blocks damage — for both sides.
 - **No build-time safety net for missing imports** referenced only inside functions (Vite won't catch it) — see AGENTS.md.
@@ -118,7 +130,7 @@ Launches your Brave browser headlessly (via puppeteer-core), loads the page, cap
 
 ## Debug hook
 
-While playing, live game state is exposed on the console as `window.__cs` (`{ game, weapon, player, bots }`) for quick inspection.
+While playing, live game state is exposed on the console as `window.__cs` (`{ game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, dom, nav }`) for quick inspection. The smoke test drives the game through it, so its shape is load-bearing rather than incidental.
 
 ## License
 

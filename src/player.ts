@@ -121,9 +121,11 @@ export function updateMovement(dt: number): void {
   // Jump / gravity / support. resolveVertical owns onGround: rising frames
   // are airborne, falling frames land on the highest swept surface (which is
   // also how step-up works — the riser ahead is within STEP_HEIGHT of the
-  // feet, so its top catches them as the feet dip a hair below it). The
-  // last-argument grounded flag lets descents stick to stairs instead of
-  // free-falling each tread.
+  // feet, so its top catches them as the feet dip a hair below it). A rise
+  // that meets a ceiling bonks (ceilingHit) and already spends the frame's
+  // remainder falling, so holding Space through it stays airborne and never
+  // re-jumps. The last-argument grounded flag lets descents stick to stairs
+  // instead of free-falling each tread.
   if (keyHeld('Space') && player.onGround) player.vel.y = JUMP_VEL;
   player.vel.y -= GRAVITY * dt;
   const vert = resolveVertical(feetY, player.vel.y, dt, player.pos.x, player.pos.z,
@@ -166,7 +168,14 @@ export function updateMovement(dt: number): void {
   motion.airLerp = deadZone(
     approach(motion.airLerp, player.onGround ? 0 : 1, dt, AIR_BLEND_RATE));
 
-  motion.groundSmoothY = approach(motion.groundSmoothY, vert.feetY, dt, GROUND_BLEND_RATE);
+  // Eased ground height for the camera. On a head-bonk the physics has
+  // already stopped while this blend still lags a rise's worth behind, so
+  // chasing it would keep the view easing UP after the body started falling
+  // (issue #125): snap up to the clamp instead — max, never down, so the
+  // fall then eases from the true top with no extra bounce at touchdown.
+  motion.groundSmoothY = vert.ceilingHit
+    ? Math.max(motion.groundSmoothY, vert.feetY)
+    : approach(motion.groundSmoothY, vert.feetY, dt, GROUND_BLEND_RATE);
   camera.position.set(
     player.pos.x,
     // The eased ground height, not the physics one: stairs snap the feet up

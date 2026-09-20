@@ -159,7 +159,9 @@ describe('a pad beneath an overhang', () => {
     let velY = 17;
     let onGround = true;
     let peak = feet;
-    // Rise: the head sweep stops the body under the slab.
+    // Rise: the head sweep stops the body under the slab. The bonk spends
+    // the frame's remainder falling (issue #125), so the peak sits up to one
+    // frame of fall below the clamp — still under the slab, no snap.
     while (velY > 0) {
       const r = resolveVertical(feet, velY, DT, X, z, R, colliders, onGround);
       feet = r.feetY;
@@ -168,7 +170,8 @@ describe('a pad beneath an overhang', () => {
       peak = Math.max(peak, feet);
       velY -= GRAVITY * DT;
     }
-    expect(peak).toBeCloseTo(SLAB_UNDERSIDE - HEAD_HEIGHT, 5);
+    expect(peak).toBeLessThanOrEqual(SLAB_UNDERSIDE - HEAD_HEIGHT);
+    expect(SLAB_UNDERSIDE - HEAD_HEIGHT - peak).toBeLessThan(0.05);
 
     // Fall: back onto the pad top, not the floor.
     for (let i = 0; !onGround && i < 600; i++) {

@@ -19,6 +19,7 @@
 // riser reads as floor, not wall — and it also lets entities stand ON boxes,
 // fall off edges and walk under elevated geometry, all without special cases.
 import * as THREE from 'three';
+import { GRAVITY } from './sim/movement';
 
 /** Tallest riser an entity auto-climbs rather than collides with. */
 export const STEP_HEIGHT = 0.3;
@@ -258,6 +259,14 @@ export interface VerticalResolve {
   velY: number;
   /** True when the entity came to rest on a surface this step. */
   onGround: boolean;
+  /**
+   * True when the head met a ceiling this step: the rise stopped under it
+   * and the frame's remaining time was spent falling (issue #125). Callers
+   * use it to tell a bonk apart from ordinary ascent — post-fix the two no
+   * longer share a velY signature, since the bonk frame already carries a
+   * small negative velocity.
+   */
+  ceilingHit: boolean;
 }
 
 /**
@@ -299,8 +308,13 @@ function lowestCeiling(
  *
  * While rising (velY > 0) the entity's head is swept from its old to its new
  * position against collider UNDERSIDES (see lowestCeiling): the first one the
- * head would cross stops the rise — feet clamp below it, velocity zeroes, and
- * the entity stays airborne. Anything already well above the head, below the
+ * head would cross stops the rise — feet clamp below it and the frame's
+ * REMAINING time (past the contact fraction) is spent falling under gravity
+ * in the same step, so the fall resumes immediately instead of hovering 2-3
+ * frames at velY = 0 (issue #125). The clamp itself stays exact and the
+ * remainder fall crosses only open air the rise just swept — no snap down,
+ * no tunneling — and the next frame is falling-branch, so the bonk fires
+ * exactly once per jump. Anything already well above the head, below the
  * feet, or beside the footprint is ignored, so jumping on the flat, riding
  * lift arcs through open air, and escaping geometry the unwedge rule allows
  * all behave exactly as before.
@@ -345,23 +359,40 @@ export function resolveVertical(
       prevFeetY + HEAD_HEIGHT, newFeetY + HEAD_HEIGHT,
       colliders,
     );
-    // Head meets a ceiling: stop under it, spent. The clamp is exact (not
-    // epsilon-slack) because the underside itself is the noise source — the
-    // body rests where the geometry actually measures.
+    // Head meets a ceiling: stop under it, spent, then fall for the rest of
+    // the frame. The clamp is exact (not epsilon-slack) because the underside
+    // itself is the noise source — the body rests where the geometry actually
+    // measures. The contact consumes only its fraction of dt (issue #125):
+    // without it the whole frame ends parked at velY = 0 and the next frames
+    // start from rest, which reads as a hover.
     if (ceiling !== Infinity) {
-      return { feetY: ceiling - HEAD_HEIGHT, velY: 0, onGround: false };
+      const clampFeet = ceiling - HEAD_HEIGHT;
+      const rise = newFeetY - prevFeetY;
+      // rise > 0 whenever velY > 0 and dt > 0; the clamp guards float noise
+      // (lowestCeiling's epsilon can place the underside a hair outside the
+      // swept interval) and a zero-dt step, both of which mean no remainder.
+      const contact = rise > 0
+        ? Math.min(1, Math.max(0, (clampFeet - prevFeetY) / rise))
+        : 1;
+      const restDt = dt * (1 - contact);
+      return {
+        feetY: clampFeet - 0.5 * GRAVITY * restDt * restDt,
+        velY: -GRAVITY * restDt,
+        onGround: false,
+        ceilingHit: true,
+      };
     }
-    return { feetY: newFeetY, velY, onGround: false };
+    return { feetY: newFeetY, velY, onGround: false, ceilingHit: false };
   }
   const ground = supportHeightAt(x, z, radius, prevFeetY + STEP_HEIGHT, colliders);
-  if (newFeetY <= ground) return { feetY: ground, velY: 0, onGround: true };
+  if (newFeetY <= ground) return { feetY: ground, velY: 0, onGround: true, ceilingHit: false };
   // Descend-stick. COLLISION_EPSILON slack because float32-noisy treads can
   // measure a hair under exactly one STEP_HEIGHT below the feet (same
   // ordering argument as the epsilon in collidesAt).
   if (wasGrounded && ground >= prevFeetY - STEP_HEIGHT - COLLISION_EPSILON) {
-    return { feetY: ground, velY: 0, onGround: true };
+    return { feetY: ground, velY: 0, onGround: true, ceilingHit: false };
   }
-  return { feetY: newFeetY, velY, onGround: false };
+  return { feetY: newFeetY, velY, onGround: false, ceilingHit: false };
 }
 
 /**

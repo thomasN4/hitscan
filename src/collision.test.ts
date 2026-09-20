@@ -232,6 +232,7 @@ describe('resolveVertical', () => {
   test('resting on flat ground stays put with zeroed velocity', () => {
     const r = resolveVertical(0, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, []);
     expect(r.onGround).toBe(true);
+    expect(r.ceilingHit).toBe(false);
     expect(r.feetY).toBe(0);
     expect(r.velY).toBe(0);
   });
@@ -239,6 +240,7 @@ describe('resolveVertical', () => {
   test('rising is never resolved as a landing', () => {
     const r = resolveVertical(0.5, 8, 0.05, 0, 0, PLAYER_RADIUS, []);
     expect(r.onGround).toBe(false);
+    expect(r.ceilingHit).toBe(false);
     expect(r.velY).toBe(8);
     expect(r.feetY).toBeCloseTo(0.9);
   });
@@ -358,10 +360,47 @@ describe('resolveVertical ceiling sweep', () => {
     expect(r.onGround).toBe(false);
   });
 
-  test('it is clamped below the underside with zero velocity', () => {
+  test('a bonk clamps under the underside and spends the remainder falling', () => {
+    // Feet 2.2 -> 3.2 this frame: contact 20% in, so the remaining 40 ms
+    // fall from the clamp under gravity (issue #125) — the frame ends
+    // millimetres under it, already moving down, instead of parked at rest.
     const r = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
-    expect(r.feetY).toBe(4.4 - HEAD_HEIGHT);
-    expect(r.velY).toBe(0);
+    expect(r.onGround).toBe(false);
+    expect(r.ceilingHit).toBe(true);
+    expect(r.feetY).toBeCloseTo(4.4 - HEAD_HEIGHT - 0.5 * 22 * 0.04 * 0.04, 12);
+    expect(r.velY).toBeCloseTo(-22 * 0.04, 12);
+  });
+
+  test('the fall resumes in the bonk frame itself — no zero-velocity hover', () => {
+    // The old clamp ended the frame at velY = 0, so the next 2-3 frames
+    // moved millimetres. The bonk frame must already sit below the clamp
+    // and carry a downward velocity — a small remainder fall, not a snap.
+    const r = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(r.ceilingHit).toBe(true);
+    expect(r.velY).toBeLessThan(0);
+    expect(r.feetY).toBeLessThan(4.4 - HEAD_HEIGHT);
+    expect(4.4 - HEAD_HEIGHT - r.feetY).toBeLessThan(0.05);
+  });
+
+  test('a bonk fires exactly once per jump', () => {
+    // The bonk frame leaves a negative velocity, so the next frame takes
+    // the falling branch: no second clamp, still airborne, feet decreasing.
+    const bonk = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(bonk.ceilingHit).toBe(true);
+    const next = resolveVertical(bonk.feetY, bonk.velY - 22 * 0.05, 0.05,
+      0, 0, PLAYER_RADIUS, [tread]);
+    expect(next.ceilingHit).toBe(false);
+    expect(next.onGround).toBe(false);
+    expect(next.feetY).toBeLessThan(bonk.feetY);
+  });
+
+  test('contact near the end of the rise leaves almost no remainder', () => {
+    // Clamp 90% into the frame: 5 ms of fall, a fraction of a millimetre —
+    // the frame still ends at the clamp for all visible purposes.
+    const r = resolveVertical(1.5, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(r.ceilingHit).toBe(true);
+    expect(r.feetY).toBeCloseTo(4.4 - HEAD_HEIGHT - 0.5 * 22 * 0.005 * 0.005, 12);
+    expect(r.velY).toBeCloseTo(-22 * 0.005, 12);
   });
 
   test('rises normally when no ceiling overlaps the footprint', () => {
@@ -383,13 +422,63 @@ describe('resolveVertical ceiling sweep', () => {
     expect(r.velY).toBe(20);
   });
 
-  test('an underside within float noise of the resting head still clamps', () => {
+  test('an underside within float noise of the resting head still bonks', () => {
     // An exact-height overhead slab's underside stores a hair LOW; the head
-    // at rest touches it. Rising must clamp at it, not slip past.
+    // at rest touches it. Rising must bonk at it, not slip past — and the
+    // contact clamps to the frame start (the head was already there), so the
+    // whole frame is remainder fall, still millimetres.
     const noisy = slab(0, 0, 3.9999997615814209, 4.3, 5);
     const r = resolveVertical(2.0, 8, 0.05, 0, 0, PLAYER_RADIUS, [noisy]);
-    expect(r.feetY).toBe(3.9999997615814209 - HEAD_HEIGHT);
-    expect(r.velY).toBe(0);
+    expect(r.ceilingHit).toBe(true);
+    expect(r.onGround).toBe(false);
+    expect(r.feetY).toBeCloseTo(3.9999997615814209 - HEAD_HEIGHT - 0.5 * 22 * 0.05 * 0.05, 9);
+    expect(r.velY).toBeCloseTo(-22 * 0.05, 12);
+  });
+});
+
+describe('sliding at bonk height (issue #125)', () => {
+  // Elevation's second-floor slab edge, reduced: x[6,14] y[3.2,3.6]. A jump
+  // under it bonks at feet 1.2, and the frames around the clamp must still
+  // slide along the edge — with the head at or below the underside the slab
+  // reads as overhead cover (walkable-under), never as a wall, so lateral
+  // input is refused for no frame of the bump.
+  const slabEdge = new THREE.Box3(
+    new THREE.Vector3(6, 3.2, -12),
+    new THREE.Vector3(14, 3.6, 12),
+  );
+  const CLAMP = 3.2 - HEAD_HEIGHT; // 1.2
+
+  test('slides along the edge at the clamp, just below it, and at ground', () => {
+    for (const feet of [CLAMP, CLAMP - 0.01, CLAMP - 0.06, 0]) {
+      const pos = new THREE.Vector3(5.9, 0, 0);
+      slideMoveXZ(pos, 0, 0.1, PLAYER_RADIUS, feet, [slabEdge]);
+      expect(pos.z).toBeCloseTo(0.1, 12);
+    }
+  });
+
+  test('same, under a float32-noisy underside measured low', () => {
+    // Real colliders measure off float32 vertices: an underside designed at
+    // 3.2 stores ~2.4e-7 low, and the clamp derives from the MEASURED value,
+    // so the overhead slack still exempts the bump frames.
+    const noisyEdge = new THREE.Box3(
+      new THREE.Vector3(6, 3.1999998092651367, -12),
+      new THREE.Vector3(14, 3.6, -6),
+    );
+    const noisyClamp = 3.1999998092651367 - HEAD_HEIGHT;
+    for (const feet of [noisyClamp, noisyClamp - 0.01]) {
+      const pos = new THREE.Vector3(5.9, 0, -6.5);
+      slideMoveXZ(pos, 0, 0.1, PLAYER_RADIUS, feet, [noisyEdge]);
+      expect(pos.z).toBeCloseTo(-6.4, 12);
+    }
+  });
+
+  test('still refuses driving INTO the slab with the head inside its band', () => {
+    // Feet above the clamp put the head inside the slab — inside geometry,
+    // which is unwedge territory, not this issue. Approaching it laterally
+    // from outside stays refused.
+    const pos = new THREE.Vector3(5.0, 0, 0);
+    slideMoveXZ(pos, 1.0, 0, PLAYER_RADIUS, CLAMP + 0.05, [slabEdge]);
+    expect(pos.x).toBe(5.0);
   });
 });
 

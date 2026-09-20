@@ -88,8 +88,10 @@ const MAX_AIM_PITCH = 1.2;
 
 /**
  * Blend rate (1/s) toward the reload displacement — ~6 closes most of the gap
- * in a quarter second, so the magazine seats promptly when the brain's fire
- * controller reports reloading and returns without lagging behind a cancel.
+ * in a quarter second, so the magazine seats promptly while the brain's fire
+ * controller reports reloading. The return trip is NOT blended: the pose snaps
+ * to rest the frame reloading clears (issue #123), so the first shootable
+ * frame never fires through a still-displaced magazine or cylinder.
  */
 const RELOAD_BLEND_RATE = 6;
 
@@ -554,6 +556,10 @@ export class Bot implements BotShape {
     // show the wrong barrel for as long as the menu is up.
     this.weapon = this.brain.weapon;
     this.rebuildAimGroup();
+    // A new life inherits no reload pose: the loadout's load() cleared any
+    // reload in flight, and the fresh rig starts at rest — carrying the
+    // corpse's blend into a render before the next update would displace it.
+    this.reloadBlend = 0;
     this.perceptionCursor = 0;
     // The present, not zero: six seconds of combat happened while this bot
     // was a corpse and none of it is news.
@@ -816,7 +822,16 @@ export class Bot implements BotShape {
     // so the matrices the pose reads through are this frame's.
     const rig = this.rig;
     if (!rig) throw new Error(`Bot ${this.name}: weapon mount missing for ${this.weapon}`);
-    this.reloadBlend = approach(this.reloadBlend, this.brain.reloading ? 1 : 0, dt, RELOAD_BLEND_RATE);
+    // Issue #123: the pose must agree with shootability on the SAME frame the
+    // logic completes. ready() goes true the frame advanceReload() finishes
+    // (whole-mag) or pull() cancels the remainder (per-round interrupt), so a
+    // blended return would let the next decide() fire through a magazine that
+    // is still visibly out or a cylinder still swung out. Snap shut instead.
+    if (this.brain.reloading) {
+      this.reloadBlend = approach(this.reloadBlend, 1, dt, RELOAD_BLEND_RATE);
+    } else {
+      this.reloadBlend = 0;
+    }
     const shotAge = gameTime.now() - this.lastShotAt;
     poseBotWeaponRig(rig, { shotAge, reloadBlend: this.reloadBlend });
     // The blade has no mechanism to kick, so the swing is the motion: a quick

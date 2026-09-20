@@ -425,6 +425,9 @@ export class WeaponFireController implements FirePosition {
   }
 
   pull(): void {
+    // Cancelling the logic is only half of a per-round interrupt (issue #123):
+    // flipping inReload also drops the executor's reload pose on the same
+    // frame, via its snap to rest while not reloading (bots.ts).
     if (this.inReload && this.def.perRound === true) {
       this.inReload = false;
       this.nextRoundIn = 0;

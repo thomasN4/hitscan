@@ -2,6 +2,7 @@
 
 ALSOFT_DRIVERS=null blender --background --factory-startup --python-exit-code 1 --python scripts/assets/create-ak47-preview.py
 """
+import math
 import runpy
 from pathlib import Path
 
@@ -45,10 +46,20 @@ assembly('mechanism_slide',[slide,handle])
 box('Rear sight leaf',(.039,.016,.050),(0,-.022,-.105),steel,.002)
 for x in (-.024,.024):
     box('Rear notch shoulder',(.012,.018,.012),(x,-.009,-.090),dark,.001)
-box('Front sight tower',(.029,.054,.024),(0,-.040,-.458),steel,.002)
+# Rotate the profile helper's side outline into the sight's frontal plane.
+tower = profile('Front sight tower', [(-.0145,-.067),(.0145,-.067),
+    (.010,-.019),(.008,-.016),(-.008,-.016),(-.010,-.019)],.024,steel,.003)
+tower.rotation_euler.y = math.pi / 2
+tower.location.z = -.458
 box('Front sight post',(.005,.018,.008),(0,-.009,-.458),dark,.0004)
-for x in (-.020,.020):
-    box('Front sight protective ear',(.005,.035,.020),(x,-.0175,-.458),steel,.001)
+# Two solid curved wings cradle the post, leaving an open gap above its tip.
+angles = [math.radians(-65 + 120 * i / 24) for i in range(25)]
+for side in (-1,1):
+    outline = [(side * radius * math.cos(a), -.011 + radius * math.sin(a))
+        for radius, arc in ((.0225, angles), (.0175, angles[::-1])) for a in arc]
+    wing = profile('Front sight protective wing',outline,.020,steel,.001)
+    wing.rotation_euler.y = math.pi / 2
+    wing.location.z = -.458
 fixed_markers((0,-.170,.121),(0,-.09,-.220),(0,-.075,-.543),
     (0,-.114,-.075),(0,-.235,0))
 validate_travel(mag_parts,[receiver,cover,stock,grip],(0,-.235,0),'AK magazine')

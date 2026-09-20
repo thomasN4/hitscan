@@ -88,12 +88,12 @@
       "id": "ak47",
       "source": "assets/source/ak47.blend",
       "output": "public/assets/ak47.glb",
-      "sourceSha256": "f60b108e59853cc3dbd9732c6868649d1e01487efe794a14d556832f55b1ccfc",
-      "outputSha256": "34c484c85c6401d60da4a4cb75ae2d9808920c7c80d033a2832479b0f78632e1",
+      "sourceSha256": "36e357109cb8919b0e2231afe11ef7dd4d4ad6fff8d078a502737237cd9b43d7",
+      "outputSha256": "d8fca944dad300c5af71b913bccad8a4e1efd4a88e2853561051747f3ddf8287",
       "stats": {
-        "vertices": 18502,
+        "vertices": 21322,
         "meshes": 8,
-        "bytes": 532968
+        "bytes": 609676
       }
     }
   ]

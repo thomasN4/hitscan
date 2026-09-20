@@ -119,3 +119,9 @@ Launches your Brave browser headlessly (via puppeteer-core), loads the page, cap
 ## Debug hook
 
 While playing, live game state is exposed on the console as `window.__cs` (`{ game, weapon, player, bots }`) for quick inspection.
+
+## License
+
+[MIT](LICENSE) © Thomas Nguyen. The code, the procedural visuals and the
+Blender weapon sources in `assets/` are all original work; no Counter-Strike
+assets are used or redistributed.

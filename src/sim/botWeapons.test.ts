@@ -10,6 +10,7 @@ import {
   WeaponFireController,
   botBrainParams,
   botHitChance,
+  hasSprayMode,
   makeBotLoadout,
   makeFireController,
   resolveBotSecondary,
@@ -99,10 +100,74 @@ describe('BOT_WEAPON_TUNING', () => {
   test('a burst pause is never shorter than the weapon it paces', () => {
     // A pause below the def's own fireRate would let a bot cycle its weapon
     // faster than the catalog says it can — the knife row included, where the
-    // pause must keep pace with WEAPONS.knife.fireRate.
+    // pause must keep pace with WEAPONS.knife.fireRate. Spray pauses (issue
+    // #135) pace the same weapon, so they hold the same floor.
     for (const id of TUNED_IDS) {
       expect(BOT_WEAPON_TUNING[id].burstPauseMin).toBeGreaterThanOrEqual(WEAPONS[id].fireRate);
+      const t = BOT_WEAPON_TUNING[id];
+      if (t.kind === 'ranged' && t.sprayPauseMin !== undefined) {
+        expect(t.sprayPauseMin).toBeGreaterThanOrEqual(WEAPONS[id].fireRate);
+      }
     }
+  });
+
+  test('spray rows are all-or-none and only on full-auto', () => {
+    // A partial spray row would silently half-spray; hasSprayMode is what the
+    // controller reads, so the table must never hand it a partial row. Only
+    // the full-auto primaries (burst > 1) carry one — semi-autos commit a
+    // single round per decision and have no burst to lengthen.
+    for (const id of TUNED_IDS) {
+      const t = BOT_WEAPON_TUNING[id];
+      if (t.kind !== 'ranged') continue;
+      const parts = [t.sprayRangeM, t.sprayBurst, t.sprayPauseMin, t.sprayPauseSpan, t.sprayChance];
+      const defined = parts.filter(p => p !== undefined).length;
+      expect([0, 5]).toContain(defined);
+      expect(hasSprayMode(t)).toBe(defined === 5);
+      if (hasSprayMode(t)) {
+        expect(t.burst).toBeGreaterThan(1);
+        expect(t.sprayBurst).toBeGreaterThan(t.burst);
+        expect(t.sprayPauseMin).toBeLessThan(t.burstPauseMin);
+        expect(t.sprayChance).toBeGreaterThan(0);
+        expect(t.sprayChance).toBeLessThan(1);
+        expect(t.sprayRangeM).toBeGreaterThan(0);
+      }
+    }
+    expect(hasSprayMode(rangedTuning('smg'))).toBe(true);
+    expect(hasSprayMode(rangedTuning('ak47'))).toBe(true);
+    expect(hasSprayMode(rangedTuning('shotgun'))).toBe(false);
+    expect(hasSprayMode(rangedTuning('sniper'))).toBe(false);
+  });
+
+  test('the sniper row is untouched by the close-range tranche', () => {
+    // Issue #135 is explicit: the flat sniper curve is adequate and out of
+    // scope. Pin the whole row so a retune has to move it deliberately.
+    const t = rangedTuning('sniper');
+    expect(t.hitChanceNear).toBe(0.30);
+    expect(t.hitChanceDivisor).toBe(200);
+    expect(t.hitChanceMin).toBe(0.12);
+    expect(t.burst).toBe(1);
+    expect(t.engageRange).toBe(80);
+    expect(hasSprayMode(t)).toBe(false);
+  });
+
+  test('the shotgun keeps its cliff and closes by cadence and closing', () => {
+    // Issue #135, approach half, plus the shotgun-vs-smg follow-up: the
+    // per-ray zero at range stays a design tool (divisor/min/near untouched
+    // — the zero still lands at ~10.1 m) and the trigger with it
+    // (engageRange 10 keeps the decorative 10-12 m pulls off). What moves is
+    // the contact cadence (pause 1.1/0.3, ~38 dps at contact, still under
+    // the 40-dps gate) and the close (farBand 9, strafeFactor 0.4).
+    const t = rangedTuning('shotgun');
+    expect(t.hitChanceNear).toBe(0.42);
+    expect(t.hitChanceDivisor).toBe(24);
+    expect(t.hitChanceMin).toBe(0);
+    expect(t.burstPauseMin).toBe(1.1);
+    expect(t.burstPauseSpan).toBe(0.3);
+    expect(t.nearBand).toBe(2);
+    expect(t.farBand).toBe(9);
+    expect(t.engageRange).toBe(10);
+    expect(t.strafeFactor).toBe(0.4);
+    expect(hasSprayMode(t)).toBe(false);
   });
 
   test('the knife row sits inside its own reach', () => {
@@ -434,6 +499,120 @@ describe('WeaponFireController cadence', () => {
     }
     expect(fire.mag).toBe(0);
     expect(fire.ready()).toBe(false);
+  });
+});
+
+describe('close-range spray (issue #135)', () => {
+  /**
+   * Fire one full burst of `n` rounds through `fire`, ticking the catalog
+   * interval between pulls and passing `dist` to each closing pull. Returns
+   * draws taken, so a test can pin the selection-plus-pause pair.
+   */
+  function burst(fire: FireController, n: number, dist: number, c: { taken: () => number }): number {
+    const before = c.taken();
+    for (let i = 0; i < n; i++) {
+      fire.pull(dist);
+      if (i < n - 1) fire.tick(WEAPONS.smg.fireRate, false);
+    }
+    return c.taken() - before;
+  }
+
+  test('an in-range burst end spends a selection draw plus the pause', () => {
+    // stagger, then: selection (< 0.5 → spray) + pause. The burst just fired
+    // is still the base 3 — the selection gates the NEXT burst — but its
+    // closing shot already spends both draws.
+    const c = counting([0, 0.1, 0.5]);
+    const fire = controller('smg', c.rng);
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 1, false);
+    const before = c.taken();
+    fire.pull(3); fire.tick(WEAPONS.smg.fireRate, false);
+    fire.pull(3); fire.tick(WEAPONS.smg.fireRate, false);
+    fire.pull(3);
+    expect(c.taken()).toBe(before + 2); // selection + pause, spray taken
+  });
+
+  test('spray is taken sometimes, not always, at close range', () => {
+    // Selection draw 0.1 < 0.5 → spray (5-round next burst); 0.9 → taps back
+    // to 3. The pause draw (0.5) is shared shape either way.
+    const c = counting([0, 0.1, 0.5, 0.9, 0.5]);
+    const fire = controller('smg', c.rng);
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 1, false);
+    const takes = burst(fire, 3, 3, c);
+    expect(takes).toBe(2);
+    // Spray burst is 5: four intra-burst intervals take no draws, the fifth
+    // pull closes it with selection + pause again.
+    fire.tick(0.7 + 0.5 * 0.4 + 0.01, false);
+    const sprayTakes = burst(fire, 5, 3, c);
+    expect(sprayTakes).toBe(2);
+  });
+
+  test('out-of-range and dist-less burst ends never spray', () => {
+    // Selection draw would spray (0.1) if the gate let it — out of range and
+    // omitted dist must both hold the base burst of 3.
+    for (const dist of [50, undefined] as const) {
+      const c = counting([0, 0.1, 0.5]);
+      const fire = controller('smg', c.rng);
+      fire.arm();
+      fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 1, false);
+      const before = c.taken();
+      for (let i = 0; i < 3; i++) {
+        if (dist === undefined) fire.pull();
+        else fire.pull(dist);
+        if (i < 2) fire.tick(WEAPONS.smg.fireRate, false);
+      }
+      // Dist-less: one pause draw. Out-of-range with spray fields: the gate
+      // fails before any selection draw, so one pause draw as well.
+      expect(c.taken()).toBe(before + 1);
+      // And the next burst is still 3, not 5: two pulls leave it unclosed.
+      fire.tick(2, false);
+      if (dist === undefined) { fire.pull(); fire.tick(WEAPONS.smg.fireRate, false); fire.pull(); }
+      else { fire.pull(dist); fire.tick(WEAPONS.smg.fireRate, false); fire.pull(dist); }
+      expect(c.taken()).toBe(before + 1);
+    }
+  });
+
+  test('a spray pause is shorter than the tap pause it replaces', () => {
+    // Selection 0.1 → spray; pause draw 0.5 → 0.7 + 0.5*0.4 = 0.9 vs taps'
+    // 0.9 + 0.5*0.6 = 1.2 at the same draw.
+    const c = counting([0, 0.1, 0.5]);
+    const fire = controller('smg', c.rng);
+    fire.arm();
+    fire.tick(FIRST_SHOT_DELAY_MIN + FIRST_SHOT_DELAY_SPAN + 1, false);
+    fire.pull(3); fire.tick(WEAPONS.smg.fireRate, false);
+    fire.pull(3); fire.tick(WEAPONS.smg.fireRate, false);
+    fire.pull(3);
+    fire.tick(0.89, false);
+    expect(fire.ready()).toBe(false);
+    fire.tick(0.02, false);
+    expect(fire.ready()).toBe(true);
+  });
+
+  test('spray lifts contact dps without moving the 10 m pin', () => {
+    // Analytic: same per-round damage as taps, more rounds per second.
+    // smg taps ~18.6 at contact / ~9.7 at 10 m; spray ~38 / ~20 — hotter up
+    // close where a held trigger should end fights, while the 10 m tap pin
+    // the suite already holds (~6-12) does not move. ak47 mirrors it.
+    function sprayDps(id: 'smg' | 'ak47', dist: number): number {
+      const def = WEAPONS[id];
+      const t = rangedTuning(id);
+      const mean = t.headChance * def.headshotMult + t.legChance * 0.75 + (1 - t.headChance - t.legChance);
+      const perRound = botHitChance(dist, t) * def.damage * mean;
+      const sprayCycle = ((t.sprayBurst ?? t.burst) - 1) * def.fireRate
+        + (t.sprayPauseMin ?? t.burstPauseMin) + (t.sprayPauseSpan ?? t.burstPauseSpan) / 2;
+      return (perRound * (t.sprayBurst ?? t.burst)) / sprayCycle;
+    }
+    for (const id of ['smg', 'ak47'] as const) {
+      expect(sprayDps(id, 0)).toBeGreaterThan(30);
+      expect(sprayDps(id, 0)).toBeLessThan(40);
+      expect(sprayDps(id, 3)).toBeGreaterThan(sprayDps(id, 8));
+    }
+    // The shotgun cliff still reaches zero just past 10 m (0.42 - d/24 floors
+    // at 10.08), and the 10 m engage gate stops the trigger there anyway —
+    // so the 10-12 m decorative pulls are gone both by curve and by gate.
+    expect(botHitChance(10, rangedTuning('shotgun'))).toBeLessThan(0.01);
+    expect(botHitChance(11, rangedTuning('shotgun'))).toBe(0);
   });
 });
 

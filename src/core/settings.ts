@@ -10,7 +10,7 @@
 // Export is the whole point of the format: the settings menu copies this
 // object as JSON, and a tuned copy pasted back becomes DEFAULT_SETTINGS. So
 // every value is in a human-readable unit — sensitivities are multipliers of
-// sim/look.ts's bases (1.0 = the shipped feel), and layout positions are
+// sim/look.ts's bases (1.0 = the base rate before acceleration), and layout positions are
 // fractions of the screen's safe area, so a layout carries across phones.
 import type { LookTuning } from '../sim/look';
 
@@ -59,26 +59,28 @@ export const SETTING_LIMITS = {
 } as const satisfies Record<string, Limits>;
 
 /**
- * Shipped defaults. The layout reproduces the original hand-placed CSS on an
- * 844×390 landscape phone (centres converted to fractions).
+ * Shipped defaults: the owner's first on-device tuning (Opera GX on Android,
+ * September 2026), pasted back from the settings menu's export. Look
+ * acceleration 1.3 on both hip and ADS at base sensitivity; the fire, ADS and
+ * utility buttons sit lower than the original hand-placed CSS did.
  */
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   mouseSens: 1,
   touch: {
-    hip: { sens: 1, accel: 0 },
-    ads: { sens: 1, accel: 0 },
-    opacity: 1,
-    stickRadius: 56,
+    hip: { sens: 1, accel: 1.3 },
+    ads: { sens: 1, accel: 1.3 },
+    opacity: 0.8,
+    stickRadius: 80,
   },
   layout: {
-    fireR: { x: 0.905, y: 0.579, scale: 1 },
-    fireL: { x: 0.079, y: 0.385, scale: 1 },
-    ads: { x: 0.917, y: 0.328, scale: 1 },
-    zoom: { x: 0.833, y: 0.31, scale: 1 },
-    reload: { x: 0.799, y: 0.544, scale: 1 },
-    jump: { x: 0.915, y: 0.846, scale: 1 },
-    crouch: { x: 0.815, y: 0.846, scale: 1 },
+    fireR: { x: 0.905, y: 0.635, scale: 1 },
+    fireL: { x: 0.082, y: 0.46, scale: 1 },
+    ads: { x: 0.93, y: 0.418, scale: 1 },
+    zoom: { x: 0.857, y: 0.377, scale: 1 },
+    reload: { x: 0.755, y: 0.888, scale: 1 },
+    jump: { x: 0.919, y: 0.864, scale: 1 },
+    crouch: { x: 0.836, y: 0.876, scale: 1 },
     pause: { x: 0.043, y: 0.082, scale: 1 },
     weapons: { x: 0.859, y: 0.077, scale: 1 },
   },

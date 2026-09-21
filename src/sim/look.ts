@@ -25,7 +25,7 @@ export function applyLook(
 
 // ---------- Sensitivity and acceleration ----------
 // User-facing sensitivities (core/settings.ts) are MULTIPLIERS of these
-// bases, so 1.0 is the feel the game shipped with.
+// bases, so 1.0 with no acceleration is the original fixed feel.
 
 /** Radians per mouse count at mouse sensitivity 1.0. */
 export const MOUSE_BASE_SENS = 0.0022;

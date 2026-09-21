@@ -137,12 +137,12 @@ const ROUTE_ABANDON = 6;
 /**
  * Zone fractions of the eye height for a target with no part meshes: the
  * player's eye IS their head (1.0), and torso/legs mirror the bot mesh's own
- * 1.60 / 1.075 / 0.375 offsets over its 1.6 m eye.
+ * 1.63 / 1.18 / 0.425 offsets over its 1.6 m eye.
  */
 const PLAYER_ZONE_FRACTION: Record<HitZone, number> = {
   head: 1.0,
-  torso: 0.67,
-  legs: 0.23,
+  torso: 0.74,
+  legs: 0.27,
 };
 
 /**
@@ -187,12 +187,12 @@ function debugLog(msg: string): void {
 }
 
 // Shared geometries/materials — one allocation for all bots. Two palettes:
-// T tan/brown, CT blue-gray, so sides read at a glance. ~1.75 m overall:
-// legs 0–0.75 m, torso 0.75–1.40 m, head 1.45–1.75 m (issue #137).
+// T tan/brown, CT blue-gray, so sides read at a glance. ~1.75 m overall
+// with adult-like ratios: legs 0–0.85 m (~49%), head 0.24 m (~14%).
 const botGeo = {
-  torso:  new THREE.BoxGeometry(0.7, 0.65, 0.4),
-  head:   new THREE.BoxGeometry(0.3, 0.3, 0.3),
-  legs:   new THREE.BoxGeometry(0.6, 0.75, 0.35),
+  torso:  new THREE.BoxGeometry(0.62, 0.66, 0.36),
+  head:   new THREE.BoxGeometry(0.24, 0.24, 0.24),
+  legs:   new THREE.BoxGeometry(0.55, 0.85, 0.32),
 };
 const palettes: Record<Team, { body: THREE.MeshToonMaterial; head: THREE.MeshToonMaterial; legs: THREE.MeshToonMaterial }> = {
   T: {
@@ -427,12 +427,12 @@ export class Bot implements BotShape {
     const palette = palettes[team];
     this.torso = new THREE.Mesh(botGeo.torso, palette.body);
     this.torso.name = 'bot-torso';
-    this.torso.position.y = 1.075;
+    this.torso.position.y = 1.18;
     this.head = new THREE.Mesh(botGeo.head, palette.head);
     this.head.name = 'bot-head';
-    this.head.position.y = 1.6;
+    this.head.position.y = 1.63;
     this.legs = new THREE.Mesh(botGeo.legs, palette.legs);
-    this.legs.position.y = 0.375;
+    this.legs.position.y = 0.425;
     [this.torso, this.head, this.legs].forEach(p => { p.castShadow = true; this.mesh.add(p); });
     const parts = { torso: this.torso, head: this.head, legs: this.legs };
     // Tag every part with its owner so bullet raycasts can attribute hits.
@@ -454,7 +454,7 @@ export class Bot implements BotShape {
     // respawn: ~9:1 right-shoulder (-X; the bot faces +Z) to left (+X).
     // Pure pick in core/botWeaponModels.ts; Math.random matches the speed
     // roll and brain rng stream already drawn directly in this constructor.
-    this.aim.position.set(pickBotShoulderOffset(Math.random), 1.22, 0);
+    this.aim.position.set(pickBotShoulderOffset(Math.random), 1.35, 0);
     // The held model itself goes through the same helper a dry swap uses, so
     // construction and swapping share ONE definition rather than two that drift.
     this.rebuildAimGroup();
@@ -612,7 +612,7 @@ export class Bot implements BotShape {
         id: 'player',
         // Feet, not the eye that `player.pos` holds: rise and the planar
         // closure measure compare these against bot feet, and passing the
-        // eye through would hand every bot 1.7 m of phantom height.
+        // eye through would hand every bot 1.6 m of phantom height.
         feet: playerFeet(player),
         eye: camera.position,
         alive: player.alive,

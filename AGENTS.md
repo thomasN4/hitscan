@@ -145,7 +145,7 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    - Gitea has no draft flag on the pull request itself. `--draft` prepends
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
-   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a trailer, chosen by the same rule as commit messages: `Co-authored-by: Muse Spark <muse-spark@meta>` when the user posts it, `Authored-by: Muse Spark <muse-spark@meta>` when `code-bot` does.
+   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a trailer naming the model that wrote that text, in `Name <email>` form, chosen by the same rule as commit messages: `Co-authored-by: <model>` when the user posts it, `Authored-by: <model>` when `code-bot` does.
 5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the

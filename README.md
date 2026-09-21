@@ -5,7 +5,7 @@ A browser-based FPS demo inspired by Counter-Strike, built with
 maps — team deathmatch or domination — with hitscan gunplay, iron sights,
 crouching, a primary/secondary loadout and multi-level bot navigation. Levels
 and effects are procedural, audio is synthesized in WebAudio, and the only
-binary assets are the seven weapon models.
+binary assets are the eight weapon models.
 
 > **On GitHub, this repository is a read-only mirror.** Development happens on a
 > self-hosted Gitea instance; the GitHub copy tracks `main` only and is pushed by
@@ -47,11 +47,11 @@ node scripts/smoke-test.mjs   # headless E2E check (see below)
 
 ## Gameplay
 
-Before deploying you pick a **loadout**: one primary and one secondary from the weapon catalog (SMG / AK-47 / sniper / shotgun primaries; pistol / revolver secondaries). The picker opens at match start (after Play) and again on death, pre-filled with your last pick; Deploy commits it and enters the game. In-game, `1`/`2` switch between the two positions and `Q` quick-swaps. Your pick survives map switches via sessionStorage.
+Before deploying you pick a **loadout**: one primary and one secondary from the weapon catalog (SMG / AK-47 / sniper / shotgun primaries; pistol / revolver / sawn-off secondaries). The picker opens at match start (after Play) and again on death, pre-filled with your last pick; Deploy commits it and enters the game. In-game, `1`/`2` switch between the two positions and `Q` quick-swaps. Your pick survives map switches via sessionStorage.
 
 Five maps plus the match setup (the game mode, your side, enemy/allied bot counts, round length in minutes, the domination points-to-win, and each side's bot primary and secondary), chosen in the start menu. Changing anything commits it to the URL query (`?map=…&mode=…&side=…&tbots=…&ctbots=…&time=…&scorelimit=…&tweap=…&tsec=…&ctweap=…&ctsec=…`) and reloads the page:
 
-**Bots carry real loadouts.** Each side sets a primary (SMG / AK-47 / sniper / shotgun) and a secondary (pistol / revolver), or **Mixed** (the default for both positions) to draw one per bot, and the choice drives everything downstream: its accuracy curve and falloff, how close it wants to fight, its rate of fire, its magazine and reload, its damage by hit zone — and its silhouette, its report, and the killfeed line it leaves. A sniper bot threatens across the whole map and a shotgun bot is harmless past ten metres, so what the enemy is holding is now worth reading off their barrel. When a position runs dry the bot swaps down the ladder — primary, then sidearm, then the blade every loadout carries.
+**Bots carry real loadouts.** Each side sets a primary (SMG / AK-47 / sniper / shotgun) and a secondary (pistol / revolver / sawn-off), or **Mixed** (the default for both positions) to draw one per bot, and the choice drives everything downstream: its accuracy curve and falloff, how close it wants to fight, its rate of fire, its magazine and reload, its damage by hit zone — and its silhouette, its report, and the killfeed line it leaves. A sniper bot threatens across the whole map and a shotgun bot is harmless past ten metres, so what the enemy is holding is now worth reading off their barrel. When a position runs dry the bot swaps down the ladder — primary, then sidearm, then the blade every loadout carries.
 
 - **Arena** (`src/maps/arena.ts`) — enemy bots (menu-configured count and weapon, default 6 and Mixed) spawn in the far half of the map and hunt you. They respect cover: they only shoot with clear line of sight.
 - **Elevation** (`src/maps/elevation.ts`) — a playtest map for watching how the bots cope with height: a two-story building with an internal stairwell and an external flight, an unrailed bridge to a tower, a plateau, and a jump-only route no bot can ever take. Bots route over a navigation graph when a target is a level above them (`src/nav.ts`), so this is where you see how they find stairs, decks and drops — press `V` in a dev build to watch the routes themselves.

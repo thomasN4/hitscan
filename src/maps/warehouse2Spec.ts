@@ -52,8 +52,8 @@ export const VOID_Z = SHELL_Z - RING;
 export const YARD_X = 44;
 export const YARD_Z = 34;
 
-/** Rail height and thickness. Top at 6.2, under a deck eye at 5.1 + 1.9 = 7.0. */
-export const RAIL_H = 1.1;
+/** Rail height and thickness. Top at 6.5, under a deck eye at 5.1 + 1.9 = 7.0. */
+export const RAIL_H = 1.4;
 export const RAIL_T = 0.16;
 /** Width of both main flights, and so of the rail gaps that receive them. */
 export const FLIGHT_W = 3.6;

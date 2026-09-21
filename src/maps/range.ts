@@ -132,9 +132,9 @@ function addTarget(x: number, z: number, { height = 0, yaw = 0 }: TargetOpts = {
   post.position.y = -(height + 0.05) / 2 + 0.025;
 
   // Part y-offsets match bots.ts exactly (torso 1.18, head 1.63, legs 0.425)
-  const legs  = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.85, 0.32), matLegs);
+  const legs  = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.85, 0.28), matLegs);
   legs.position.y = 0.425;
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.66, 0.36), [matBody, matBody, matBody, matBody, bullseyeMat, matBody]);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.66, 0.3), [matBody, matBody, matBody, matBody, bullseyeMat, matBody]);
   torso.position.y = 1.18;
   const head  = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), matHead);
   head.position.y = 1.63;

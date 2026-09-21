@@ -188,11 +188,13 @@ function debugLog(msg: string): void {
 
 // Shared geometries/materials — one allocation for all bots. Two palettes:
 // T tan/brown, CT blue-gray, so sides read at a glance. ~1.75 m overall
-// with adult-like ratios: legs 0–0.85 m (~49%), head 0.24 m (~14%).
+// with adult-like ratios: legs 0–0.85 m (~49%), head 0.24 m (~14%), and a
+// visibly slim torso — the raycast shoots these meshes, so narrower bodies
+// are directly harder to hit.
 const botGeo = {
-  torso:  new THREE.BoxGeometry(0.62, 0.66, 0.36),
+  torso:  new THREE.BoxGeometry(0.5, 0.66, 0.3),
   head:   new THREE.BoxGeometry(0.24, 0.24, 0.24),
-  legs:   new THREE.BoxGeometry(0.55, 0.85, 0.32),
+  legs:   new THREE.BoxGeometry(0.45, 0.85, 0.28),
 };
 const palettes: Record<Team, { body: THREE.MeshToonMaterial; head: THREE.MeshToonMaterial; legs: THREE.MeshToonMaterial }> = {
   T: {

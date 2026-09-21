@@ -52,8 +52,8 @@ export const VOID_Z = SHELL_Z - RING;
 export const YARD_X = 44;
 export const YARD_Z = 34;
 
-/** Rail height and thickness. Top at 6.5, under a deck eye at 5.1 + 1.9 = 7.0. */
-export const RAIL_H = 1.4;
+/** Rail height and thickness. Top at 6.2, under a deck eye at 5.1 + 1.6 = 6.7. */
+export const RAIL_H = 1.1;
 export const RAIL_T = 0.16;
 /** Width of both main flights, and so of the rail gaps that receive them. */
 export const FLIGHT_W = 3.6;
@@ -96,7 +96,7 @@ export const YARD_FLIGHT_X = 32.5;
 const LIFT_A = { id: 'cargo-a', x: 8, z: -VOID_Z + PAD_W / 2, sign: -1 as const };
 const LIFT_B = { id: 'cargo-b', x: -8, z: VOID_Z - PAD_W / 2, sign: 1 as const };
 
-/** Rack height. Over a ground eye (1.7), under a deck eye (7.0) — nothing hides from the ring. */
+/** Rack height. Over a ground eye (1.6), under a deck eye (6.7) — nothing hides from the ring. */
 export const RACK_H = 3;
 /** Centre z of the two central racks; RACK_D deep, leaving a 4 m aisle between. */
 export const RACK_Z = 3;

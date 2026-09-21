@@ -451,7 +451,7 @@ export function shoot(): void {
   // FEET, not the eye `origin` the rays leave from. A heard position is a
   // place to walk to, and navGrid.ts:nearestNode weights a metre of height
   // like four of ground — so an eye-height goal snaps to the deck ABOVE the
-  // shooter wherever one exists. 1.7 m makes no difference to an 80 m radius
+  // shooter wherever one exists. 1.6 m makes no difference to an 80 m radius
   // and all the difference to the route.
   soundEvents.emit({
     kind: 'gunshot',

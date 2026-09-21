@@ -82,7 +82,7 @@ try {
     await page.evaluate(() => {
       const cs = window.__cs;
       cs.game.started = true; cs.game.locked = true;
-      cs.player.pos.set(6, 1.7, 10); cs.game.yaw = -2.35;
+      cs.player.pos.set(6, 1.6, 10); cs.game.yaw = -2.35;
       for (const bot of cs.bots) { bot.update = () => {}; bot.mesh.visible = false; }
       document.getElementById('startMenu').style.display = 'none';
       document.getElementById('hud').style.display = 'block';

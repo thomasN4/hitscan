@@ -52,8 +52,8 @@ export function rangeSpec(): MapSpec {
     lifts: [],
     // Staggered distances and heights on both halves of the lane, angled
     // slightly toward the firing line. Near ones for spray control, far ones
-    // for accuracy. Part dims match bots.ts exactly (torso 1.35, head 2.0,
-    // legs 0.45) so headshot practice transfers — that match is owned by the
+    // for accuracy. Part dims match bots.ts exactly (torso 1.18, head 1.63,
+    // legs 0.425) so headshot practice transfers — that match is owned by the
     // builder's addTarget, positions are owned here.
     targets: [
       { x: -4.5, z: -5, height: 0, yaw: 0 }, // 10 m

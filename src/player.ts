@@ -52,8 +52,8 @@ const JUMP_VEL = 8;    // initial jump velocity -> ~1.45m apex
 const BLEND_RATE = 10;
 /** Sprint ramp time constant (s) — ~0.2 s from standstill to full speed. */
 const SPRINT_RAMP = 0.2;
-/** How far the camera drops at full crouch (m). */
-const CROUCH_DROP = 0.7;
+/** How far the camera drops at full crouch (m). Scaled with the 1.6 m eye so the crouched eye (0.94) keeps its cover ratios. */
+const CROUCH_DROP = 0.66;
 /** Airborne blend rate (1/s); ~100-200 ms to ease the jump penalty in and out. */
 const AIR_BLEND_RATE = 12;
 /**

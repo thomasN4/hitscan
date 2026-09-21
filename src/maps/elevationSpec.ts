@@ -27,7 +27,7 @@ export const ELEVATION_STEP = { h: 0.3, d: 0.75 } as const;
  * could be jumped THROUGH and landed on.
  */
 export const ELEVATION_DECK_Y = 3.6;
-/** Slab thickness; DECK_Y - SLAB_T = 3.2 m of headroom underneath, well over collision.ts:HEAD_HEIGHT (2.0). */
+/** Slab thickness; DECK_Y - SLAB_T = 3.2 m of headroom underneath, well over collision.ts:HEAD_HEIGHT (1.75). */
 export const ELEVATION_SLAB_T = 0.4;
 
 /** Ground-floor wall height; the slab sits on top of it. */

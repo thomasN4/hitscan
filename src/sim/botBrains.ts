@@ -60,7 +60,7 @@ const UP_Y = new THREE.Vector3(0, 1, 0);
  * position. Matches the executor's bot eye convention (bots.ts:eyePos), so
  * the barrel tips level rather than at the floor.
  */
-const LOOK_EYE_HEIGHT = 1.9;
+const LOOK_EYE_HEIGHT = 1.6;
 
 /**
  * Fraction of travel speed a capping bot drifts at: weight-shifting inside

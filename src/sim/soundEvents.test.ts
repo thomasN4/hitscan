@@ -136,7 +136,7 @@ describe('SoundRing high-water snapshots', () => {
 describe('SoundEvent immutability', () => {
   it('copies the emitted position: moving the source does not move the event', () => {
     const ring = new SoundRing();
-    const muzzle = new THREE.Vector3(5, 1.9, 5);
+    const muzzle = new THREE.Vector3(5, 1.6, 5);
     const ev = ring.emit(shot(0, 0, { pos: muzzle }));
     muzzle.set(-100, 0, -100);
     expect(ev.pos.x).toBe(5);

@@ -392,16 +392,16 @@ export interface PlayerState {
  * Player entity. `pos` is the EYE position (not feet); the feet ride at
  * pos.y − eyeHeight and rest on whatever surface is beneath them — on open
  * ground exactly y = 0, on stairs/platforms higher. Crouch only offsets the
- * camera, not `pos` itself.
+ * camera, not `pos` itself. Eye matches the bots' 1.6 m (bots.ts:eyePos).
  */
 export const player: PlayerState = {
-  pos: new THREE.Vector3(0, 1.7, 48),
+  pos: new THREE.Vector3(0, 1.6, 48),
   vel: new THREE.Vector3(),
   onGround: true,
   hp: 100,
   alive: true,
   radius: 0.45,
-  eyeHeight: 1.7,
+  eyeHeight: 1.6,
 };
 
 /**

@@ -93,7 +93,7 @@ describe('BOT_WEAPON_TUNING', () => {
     // Pins the product decision: sidearms never appear as primaries, the
     // blade never draws at all — it arrives only as every loadout's fallback.
     expect([...BOT_PRIMARY_IDS].sort()).toEqual(['ak47', 'shotgun', 'smg', 'sniper']);
-    expect([...BOT_SIDEARM_IDS].sort()).toEqual(['pistol', 'revolver']);
+    expect([...BOT_SIDEARM_IDS].sort()).toEqual(['pistol', 'revolver', 'sawnOff']);
   });
 
   test('a burst pause is never shorter than the weapon it paces', () => {
@@ -201,12 +201,12 @@ describe('expected damage per second', () => {
   });
 
   test('mid-band lethality stays in reach of the pre-weapon bot', () => {
-    // Tranche 6's bot sat at 6.1 dps at 10 m. Every weapon except the
-    // shotgun stays within roughly twice that at its own preferred range —
+    // Tranche 6's bot sat at 6.1 dps at 10 m. Non-pellet firearms stay
+    // within roughly twice that at their preferred ranges —
     // this tranche is about character, not difficulty. Melee rows skipped as
     // above: a blade has no dps to band.
     for (const id of TUNED_IDS) {
-      if (id === 'shotgun' || id === 'knife') continue; // see the cliff test below
+      if (id === 'shotgun' || id === 'sawnOff' || id === 'knife') continue; // see the cliff test below
       const t = BOT_WEAPON_TUNING[id];
       if (t.kind !== 'ranged') continue;
       const band = (t.nearBand + t.farBand) / 2;
@@ -215,15 +215,14 @@ describe('expected damage per second', () => {
   });
 
   test('the shotgun trades every metre of reach for contact damage', () => {
-    // The one deliberate outlier, and the trade is what justifies it: it is
-    // the ONLY firearm whose curve reaches actual zero, and it gets there
+    // Pellet shotguns trade reach for contact damage. The pump reaches zero
     // inside 11 m. Stated as shape rather than as absolute numbers so a
     // retune inside the band above does not have to edit this.
     expect(dps('shotgun', 1)).toBeGreaterThan(2 * dps('shotgun', 6));
     expect(dps('shotgun', 11)).toBe(0);
     expect(dps('shotgun', 0)).toBeGreaterThan(dps('smg', 0));
     for (const id of TUNED_IDS) {
-      if (id === 'shotgun' || id === 'knife') continue;
+      if (id === 'shotgun' || id === 'sawnOff' || id === 'knife') continue;
       expect(dps(id, 11)).toBeGreaterThan(0);
     }
   });
@@ -900,5 +899,37 @@ describe('resolveBotSecondary', () => {
 
   test('a draw of exactly 1 stays in range', () => {
     expect(resolveBotSecondary('mixed', () => 1)).toBe(BOT_SIDEARM_IDS[BOT_SIDEARM_IDS.length - 1]);
+  });
+});
+
+describe('sawn-off sidearm', () => {
+  test('its short-range pellet chance reaches zero before the pump shotgun', () => {
+    expect(botHitChance(7, rangedTuning('sawnOff'))).toBe(0);
+    expect(botHitChance(7, rangedTuning('shotgun'))).toBeGreaterThan(0);
+    expect(botHitChance(0, rangedTuning('sawnOff'))).toBe(.42);
+  });
+  test('two shells require a complete reload before any ammunition transfers', () => {
+    const fire = new WeaponFireController('sawnOff', WEAPONS.sawnOff, rangedTuning('sawnOff'), () => .5);
+    fire.pull(); fire.tick(2, true); fire.pull(); fire.tick(0, true);
+    expect(fire.mag).toBe(0);
+    expect(fire.reloading).toBe(true);
+    fire.tick(2.39, true);
+    expect(fire.mag).toBe(0);
+    expect(fire.ready()).toBe(false);
+    fire.tick(.02, true);
+    expect(fire.mag).toBe(2);
+    expect(fire.reserve).toBe(14);
+    expect(fire.reloading).toBe(false);
+  });
+  test('pellets share damage rules and exhausted sidearms fall back to the blade', () => {
+    const fire = new WeaponFireController('sawnOff', WEAPONS.sawnOff, rangedTuning('sawnOff'), () => .25);
+    expect(fire.resolve(0)).toMatchObject({ rays: 8, hits: 8, damage: 104 });
+    const loadout = makeBotLoadout('smg', 'sawnOff', id => WEAPONS[id], () => .5);
+    loadout.arm();
+    for (let i = 0; i < 400 && loadout.weapon !== 'knife'; i++) {
+      loadout.tick(10, true);
+      if (loadout.ready()) loadout.pull();
+    }
+    expect(loadout.weapon).toBe('knife');
   });
 });

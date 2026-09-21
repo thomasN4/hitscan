@@ -40,7 +40,7 @@ export interface SessionConfig {
   botWeaponT: BotWeaponChoice;
   /** Same for the CT side. */
   botWeaponCt: BotWeaponChoice;
-  /** Sidearm for T-side bot loadouts; 'mixed' draws pistol/revolver per bot. */
+  /** Sidearm for T-side bot loadouts; 'mixed' draws pistol/revolver/sawn-off per bot. */
   botSecondaryT: BotSecondaryChoice;
   /** Same for the CT side. */
   botSecondaryCt: BotSecondaryChoice;
@@ -208,7 +208,7 @@ export function asBotWeapon(
  * than one that falls back.
  */
 const IS_BOT_SECONDARY: Record<BotSecondaryChoice, true> = {
-  mixed: true, pistol: true, revolver: true,
+  mixed: true, pistol: true, revolver: true, sawnOff: true,
 };
 
 export function asBotSecondary(

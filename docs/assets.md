@@ -1,7 +1,7 @@
 # First-person weapon assets
 
 Editable sources under `assets/source/`: `shotgun.blend`, `revolver.blend`,
-`pistol.blend`, `smg.blend`, `sniper.blend`, `knife.blend`, and `ak47.blend`.
+`pistol.blend`, `smg.blend`, `sniper.blend`, `knife.blend`, `ak47.blend`, and `sawnOff.blend`.
 Runtime exports live under `public/assets/` with the matching `.glb` names. The
 game retains procedural maps and synthesized audio — bots hold the same
 authored weapon models as the player, mounted third-person on their aim
@@ -20,7 +20,7 @@ npm run build
 edited sources, preserves them, writes GLB, validates the result, then records
 source/output/export-script SHA-256 hashes and settings in
 `assets/weapons-manifest.json`. Commit sources, GLBs and manifest together.
-`assets:check` verifies all seven committed GLBs without Blender.
+`assets:check` verifies all eight committed GLBs without Blender.
 The exporter disables audio via `ALSOFT_DRIVERS=null` for headless Linux machines.
 
 The manifest also records `gltfAddon` (e.g. `"5.2.40"`), the Khronos glTF
@@ -176,7 +176,7 @@ CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-animation-check.mjs /tmp
 CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-assets-check.mjs
 ```
 
-The asset checks cover missing/corrupt files and one-load startup for all seven
+The asset checks cover missing/corrupt files and one-load startup for all eight
 assets. Unit checks exercise exported contracts, independent clones, magazine
 paths, action restoration and aiming visibility. Runtime palette and framing
 are reviewed in the browser; the studio renders use Workbench material colors.
@@ -234,3 +234,43 @@ through the complete draw delay before testing reload input.
 | Magazine extraction | Bot-held model |
 | --- | --- |
 | ![AK-47 reload](images/ak47/ak47-reload-insert.png) | ![Bot holding the AK-47](images/ak47/ak47-bot.png) |
+
+## Sawn-off double-barrel
+
+`SAWN-OFF` (`sawnOff`) is a secondary for the player and both bot teams,
+including mixed sidearm pools. Each click fires one of two shells; RMB aims.
+Eight pellets deal 13 torso damage each, with a fixed 0.10-radian pattern,
+a 0.25-second firing ceiling, and 16 reserve shells. ADS steadies the aim layer
+without tightening the pellet pattern. The 2.4-second break-action reload
+transfers only missing shells, together on completion, including partial and
+limited-reserve reloads. Sprinting or swapping cancels without transferring ammo.
+
+The dedicated generator overwrites only `sawnOff.blend`. Short bored barrels,
+a walnut birdshead grip and fore-end, and a supported brass bead use the existing
+palette. `mechanism_hinge` owns both chambers, the support grip, loading marker
+and muzzle. The first-person reload extracts spent shells and feeds the available
+replacement count along the rotated bore axes. Cancellation hides loose shells
+and closes the hinge; bots use the same authored model and hinged action.
+Gameplay clocks remain authoritative, including synthesized reload cues.
+
+Bots retain deliberate single-shot pacing: a 1.4–1.8-second pause keeps their
+preferred-range damage inside the existing budget. Their preferred range is
+1–4 metres, with pellet hit probability reaching zero at 6.72 metres.
+
+```sh
+ALSOFT_DRIVERS=null blender --background --factory-startup --python-exit-code 1 --python scripts/assets/create-sawn-off-preview.py
+npm run assets:export
+npm run assets:check
+CS_SMOKE_BASE=http://127.0.0.1:5199 node scripts/sawn-off-check.mjs /tmp/sawn-off-review
+CS_SMOKE_BASE=http://127.0.0.1:5199 node scripts/weapon-animation-check.mjs /tmp/sawn-off-review sawnOff
+```
+
+The integration check covers actual picker input and persistence, both bot teams'
+secondary mounts, eight-pellet hitscan damage, held-trigger suppression, empty-fire
+reload, full/partial/limited-reserve transfers, ADS/fire refusal during reload,
+sprint/swap cancellation, respawn and range ammunition. Run both browser commands
+against production preview as well.
+
+| Hip | Bead sights | Break-action reload |
+| --- | --- | --- |
+| ![Sawn-off](images/sawn-off/hip.png) | ![Bead sights](images/sawn-off/ads.png) | ![Two shells](images/sawn-off/reload.png) |

@@ -32,7 +32,7 @@ async function asset(id) {
   new Uint8Array(buffer).set(bytes);
   return (await new GLTFLoader().parseAsync(buffer, '')).scene;
 }
-const assets = Object.fromEntries(await Promise.all(['smg','sniper','shotgun','pistol','revolver','knife','ak47'].map(async id => [id, await asset(id)])));
+const assets = Object.fromEntries(await Promise.all(['smg','sniper','shotgun','pistol','revolver','knife','ak47','sawnOff'].map(async id => [id, await asset(id)])));
 
 function poseFor(id, cycle) {
   return weaponPose({
@@ -106,6 +106,7 @@ function nearestInAimCone(gun) {
 // measured against the shipped assets across the fire cycle. Infinity means the
 // cone is empty at every phase.
 const AIM_STATION = {
+  sawnOff: 0.68, // bead crest at the end of the short barrels
   ak47: 0.91, // front sight crest beyond the clear rear notch (0.924 m).
   smg: 0.73,       // front post crest, on the axis (0.736)
   sniper: 0.66,    // scope body during the ADS blend (0.668), not a sight — see below
@@ -115,7 +116,7 @@ const AIM_STATION = {
   knife: Infinity,
 };
 
-for (const id of ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife', 'ak47']) {
+for (const id of ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife', 'ak47', 'sawnOff']) {
   // The sniper is the only scopedOverlay weapon: weapons.ts hides gunGroup
   // entirely above adsLerp 0.85, so its obstruction window is the blend, not the
   // settled scope. The knife never reaches ADS at all (aiming is gated on
@@ -135,7 +136,7 @@ test('the check can see the weapons at all', () => {
   // Guard against a silent pass: a wrong transform, a hidden group or an empty
   // scene would clear every cone above by touching nothing.
   const caster = new Raycaster();
-  for (const id of ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'ak47']) {
+  for (const id of ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'ak47', 'sawnOff']) {
     const meshes = visibleMeshes(rig(id, id === 'sniper' ? 0.85 : 1, 0).gun);
     let hits = 0;
     for (let up = -150; up <= 150; up += 10) {

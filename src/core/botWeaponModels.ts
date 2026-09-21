@@ -169,6 +169,7 @@ export function poseBotWeaponRig(
     node.rotation.copy(r.rotation);
   }
   const m = rig.mechanisms;
+  if (m.hinge) m.hinge.rotation.x -= Math.PI / 5 * pose.reloadBlend;
   const kick = botShotKick(pose.shotAge);
   if (kick > 0.001) {
     if (m.slide) m.slide.position.z += 0.045 * kick;

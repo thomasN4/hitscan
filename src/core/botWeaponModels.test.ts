@@ -44,6 +44,12 @@ function mockAsset(id: WeaponId): THREE.Object3D {
     marker('blade_tip', [0.1, -0.05, -0.3], root);
     return root;
   }
+  if (id === 'sawnOff') {
+    const hinge = marker('mechanism_hinge', [0, -.075, .026], root);
+    for (const name of ['Muzzle', 'grip_left', 'reload_port', 'chamber_left', 'chamber_right'])
+      marker(name, [0, 0, -.1], hinge);
+    return root;
+  }
   marker('Muzzle', [0.1, 0.02, -0.6], root);
   if (id === 'shotgun') {
     const pump = marker('mechanism_pump', [0, -0.05, -0.2], root);
@@ -70,7 +76,7 @@ function mockAsset(id: WeaponId): THREE.Object3D {
   return root;
 }
 
-const IDS: readonly WeaponId[] = ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47'];
+const IDS: readonly WeaponId[] = ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47', 'sawnOff'];
 
 function initMocks(): void {
   const assets = Object.fromEntries(IDS.map(id => [id, mockAsset(id)])) as WeaponAssets;
@@ -183,6 +189,19 @@ describe('botWeaponModels', () => {
     expect(cylinder.rotation.z).toBeCloseTo(1.60, 10);
     poseBotWeaponRig(rig, { shotAge: 10, reloadBlend: 0 });
     expect(cylinder.rotation.z).toBeCloseTo(0, 10);
+  });
+
+  test('break-action bot barrels open on reload and snap closed when ready', () => {
+    initMocks();
+    const rig = createBotWeaponRig('sawnOff');
+    const hinge = rig.mechanisms.hinge;
+    if (!hinge) throw new Error('sawn-off mock lost its hinge');
+    poseBotWeaponRig(rig, { shotAge: 10, reloadBlend: 1 });
+    expect(hinge.rotation.x).toBeCloseTo(-Math.PI / 5);
+    poseBotWeaponRig(rig, { shotAge: 10, reloadBlend: 1 });
+    expect(hinge.rotation.x).toBeCloseTo(-Math.PI / 5);
+    poseBotWeaponRig(rig, { shotAge: 0, reloadBlend: 0 });
+    expect(hinge.rotation.x).toBeCloseTo(0);
   });
 
   test('knife rig poses without throwing', () => {

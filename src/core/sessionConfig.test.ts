@@ -221,8 +221,8 @@ describe('botLimits/defaultBotCounts', () => {
 });
 
 describe('asBotSecondary', () => {
-  it('accepts both sidearms, plus mixed', () => {
-    for (const id of ['mixed', 'pistol', 'revolver'] as const) {
+  it('accepts every sidearm, plus mixed', () => {
+    for (const id of ['mixed', 'pistol', 'revolver', 'sawnOff'] as const) {
       expect(asBotSecondary(id, 'pistol')).toBe(id);
     }
   });
@@ -273,7 +273,7 @@ describe('asBotWeapon', () => {
     // Sidearms arrive via the secondary position and the blade via every
     // loadout's fallback; a stale ?tweap=knife bookmark from when the blade
     // was a legal primary falls back rather than throwing.
-    for (const id of ['pistol', 'revolver', 'knife']) {
+    for (const id of ['pistol', 'revolver', 'sawnOff', 'knife']) {
       expect(asBotWeapon(id, 'mixed')).toBe('mixed');
     }
   });

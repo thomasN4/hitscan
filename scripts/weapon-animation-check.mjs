@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs';
 const BASE = process.env.CS_SMOKE_BASE || 'http://127.0.0.1:5178';
 const OUT = process.argv[2] || '/tmp/weapon-animation-check';
 const ids = process.argv.slice(3);
-if (!ids.length) ids.push('smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife', 'ak47');
+if (!ids.length) ids.push('smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife', 'ak47', 'sawnOff');
 mkdirSync(OUT, { recursive: true });
 const browser = await puppeteer.launch({
   executablePath: '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave',
@@ -32,7 +32,7 @@ async function snapshot(page) {
   return page.evaluate(() => {
     const cs = window.__cs;
     const scene = cs.bots[0].mesh.parent;
-    const vm = scene.getObjectByName(`viewmodel-${cs.weapon.name.toLowerCase().replaceAll('-', '')}`);
+    const vm = scene.getObjectByName(`viewmodel-${(cs.weapon.name === 'SAWN-OFF' ? 'sawnOff' : cs.weapon.name.toLowerCase().replaceAll('-', ''))}`);
     const parts = {};
     vm.traverse(node => {
       if (node.name.startsWith('weapon-mechanism-')) {
@@ -76,7 +76,7 @@ try {
     page.on('console', m => { if (['error', 'warning'].includes(m.type())) errors.push(m.text()); });
     await page.evaluateOnNewDocument(id => sessionStorage.setItem('acsc.loadout', JSON.stringify({
       primary: ['smg', 'sniper', 'shotgun', 'ak47'].includes(id) ? id : 'smg',
-      secondary: id === 'revolver' ? 'revolver' : 'pistol',
+      secondary: ['revolver', 'sawnOff'].includes(id) ? id : 'pistol',
     })), id);
     await page.goto(`${BASE}/?map=arena&tbots=1&time=600&style=${process.env.CS_SMOKE_STYLE || 'ligne-claire'}`, { waitUntil: 'networkidle0' });
     await page.evaluate(() => {
@@ -87,10 +87,10 @@ try {
       document.getElementById('startMenu').style.display = 'none';
       document.getElementById('hud').style.display = 'block';
     });
-    if (['pistol', 'revolver'].includes(id)) await page.keyboard.press('Digit2');
+    if (['pistol', 'revolver', 'sawnOff'].includes(id)) await page.keyboard.press('Digit2');
     if (id === 'knife') await page.keyboard.press('Digit3');
-    await runFor(page, 0.35);
-    assert.equal(await page.evaluate(() => window.__cs.weapon.name.toLowerCase().replaceAll('-', '')), id);
+    await runFor(page, 0.45);
+    assert.equal(await page.evaluate(() => (window.__cs.weapon.name === 'SAWN-OFF' ? 'sawnOff' : window.__cs.weapon.name.toLowerCase().replaceAll('-', ''))), id);
     const idle = await snapshot(page);
     if (idle.parts['weapon-mechanism-shell']) assert.equal(idle.parts['weapon-mechanism-shell'].visible, false);
     await page.screenshot({ path: `${OUT}/${id}-hip.png` });
@@ -212,7 +212,7 @@ try {
       await page.evaluate(() => { window.__cs.weapon.mag = 1; window.__cs.weapon.reserve = 3; });
       await page.keyboard.press('KeyR'); await runFor(page, 0.1);
       await page.keyboard.press('Digit3');
-      await page.keyboard.press(['pistol', 'revolver'].includes(id) ? 'Digit2' : 'Digit1');
+      await page.keyboard.press(['pistol', 'revolver', 'sawnOff'].includes(id) ? 'Digit2' : 'Digit1');
       // A fresh draw blocks reload for the full 0.4-second deploy window.
       await runFor(page, 0.5);
       const swapped = await snapshot(page);
@@ -252,7 +252,7 @@ try {
     await runFor(page, .3);
     await page.keyboard.press(id === 'knife' ? 'Digit1' : 'Digit3');
     await runFor(page, .1);
-    await page.keyboard.press(id === 'knife' ? 'Digit3' : ['pistol', 'revolver'].includes(id) ? 'Digit2' : 'Digit1');
+    await page.keyboard.press(id === 'knife' ? 'Digit3' : ['pistol', 'revolver', 'sawnOff'].includes(id) ? 'Digit2' : 'Digit1');
     await runFor(page, .1);
     assert.ok(finite(await snapshot(page)), `${id}: non-finite mechanisms after a swap`);
     await page.screenshot({ path: `${OUT}/${id}-swap.png` });

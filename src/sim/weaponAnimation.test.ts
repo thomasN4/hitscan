@@ -155,3 +155,36 @@ describe('shotgun ADS chambering', () => {
     }
   });
 });
+
+describe('sawn-off break-action timeline', () => {
+  const at = (t: number, shells = 2, spent = 2) => weaponPose({ ...idle, id: 'sawnOff',
+    reloading: true, reloadStartedAt: 7.6, roundInterval: 2.4, reloadT: t,
+    reloadShells: shells, reloadSpent: spent });
+  test('opens before extraction and stays open until the shells are seated', () => {
+    expect(at(0).breakOpen).toBe(0);
+    expect(at(.18).breakOpen).toBe(1);
+    expect(at(.28).spentCount).toBe(2);
+    expect(at(.28).extraction).toBeGreaterThan(0);
+    expect(at(.28).shellCount).toBe(0);
+    expect(at(.5).spentCount).toBe(0);
+    expect(at(.5).shellCount).toBe(2);
+    expect(at(.74).insert).toBe(1);
+    expect(at(.80).breakOpen).toBe(1);
+    expect(at(1).breakOpen).toBe(0);
+    expect(at(1).shellCount).toBe(0);
+  });
+  test('partial and limited-reserve reloads show only the snapshotted shells', () => {
+    expect(at(.28, 1, 1).spentCount).toBe(1);
+    expect(at(.5, 1, 1).shellCount).toBe(1);
+    expect(at(.28, 1, 2).spentCount).toBe(2);
+    expect(at(.5, 1, 2).shellCount).toBe(1);
+  });
+  test('cancellation hides shells immediately and closes the action', () => {
+    const cancelled = { ...idle, id: 'sawnOff' as const, closeAt: 10, closeBlend: 1,
+      reloadSpent: 2, reloadShells: 2 };
+    expect(weaponPose(cancelled).shellCount).toBe(0);
+    expect(weaponPose(cancelled).spentCount).toBe(0);
+    expect(weaponPose(cancelled).breakOpen).toBe(1);
+    expect(weaponPose({ ...cancelled, now: 10.15 }).breakOpen).toBe(0);
+  });
+});

@@ -80,8 +80,9 @@ export function validateWeaponGlb(bytes, id) {
   assert.equal(gltf.buffers.length, 1);
   assert.ok(!gltf.buffers[0].uri && gltf.buffers[0].byteLength <= bytes.length - length - 28);
   assert.ok(!gltf.images?.length && !gltf.animations?.length && !gltf.extensionsRequired?.length);
-  assert.ok(['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47'].includes(id), 'Unknown weapon asset');
+  assert.ok(['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47', 'sawnOff'].includes(id), 'Unknown weapon asset');
   const parts = {
+    sawnOff: ['grip_left', 'mechanism_hinge', 'chamber_left', 'chamber_right'],
     shotgun: ['grip_left', 'mechanism_pump'], revolver: ['mechanism_cylinder', 'mechanism_rotor', 'mechanism_hammer'],
     pistol: ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'],
     ak47: ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'],
@@ -91,6 +92,7 @@ export function validateWeaponGlb(bytes, id) {
   const required = ['grip_right', ...(id === 'knife' ? [] : ['reload_port', 'Muzzle']), ...parts[id]];
   for (const name of required) assert.equal(gltf.nodes.filter(n => n.name === name).length, 1, `Missing/duplicate ${name}`);
   const palettes = {
+    sawnOff: ['Brass', 'Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Warm walnut'],
     ak47: ['Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Warm walnut'],
     smg: ['Brushed steel', 'Charcoal blued steel', 'Recess / rubber'],
     sniper: ['Brushed steel', 'Charcoal blued steel', 'Olive composite', 'Recess / rubber'],
@@ -102,7 +104,14 @@ export function validateWeaponGlb(bytes, id) {
   assert.deepEqual(gltf.materials.map(m => m.name).sort(), palettes[id]);
   assert.ok(gltf.meshes.length > 0);
   const nodeIndex = name => gltf.nodes.findIndex(n => n.name === name);
-  if (id === 'shotgun' || id === 'revolver') {
+  if (id === 'sawnOff') {
+    const hinge = gltf.nodes[nodeIndex('mechanism_hinge')];
+    for (const name of ['grip_left', 'reload_port', 'Muzzle', 'chamber_left', 'chamber_right'])
+      assert.ok(hinge.children.includes(nodeIndex(name)), `Detached attachment ${name}`);
+    const roots = gltf.scenes[gltf.scene].nodes;
+    for (const name of ['grip_right', 'mechanism_hinge'])
+      assert.ok(roots.includes(nodeIndex(name)), `Detached attachment ${name}`);
+  } else if (id === 'shotgun' || id === 'revolver') {
     const owner = gltf.nodes[nodeIndex(id === 'shotgun' ? 'mechanism_pump' : 'mechanism_cylinder')];
     for (const name of id === 'shotgun' ? ['grip_left'] : ['mechanism_rotor', 'reload_port'])
       assert.ok(owner.children.includes(nodeIndex(name)), `Detached attachment ${name}`);
@@ -151,7 +160,7 @@ export function weaponPipeline(mode) {
     const previous = readPreviousGltfAddon();
     if (previous && previous !== gltfAddon)
       console.warn(`glTF add-on moved ${previous} -> ${gltfAddon}; outputs differing only by exporter version still normalize byte-identical`);
-    const assets = ['shotgun','revolver','pistol','smg','sniper','knife','ak47'].map(id => {
+    const assets = ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff'].map(id => {
       const source=`assets/source/${id}.blend`, output=`public/assets/${id}.glb`;
       const normalized = normalizeWeaponGlb(readFileSync(root+output));
       writeFileSync(root+output, normalized);
@@ -162,7 +171,7 @@ export function weaponPipeline(mode) {
     const manifest=JSON.parse(readFileSync(root+manifestPath));
     assert.equal(manifest.exporterSha256,hash(exporter),'Weapon exporter changed: run assets:export');
     assert.match(manifest.gltfAddon ?? '', /^\d+\.\d+\.\d+$/, 'Weapon manifest lacks gltfAddon: run assets:export');
-    assert.deepEqual(manifest.assets.map(asset => asset.id).sort(), ['ak47','knife','pistol','revolver','shotgun','smg','sniper']);
+    assert.deepEqual(manifest.assets.map(asset => asset.id).sort(), ['ak47','knife','pistol','revolver','sawnOff','shotgun','smg','sniper']);
     const entries = manifest.assets.map(asset => ({ asset, bytes: readFileSync(root + asset.output) }));
     const seen = entries.map(({ asset, bytes }) => readGlbGenerator(bytes, asset.id));
     assert.equal(new Set(seen).size, 1, `Mixed exporter versions across GLBs ${[...new Set(seen)]}: run assets:export`);

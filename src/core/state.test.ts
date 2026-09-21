@@ -359,3 +359,17 @@ describe('DOM_FLAGS', () => {
     }
   });
 });
+
+test('sawn-off is a persisted sidearm with two shells and whole-load reloads', () => {
+  expect(sanitizeLoadout({ primary: 'smg', secondary: 'sawnOff' })).toEqual({ primary: 'smg', secondary: 'sawnOff' });
+  expect(() => setLoadout('sawnOff', 'pistol')).toThrow('not a primary');
+  setLoadout('smg', 'sawnOff');
+  expect(ammoStore[1]).toMatchObject({ mag: 2, reserve: 16 });
+  expect(WEAPONS.sawnOff.perRound).toBeUndefined();
+  wpn.animation.reloadSpent = 2;
+  wpn.animation.reloadShells = 1;
+  armLoadout();
+  expect(wpn.animation.reloadSpent).toBe(0);
+  expect(wpn.animation.reloadShells).toBe(0);
+  setLoadout('smg', 'pistol');
+});

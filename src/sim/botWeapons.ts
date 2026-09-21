@@ -158,7 +158,7 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     // A cliff, not a curve: hitChanceMin 0 with a divisor of 24 means the
     // curve genuinely REACHES zero at 10.1 m, which is what makes a shotgun
     // bot safe to walk away from rather than merely unlikely to hit. It is
-    // the only weapon in the table that hits exactly nothing at range, and
+    // like the sawn-off, it hits exactly nothing at range, and
     // that trade is what buys it ~34 dps at contact against ~18 for the smg.
     //
     // headChance is 0.05 — less than half the others — and that is the fix
@@ -170,6 +170,14 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     headChance: 0.05, legChance: 0.20,
     burst: 1, burstPauseMin: 1.2, burstPauseSpan: 0.4,
     nearBand: 2, farBand: 7, engageRange: 12, strafeFactor: 0.9,
+  },
+  sawnOff: {
+    kind: 'ranged',
+    hitChanceNear: 0.42, hitChanceDivisor: 16, hitChanceMin: 0,
+    headChance: 0.05, legChance: 0.20,
+    // The shorter preferred band needs a slightly slower tap to stay below 20 DPS.
+    burst: 1, burstPauseMin: 1.4, burstPauseSpan: 0.4,
+    nearBand: 1, farBand: 4, engageRange: 8, strafeFactor: 0.9,
   },
   pistol: {
     kind: 'ranged',
@@ -736,7 +744,7 @@ export class BotLoadout implements FireController {
  * — and neither is the blade, which is already every loadout's last position.
  */
 export const BOT_SIDEARM_IDS: readonly BotSidearmId[] =
-  ['pistol', 'revolver'];
+  ['pistol', 'revolver', 'sawnOff'];
 
 /**
  * Turn a menu/URL secondary setting into the sidearm ONE bot carries there.

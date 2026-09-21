@@ -13,7 +13,7 @@ async function asset(id) {
   const buffer=new ArrayBuffer(bytes.length); new Uint8Array(buffer).set(bytes);
   return (await new GLTFLoader().parseAsync(buffer,'')).scene;
 }
-for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47']) {
+for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff']) {
   test(`${id} export contract rejects corrupt data and missing mechanisms`, async()=>{
     const bytes=readFileSync(new URL(`../../public/assets/${id}.glb`,import.meta.url));
     expect(validateWeaponGlb(bytes,id).vertices).toBeGreaterThan(1000);
@@ -26,7 +26,7 @@ for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47']) {
   test(`${id} moving assemblies clone independently`,async()=>{
     const source=await asset(id);
     const a=createAuthoredWeaponRig(id,source), b=createAuthoredWeaponRig(id,source);
-    const key=id==='shotgun'?'pump':id==='revolver'?'cylinder':'magazine';
+    const key=id==='sawnOff'?'hinge':id==='shotgun'?'pump':id==='revolver'?'cylinder':'magazine';
     const movingA=id==='knife'?a.grip:a.mechanisms[key];
     const movingB=id==='knife'?b.grip:b.mechanisms[key];
     movingA.rotation.z+=1;
@@ -170,5 +170,42 @@ for (const id of ['smg','sniper','ak47']) test(`${id} extracted magazine stays v
     expect(maxY,`${id} magazine vertical framing at ${aspect}`).toBeLessThan(.95);
     expect(minZ).toBeGreaterThan(-1);
     expect(maxZ).toBeLessThan(1);
+  }
+});
+
+test('sawn-off rejects detached chamber markers', async () => {
+  const source = await asset('sawnOff');
+  source.attach(source.getObjectByName('chamber_left'));
+  expect(() => createAuthoredWeaponRig('sawnOff', source)).toThrow('hierarchy');
+});
+
+test('sawn-off shells follow the rotated bores and restore after cancellation', async () => {
+  const vm = createWeaponViewModel('sawnOff', { sawnOff: await asset('sawnOff') });
+  const input = { id: 'sawnOff', now: 10, shotAt: -10, fireInterval: .25, switchedAt: 0,
+    hasOutgoing: false, aiming: false, reloading: true, reloadStartedAt: 7.6,
+    reloadT: .5, roundInterval: 2.4, lastRound: true, emptyReload: true,
+    reloadSpent: 2, reloadShells: 2, closeAt: 0, closeBlend: 0 };
+  for (const count of [1, 2]) for (const t of [.18, .28, .5, .70, .85, 1]) {
+    const pose = weaponPose({ ...input, reloadSpent: count, reloadShells: count, reloadT: t });
+    poseWeapon(vm, 'sawnOff', pose, 10, 0, 0);
+    const hinge = vm.mechanisms.hinge;
+    expect(hinge.rotation.x).toBeCloseTo(-Math.PI / 5 * pose.breakOpen);
+    for (const [i, key] of ['shellLeft', 'shellRight'].entries()) {
+      const shell = vm.mechanisms[key];
+      expect(shell.visible).toBe(i < Math.max(pose.shellCount, pose.spentCount));
+      if (shell.visible) {
+        const offset = shell.position.clone().sub(attachmentPoint(vm.authored.chambers[i], vm.body));
+        const bore = new Vector3(0, 0, 1).applyQuaternion(hinge.quaternion);
+        expect(offset.clone().cross(bore).length()).toBeLessThan(1e-6);
+        expect(shell.quaternion.angleTo(hinge.quaternion)).toBeLessThan(1e-6);
+      }
+    }
+    const frozen = hinge.rotation.x;
+    poseWeapon(vm, 'sawnOff', pose, 10, 0, 0);
+    expect(hinge.rotation.x).toBe(frozen);
+    poseWeapon(vm, 'sawnOff', weaponPose({ ...input, reloading: false }), 10, 0, 0);
+    expect(hinge.rotation.x).toBeCloseTo(0);
+    expect(vm.mechanisms.shellLeft.visible).toBe(false);
+    expect(vm.mechanisms.shellRight.visible).toBe(false);
   }
 });

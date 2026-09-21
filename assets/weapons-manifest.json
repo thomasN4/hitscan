@@ -3,7 +3,7 @@
   "blender": "5.2.1 LTS",
   "gltfAddon": "5.2.40",
   "exporter": "scripts/assets/export-weapons.py",
-  "exporterSha256": "63e3a1e065f5e37578f18820d8b5d082aa118a5c32411c34617d092800077fcc",
+  "exporterSha256": "98bc504abdd19131cdc0d99a54d7df0b5059174e4712e50c67fbc96de18b49c7",
   "settings": {
     "format": "GLB",
     "export_yup": false,
@@ -94,6 +94,18 @@
         "vertices": 21322,
         "meshes": 8,
         "bytes": 609676
+      }
+    },
+    {
+      "id": "sawnOff",
+      "source": "assets/source/sawnOff.blend",
+      "output": "public/assets/sawnOff.glb",
+      "sourceSha256": "6421238ee5ec5985c7da797dda8b7fb5da5788363ede7e6b013862bf4f58e5fd",
+      "outputSha256": "77cf7e0216d1fba2c8abb0b8c4c7690cc172f94cd3f8fcba2b70cd0d5f14d49e",
+      "stats": {
+        "vertices": 12686,
+        "meshes": 7,
+        "bytes": 356532
       }
     }
   ]

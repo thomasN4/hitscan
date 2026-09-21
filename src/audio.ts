@@ -60,6 +60,9 @@ export const sfxSniper = (): void => playGunshot(0.5, 500, 0.3);
 /** Shotgun: big low boom, longer tail — a powder charge, not a cartridge crack. */
 export const sfxShotgun = (): void => playGunshot(0.55, 380, 0.28);
 
+/** Short barrels give the sawn-off a sharper report than the pump. */
+export const sfxSawnOff = (): void => playGunshot(0.55, 440, 0.24);
+
 /** Pistol: sharper, shorter crack than the smg burst. */
 export const sfxPistol = (): void => playGunshot(0.35, 1100, 0.09);
 
@@ -135,6 +138,7 @@ const ENEMY_ATTACK_TONE: Record<BotWeaponId, EnemyAttackTone> = {
   // Deepest and longest-tailed, and it carries furthest — the report is how
   // you learn there is a sniper before you find out the hard way.
   sniper:   { voice: 'report', vol: 0.40, falloff: 260, freqBase: 430, dur: 0.26 },
+  sawnOff: { voice: 'report', vol: 0.42, falloff: 170, freqBase: 390, dur: 0.20 },
   shotgun:  { voice: 'report', vol: 0.42, falloff: 170, freqBase: 330, dur: 0.24 },
   // A swing you hear only if it is nearly on you: close-range and short.
   knife:    { voice: 'swish', vol: 0.22, falloff: 45, freqBase: 1400, dur: 0.12 },
@@ -180,6 +184,17 @@ export function sfxReload(duration: number): ScheduledHandle {
   const pending = [
     gameTime.schedule(duration * 0.25, () => playGunshot(0.12, 800, 0.06)),
     gameTime.schedule(duration * 0.77, () => playGunshot(0.15, 1000, 0.08)),
+  ];
+  return { cancel: () => pending.forEach(handle => handle.cancel()) };
+}
+
+/** Break open, extract, seat and lock; cancellation owns every pending cue. */
+export function sfxBreakReload(duration: number): ScheduledHandle {
+  sfxMechanism();
+  const pending = [
+    gameTime.schedule(duration * 0.28, sfxMechanism),
+    gameTime.schedule(duration * 0.72, sfxShell),
+    gameTime.schedule(duration * 0.94, sfxMechanism),
   ];
   return { cancel: () => pending.forEach(handle => handle.cancel()) };
 }

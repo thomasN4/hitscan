@@ -1319,9 +1319,12 @@ async function runVisionAwarenessCheck() {
       //    cone is NOT zero — it spreads ~1.4 cm at this range, which a
       //    torso hit absorbs deterministically — so the setup forces the
       //    situational spread layers to rest instead of pretending the gun
-      //    is a ray. The respawned T faces +z, straight at the player, so
-      //    the firing frame carries an eligible FOV/range/LOS candidate:
-      //    the simultaneous ordinary visual the incoming-fire bearing must
+      //    is a ray. Aim AT the torso (center ~1.08 m, pitch ~-0.124): a
+      //    level gaze from the 1.7 m player eye only grazes the top of the
+      //    1.75 m skull (issue #137), which no real shooter does. The
+      //    respawned T faces +z, straight at the player, so the firing
+      //    frame carries an eligible FOV/range/LOS candidate: the
+      //    simultaneous ordinary visual the incoming-fire bearing must
       //    outrank for that one decision.
       bot.respawn();
       bot.hp = 100000; // the hit must be nonlethal
@@ -1333,7 +1336,7 @@ async function runVisionAwarenessCheck() {
       cs.player.pos.set(PLAYER5[0], 1.7, PLAYER5[1]);
       cs.player.vel.set(0, 0, 0);
       cs.game.yaw = 0; // forward is -z: straight at the bot
-      cs.game.pitch = 0;
+      cs.game.pitch = -0.124; // down at the torso center, not level over the skull
       cs.weapon.mag = 30;
       cs.weapon.lastShot = -9;
       const playerHpBefore = cs.player.hp;

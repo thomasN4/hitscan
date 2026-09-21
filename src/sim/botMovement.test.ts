@@ -29,7 +29,7 @@ function corner(params: BrainParams, hz: number): { loss: number; stall: number 
   for (let frame = 0; frame < hz * 12; frame++) {
     const dist = target.distanceTo(feet);
     const intent = brain.decide({ selfFeet: feet, facing: target.clone().sub(feet).normalize(),
-      visual: { id: 'player', feet: target, eye: target.clone().setY(1.7), dist, dist3: Math.hypot(dist, 0.2), rise: 0 },
+      visual: { id: 'player', feet: target, eye: target.clone().setY(1.6), dist, dist3: Math.hypot(dist, 0.2), rise: 0 },
       onGround: true, selfSpeed: 3.9, moveBlocked: blocked, heard: [],
       canStandAt: (x, z) => !collidesAt(new THREE.Vector3(x, 0, z), 0.5, 0, walls),
       hasFootingAt: () => true,

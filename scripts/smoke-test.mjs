@@ -40,13 +40,13 @@ let failures = 0;
 //   bottomDir ...compared with >= when +1, <= when -1 (flights face both ways)
 const STAIRS = {
   // Arena: the raised platform's south flight, 8 x 0.3 = 2.4.
-  arena: { start: [26, 1.7, 22.5], upYaw: Math.PI, deckFeet: 2.4, downYaw: 0, bottomZ: 23, bottomDir: -1 },
+  arena: { start: [26, 1.6, 22.5], upYaw: Math.PI, deckFeet: 2.4, downYaw: 0, bottomZ: 23, bottomDir: -1 },
   // Elevation: the two-story building's EXTERNAL south flight, 12 x 0.3 = 3.6.
   // Deliberately the outside one — it is the flight a player uses without
   // entering the building, so this phase stays independent of the interior.
-  elevation: { start: [8, 1.7, 22.5], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 22, bottomDir: 1 },
+  elevation: { start: [8, 1.6, 22.5], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 22, bottomDir: 1 },
   // warehouse1: the south mezzanine flight, mouth at z = 17 ascending z-.
-  warehouse1: { start: [0, 1.7, 18], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 17.5, bottomDir: 1 },
+  warehouse1: { start: [0, 1.6, 18], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 17.5, bottomDir: 1 },
   // warehouse2: the YARD flight, mouth at z = 15.75 on x = 32.5, ascending z-.
   // Deliberately the outdoor one, for the same reason as elevation's: it is
   // the flight a player uses without entering the building, so this phase
@@ -54,7 +54,7 @@ const STAIRS = {
   // the void (world.ts:addOpenStairs) — the climb/descend assertions hold for
   // thin treads exactly as for solid risers, since tread TOPS sit at the same
   // heights either way.
-  warehouse2: { start: [32.5, 1.7, 17], upYaw: 0, deckFeet: 5.1, downYaw: Math.PI, bottomZ: 16.25, bottomDir: 1 },
+  warehouse2: { start: [32.5, 1.6, 17], upYaw: 0, deckFeet: 5.1, downYaw: Math.PI, bottomZ: 16.25, bottomDir: 1 },
 };
 
 async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = null, liftCheck = null } = {}) {
@@ -155,13 +155,13 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         while (performance.now() - t0 < 8000) {
           await new Promise(r => requestAnimationFrame(r));
           minY = Math.min(minY, cs.player.pos.y);
-          if ((cs.player.pos.y - 1.7) >= spec.deckFeet - 0.05 && cs.player.onGround) { reached = true; break; }
+          if ((cs.player.pos.y - 1.6) >= spec.deckFeet - 0.05 && cs.player.onGround) { reached = true; break; }
         }
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
         const result = {
           reached,
-          climbedTo: +(cs.player.pos.y - 1.7).toFixed(2),
+          climbedTo: +(cs.player.pos.y - 1.6).toFixed(2),
           onGround: cs.player.onGround,
           sankBy: +(startY - minY).toFixed(3),
         };
@@ -193,12 +193,12 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
           await new Promise(r => requestAnimationFrame(r));
           if (!cs.player.onGround) airborneFrames++;
           const pastBottom = spec.bottomDir > 0 ? cs.player.pos.z >= spec.bottomZ : cs.player.pos.z <= spec.bottomZ;
-          if ((cs.player.pos.y - 1.7) <= 0.05 && pastBottom) { reachedBottom = true; break; }
+          if ((cs.player.pos.y - 1.6) <= 0.05 && pastBottom) { reachedBottom = true; break; }
         }
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
         const result = {
           reachedBottom,
-          endedAtFeet: +(cs.player.pos.y - 1.7).toFixed(2),
+          endedAtFeet: +(cs.player.pos.y - 1.6).toFixed(2),
           airborneFrames,
         };
         cs.player.hp = 100;
@@ -226,7 +226,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       sprint = await page.evaluate(async () => {
         const cs = window.__cs;
         cs.game.pitch = 0; // level, so all displacement is horizontal
-        cs.player.pos.set(0, 1.7, 8);
+        cs.player.pos.set(0, 1.6, 8);
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         const startZ = cs.player.pos.z;
@@ -346,7 +346,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
         const cs = window.__cs;
         const wait = ms => new Promise(r => setTimeout(r, ms));
         cs.game.pitch = 0;
-        cs.player.pos.set(0, 1.7, 8);
+        cs.player.pos.set(0, 1.6, 8);
         await wait(400); // let moveLerp/crouchLerp settle
         cs.game.spray = 1; // isolate stance/movement layers from prior phases
         await wait(150);   // let the frame loop recompute spread from spray=1
@@ -382,7 +382,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       //    freeze movement) but must stop short of the face.
       const clip = await page.evaluate(async () => {
         const cs = window.__cs;
-        cs.player.pos.set(0, 1.7, -75);
+        cs.player.pos.set(0, 1.6, -75);
         cs.game.yaw = 0; // forward is -z: straight into the backstop
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         const t0 = performance.now();
@@ -401,7 +401,7 @@ async function runMap(name, url, { sprintCheck = false, configCheck = false, bot
       //    face at z=-4.8, at x=-4.5). Must stop short of its center plane.
       const target = await page.evaluate(async () => {
         const cs = window.__cs;
-        cs.player.pos.set(-4.5, 1.7, -2);
+        cs.player.pos.set(-4.5, 1.6, -2);
         cs.game.yaw = 0; // face -z, straight at the target
         window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
         const t0 = performance.now();
@@ -1026,7 +1026,7 @@ async function runFlatRouteCheck() {
       // ROUTE_ABANDON drift check drops it a frame later.
       bot.path = [];
       bot.leg = 0;
-      cs.player.pos.set(SEED_EYE[0], 1.7, SEED_EYE[1]);
+      cs.player.pos.set(SEED_EYE[0], 1.6, SEED_EYE[1]);
       cs.player.vel.set(0, 0, 0);
       let seen = false;
       const tSeed = performance.now();
@@ -1054,7 +1054,7 @@ async function runFlatRouteCheck() {
       bot.onGround = true;
       bot.path = [];
       bot.leg = 0;
-      cs.player.pos.set(HIDDEN[0], 1.7, HIDDEN[1]);
+      cs.player.pos.set(HIDDEN[0], 1.6, HIDDEN[1]);
       cs.player.vel.set(0, 0, 0);
 
       const t0 = performance.now();
@@ -1153,7 +1153,7 @@ async function runVisionAwarenessCheck() {
         if (blocked(x, z)) return { fail: `${label} spot (${x}, ${z}) is inside geometry` };
       }
       cs.player.hp = 100000;
-      cs.player.pos.set(NORTH[0], 1.7, NORTH[1]);
+      cs.player.pos.set(NORTH[0], 1.6, NORTH[1]);
       cs.player.vel.set(0, 0, 0);
       // The hidden phase wants the bot UNAWARE: with the player a
       // non-candidate there is nothing to acquire, so patrol begins after
@@ -1223,7 +1223,7 @@ async function runVisionAwarenessCheck() {
       bot.path = [];
       bot.leg = 0;
       cs.player.alive = true;
-      cs.player.pos.set(SOUTH[0], 1.7, SOUTH[1]);
+      cs.player.pos.set(SOUTH[0], 1.6, SOUTH[1]);
       cs.player.vel.set(0, 0, 0);
       let acquired = false;
       const t2 = performance.now();
@@ -1244,7 +1244,7 @@ async function runVisionAwarenessCheck() {
       // 3) Frozen memory: break sight north; the pursuit endpoint must stay
       //    pinned to the COPIED pre-break eye and grade non-shootable.
       const preBreak = bot.targetEye.clone();
-      cs.player.pos.set(NORTH[0], 1.7, NORTH[1]);
+      cs.player.pos.set(NORTH[0], 1.6, NORTH[1]);
       cs.player.vel.set(0, 0, 0);
       let routed = false;
       const t3 = performance.now();
@@ -1319,13 +1319,13 @@ async function runVisionAwarenessCheck() {
       //    cone is NOT zero — it spreads ~1.4 cm at this range, which a
       //    torso hit absorbs deterministically — so the setup forces the
       //    situational spread layers to rest instead of pretending the gun
-      //    is a ray. Aim AT the torso (center ~1.08 m, pitch ~-0.124): a
-      //    level gaze from the 1.7 m player eye only grazes the top of the
-      //    1.75 m skull (issue #137), which no real shooter does. The
-      //    respawned T faces +z, straight at the player, so the firing
-      //    frame carries an eligible FOV/range/LOS candidate: the
-      //    simultaneous ordinary visual the incoming-fire bearing must
-      //    outrank for that one decision.
+      //    is a ray. Aim AT the torso (center ~1.18 m, pitch ~-0.084): with
+      //    matched 1.6 m eyes a level gaze meets the 0.24 m face, a thin
+      //    band recoil climbs out of within a few rounds, while the 0.66 m
+      //    torso holds the burst. The respawned T faces +z, straight at the
+      //    player, so the firing frame carries an eligible FOV/range/LOS
+      //    candidate: the simultaneous ordinary visual the incoming-fire
+      //    bearing must outrank for that one decision.
       bot.respawn();
       bot.hp = 100000; // the hit must be nonlethal
       const BOT5 = [10, 5], PLAYER5 = [10, 10];
@@ -1333,10 +1333,10 @@ async function runVisionAwarenessCheck() {
       bot.mesh.position.set(BOT5[0], 0, BOT5[1]);
       bot.vy = 0;
       bot.onGround = true;
-      cs.player.pos.set(PLAYER5[0], 1.7, PLAYER5[1]);
+      cs.player.pos.set(PLAYER5[0], 1.6, PLAYER5[1]);
       cs.player.vel.set(0, 0, 0);
       cs.game.yaw = 0; // forward is -z: straight at the bot
-      cs.game.pitch = -0.124; // down at the torso center, not level over the skull
+      cs.game.pitch = -0.084; // down at the torso center, where the burst holds
       cs.weapon.mag = 30;
       cs.weapon.lastShot = -9;
       const playerHpBefore = cs.player.hp;
@@ -1517,7 +1517,7 @@ async function runHearingCheck() {
       // ---- 1 + 2) a hostile gunshot through the wall ----------------------
       place(t, BOT);
       place(ct, ALLY);
-      cs.player.pos.set(SHOOTER[0], 1.7, SHOOTER[1]);
+      cs.player.pos.set(SHOOTER[0], 1.6, SHOOTER[1]);
       cs.player.vel.set(0, 0, 0);
       cs.game.yaw = Math.PI;   // forward +z: fire AWAY from the wall and both bots
       cs.weapon.mag = 30;
@@ -1589,7 +1589,7 @@ async function runHearingCheck() {
       ct.alive = false;
       ct.mesh.visible = false;
       place(t, BOT);
-      cs.player.pos.set(WALKER[0], 1.7, WALKER[1]);
+      cs.player.pos.set(WALKER[0], 1.6, WALKER[1]);
       cs.player.vel.set(0, 0, 0);
       cs.game.yaw = Math.PI / 2;  // forward = -x: west, parallel to the wall
       cs.game.running = true;
@@ -1626,7 +1626,7 @@ async function runHearingCheck() {
 
       // ---- 4) the same path, crouched, is silent ---------------------------
       place(t, CREEP_BOT);
-      cs.player.pos.set(CREEPER[0], 1.7, CREEPER[1]);
+      cs.player.pos.set(CREEPER[0], 1.6, CREEPER[1]);
       cs.player.vel.set(0, 0, 0);
       cs.game.crouching = true;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
@@ -1698,7 +1698,11 @@ async function runBotClimbCheck() {
       cs.player.hp = 100000; // the bot shoots back; the climb is what matters
       // Player on the second-floor slab, directly up the fall line of the
       // internal flight (which runs x [2,6], z -9 -> 0, deck at 3.6).
-      cs.player.pos.set(4, 3.6 + 1.7, 8);
+      // z = 6, not 8: the sightline from the stair foot must clear the
+      // top step's riser face (z -0.75, top 3.6), and with the 1.6 m bot
+      // eye the z = 8 ray meets it exactly head-on, which the bot never
+      // acquires through.
+      cs.player.pos.set(4, 3.6 + 1.6, 6);
       const bot = cs.bots[0];
       if (!bot) return { fail: 'no bot spawned on the elevation map' };
       bot.mesh.position.set(4, 0, -10); // just north of the first riser
@@ -1940,7 +1944,7 @@ async function runDebugViewCheck() {
       bot.onGround = true;
       bot.path = [];
       bot.leg = 0;
-      cs.player.pos.set(PLAYER_EYE[0], 1.7, PLAYER_EYE[1]);
+      cs.player.pos.set(PLAYER_EYE[0], 1.6, PLAYER_EYE[1]);
       cs.player.vel.set(0, 0, 0);
       // The T faces +z, straight at the player 13 m away in the open — the
       // acquisition must exist BEFORE any V press, on gameplay perception
@@ -2543,7 +2547,7 @@ async function runPatrolCheck() {
       // B. A real SMG hit from beyond the 80 m perception range.
       cs.player.alive = true;
       cs.player.hp = 100000;
-      cs.player.pos.set(PLAYER_FAR[0], 1.7, PLAYER_FAR[1]);
+      cs.player.pos.set(PLAYER_FAR[0], 1.6, PLAYER_FAR[1]);
       cs.player.vel.set(0, 0, 0);
       cs.game.yaw = 0;   // forward is -z: down the x=12 gap lane, at the bot
       cs.game.pitch = 0;
@@ -2615,7 +2619,7 @@ async function runPatrolCheck() {
       if (!acquired) {
         const closeSpot = [bot.mesh.position.x, bot.mesh.position.z + 60];
         if (blocked(closeSpot[0], closeSpot[1])) return { fail: 'the close-player spot is inside geometry', advance };
-        cs.player.pos.set(closeSpot[0], 1.7, closeSpot[1]);
+        cs.player.pos.set(closeSpot[0], 1.6, closeSpot[1]);
         cs.player.vel.set(0, 0, 0);
         const tD = performance.now();
         while (performance.now() - tD < 15000) {

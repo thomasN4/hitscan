@@ -35,7 +35,7 @@ try {
       cs.game.started = true;
       cs.game.locked = true;
       if (cs.game.map === 'arena') {
-        cs.player.pos.set(6, 1.7, 10);
+        cs.player.pos.set(6, 1.6, 10);
         cs.game.yaw = -2.35;
         for (const bot of cs.bots) { bot.update = () => {}; bot.mesh.visible = false; }
       }

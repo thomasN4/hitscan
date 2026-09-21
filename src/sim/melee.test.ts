@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import { BACKSTAB_MIN_ALIGNMENT, isBackstab, meleeSwing, type MeleeCandidate } from './melee';
 
-/** Eye at the origin looking down -z (the arena's default facing). */
-const EYE = new THREE.Vector3(0, 1.7, 0);
+/** Eye at the origin looking down -z (the arena's default facing). Tracks the 1.6 m player/bot eye. */
+const EYE = new THREE.Vector3(0, 1.6, 0);
 const FORWARD = new THREE.Vector3(0, 0, -1);
 
 function candidate(payload: string, zone: 'head' | 'torso' | 'legs', at: THREE.Vector3): MeleeCandidate<string> {
@@ -29,7 +29,7 @@ describe('meleeSwing', () => {
 
   test('range boundary is inclusive', () => {
     const hit = meleeSwing(EYE, FORWARD, 2.0, 0.6, [
-      candidate('bot', 'torso', new THREE.Vector3(0, 1.7, -2.0)),
+      candidate('bot', 'torso', new THREE.Vector3(0, 1.6, -2.0)),
     ]);
     expect(hit?.distance).toBeCloseTo(2.0, 5);
   });

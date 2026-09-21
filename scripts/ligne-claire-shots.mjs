@@ -52,7 +52,7 @@ try {
       Math.random = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
     });
     await page.goto(`${BASE}/?map=arena&tbots=1&ctbots=1&time=600&style=${style}`, { waitUntil: 'networkidle0' });
-    await pose(page, [6, 1.7, 10], -2.35);
+    await pose(page, [6, 1.6, 10], -2.35);
     await page.screenshot({ path: `${OUT}/${style}-courtyard.png` });
     report[style] = await page.evaluate(() => {
       const cs = window.__cs;
@@ -65,7 +65,7 @@ try {
         navNodes: cs.nav.grid().count,
       };
     });
-    await pose(page, [9, 1.7, 13], -2.35);
+    await pose(page, [9, 1.6, 13], -2.35);
     await page.screenshot({ path: `${OUT}/${style}-bot.png` });
 
     if (style === 'ligne-claire') {
@@ -77,7 +77,7 @@ try {
           cs.game.zoomLevel = 0;
           cs.game.aiming = false;
         }, weapon);
-        await pose(page, [6, 1.7, 10], -2.35);
+        await pose(page, [6, 1.6, 10], -2.35);
         await page.screenshot({ path: `${OUT}/${weapon}-hip.png` });
       }
       // Maximum scope zoom and resized / high-DPI strokes.
@@ -90,7 +90,7 @@ try {
       await page.screenshot({ path: `${OUT}/sniper-zoom.png` });
       await page.evaluate(() => { window.__cs.game.aiming = false; window.__cs.game.zoomLevel = 0; });
       await page.setViewport({ width: 960, height: 640, deviceScaleFactor: 2 });
-      await pose(page, [6, 1.7, 10], -2.35);
+      await pose(page, [6, 1.6, 10], -2.35);
       await page.screenshot({ path: `${OUT}/resized-dpr2.png` });
       await page.keyboard.press('KeyV');
       await page.screenshot({ path: `${OUT}/debug.png` });

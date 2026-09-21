@@ -183,6 +183,11 @@ export function respawn(useDirector = false): void {
   motion.airLerp = 0;
   motion.crouchLerp = 0;
   input.crouching = false; // else a death while crouch-toggled respawns you crouched
+  // The sights and the trigger too. On desktop an RMB/LMB release clears them
+  // on the way to the menu, but the touch ADS button is a TOGGLE and nothing
+  // releases it — a death while aimed respawned you aimed.
+  input.aiming = false;
+  input.shooting = false;
   wpn.adsLerp = 0;
   armLoadout();   // refills both loadout positions and mirrors the primary into `weapon`
   wpn.slot = 0;

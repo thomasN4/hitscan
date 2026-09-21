@@ -2936,6 +2936,22 @@ async function runTouchCheck() {
     const adsOff = await page.evaluate(() => window.__cs.game.aiming);
     if (!adsOn || adsOff) throw new Error(`ADS toggle wrong: on=${adsOn} off=${adsOff}`);
 
+    // Dying with the ADS toggle on must respawn at hip: nothing releases a
+    // toggle the way an RMB release does. Same dead-player Deploy route the
+    // [picker] phase exercises.
+    await page.tap('#tcAds');
+    await frames(10);
+    const deathAds = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const before = { aiming: cs.game.aiming, adsLerp: cs.game.adsLerp };
+      cs.player.alive = false;
+      document.getElementById('deployBtn').click();
+      await new Promise(r => requestAnimationFrame(r));
+      return { before, aiming: cs.game.aiming, adsLerp: cs.game.adsLerp, alive: cs.player.alive, locked: cs.game.locked };
+    });
+    if (!deathAds.before.aiming) throw new Error(`ADS toggle did not raise before the death: ${JSON.stringify(deathAds)}`);
+    if (deathAds.aiming || deathAds.adsLerp > 0.01 || !deathAds.alive) throw new Error(`respawned still aimed: ${JSON.stringify(deathAds)}`);
+
     // Pause button -> pause menu (with its fullscreen toggle) -> Resume.
     await page.tap('#tcPause');
     await frames(2);

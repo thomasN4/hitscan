@@ -135,21 +135,29 @@
     background: #2a3140; color: #eee; font-size: 12px; padding: 8px 14px; z-index: 11; }
 
   /* Menus must fit a landscape phone (~360-430 px tall): compact type, the
-     config form in two field columns, and a scrollable overlay. The auto
-     margins centre the content when it fits and let it scroll when it
-     doesn't (plain justify-content:center would clip the top instead). */
-  body.touch .menu { justify-content: flex-start; overflow-y: auto; padding: 14px max(14px, env(safe-area-inset-right)) 14px max(14px, env(safe-area-inset-left)); }
-  body.touch .menu > :first-child { margin-top: auto; }
-  body.touch .menu > :last-child { margin-bottom: auto; }
+     config form in two field columns, and a scrollable overlay. `safe center`
+     centres content that fits and top-aligns content that overflows, so it
+     scrolls instead of clipping its top (plain `center` would clip). Not
+     auto margins on the first/last child: the fixed-position fullscreen
+     button is the pause menu's last child, and a margin on an out-of-flow
+     element centres nothing. */
+  body.touch .menu { justify-content: safe center; overflow-y: auto; padding: 14px max(14px, env(safe-area-inset-right)) 14px max(14px, env(safe-area-inset-left)); }
   body.touch .menu h1 { font-size: 30px; margin-bottom: 4px; }
   body.touch .menu p { margin-bottom: 12px; font-size: 13px; }
   body.touch .menu button:not(.wcard):not(.fsBtn) { font-size: 16px; padding: 11px 30px; }
   body.touch .cfg { grid-template-columns: auto 110px auto 110px; gap: 6px 12px; margin-bottom: 14px; }
   body.touch .cfg .cfgName { font-size: 11px; }
   body.touch .cfg input, body.touch .cfg select { padding: 5px 8px; font-size: 14px; }
-  body.touch .wcols { gap: 14px; margin-bottom: 14px; }
-  body.touch .wcol { min-width: 200px; gap: 5px; padding: 6px; }
-  body.touch .wcard { padding: 7px 10px; }
+  /* Loadout picker: each column's cards two across, so four primaries take
+     two rows and the whole picker fits 390 px without scrolling. */
+  body.touch #loadoutScreen h1 { font-size: 22px; }
+  body.touch .wcols { gap: 12px; margin-bottom: 10px; }
+  body.touch .wcol { display: grid; grid-template-columns: 1fr 1fr; min-width: 0; gap: 5px; padding: 5px; }
+  body.touch .wcolTitle { grid-column: 1 / -1; margin-bottom: 0; font-size: 10px; }
+  body.touch .wcard { padding: 5px 8px; min-width: 150px; letter-spacing: 0; }
+  body.touch .wcard .wstats { white-space: nowrap; }
+  body.touch .wcard .wname { font-size: 13px; letter-spacing: 1px; }
+  body.touch .wcard .wstats { font-size: 10px; margin-top: 1px; }
   body.touch #scoreboardWrap { margin-bottom: 14px; }
 
   /* In-game HUD: the stick and the fire cluster own the bottom corners, so

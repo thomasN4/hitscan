@@ -18,7 +18,7 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
          equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
 import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
-         sfxReload, sfxShell, sfxMechanism, sfxSwitch } from './audio';
+         sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
@@ -112,6 +112,7 @@ const SHOT_SFX: Record<WeaponId, () => void> = {
   smg: sfxShoot,
   sniper: sfxSniper,
   shotgun: sfxShotgun,
+  sawnOff: sfxSawnOff,
   pistol: sfxPistol,
   revolver: sfxRevolver,
   knife: sfxKnife,
@@ -131,6 +132,7 @@ export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
     smg: createWeaponViewModel('smg', weaponAssets),
     sniper: createWeaponViewModel('sniper', weaponAssets),
     shotgun: createWeaponViewModel('shotgun', weaponAssets),
+    sawnOff: createWeaponViewModel('sawnOff', weaponAssets),
     pistol: createWeaponViewModel('pistol', weaponAssets),
     revolver: createWeaponViewModel('revolver', weaponAssets),
     knife: createWeaponViewModel('knife', weaponAssets),
@@ -224,6 +226,8 @@ export function tryReload(): void {
   cancelPendingReloadSfx();
   wpn.animation.reloadStartedAt = gameTime.now();
   wpn.animation.emptyReload = weapon.mag === 0;
+  wpn.animation.reloadSpent = weapon.magSize - weapon.mag;
+  wpn.animation.reloadShells = Math.min(wpn.animation.reloadSpent, weapon.reserve);
   wpn.animation.closeAt = -Infinity;
   weapon.reloading = true;
   if (currentDef().perRound) {
@@ -231,7 +235,8 @@ export function tryReload(): void {
     sfxShell(); // tactile feedback on the keypress; each transfer clicks too
   } else {
     weapon.reloadEnd = gameTime.now() + weapon.reloadTime;
-    wpn.reloadSfxHandle = sfxReload(weapon.reloadTime);
+    wpn.reloadSfxHandle = equippedId(wpn.slot) === 'sawnOff'
+      ? sfxBreakReload(weapon.reloadTime) : sfxReload(weapon.reloadTime);
   }
 }
 
@@ -702,8 +707,8 @@ function updateWeaponPresentation(): void {
     switchedAt: animation.switchedAt, hasOutgoing: animation.outgoingId !== null, aiming: input.aiming || wpn.adsLerp > 0.01,
     reloading: weapon.reloading, reloadStartedAt: animation.reloadStartedAt, reloadT,
     roundInterval: interval, lastRound: weapon.mag + 1 >= weapon.magSize || session.map !== 'range' && weapon.reserve === 1,
-    emptyReload: animation.emptyReload, closeAt: animation.closeAt, closeBlend: animation.closeBlend });
-  animation.reloadBlend = pose.reload;
+    emptyReload: animation.emptyReload, reloadSpent: animation.reloadSpent, reloadShells: animation.reloadShells, closeAt: animation.closeAt, closeBlend: animation.closeBlend });
+  animation.reloadBlend = id === 'sawnOff' ? pose.breakOpen : pose.reload;
   poseWeapon(VIEWMODELS[id], id, pose, now, wpn.adsLerp, motion.runLerp);
   if (pose.holster && animation.outgoingId !== null && animation.outgoingId !== id) {
     VIEWMODELS[id].group.visible = false;

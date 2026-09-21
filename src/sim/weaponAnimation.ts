@@ -15,6 +15,8 @@ export interface WeaponAnimationInput {
   roundInterval: number;
   lastRound: boolean;
   emptyReload: boolean;
+  reloadSpent?: number;
+  reloadShells?: number;
   closeAt: number;
   closeBlend: number;
 }
@@ -36,6 +38,10 @@ export interface WeaponPose {
   holster: boolean;
   holsterDrop: number;
   swing: number;
+  breakOpen: number;
+  extraction: number;
+  shellCount: number;
+  spentCount: number;
 }
 
 function smooth(a: number, b: number, value: number): number {
@@ -80,9 +86,13 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
   const holster = swapping && input.hasOutgoing && swapAge >= 0 && swapAge < holsterEnd;
   return {
     reload,
+    breakOpen: id === 'sawnOff' ? (reloading ? hold(t, 0, .18, .80, 1) : closing) : 0,
+    extraction: id === 'sawnOff' && reloading ? smooth(.20, .36, t) : 0,
+    spentCount: id === 'sawnOff' && reloading && t >= .18 && t < .38 ? (input.reloadSpent ?? 0) : 0,
+    shellCount: id === 'sawnOff' && reloading && t >= .44 && t < .80 ? (input.reloadShells ?? 0) : 0,
     magazine: reloading && !perRound ? hold(t, 0.14, 0.36, 0.52, 0.77) : 0,
     shell: reloading && perRound && t >= 0.25 && t < 0.83,
-    insert: smooth(0.35, 0.82, t),
+    insert: id === 'sawnOff' ? smooth(.48, .74, t) : smooth(0.35, 0.82, t),
     cylinder: id === 'revolver' ? reload : 0,
     pump: shotgunPump(input),
     boltLift: id === 'sniper' && firing && !reloading ? hold(cycle, 0.12, 0.26, 0.76, 0.90) : 0,

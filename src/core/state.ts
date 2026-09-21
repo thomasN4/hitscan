@@ -27,7 +27,7 @@ import { DOM_SCORE_LIMIT } from '../sim/domination';
 export type WeaponClass = 'primary' | 'secondary' | 'melee';
 
 /** Catalog ids — stable strings; the loadout slice and the picker use them. */
-export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'knife';
+export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'sawnOff' | 'knife';
 
 /**
  * Weapons a BOT may hold. Since tranche 7b that is the WHOLE catalog, the
@@ -56,11 +56,11 @@ export type BotPrimaryId = 'smg' | 'ak47' | 'sniper' | 'shotgun';
  * Same explicit-union reasoning as BotPrimaryId; extends to
  * sim/botWeapons.ts:BOT_SIDEARM_IDS.
  */
-export type BotSidearmId = 'pistol' | 'revolver';
+export type BotSidearmId = 'pistol' | 'revolver' | 'sawnOff';
 
 /**
  * A menu/URL setting for a bot's SECONDARY position: one sidearm for the
- * whole team, or 'mixed' for an independent pistol/revolver draw per bot
+ * whole team, or 'mixed' for an independent pistol/revolver/sawn-off draw per bot
  * (sim/botWeapons.ts:resolveBotSecondary). Every bot always carries a
  * sidearm — there is no 'none': the blade is already the last position of
  * every loadout (sim/botWeapons.ts:makeBotLoadout), so the ladder always
@@ -587,6 +587,18 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     scopedOverlay: false,
     semiAuto: true,     // one trigger pull = one shell; holding does nothing
     perRound: true,     // shell-by-shell reload; firing cancels the rest (playtest round 2)
+  },
+  sawnOff: {
+    name: 'SAWN-OFF', class: 'secondary',
+    magSize: 2, reserveMax: 16,
+    fireRate: 0.25, reloadTime: 2.4,
+    damage: 13, headshotMult: 4, pellets: 8,
+    pelletCone: 0.10, // wider than the pump: contact power, little reach
+    zoomFovs: [60], spreadMul: 0.6, inherent: 0.002, crosshairGain: 1,
+    sprayKick: 0.15, recoilKick: 5, sprayCap: 3, sprayRecover: 0.15,
+    recoilRecover: 7, punchRad: 0.016, yawKick: 1.2, yawRecover: 7,
+    scopedOverlay: false, semiAuto: true,
+    // Break-action: both missing shells transfer only after closing.
   },
   pistol: {
     name: 'PISTOL',
@@ -1163,7 +1175,7 @@ export interface SessionState {
   botWeaponT: BotWeaponChoice;
   botWeaponCt: BotWeaponChoice;
   /**
-   * Secondary sidearm (pistol/revolver) for each side's bot loadouts, or
+   * Secondary sidearm (pistol/revolver/sawn-off) for each side's bot loadouts, or
    * 'mixed' for an independent draw per bot. Read once by main.ts when it
    * spawns the waves, like the primary pair above.
    */
@@ -1254,6 +1266,9 @@ export interface WeaponAnimationState {
   reloadStartedAt: number;
   closeAt: number;
   emptyReload: boolean;
+  /** Break-action presentation snapshots; never drive ammunition transfers. */
+  reloadSpent: number;
+  reloadShells: number;
   previousShotAge: number;
   reloadBlend: number;
   closeBlend: number;
@@ -1261,7 +1276,7 @@ export interface WeaponAnimationState {
 
 export function freshWeaponAnimation(): WeaponAnimationState {
   return { shotAt: -Infinity, switchedAt: -Infinity, outgoingId: null, reloadStartedAt: -Infinity,
-    closeAt: -Infinity, emptyReload: false, previousShotAge: Infinity, reloadBlend: 0, closeBlend: 0 };
+    closeAt: -Infinity, emptyReload: false, reloadSpent: 0, reloadShells: 0, previousShotAge: Infinity, reloadBlend: 0, closeBlend: 0 };
 }
 
 /**

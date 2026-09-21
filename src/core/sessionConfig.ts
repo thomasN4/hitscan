@@ -40,7 +40,7 @@ export interface SessionConfig {
   botWeaponT: BotWeaponChoice;
   /** Same for the CT side. */
   botWeaponCt: BotWeaponChoice;
-  /** Sidearm for T-side bot loadouts; 'mixed' draws pistol/revolver per bot. */
+  /** Sidearm for T-side bot loadouts; 'mixed' draws pistol/revolver/sawn-off per bot. */
   botSecondaryT: BotSecondaryChoice;
   /** Same for the CT side. */
   botSecondaryCt: BotSecondaryChoice;
@@ -200,15 +200,16 @@ export function asBotWeapon(
  * Narrow an untrusted string to a bot SECONDARY setting, falling back to
  * `fallback` for anything unrecognized.
  *
- * Exhaustive Record and hasOwn for exactly asMapName's reasons. Only the two
- * sidearms are keys: primaries belong to the primary position, and the blade
+ * Exhaustive Record and hasOwn for exactly asMapName's reasons. Only the three
+ * sidearms (pistol/revolver/sawnOff) are keys: primaries belong to the primary
+ * position, and the blade
  * is already the last position of every loadout
  * (sim/botWeapons.ts:makeBotLoadout), so naming either here would ask for a
  * duplicate the loadout then drops — a silently ignored setting is worse
  * than one that falls back.
  */
 const IS_BOT_SECONDARY: Record<BotSecondaryChoice, true> = {
-  mixed: true, pistol: true, revolver: true,
+  mixed: true, pistol: true, revolver: true, sawnOff: true,
 };
 
 export function asBotSecondary(

@@ -4,6 +4,7 @@ import { shotgunChambering, type WeaponPose } from '../sim/weaponAnimation';
 import { posePistolReload } from './pistolPresentation';
 import { poseRifleReload } from './riflePresentation';
 import { poseMagazine } from './magazinePresentation';
+import { poseSawnOffReload } from './sawnOffPresentation';
 import { poseShotgunReload } from './shotgunPresentation';
 import { poseRevolverReload } from './revolverPresentation';
 
@@ -60,4 +61,5 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   if (id === 'pistol' && pose.reload > 0) posePistolReload(vm, pose);
   if (id === 'shotgun' && pose.reload > 0) poseShotgunReload(vm, pose);
   if (id === 'revolver') poseRevolverReload(vm, pose);
+  if (id === 'sawnOff') poseSawnOffReload(vm, pose);
 }

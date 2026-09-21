@@ -17,6 +17,7 @@ import type { BrainMode } from '../sim/botBrains';
 // A value import, like GameClock and SoundRing above: sim/domination.ts takes
 // only `type Team` back, so nothing is circular at runtime.
 import { DOM_SCORE_LIMIT } from '../sim/domination';
+import { sanitizeSettings, type Settings } from './settings';
 
 // ---------- Domain vocabulary ----------
 /**
@@ -1538,3 +1539,12 @@ export const keys: Record<string, boolean | undefined> = {};
 export function keyHeld(code: string): boolean {
   return keys[code] === true;
 }
+
+/**
+ * Player preferences (core/settings.ts): look sensitivity/acceleration and
+ * the touch layout. ONE writer — settingsMenu.ts, which loads it from
+ * localStorage at startup and applies slider/editor changes — and read by
+ * main.ts (mouse look) and touchControls.ts. Starts as a fresh copy of the
+ * defaults so a Node test importing state never sees storage.
+ */
+export const settings: Settings = sanitizeSettings(undefined);

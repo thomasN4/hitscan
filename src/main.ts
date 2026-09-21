@@ -16,7 +16,7 @@ import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, S
                LoadoutState, Team,
                MapName, MatchMode, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout, settings } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders, elevators, updateElevators } from './world';
 import { HEAD_HEIGHT } from './collision';
@@ -34,9 +34,10 @@ import { buildDomFlags } from './domFlags';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, addKillfeed } from './hud';
 import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout, setAssetStatus } from './menu';
 import { decideWinner, decideDomWinner } from './sim/match';
-import { applyLook } from './sim/look';
+import { applyLook, MOUSE_BASE_SENS } from './sim/look';
 import { detectTouchMode, initPlayControl, enterPlay } from './playControl';
-import { initTouchControls, updateTouchControls, resetTouchInput } from './touchControls';
+import { initTouchControls, updateTouchControls, resetTouchInput, setTouchControlsShown } from './touchControls';
+import { initSettingsMenu, loadStoredSettings } from './settingsMenu';
 import { validateWeapons } from './sim/validateWeapons';
 import { loadWeaponAssets } from './core/weaponAssets';
 import { initBotWeaponModels } from './core/botWeaponModels';
@@ -72,6 +73,8 @@ async function start(): Promise<void> {
   // keys on phones; ?touch=1/0 forces it. Local, like lowfx: not match config.
   const touchParam = new URLSearchParams(location.search).get('touch');
   const touch = detectTouchMode(location.search);
+  // Before anything reads the settings slice (touch layout, look feel).
+  loadStoredSettings();
 
   // Loud, not fatal: this runs before initEngine(), so throwing would blank
   // the page and hide the message behind a broken app. A violation is a
@@ -148,6 +151,7 @@ async function start(): Promise<void> {
       enterPlay();
     },
   }, { touch });
+  initSettingsMenu({ touch });
 
   // ---------- Input ----------
   addEventListener('resize', () => {
@@ -194,10 +198,11 @@ async function start(): Promise<void> {
     if (touch) resetTouchInput();
   });
 
-  const SENS = 0.0022; // radians per pixel of mouse movement
   document.addEventListener('mousemove', e => {
     if (!session.locked || !player.alive) return;
-    const next = applyLook(aim.yaw, aim.pitch, e.movementX, e.movementY, SENS, wpn.zoomScale);
+    // No acceleration here: the OS already applies its own to the mouse.
+    const sens = MOUSE_BASE_SENS * settings.mouseSens;
+    const next = applyLook(aim.yaw, aim.pitch, e.movementX, e.movementY, sens, wpn.zoomScale);
     aim.yaw = next.yaw;
     aim.pitch = next.pitch;
   });
@@ -233,8 +238,11 @@ async function start(): Promise<void> {
   function onPlayChange(captured: boolean): void {
     session.locked = captured;
     hudEl.style.display = session.locked ? 'block' : 'none';
-    // Nothing a finger was holding may survive into the pause/death screen.
-    if (!session.locked && touch) resetTouchInput();
+    if (touch) {
+      setTouchControlsShown(session.locked);
+      // Nothing a finger was holding may survive into the pause/death screen.
+      if (!session.locked) resetTouchInput();
+    }
     // updateWeapon stops running when the loop pauses; make sure a held scope
     // can't stay stuck on screen across pause/death.
     if (!session.locked) setScopeOverlay(false);
@@ -397,7 +405,7 @@ async function start(): Promise<void> {
     get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
   };
 
-  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, dom, nav: { route, transportRoute, grid: navGrid } };
+  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, dom, settings, nav: { route, transportRoute, grid: navGrid } };
 }
 
 void start().catch((error: unknown) => {
@@ -419,6 +427,8 @@ declare global {
       gameTime: typeof gameTime;
       /** Domination slice — flags, ticked scores; empty flags outside dom matches. */
       dom: typeof dom;
+      /** Player preferences slice (core/settings.ts) — read-only for tests; settingsMenu.ts is its writer. */
+      settings: typeof settings;
       /**
        * Navigation graph queries. The graph is the one part of the AI whose
        * correctness can be checked without watching a bot move, so the smoke

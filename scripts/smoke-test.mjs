@@ -2965,6 +2965,61 @@ async function runTouchCheck() {
     const resumed = await page.evaluate(() => window.__cs.game.locked);
     if (!resumed) throw new Error('Resume did not re-enter touch play');
 
+    // Settings (settingsMenu.ts): opened from the pause menu, a slider change
+    // lands in the slice and persists; the layout editor moves the right fire
+    // button; Copy settings exports exactly the slice.
+    await page.tap('#tcPause');
+    await frames(2);
+    await page.tap('#settingsBtnPause');
+    await frames(2);
+    if (!(await shown('#settingsScreen'))) throw new Error('Settings did not open from the pause menu');
+    if (await page.$eval('#setMouseSens', el => el.offsetParent !== null)) throw new Error('desktop mouse slider shown in touch mode');
+    await page.evaluate(() => {
+      const el = document.getElementById('setHipSens');
+      el.value = '1.5';
+      el.dispatchEvent(new Event('input'));
+    });
+    const hipSens = await page.evaluate(() => window.__cs.settings.touch.hip.sens);
+    if (hipSens !== 1.5) throw new Error(`look sensitivity slider did not reach the slice: ${hipSens}`);
+
+    await page.tap('#editLayoutBtn');
+    await frames(2);
+    const fireAt = await centre('#tcFire');
+    const x0 = await page.evaluate(() => window.__cs.settings.layout.fireR.x);
+    const grab = await page.touchscreen.touchStart(fireAt.x, fireAt.y);
+    await grab.move(fireAt.x - 120, fireAt.y - 40);
+    await grab.end();
+    const midEdit = await page.evaluate(() => window.__cs.settings.layout.fireR.x);
+    await page.tap('#tcEditDone');
+    await frames(2);
+    const edited = await page.evaluate(() => ({
+      x: window.__cs.settings.layout.fireR.x,
+      editing: document.getElementById('touchControls').classList.contains('editing'),
+    }));
+    if (midEdit !== x0) throw new Error('layout editor wrote the live slice before Done');
+    if (edited.editing || !(edited.x < x0 - 0.05)) throw new Error(`layout edit did not move the fire button: ${x0} -> ${JSON.stringify(edited)}`);
+
+    await page.tap('#copySettingsBtn');
+    await frames(1);
+    const exported = await page.evaluate(() => {
+      const text = document.getElementById('settingsExport').value;
+      return { same: JSON.stringify(JSON.parse(text)) === JSON.stringify(window.__cs.settings) };
+    });
+    if (!exported.same) throw new Error('Copy settings did not export the live settings');
+
+    // Both survive a reload (localStorage), and the reloaded layout is applied.
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => !document.getElementById('playBtn').disabled, { timeout: 20000 });
+    const persisted = await page.evaluate(() => ({
+      sens: window.__cs.settings.touch.hip.sens,
+      x: window.__cs.settings.layout.fireR.x,
+      css: document.getElementById('tcFire').style.getPropertyValue('--x'),
+    }));
+    await page.evaluate(() => localStorage.removeItem('acsc.settings'));
+    if (persisted.sens !== 1.5 || persisted.x !== edited.x || Number(persisted.css) !== edited.x) {
+      throw new Error(`settings did not persist across a reload: ${JSON.stringify(persisted)}`);
+    }
+
     // Desktop default: none of the touch UI.
     const desk = await browser.newPage();
     await desk.setViewport({ width: 1280, height: 720 });
@@ -2976,6 +3031,16 @@ async function runTouchCheck() {
       fsPause: getComputedStyle(document.getElementById('fullscreenBtnPause')).display,
       controls: getComputedStyle(document.getElementById('touchControls')).display,
     }));
+    await desk.click('#settingsBtn');
+    const deskSettings = await desk.evaluate(() => ({
+      open: document.getElementById('settingsScreen').style.display,
+      mouse: document.getElementById('setMouseSens').offsetParent !== null,
+      touchRow: document.getElementById('setHipSens').offsetParent !== null,
+      editBtn: getComputedStyle(document.getElementById('editLayoutBtn')).display,
+    }));
+    if (deskSettings.open !== 'flex' || !deskSettings.mouse || deskSettings.touchRow || deskSettings.editBtn !== 'none') {
+      throw new Error(`desktop settings screen wrong: ${JSON.stringify(deskSettings)}`);
+    }
     await desk.close();
     if (deskUi.touchClass || deskUi.fs !== 'none' || deskUi.fsPause !== 'none' || deskUi.controls !== 'none') {
       throw new Error(`touch UI leaked onto the desktop page: ${JSON.stringify(deskUi)}`);

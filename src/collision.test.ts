@@ -104,9 +104,9 @@ describe('collidesAt — blocking is relative to the feet', () => {
 
   test('overhead cover built at exactly head height stays walkable-under', () => {
     // A slab whose bottom is designed at HEAD_HEIGHT stores one float32 ULP
-    // LOW (1.9999997615814209); the overhead bound takes COLLISION_EPSILON
+    // LOW (1.7499998807907104); the overhead bound takes COLLISION_EPSILON
     // slack like the steppable bound does, or exact-height cover walls you in.
-    const bottom = 1.9999997615814209;
+    const bottom = 1.7499998807907104;
     const cover = slab(0, 0, bottom, 3);
     expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [cover])).toBe(false);
     // One hair genuinely lower is real cover and still blocks.
@@ -354,21 +354,21 @@ describe('resolveVertical ceiling sweep', () => {
   const tread = slab(0, 0, 4.4, 4.7, 5);
 
   test('a rising body cannot cross a thin tread underside', () => {
-    // Feet 2.2 -> 3.2 this frame: the head sweeps 4.2 -> 5.2, straight
+    // Feet 2.2 -> 3.2 this frame: the head sweeps 3.95 -> 4.95, straight
     // through the underside at 4.4.
     const r = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
     expect(r.onGround).toBe(false);
   });
 
   test('a bonk clamps under the underside and spends the remainder falling', () => {
-    // Feet 2.2 -> 3.2 this frame: contact 20% in, so the remaining 40 ms
+    // Feet 2.2 -> 3.2 this frame: contact 45% in, so the remaining 27.5 ms
     // fall from the clamp under gravity (issue #125) — the frame ends
     // millimetres under it, already moving down, instead of parked at rest.
     const r = resolveVertical(2.2, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
     expect(r.onGround).toBe(false);
     expect(r.ceilingHit).toBe(true);
-    expect(r.feetY).toBeCloseTo(4.4 - HEAD_HEIGHT - 0.5 * 22 * 0.04 * 0.04, 12);
-    expect(r.velY).toBeCloseTo(-22 * 0.04, 12);
+    expect(r.feetY).toBeCloseTo(4.4 - HEAD_HEIGHT - 0.5 * 22 * 0.0275 * 0.0275, 12);
+    expect(r.velY).toBeCloseTo(-22 * 0.0275, 12);
   });
 
   test('the fall resumes in the bonk frame itself — no zero-velocity hover', () => {
@@ -395,9 +395,10 @@ describe('resolveVertical ceiling sweep', () => {
   });
 
   test('contact near the end of the rise leaves almost no remainder', () => {
-    // Clamp 90% into the frame: 5 ms of fall, a fraction of a millimetre —
-    // the frame still ends at the clamp for all visible purposes.
-    const r = resolveVertical(1.5, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    // Feet 1.75 -> 2.75 this frame: clamp 90% in, 5 ms of fall, a fraction
+    // of a millimetre — the frame still ends at the clamp for all visible
+    // purposes.
+    const r = resolveVertical(1.75, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
     expect(r.ceilingHit).toBe(true);
     expect(r.feetY).toBeCloseTo(4.4 - HEAD_HEIGHT - 0.5 * 22 * 0.005 * 0.005, 12);
     expect(r.velY).toBeCloseTo(-22 * 0.005, 12);
@@ -415,20 +416,22 @@ describe('resolveVertical ceiling sweep', () => {
   });
 
   test('a body whose head already overlaps the ceiling is not pulled down', () => {
-    // Inside geometry (unwedge territory): the underside is below the head
-    // already, so the sweep must leave it to the horizontal escape rule.
-    const r = resolveVertical(2.5, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
-    expect(r.feetY).toBeCloseTo(3.5);
+    // Inside geometry (unwedge territory): feet at 2.9 put the 1.75 m head
+    // at 4.65, already past the 4.4 underside, so the sweep must leave it
+    // to the horizontal escape rule.
+    const r = resolveVertical(2.9, 20, 0.05, 0, 0, PLAYER_RADIUS, [tread]);
+    expect(r.feetY).toBeCloseTo(3.9);
     expect(r.velY).toBe(20);
   });
 
   test('an underside within float noise of the resting head still bonks', () => {
-    // An exact-height overhead slab's underside stores a hair LOW; the head
-    // at rest touches it. Rising must bonk at it, not slip past — and the
-    // contact clamps to the frame start (the head was already there), so the
-    // whole frame is remainder fall, still millimetres.
+    // An exact-height overhead slab's underside stores a hair LOW; feet at
+    // 2.25 rest the 1.75 m head at 4.0, touching it. Rising must bonk at it,
+    // not slip past — and the contact clamps to the frame start (the head
+    // was already there), so the whole frame is remainder fall, still
+    // millimetres.
     const noisy = slab(0, 0, 3.9999997615814209, 4.3, 5);
-    const r = resolveVertical(2.0, 8, 0.05, 0, 0, PLAYER_RADIUS, [noisy]);
+    const r = resolveVertical(2.25, 8, 0.05, 0, 0, PLAYER_RADIUS, [noisy]);
     expect(r.ceilingHit).toBe(true);
     expect(r.onGround).toBe(false);
     expect(r.feetY).toBeCloseTo(3.9999997615814209 - HEAD_HEIGHT - 0.5 * 22 * 0.05 * 0.05, 9);
@@ -446,7 +449,7 @@ describe('sliding at bonk height (issue #125)', () => {
     new THREE.Vector3(6, 3.2, -12),
     new THREE.Vector3(14, 3.6, 12),
   );
-  const CLAMP = 3.2 - HEAD_HEIGHT; // 1.2
+  const CLAMP = 3.2 - HEAD_HEIGHT; // 1.45
 
   test('slides along the edge at the clamp, just below it, and at ground', () => {
     for (const feet of [CLAMP, CLAMP - 0.01, CLAMP - 0.06, 0]) {

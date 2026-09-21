@@ -36,7 +36,7 @@ function bot(over: Partial<DebugBotView> = {}): DebugBotView {
     targetEye: null,
     targetInRange: false,
     targetLOS: null,
-    eyePos: () => new THREE.Vector3(position.x, position.y + 1.9, position.z),
+    eyePos: () => new THREE.Vector3(position.x, position.y + 1.6, position.z),
     ...over,
   };
 }
@@ -47,7 +47,7 @@ function buffers(): { pos: Float32Array; col: Float32Array } {
 
 /**
  * Assert vertex `i` is a given point. Compared with a tolerance because the
- * buffer is Float32Array — 1.9 round-trips as 1.899999976158142.
+ * buffer is Float32Array — 1.6 round-trips as 1.600000023841858.
  */
 function expectVertex(pos: Float32Array, i: number, x: number, y: number, z: number): void {
   expect(pos[i * 3]!).toBeCloseTo(x, 5);
@@ -88,7 +88,7 @@ describe('buildDebugSegments', () => {
     });
 
     expect(buildDebugSegments([b], pos, col, VIEW)).toBe(2 + MARKER_VERTS);
-    expectVertex(pos, 0, 0, 1.9, 0);
+    expectVertex(pos, 0, 0, 1.6, 0);
     expectVertex(pos, 1, 10, 5.3, 0);
   });
 
@@ -169,15 +169,15 @@ describe('buildDebugSegments', () => {
       const verts = buildDebugSegments(
         [bot({
           mode: 'search',
-          targetEye: new THREE.Vector3(3, 1.9, 0),
+          targetEye: new THREE.Vector3(3, 1.6, 0),
           targetInRange: false,
           targetLOS: null,
         })],
         pos, col, VIEW,
       );
       expect(verts).toBe(2 + MARKER_VERTS); // the intent line is still emitted
-      expectVertex(pos, 0, 0, 1.9, 0);
-      expectVertex(pos, 1, 3, 1.9, 0);
+      expectVertex(pos, 0, 0, 1.6, 0);
+      expectVertex(pos, 1, 3, 1.6, 0);
       expect(col[0]).toBeCloseTo(0.25, 12); // 0.25 × search yellow
       expect(col[1]).toBeCloseTo(0.25, 12);
       expect(col[2]).toBeCloseTo(0, 12);
@@ -212,8 +212,8 @@ describe('buildDebugSegments', () => {
       const { pos, col } = buffers();
       const b = bot({ mesh: { position: new THREE.Vector3(0, 0, -10) } });
       buildDebugSegments([b], pos, col, VIEW);
-      // Head cube tops out at ~2.17 m; every vertex must clear it.
-      for (let i = 0; i < MARKER_VERTS; i++) expect(pos[i * 3 + 1]!).toBeGreaterThan(2.2);
+      // Head cube tops out at ~1.75 m; every vertex must clear it.
+      for (let i = 0; i < MARKER_VERTS; i++) expect(pos[i * 3 + 1]!).toBeGreaterThan(1.8);
     });
 
     it('holds apparent size by scaling with distance', () => {

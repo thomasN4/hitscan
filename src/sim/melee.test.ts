@@ -60,7 +60,7 @@ describe('meleeSwing', () => {
   test('the nearest candidate wins among several', () => {
     const hit = meleeSwing(EYE, FORWARD, 2.0, 0.6, [
       candidate('far', 'torso', new THREE.Vector3(0, 1.4, -1.8)),
-      candidate('near', 'head', new THREE.Vector3(0, 1.9, -1.2)),
+      candidate('near', 'head', new THREE.Vector3(0, 1.6, -1.2)),
       candidate('other', 'legs', new THREE.Vector3(0, 0.6, -1.5)),
     ]);
     expect(hit?.payload).toBe('near');

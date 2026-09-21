@@ -97,8 +97,8 @@ const GATE_BRIGHTNESS = { shoot: 1, range: 0.5, track: 0.25 } as const;
  */
 const MARKER_SCALE = 0.022;
 
-/** How far above a bot's feet the marker floats — clear of the 2.17 m head cube. */
-const MARKER_HEIGHT = 2.6;
+/** How far above a bot's feet the marker floats — clear of the 1.75 m head cube. */
+const MARKER_HEIGHT = 2.15;
 
 let overlay: THREE.LineSegments | undefined;
 let positions: Float32Array | undefined;

@@ -18,22 +18,22 @@ import {
 
 const HALF_FOV_RAD = (PERCEPTION_FOV_DEG / 2) * (Math.PI / 180);
 
-/** Canonical perceiver: feet at the origin, eye 1.9 m up, facing +z. */
+/** Canonical perceiver: feet at the origin, eye 1.6 m up, facing +z. */
 function selfAt(over: Partial<{ fx: number; fz: number }> = {}) {
   const facing = new THREE.Vector3(over.fx ?? 0, 0, over.fz ?? 1).normalize();
   return {
-    eye: new THREE.Vector3(0, 1.9, 0),
+    eye: new THREE.Vector3(0, 1.6, 0),
     feet: new THREE.Vector3(0, 0, 0),
     facing,
   };
 }
 
-/** Candidate at planar offset (x, z), eye 1.9 m up, feet on the ground. */
+/** Candidate at planar offset (x, z), eye 1.6 m up, feet on the ground. */
 function cand(id: PerceptionId, x: number, z: number, opts: Partial<{ alive: boolean; eyeY: number; feetY: number }> = {}): VisualCandidate {
   return {
     id,
     feet: new THREE.Vector3(x, opts.feetY ?? 0, z),
-    eye: new THREE.Vector3(x, opts.eyeY ?? 1.9, z),
+    eye: new THREE.Vector3(x, opts.eyeY ?? 1.6, z),
     alive: opts.alive ?? true,
   };
 }
@@ -71,9 +71,9 @@ describe('acquireVisual cheap gates', () => {
     const self = selfAt();
     const { los } = countingLos();
     // 45 m planar and 45 m up: eye-to-eye ~63.6 m — inside.
-    const inside = cand(1, 0, 45, { eyeY: 1.9 + 45, feetY: 45 });
+    const inside = cand(1, 0, 45, { eyeY: 1.6 + 45, feetY: 45 });
     // 45 m planar and 80 m up: eye-to-eye ~92 m — beyond.
-    const outside = cand(2, 0, 45, { eyeY: 1.9 + 80, feetY: 80 });
+    const outside = cand(2, 0, 45, { eyeY: 1.6 + 80, feetY: 80 });
     expect(acquireVisual(self, [inside], null, 0, los).observation).not.toBeNull();
     expect(acquireVisual(self, [outside], null, 0, los).observation).toBeNull();
   });
@@ -99,7 +99,7 @@ describe('acquireVisual cheap gates', () => {
     // cos(π/3), so the inclusive comparison must absorb floating-point-scale
     // error at the boundary — without accepting a meaningfully outside one.
     const facing = new THREE.Vector3(Math.sin(Math.PI / 6), 0, Math.cos(Math.PI / 6)).normalize();
-    const self = { eye: new THREE.Vector3(0, 1.9, 0), feet: new THREE.Vector3(0, 0, 0), facing };
+    const self = { eye: new THREE.Vector3(0, 1.6, 0), feet: new THREE.Vector3(0, 0, 0), facing };
     const { los } = countingLos();
     const exact = cand(1, 10, 0);
     expect(acquireVisual(self, [exact], null, 0, los).observation).not.toBeNull();
@@ -111,7 +111,7 @@ describe('acquireVisual cheap gates', () => {
     // 45° off facing in the plane, ~48 m up: ~78° above horizontal — far
     // outside any vertical cone, but the FOV is horizontal-only and the
     // eye-to-eye range still fits.
-    const deck = cand(1, 5, 5, { eyeY: 1.9 + 45, feetY: 45 });
+    const deck = cand(1, 5, 5, { eyeY: 1.6 + 45, feetY: 45 });
     expect(Math.hypot(5, 45, 5)).toBeLessThan(PERCEPTION_RANGE_M);
     expect(acquireVisual(self, [deck], null, 0, los).observation).not.toBeNull();
   });
@@ -255,14 +255,14 @@ describe('acquireVisual observations', () => {
     c.eye.set(100, 100, 100);
     expect(obs.feet.x).toBe(3);
     expect(obs.feet.z).toBe(4);
-    expect(obs.eye.y).toBe(1.9);
+    expect(obs.eye.y).toBe(1.6);
   });
 
   it('derives planar distance, eye-to-eye 3D distance and rise', () => {
     const self = selfAt();
     // Feet 8 m up at planar offset (3, 4): planar dist 5, rise 8, eye-to-eye
-    // hypot(5, 8) — both eyes 1.9 m up so the eye offset is planar + rise.
-    const c = cand(1, 3, 4, { feetY: 8, eyeY: 8 + 1.9 });
+    // hypot(5, 8) — both eyes 1.6 m up so the eye offset is planar + rise.
+    const c = cand(1, 3, 4, { feetY: 8, eyeY: 8 + 1.6 });
     const obs = acquireVisual(self, [c], null, 0, () => true).observation!;
     expect(obs.dist).toBeCloseTo(5, 12);
     expect(obs.rise).toBeCloseTo(8, 12);

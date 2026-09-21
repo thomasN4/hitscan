@@ -118,7 +118,7 @@ function moveParams(): BrainParams {
 
 /**
  * A visual observation the executor could have produced: a target due +x at
- * planar `dist`, feet at `rise`, eye 1.9 m above its feet (matching the
+ * planar `dist`, feet at `rise`, eye 1.6 m above its feet (matching the
  * executor's eye convention), both eyes level so dist3 closes to the planar
  * distance unless a test overrides it.
  */
@@ -126,7 +126,7 @@ function visualAt(dist = 10, rise = 0, dist3 = Math.hypot(dist, rise), id: Perce
   return {
     id,
     feet: new THREE.Vector3(dist, rise, 0),
-    eye: new THREE.Vector3(dist, rise + 1.9, 0),
+    eye: new THREE.Vector3(dist, rise + 1.6, 0),
     dist,
     dist3,
     rise,
@@ -406,7 +406,7 @@ describe('DefaultBrain visual intent', () => {
     const target = new THREE.Vector3(30, 0, 40);
     const vis = visualAt(0);
     vis.feet.copy(target);
-    vis.eye.set(target.x, 1.9, target.z);
+    vis.eye.set(target.x, 1.6, target.z);
     vis.dist = Math.hypot(30, 40);
     vis.dist3 = 50;
     const intent = calmBrain().decide(view({ visual: vis, facing: new THREE.Vector3(0, 0, 1) }), DT);
@@ -417,7 +417,7 @@ describe('DefaultBrain visual intent', () => {
   it('falls back to the body facing for a degenerate (zero planar offset) visual', () => {
     const vis = visualAt(0);
     vis.feet.set(0, 0, 0);
-    vis.eye.set(0, 1.9, 0);
+    vis.eye.set(0, 1.6, 0);
     vis.dist = 0;
     const intent = calmBrain().decide(view({ visual: vis, facing: new THREE.Vector3(0, 0, 1) }), DT);
     expect(intent.facing.z).toBeCloseTo(1, 12);
@@ -1122,7 +1122,7 @@ describe('DefaultBrain memory pursuit', () => {
 
   it('freezes a COPY of the observation: mutating the source cannot drift the memory', () => {
     const brain = calmBrain();
-    const vis = visualAt(10); // feet (10,0,0), eye (10,1.9,0)
+    const vis = visualAt(10); // feet (10,0,0), eye (10,1.6,0)
     brain.decide(view({ visual: vis }), DT); // memory taken
     vis.feet.set(99, 5, 99); // the target "moves" by mangling the executor's record
     vis.eye.set(99, 99, 99);
@@ -1135,7 +1135,7 @@ describe('DefaultBrain memory pursuit', () => {
     expect(goals[0]!.y).toBeCloseTo(0, 12);
     expect(goals[0]!.z).toBeCloseTo(0, 12);
     expect(intent.lookAt!.x).toBeCloseTo(10, 12);
-    expect(intent.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(intent.lookAt!.y).toBeCloseTo(1.6, 12);
   });
 
   it('routes to the remembered FEET on sight loss and returns a copied lookAt', () => {
@@ -1145,7 +1145,7 @@ describe('DefaultBrain memory pursuit', () => {
     const goals: THREE.Vector3[] = [];
     const first = brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
     expect(goals[0]!.x).toBeCloseTo(10, 12);
-    expect(first.lookAt!.clone()).toEqual(new THREE.Vector3(10, 1.9, 0));
+    expect(first.lookAt!.clone()).toEqual(new THREE.Vector3(10, 1.6, 0));
     expect(first.wantShoot).toBe(false);
     expect(first.mode).toBe('route');
 
@@ -1155,7 +1155,7 @@ describe('DefaultBrain memory pursuit', () => {
     const second = brain.decide(view({ visual: null, nextWaypoint: routeSpy(goals, new THREE.Vector3(0.5, 0, 0)) }), DT);
     expect(goals[1]!.x).toBeCloseTo(10, 12);
     expect(second.lookAt!.x).toBeCloseTo(10, 12);
-    expect(second.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(second.lookAt!.y).toBeCloseTo(1.6, 12);
   });
 
   it('never orders a shot from memory, however willing the weapon', () => {
@@ -1179,7 +1179,7 @@ describe('DefaultBrain memory pursuit', () => {
       expect(intent.step.length()).toBe(0);
       expect(intent.wantShoot).toBe(false);
       expect(intent.focusId).toBe('player');
-      expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(10, 1.9, 0));
+      expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(10, 1.6, 0));
     }
   });
 
@@ -1193,7 +1193,7 @@ describe('DefaultBrain memory pursuit', () => {
     expect(intent.focusId).toBe('player'); // identity survives into the scan
     expect(intent.facing.x).toBeCloseTo(1, 12);
     expect(intent.facing.z).toBeCloseTo(0, 12);
-    expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.9, 0));
+    expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.6, 0));
   });
 
   it('the inclusive 1 m arrival boundary starts a search without consulting the graph', () => {
@@ -1207,7 +1207,7 @@ describe('DefaultBrain memory pursuit', () => {
     expect(asked).toBe(0); // arrival is decided before the graph is ever asked
     expect(intent.mode).toBe('search');
     expect(intent.facing.x).toBeCloseTo(1, 12);
-    expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.9, 0));
+    expect(intent.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.6, 0));
   });
 
   it('a visual reacquisition refreshes the memory and exits an active search', () => {
@@ -1266,7 +1266,7 @@ describe('DefaultBrain scan search', () => {
     // Elapsed zero: the entry heading IS the base bearing.
     expect(entry.facing.x).toBeCloseTo(1, 12);
     expect(entry.facing.z).toBeCloseTo(0, 12);
-    expect(entry.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.9, 0));
+    expect(entry.lookAt!.clone()).toEqual(new THREE.Vector3(1, 1.6, 0));
 
     // dt = one full scan phase: each frame lands exactly on a phase boundary.
     // Three.js positive-Y rotation: +120° takes (1,0,0) to (cos120°, 0, −sin120°).
@@ -1274,14 +1274,14 @@ describe('DefaultBrain scan search', () => {
     const f1 = brain.decide(view({ visual: null }), 0.75);
     expect(f1.facing.x).toBeCloseTo(-0.5, 12);
     expect(f1.facing.z).toBeCloseTo(-S, 12);
-    expect(f1.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(f1.lookAt!.y).toBeCloseTo(1.6, 12);
     expect(f1.lookAt!.x).toBeCloseTo(-0.5, 12);
     expect(f1.lookAt!.z).toBeCloseTo(-S, 12);
 
     const f2 = brain.decide(view({ visual: null }), 0.75);
     expect(f2.facing.x).toBeCloseTo(-0.5, 12);
     expect(f2.facing.z).toBeCloseTo(S, 12);
-    expect(f2.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(f2.lookAt!.y).toBeCloseTo(1.6, 12);
     expect(f2.lookAt!.x).toBeCloseTo(-0.5, 12);
     expect(f2.lookAt!.z).toBeCloseTo(S, 12);
 
@@ -1341,7 +1341,7 @@ describe('DefaultBrain incoming fire', () => {
     expect(intent.facing.z).toBeCloseTo(0.8, 12);
     // Direction-only: no memory, so the scan look rides the bot eye
     // convention off the bot's own feet.
-    expect(intent.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(intent.lookAt!.y).toBeCloseTo(1.6, 12);
     expect(intent.lookAt!.x).toBeCloseTo(0.6, 12);
     expect(intent.lookAt!.z).toBeCloseTo(0.8, 12);
   });
@@ -1525,10 +1525,10 @@ describe('DefaultBrain hearing', () => {
       heard: [gunshot(1, 12, 0)],
       nextWaypoint: () => new THREE.Vector3(0.5, 0, 0),
     }), DT);
-    // A noise leaves no eye to remember; 1.9 m above the spot is the bot eye
+    // A noise leaves no eye to remember; 1.6 m above the spot is the bot eye
     // convention, and aiming at the floor 12 m out would read as a bug.
     expect(intent.lookAt!.x).toBeCloseTo(12, 12);
-    expect(intent.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(intent.lookAt!.y).toBeCloseTo(1.6, 12);
   });
 
   it('never orders a shot from a heard position, however willing the weapon', () => {
@@ -1725,7 +1725,7 @@ describe('DefaultBrain patrol', () => {
     expect(walked.step.z).toBeCloseTo(0.8 * 4 * 0.25, 12);
     // Looking one metre along the next waypoint at eye height.
     expect(walked.lookAt!.x).toBeCloseTo(0.6, 12);
-    expect(walked.lookAt!.y).toBeCloseTo(1.9, 12);
+    expect(walked.lookAt!.y).toBeCloseTo(1.6, 12);
     expect(walked.lookAt!.z).toBeCloseTo(0.8, 12);
   });
 

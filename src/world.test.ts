@@ -246,10 +246,11 @@ describe('openTreadBase', () => {
     const blocks = (i: number): boolean =>
       collidesAt(new THREE.Vector3(0, 0, 0), 0.5, 0, [tread(i)]);
 
-    // First tread whose plate hangs clear of a standing body's head.
+    // First tread whose plate hangs clear of a standing body's head (follows
+    // HEAD_HEIGHT: bases run 0.14 + 0.3i, so 1.75 clears from tread 6).
     const firstOpen = Array.from({ length: COUNT }, (_, i) => i)
       .findIndex(i => openTreadBase(0, i, STEP_H, TREAD_T) >= HEAD_HEIGHT);
-    expect(firstOpen).toBe(7);
+    expect(firstOpen).toBe(6);
 
     // Tread 0 is the step you take onto the flight, not a wall — its top is
     // one riser up, which collision.ts reads as floor.

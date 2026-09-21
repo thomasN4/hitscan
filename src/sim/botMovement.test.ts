@@ -102,7 +102,7 @@ function lowestFeet(
   for (let frame = 0; frame < hz * 8; frame++) {
     const dist = Math.hypot(target.x - feet.x, target.z - feet.z);
     const intent = brain.decide({ selfFeet: feet, facing: new THREE.Vector3(target.x - feet.x, 0, target.z - feet.z).normalize(),
-      visual: { id: 'player', feet: target, eye: target.clone().setY(target.y + 1.9), dist,
+      visual: { id: 'player', feet: target, eye: target.clone().setY(target.y + 1.6), dist,
         dist3: Math.hypot(dist, target.y - feet.y), rise: target.y - feet.y },
       onGround, selfSpeed: SPEED, moveBlocked: blocked, heard: [],
       canStandAt: (x, z) => !collidesAt(probe.set(x, 0, z), R, feet.y, colliders),

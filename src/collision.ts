@@ -23,8 +23,8 @@ import { GRAVITY } from './sim/movement';
 
 /** Tallest riser an entity auto-climbs rather than collides with. */
 export const STEP_HEIGHT = 0.3;
-/** Top of the entity's collision span, relative to its feet. */
-export const HEAD_HEIGHT = 2.0;
+/** Top of the entity's collision span, relative to its feet. Tracks the ~1.75 m bot visual top (issue #137). */
+export const HEAD_HEIGHT = 1.75;
 /**
  * Slack for the elevation comparisons, in metres.
  *

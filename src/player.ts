@@ -95,10 +95,16 @@ export function updateMovement(dt: number): void {
   const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
   const move = new THREE.Vector3();
-  if (keyHeld('KeyW')) move.add(forward);
-  if (keyHeld('KeyS')) move.sub(forward);
-  if (keyHeld('KeyD')) move.add(right);
-  if (keyHeld('KeyA')) move.sub(right);
+  if (input.moveX !== 0 || input.moveY !== 0) {
+    // Touch stick: analog direction, same speed tiers as the keys — its
+    // magnitude only decides walk vs sprint (sim/joystick.ts).
+    move.addScaledVector(forward, input.moveY).addScaledVector(right, input.moveX);
+  } else {
+    if (keyHeld('KeyW')) move.add(forward);
+    if (keyHeld('KeyS')) move.sub(forward);
+    if (keyHeld('KeyD')) move.add(right);
+    if (keyHeld('KeyA')) move.sub(right);
+  }
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
 
   // Horizontal movement: the shared slide-along-walls gate (collision.ts),

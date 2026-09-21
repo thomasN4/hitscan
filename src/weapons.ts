@@ -18,7 +18,7 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
          equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
 import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
-         sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch } from './audio';
+         sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch, sfxZoom } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
@@ -57,11 +57,45 @@ export function currentSprintActive(crouching: boolean): boolean {
     sprintHeld: input.running,
     aiming: input.aiming,
     crouching,
-    forward: keyHeld('KeyW'),
-    backward: keyHeld('KeyS'),
-    left: keyHeld('KeyA'),
-    right: keyHeld('KeyD'),
+    // The touch stick counts as a direction on each axis it points along,
+    // so a rim push sprints exactly where W-plus-Shift would.
+    forward: keyHeld('KeyW') || input.moveY > 0,
+    backward: keyHeld('KeyS') || input.moveY < 0,
+    left: keyHeld('KeyA') || input.moveX < 0,
+    right: keyHeld('KeyD') || input.moveX > 0,
   });
+}
+
+/**
+ * A fresh request to raise the sights (RMB press, or the touch ADS toggle).
+ * Refused while recoil is still settling past the weapon's scopeGate (sniper
+ * bolt-action feel), while a swapped weapon is still being drawn (issue #15
+ * deploy window), or while a whole-mag reload is running — ADS there is
+ * impossible until the reload finishes or is cancelled. Gradual (perRound)
+ * reloads are the exception: the press cancels them and still raises (see
+ * cancelsReload). A raise already held is unaffected.
+ */
+export function tryRaiseSights(): void {
+  const def = currentDef();
+  const gate = def.scopeGate; // undefined = no gate (smg)
+  const perRound = def.perRound ?? false; // documented default: whole-mag
+  if ((gate === undefined || wpn.recoil < gate) &&
+    !isDeploying(gameTime.now(), wpn.animation.switchedAt) &&
+    (!weapon.reloading || perRound)) input.aiming = true;
+}
+
+/**
+ * Step the scope zoom (mouse wheel, or the touch zoom button), only while
+ * scoped with a multi-step-zoom weapon (the sniper's zoomFovs). +1 zooms in,
+ * -1 out, wrapping through the levels; single-entry weapons (iron sights)
+ * have nothing to cycle.
+ */
+export function cycleZoom(dir: 1 | -1): void {
+  if (!input.aiming) return;
+  const fovs = currentDef().zoomFovs;
+  if (fovs.length < 2) return;
+  wpn.zoomLevel = (wpn.zoomLevel + dir + fovs.length) % fovs.length;
+  sfxZoom();
 }
 
 /** Zoom FOV target for the current zoom level, clamped into range. */

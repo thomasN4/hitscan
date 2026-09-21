@@ -16,6 +16,7 @@ import {
   defaultBotCounts,
   numOr,
   parseSessionConfig,
+  parseTouchOverride,
   secondsToMinutesLabel,
   type ParamSource,
   type SessionConfig,
@@ -379,5 +380,19 @@ describe('secondsToMinutesLabel', () => {
     for (let seconds = TIME_LIMITS_S.min; seconds <= TIME_LIMITS_S.max; seconds++) {
       expect(Math.round(Number(secondsToMinutesLabel(seconds)) * 60)).toBe(seconds);
     }
+  });
+});
+
+describe('parseTouchOverride', () => {
+  it('forces on/off for 1/0 and defers to detection otherwise', () => {
+    expect(parseTouchOverride('1')).toBe(true);
+    expect(parseTouchOverride('0')).toBe(false);
+    expect(parseTouchOverride(null)).toBe(null);
+    expect(parseTouchOverride('yes')).toBe(null);
+    expect(parseTouchOverride('')).toBe(null);
+  });
+
+  it('is not part of the committed match query', () => {
+    expect(configToQuery(parseSessionConfig(src({ touch: '1' })))).not.toContain('touch');
   });
 });

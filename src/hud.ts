@@ -43,8 +43,12 @@ export let hudEl: HTMLElement;
 export let crosshair: HTMLElement;
 export let vignette: HTMLElement;
 
+/** Reload prompt wording: a key on desktop, the on-screen button in touch mode. */
+let reloadPrompt = 'PRESS [R] TO RELOAD';
+
 /** Resolve every HUD element reference. Call once, after the DOM is ready. */
-export function initHUD(): void {
+export function initHUD(touch = false): void {
+  if (touch) reloadPrompt = 'TAP \u21bb TO RELOAD';
   hudEl = el('hud');
   crosshair = el('crosshair');
   applyCrosshairVisibility();
@@ -231,7 +235,7 @@ export function updateHUD(): void {
   ammoReserve.style.display = ammoDisplay;
   reloadHint.style.visibility = (!meleeHeld && !weapon.reloading && isLowAmmo(weapon.mag, weapon.magSize)) ? 'visible' : 'hidden';
   if (weapon.reloading) reloadHint.textContent = 'RELOADING...';
-  else reloadHint.textContent = 'PRESS [R] TO RELOAD';
+  else reloadHint.textContent = reloadPrompt;
   // Weapon name + scope zoom label; cached so unchanged values don't touch
   // the DOM (these are written every frame like the rest of updateHUD).
   if (weapon.name !== lastName) {

@@ -3,7 +3,8 @@
 // Flow: parse config query -> initEngine() (imports have no engine/DOM side
 // effects) -> BUILDERS[map]() + spawnBots -> initMenus -> register input/pointer-lock
 // handlers -> start the render loop.
-// The loop only simulates (player, bots, timer) while pointer lock is held;
+// The loop only simulates (player, bots, timer) while play input is captured
+// (pointer lock on desktop, the touch capture flag on phones — playControl.ts);
 // rendering and effect updates run always so pause screens stay visible.
 // Game time (core/state.ts:gameTime) advances only inside that simulated
 // window too — see GameClock in sim/gameClock.ts for why everything
@@ -15,7 +16,7 @@ import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, S
                LoadoutState, Team,
                MapName, MatchMode, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout, equippedId } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders, elevators, updateElevators } from './world';
 import { HEAD_HEIGHT } from './collision';
@@ -24,7 +25,7 @@ import { BUILDERS } from './maps';
 import { buildNav, route, transportRoute, navGrid } from './nav';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
-import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon } from './weapons';
+import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon, tryRaiseSights, cycleZoom } from './weapons';
 import { updateEffects } from './effects';
 import { toggleDebugView, updateDebugView } from './debugView';
 import { respawn, endMatch } from './combat';
@@ -32,9 +33,10 @@ import { updateDomination } from './domination';
 import { buildDomFlags } from './domFlags';
 import { updateHUD, setTimer, hudEl, setScopeOverlay, initHUD, addKillfeed } from './hud';
 import { initMenus, hideAllMenus, showPauseMenu, showLoadoutPicker, readStoredLoadout, setAssetStatus } from './menu';
-import { sfxZoom } from './audio';
 import { decideWinner, decideDomWinner } from './sim/match';
-import { isDeploying } from './sim/weaponSwap';
+import { applyLook } from './sim/look';
+import { detectTouchMode, initPlayControl, enterPlay } from './playControl';
+import { initTouchControls, updateTouchControls, resetTouchInput } from './touchControls';
 import { validateWeapons } from './sim/validateWeapons';
 import { loadWeaponAssets } from './core/weaponAssets';
 import { initBotWeaponModels } from './core/botWeaponModels';
@@ -66,6 +68,10 @@ async function start(): Promise<void> {
   // A reload-based visual experiment, deliberately separate from match rules.
   const ligneClaire = session.map === 'arena'
     && new URLSearchParams(location.search).get('style') === 'ligne-claire';
+  // Touch controls (sim/joystick.ts, touchControls.ts) replace mouse and
+  // keys on phones; ?touch=1/0 forces it. Local, like lowfx: not match config.
+  const touchParam = new URLSearchParams(location.search).get('touch');
+  const touch = detectTouchMode(location.search);
 
   // Loud, not fatal: this runs before initEngine(), so throwing would blank
   // the page and hide the message behind a broken app. A violation is a
@@ -80,7 +86,7 @@ async function start(): Promise<void> {
     // through sessionConfig, so the committed config query is untouched.
     lowFx: new URLSearchParams(location.search).get('lowfx') === '1',
   });
-  initHUD();
+  initHUD(touch);
   setAssetStatus('loading');
   const weaponAssets = await loadWeaponAssets(import.meta.env.BASE_URL);
   initWeaponViewmodels(weaponAssets);
@@ -111,14 +117,17 @@ async function start(): Promise<void> {
   }
   respawn(); // draw the player's opening spawn from their team's zone, with fresh HP/ammo/yaw
   const illustration = ligneClaire ? initLigneClaire(scene, renderer) : null;
+  initPlayControl(renderer.domElement, touch, onPlayChange);
+  if (touch) initTouchControls();
   initMenus({
     onStart: () => showLoadoutPicker('start'),
     onCommit: query => {
       const params = new URLSearchParams(query);
       if (ligneClaire && params.get('map') === 'arena') params.set('style', 'ligne-claire');
+      if (touchParam !== null) params.set('touch', touchParam);
       location.href = location.pathname + '?' + params.toString();
     },
-    onResume: lock,
+    onResume: enterPlay,
     onQuit: () => { location.reload(); },
     // End screen Rematch: same config query, fresh match — a reload IS the
     // restart, since every slice initializes from defaults at module scope.
@@ -136,9 +145,9 @@ async function start(): Promise<void> {
       // no part, so a camped flag keeps full odds); the match-opening deploy
       // finds the player alive and keeps the zone-drawn opening spawn.
       if (!player.alive) respawn(session.mode === 'dom');
-      lock();
+      enterPlay();
     },
-  });
+  }, { touch });
 
   // ---------- Input ----------
   addEventListener('resize', () => {
@@ -182,47 +191,31 @@ async function start(): Promise<void> {
     input.running = false;
     input.shooting = false;
     input.aiming = false;
+    if (touch) resetTouchInput();
   });
 
   const SENS = 0.0022; // radians per pixel of mouse movement
   document.addEventListener('mousemove', e => {
     if (!session.locked || !player.alive) return;
-    // zoomScale shrinks toward the FOV ratio while scoped (weapons.ts), so
-    // aiming stays controllable at 12x instead of flinging across the sky.
-    aim.yaw -= e.movementX * SENS * wpn.zoomScale;
-    aim.pitch -= e.movementY * SENS * wpn.zoomScale;
-    // Clamp pitch so the player can't flip over backwards
-    aim.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, aim.pitch));
+    const next = applyLook(aim.yaw, aim.pitch, e.movementX, e.movementY, SENS, wpn.zoomScale);
+    aim.yaw = next.yaw;
+    aim.pitch = next.pitch;
   });
 
-  // Wheel = scope zoom steps, only while scoped with a multi-step-zoom weapon
-  // (the sniper's zoomFovs). Scroll up zooms in, scroll down zooms out, wrapping
-  // through the levels; single-entry weapons (iron sights) have nothing to cycle.
+  // Wheel = scope zoom steps (weapons.ts:cycleZoom): scroll up zooms in,
+  // scroll down zooms out.
   addEventListener('wheel', e => {
-    if (!session.locked || !player.alive || !input.aiming) return;
-    const fovs = WEAPONS[equippedId(wpn.slot)].zoomFovs;
-    if (fovs.length < 2) return;
-    wpn.zoomLevel = (wpn.zoomLevel + (e.deltaY < 0 ? 1 : -1) + fovs.length) % fovs.length;
-    sfxZoom();
+    if (!session.locked || !player.alive) return;
+    cycleZoom(e.deltaY < 0 ? 1 : -1);
   });
 
   // LMB = fire (held), RMB = iron sights (held). Buttons are tracked as state
   // rather than one-shot events because firing is continuous in updateWeapon.
   addEventListener('mousedown', e => {
     if (e.button === 0 && session.locked && player.alive) input.shooting = true;
-    // A fresh RMB press can't enter the scope while recoil is still settling
-    // (sniper bolt-action feel), while the swapped weapon is still being
-    // drawn (issue #15 deploy window), or while a whole-mag reload is running
-    // — ADS there is impossible until the reload finishes or is cancelled.
-    // Gradual (perRound) reloads are the exception: the press cancels them
-    // and still raises (see cancelsReload). A press already held is unaffected.
-    if (e.button === 2 && session.locked && player.alive) {
-      const gate = WEAPONS[equippedId(wpn.slot)].scopeGate; // undefined = no gate (smg)
-      const perRound = WEAPONS[equippedId(wpn.slot)].perRound ?? false; // documented default: whole-mag
-      if ((gate === undefined || wpn.recoil < gate) &&
-        !isDeploying(gameTime.now(), wpn.animation.switchedAt) &&
-        (!weapon.reloading || perRound)) input.aiming = true;
-    }
+    // A fresh RMB press, gated in weapons.ts:tryRaiseSights (scope settle,
+    // deploy window, whole-mag reload) — shared with the touch ADS toggle.
+    if (e.button === 2 && session.locked && player.alive) tryRaiseSights();
   });
   addEventListener('mouseup', e => {
     if (e.button === 0) input.shooting = false;
@@ -230,22 +223,18 @@ async function start(): Promise<void> {
   });
   addEventListener('contextmenu', e => e.preventDefault()); // RMB must not open the menu
 
-  // ---------- Pointer lock / menus ----------
-  function lock(): void {
-    // Chrome's requestPointerLock returns a promise that REJECTS when the
-    // browser-enforced cooldown (or headless CI) blocks the request; an
-    // unhandled rejection here would surface as a page error. Failure is
-    // recoverable — the canvas click handler re-locks — so swallow it.
-    try {
-      const p = renderer.domElement.requestPointerLock() as unknown;
-      if (p instanceof Promise) p.catch(() => { /* cooldown/headless: recovered by canvas click */ });
-    } catch { /* same recovery path */ }
-  }
-  renderer.domElement.addEventListener('click', () => { if (!session.locked && !session.matchOver && player.alive && session.started) lock(); });
+  // ---------- Play capture / menus ----------
+  renderer.domElement.addEventListener('click', () => { if (!session.locked && !session.matchOver && player.alive && session.started) enterPlay(); });
 
-  document.addEventListener('pointerlockchange', () => {
-    session.locked = document.pointerLockElement === renderer.domElement;
+  // Pointer lock on desktop, the touch capture flag on phones — playControl.ts
+  // reports both here. Touch releases arrive synchronously (possibly mid-frame,
+  // from combat.ts); every branch below is safe either way because the frame
+  // already inside the simulate block finishes against the state it started.
+  function onPlayChange(captured: boolean): void {
+    session.locked = captured;
     hudEl.style.display = session.locked ? 'block' : 'none';
+    // Nothing a finger was holding may survive into the pause/death screen.
+    if (!session.locked && touch) resetTouchInput();
     // updateWeapon stops running when the loop pauses; make sure a held scope
     // can't stay stuck on screen across pause/death.
     if (!session.locked) setScopeOverlay(false);
@@ -263,7 +252,7 @@ async function start(): Promise<void> {
     } else {
       showPauseMenu(false);
     }
-  });
+  }
 
   // ---------- Game loop ----------
   function animate(): void {
@@ -334,6 +323,7 @@ async function start(): Promise<void> {
       }
 
       updateHUD();
+      if (touch) updateTouchControls();
     }
 
     // Effects keep fading while paused so impacts don't freeze on screen
@@ -378,6 +368,8 @@ async function start(): Promise<void> {
     get aiming() { return input.aiming; }, set aiming(v: boolean) { input.aiming = v; },
     get running() { return input.running; }, set running(v: boolean) { input.running = v; },
     get crouching() { return input.crouching; }, set crouching(v: boolean) { input.crouching = v; },
+    get moveX() { return input.moveX; }, set moveX(v: number) { input.moveX = v; },
+    get moveY() { return input.moveY; }, set moveY(v: number) { input.moveY = v; },
     get yaw() { return aim.yaw; }, set yaw(v: number) { aim.yaw = v; },
     get pitch() { return aim.pitch; }, set pitch(v: number) { aim.pitch = v; },
     get spread() { return wpn.spread; }, set spread(v: number) { wpn.spread = v; },

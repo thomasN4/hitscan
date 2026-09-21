@@ -1181,7 +1181,11 @@ export interface SessionState {
    */
   botSecondaryT: BotSecondaryChoice;
   botSecondaryCt: BotSecondaryChoice;
-  /** Pointer lock active (Esc/menu releases it). */
+  /**
+   * Play input captured: pointer lock on desktop, touch play in touch mode
+   * (playControl.ts owns both). Esc, the touch pause button, death and match
+   * end release it; the loop simulates only while it is held.
+   */
   locked: boolean;
   /** First Play click happened; distinguishes pause from pre-game. */
   started: boolean;
@@ -1209,21 +1213,30 @@ export const session: SessionState = {
 
 /**
  * Raw button state (LMB/RMB/sprint/crouch). Written by main.ts's event
- * handlers — plus two weapons.ts writes (`shoot()` clears `aiming` on
+ * handlers and, in touch mode, by touchControls.ts's on-screen controls (the
+ * sprint flag from the stick's rim, aiming as a tap toggle) — plus the
+ * weapons.ts writes (`shoot()` clears `aiming` on
  * unscopeOnShot, and `tryReload()` clears it when a reload starts while the
  * sights are up: one motion at a time) — and read by player/weapons/hud.
  * Tracked as state rather than one-shot events because firing is continuous
  * in updateWeapon.
  */
 export interface InputState {
-  /** LMB held. */
+  /** LMB (or a touch fire button) held. */
   shooting: boolean;
-  /** RMB held (iron sights). */
+  /** RMB held, or the touch ADS toggle on (iron sights). */
   aiming: boolean;
-  /** Shift held, either side (sprint). */
+  /** Shift held, either side, or the touch stick at its rim (sprint). */
   running: boolean;
   /** Crouch toggled by a Ctrl/C tap; effective only on ground. */
   crouching: boolean;
+  /**
+   * Touch movement stick direction (touchControls.ts), unit length or both 0
+   * at rest: +x strafes right, +y walks forward. When nonzero it replaces the
+   * WASD vector in player.ts; the keyboard never writes it.
+   */
+  moveX: number;
+  moveY: number;
 }
 
 export const input: InputState = {
@@ -1231,6 +1244,8 @@ export const input: InputState = {
   aiming: false,
   running: false,
   crouching: false,
+  moveX: 0,
+  moveY: 0,
 };
 
 /** Effective crouch stance: the toggle only takes effect on the ground. */

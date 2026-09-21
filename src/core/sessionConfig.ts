@@ -307,3 +307,16 @@ export function configsEqual(a: SessionConfig, b: SessionConfig): boolean {
     a.botSecondaryCt === b.botSecondaryCt
   );
 }
+
+/**
+ * `?touch=1` / `?touch=0` forces touch controls on or off; anything else
+ * (absent included) is null, meaning "detect from the device". Like `lowfx`,
+ * this is a local input concern, not match config: it is NOT part of
+ * SessionConfig or configToQuery, and main.ts carries it across the menu's
+ * commit reload itself.
+ */
+export function parseTouchOverride(raw: string | null | undefined): boolean | null {
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <link rel="icon" href="data:,">
 <title>Hitscan</title>
 <style>
@@ -121,6 +122,69 @@
   .cfg input:focus, .cfg select:focus { outline: 1px solid #ffcc66; }
   .cfg input:disabled, .cfg select:disabled { opacity: .35; cursor: not-allowed; }
   .cfgNote { grid-column: 2; font-size: 11px; color: #667; margin-top: -8px; }
+
+  /* ---------- Touch mode (body.touch, set by menu.ts) ---------- */
+  .touch-only { display: none; }
+  body.touch .touch-only { display: revert; }
+  body.touch .desk-only { display: none; }
+  body.touch { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+  body.touch canvas { touch-action: none; }
+  /* Pinned to the menu's corner, out of the scrolling flow, so it is
+     reachable without scrolling the config form on a short screen. */
+  body.touch .menu button.fsBtn { position: fixed; top: 10px; right: max(10px, env(safe-area-inset-right));
+    background: #2a3140; color: #eee; font-size: 12px; padding: 8px 14px; z-index: 11; }
+
+  /* Menus must fit a landscape phone (~360-430 px tall): compact type, the
+     config form in two field columns, and a scrollable overlay. The auto
+     margins centre the content when it fits and let it scroll when it
+     doesn't (plain justify-content:center would clip the top instead). */
+  body.touch .menu { justify-content: flex-start; overflow-y: auto; padding: 14px max(14px, env(safe-area-inset-right)) 14px max(14px, env(safe-area-inset-left)); }
+  body.touch .menu > :first-child { margin-top: auto; }
+  body.touch .menu > :last-child { margin-bottom: auto; }
+  body.touch .menu h1 { font-size: 30px; margin-bottom: 4px; }
+  body.touch .menu p { margin-bottom: 12px; font-size: 13px; }
+  body.touch .menu button:not(.wcard):not(.fsBtn) { font-size: 16px; padding: 11px 30px; }
+  body.touch .cfg { grid-template-columns: auto 110px auto 110px; gap: 6px 12px; margin-bottom: 14px; }
+  body.touch .cfg .cfgName { font-size: 11px; }
+  body.touch .cfg input, body.touch .cfg select { padding: 5px 8px; font-size: 14px; }
+  body.touch .wcols { gap: 14px; margin-bottom: 14px; }
+  body.touch .wcol { min-width: 200px; gap: 5px; padding: 6px; }
+  body.touch .wcard { padding: 7px 10px; }
+  body.touch #scoreboardWrap { margin-bottom: 14px; }
+
+  /* In-game HUD: the stick and the fire cluster own the bottom corners, so
+     health/ammo move to a compact bottom-centre row, and the kill feed drops
+     below the weapon strip. */
+  body.touch #bottom { left: 50%; right: auto; transform: translateX(-50%); bottom: 8px; gap: 36px; padding: 0; }
+  body.touch #healthBox, body.touch #ammoBox { font-size: 22px; }
+  body.touch #healthBar { width: 90px; }
+  body.touch #weaponName { font-size: 11px; }
+  body.touch #killfeed { top: 64px; font-size: 12px; }
+  body.touch #topbar { font-size: 16px; top: 8px; }
+
+  /* On-screen controls (touchControls.ts). #hud is pointer-events:none, so
+     each surface opts back in. Layers: look surface < stick zone < buttons. */
+  #touchControls { position: absolute; inset: 0; display: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #touchControls > * { pointer-events: auto; touch-action: none; }
+  #tcLook { position: absolute; top: 0; bottom: 0; left: 40%; right: 0; }
+  #tcStickZone { position: absolute; top: 22%; bottom: 0; left: 0; width: 40%; }
+  #tcStickBase { position: absolute; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%;
+                 border: 2px solid rgba(255,255,255,.35); background: rgba(255,255,255,.08); display: none; pointer-events: none; }
+  #tcStickKnob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; background: rgba(255,255,255,.45); }
+  .tc-btn { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+            background: rgba(20,24,30,.45); border: 2px solid rgba(255,255,255,.4); color: rgba(255,255,255,.85);
+            font-size: 12px; font-weight: bold; letter-spacing: 1px; text-shadow: 0 0 3px #000; }
+  .tc-btn.active { background: rgba(255,204,102,.45); border-color: #ffcc66; }
+  #tcFire  { width: 92px; height: 92px; right: calc(34px + env(safe-area-inset-right)); bottom: 118px; background: rgba(255,82,82,.35); border-color: rgba(255,120,120,.7); }
+  #tcFireL { width: 66px; height: 66px; left: calc(34px + env(safe-area-inset-left)); top: 30%; background: rgba(255,82,82,.3); border-color: rgba(255,120,120,.6); }
+  #tcAds   { width: 60px; height: 60px; right: calc(40px + env(safe-area-inset-right)); bottom: 232px; }
+  #tcZoom  { width: 46px; height: 46px; right: calc(118px + env(safe-area-inset-right)); bottom: 246px; display: none; font-size: 20px; }
+  #tcReload { width: 56px; height: 56px; right: calc(142px + env(safe-area-inset-right)); bottom: 150px; font-size: 22px; }
+  #tcJump  { width: 64px; height: 64px; right: calc(40px + env(safe-area-inset-right)); bottom: 28px; }
+  #tcCrouch { width: 64px; height: 64px; right: calc(124px + env(safe-area-inset-right)); bottom: 28px; }
+  #tcPause { width: 44px; height: 44px; left: calc(14px + env(safe-area-inset-left)); top: 10px; font-size: 16px; }
+  #tcWeapons { position: absolute; top: 10px; right: calc(14px + env(safe-area-inset-right)); display: flex; gap: 6px; }
+  #tcWeapons .tc-btn { position: static; border-radius: 4px; padding: 0 10px; height: 40px; min-width: 64px; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -164,6 +228,24 @@
       <span id="magText">30</span> <span id="ammoSep" style="color:#aaa;font-size:20px">/</span> <span id="ammoReserve">90</span>
       <span id="zoomText"></span>
       <div id="reloadHint">PRESS [R] TO RELOAD</div>
+    </div>
+  </div>
+  <div id="touchControls">
+    <div id="tcLook"></div>
+    <div id="tcStickZone"></div>
+    <div id="tcStickBase"><div id="tcStickKnob"></div></div>
+    <div class="tc-btn" id="tcFireL">FIRE</div>
+    <div class="tc-btn" id="tcFire">FIRE</div>
+    <div class="tc-btn" id="tcAds">ADS</div>
+    <div class="tc-btn" id="tcZoom">+</div>
+    <div class="tc-btn" id="tcReload">&#8635;</div>
+    <div class="tc-btn" id="tcJump">JUMP</div>
+    <div class="tc-btn" id="tcCrouch">DUCK</div>
+    <div class="tc-btn" id="tcPause">II</div>
+    <div id="tcWeapons">
+      <div class="tc-btn" id="tcSlot0">1</div>
+      <div class="tc-btn" id="tcSlot1">2</div>
+      <div class="tc-btn" id="tcSlot2">3</div>
     </div>
   </div>
 </div>
@@ -253,7 +335,12 @@
   </div>
   <p id="assetStatus" role="status">Loading weapon assets…</p>
   <button id="playBtn" disabled>Play</button>
-  <div class="keys">
+  <button id="fullscreenBtn" class="fsBtn touch-only">Fullscreen</button>
+  <div class="keys touch-only">
+    <b>Left thumb</b> move (push to the rim to run) &nbsp;&middot;&nbsp; <b>Right thumb</b> aim &nbsp;&middot;&nbsp; <b>FIRE</b> shoots &mdash; drag it to aim while firing<br>
+    <b>ADS</b> sights toggle &nbsp;&middot;&nbsp; <b>&#8635;</b> reload &nbsp;&middot;&nbsp; <b>1/2/3</b> tap a weapon &nbsp;&middot;&nbsp; <b>II</b> pause
+  </div>
+  <div class="keys desk-only">
     <b>WASD</b> move &nbsp;&middot;&nbsp; <b>Mouse</b> aim &nbsp;&middot;&nbsp; <b>LMB</b> fire &nbsp;&middot;&nbsp; <b>RMB</b> iron sights / scope &nbsp;&middot;&nbsp; <b>R</b> reload<br>
     <b>1/2/3</b> primary / secondary / knife &nbsp;&middot;&nbsp; <b>Q</b> last weapon &nbsp;&middot;&nbsp; <b>Wheel</b> scope zoom (scoped) &nbsp;&middot;&nbsp; <b>Shift</b> run &nbsp;&middot;&nbsp; <b>Ctrl/C</b> crouch toggle (silent) &nbsp;&middot;&nbsp; <b>Space</b> jump &nbsp;&middot;&nbsp; <b>Esc</b> pause
   </div>
@@ -266,6 +353,7 @@
     <button id="resumeBtn">Resume</button>
     <button id="quitBtn" style="background:#9db8d9">Quit to Menu</button>
   </div>
+  <button id="fullscreenBtnPause" class="fsBtn touch-only">Fullscreen</button>
 </div>
 
 <div class="menu" id="loadoutScreen" style="display:none">
@@ -280,8 +368,9 @@
     </div>
   </div>
   <button id="deployBtn">Deploy</button>
-  <p class="cfgNote">A knife rides along as your fallback &mdash; press <b>3</b> once deployed.</p>
-  <div class="keys">
+  <p class="cfgNote desk-only">A knife rides along as your fallback &mdash; press <b>3</b> once deployed.</p>
+  <p class="cfgNote touch-only">A knife rides along as your fallback &mdash; tap its slot once deployed.</p>
+  <div class="keys desk-only">
     <b>Click</b> or <b>&uarr;&darr;&larr;&rarr;</b> select &nbsp;&middot;&nbsp; <b>Enter</b> deploy
   </div>
 </div>

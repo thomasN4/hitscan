@@ -2844,6 +2844,137 @@ async function runBotWeaponsCheck() {
 }
 
 
+// Touch mode (playControl.ts / touchControls.ts), driven with real CDP touch
+// events on an emulated landscape phone: the menu path must reach live play
+// without pointer lock, and each control must write the slice it claims to.
+// ?touch=1 forces the mode rather than trusting the emulator's pointer media
+// query; the desktop half proves the default page shows none of it.
+async function runTouchCheck() {
+  const page = await browser.newPage();
+  await page.emulate({
+    userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36',
+    viewport: { width: 844, height: 390, deviceScaleFactor: 2, isMobile: true, hasTouch: true, isLandscape: true },
+  });
+  const mapErrors = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') mapErrors.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  const frames = n => page.evaluate(async k => { for (let i = 0; i < k; i++) await new Promise(r => requestAnimationFrame(r)); }, n);
+  const centre = sel => page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  const shown = sel => page.$eval(sel, el => getComputedStyle(el).display !== 'none');
+
+  try {
+    await page.goto(mapUrl('/?map=range&touch=1'), { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.waitForFunction(() => !document.getElementById('playBtn').disabled, { timeout: 20000 });
+
+    const menu = await page.evaluate(() => ({
+      touchClass: document.body.classList.contains('touch'),
+      fsEnabled: document.fullscreenEnabled,
+    }));
+    if (!menu.touchClass) throw new Error('body.touch not set under ?touch=1');
+    if (menu.fsEnabled && !(await shown('#fullscreenBtn'))) throw new Error('start-menu fullscreen toggle hidden in touch mode');
+
+    // Play -> loadout picker -> Deploy: a plain tap must enter play (no pointer lock on phones).
+    await page.tap('#playBtn');
+    await page.waitForFunction(() => document.getElementById('loadoutScreen').style.display === 'flex', { timeout: 5000 });
+    await page.tap('#deployBtn');
+    await frames(3);
+    const entered = await page.evaluate(() => ({
+      locked: window.__cs.game.locked, started: window.__cs.game.started,
+      hud: document.getElementById('hud').style.display,
+    }));
+    if (!entered.locked || !entered.started || entered.hud !== 'block') throw new Error(`deploy did not enter touch play: ${JSON.stringify(entered)}`);
+    if (!(await shown('#touchControls'))) throw new Error('touch controls hidden during play');
+
+    // Stick: a short push walks, a rim push sprints.
+    const start = await page.evaluate(() => ({ x: window.__cs.player.pos.x, z: window.__cs.player.pos.z }));
+    const thumb = await page.touchscreen.touchStart(150, 300);
+    await thumb.move(150, 262); // 38 px of a 56 px radius: walk
+    await frames(20);
+    const walk = await page.evaluate(() => ({
+      x: window.__cs.player.pos.x, z: window.__cs.player.pos.z,
+      moveY: window.__cs.game.moveY, running: window.__cs.game.running,
+    }));
+    await thumb.move(150, 200); // past the rim: sprint
+    await frames(5);
+    const sprinting = await page.evaluate(() => window.__cs.game.running);
+    await thumb.end();
+    await frames(2);
+    const released = await page.evaluate(() => ({ moveY: window.__cs.game.moveY, running: window.__cs.game.running }));
+    const moved = Math.hypot(walk.x - start.x, walk.z - start.z);
+    if (walk.moveY <= 0.9 || walk.running) throw new Error(`short stick push should walk forward: ${JSON.stringify(walk)}`);
+    if (moved < 0.3) throw new Error(`stick did not move the player (${moved.toFixed(2)} m)`);
+    if (!sprinting) throw new Error('rim stick push did not sprint');
+    if (released.moveY !== 0 || released.running) throw new Error(`stick release left input latched: ${JSON.stringify(released)}`);
+
+    // Look surface: dragging left turns left (yaw grows).
+    const yaw0 = await page.evaluate(() => window.__cs.game.yaw);
+    const finger = await page.touchscreen.touchStart(620, 200);
+    await finger.move(560, 200);
+    await finger.end();
+    const yaw1 = await page.evaluate(() => window.__cs.game.yaw);
+    if (!(yaw1 > yaw0 + 0.1)) throw new Error(`look drag did not turn the view: ${yaw0} -> ${yaw1}`);
+
+    // Right fire button: holding it spends rounds, and dragging it also aims.
+    const mag0 = await page.evaluate(() => window.__cs.weapon.mag);
+    const fire = await centre('#tcFire');
+    const trigger = await page.touchscreen.touchStart(fire.x, fire.y);
+    await frames(20);
+    await trigger.move(fire.x - 40, fire.y);
+    await trigger.end();
+    await frames(2);
+    const fired = await page.evaluate(() => ({ mag: window.__cs.weapon.mag, shooting: window.__cs.game.shooting, yaw: window.__cs.game.yaw }));
+    if (!(fired.mag < mag0)) throw new Error(`fire button spent no rounds: ${mag0} -> ${fired.mag}`);
+    if (fired.shooting) throw new Error('fire release left input.shooting latched');
+    if (!(fired.yaw > yaw1 + 0.05)) throw new Error(`dragging the fire button did not aim: ${yaw1} -> ${fired.yaw}`);
+
+    // ADS toggles on a tap and off on the next.
+    await page.tap('#tcAds');
+    await frames(1);
+    const adsOn = await page.evaluate(() => window.__cs.game.aiming);
+    await page.tap('#tcAds');
+    await frames(1);
+    const adsOff = await page.evaluate(() => window.__cs.game.aiming);
+    if (!adsOn || adsOff) throw new Error(`ADS toggle wrong: on=${adsOn} off=${adsOff}`);
+
+    // Pause button -> pause menu (with its fullscreen toggle) -> Resume.
+    await page.tap('#tcPause');
+    await frames(2);
+    const paused = await page.evaluate(() => ({
+      locked: window.__cs.game.locked, menu: document.getElementById('pauseMenu').style.display,
+    }));
+    if (paused.locked || paused.menu !== 'flex') throw new Error(`pause button did not pause: ${JSON.stringify(paused)}`);
+    if (menu.fsEnabled && !(await shown('#fullscreenBtnPause'))) throw new Error('pause-menu fullscreen toggle hidden in touch mode');
+    await page.tap('#resumeBtn');
+    await frames(2);
+    const resumed = await page.evaluate(() => window.__cs.game.locked);
+    if (!resumed) throw new Error('Resume did not re-enter touch play');
+
+    // Desktop default: none of the touch UI.
+    const desk = await browser.newPage();
+    await desk.setViewport({ width: 1280, height: 720 });
+    desk.on('pageerror', e => mapErrors.push('PAGEERROR (desktop): ' + e.message));
+    await desk.goto(mapUrl('/?map=range&touch=0'), { waitUntil: 'networkidle0', timeout: 20000 });
+    const deskUi = await desk.evaluate(() => ({
+      touchClass: document.body.classList.contains('touch'),
+      fs: getComputedStyle(document.getElementById('fullscreenBtn')).display,
+      fsPause: getComputedStyle(document.getElementById('fullscreenBtnPause')).display,
+      controls: getComputedStyle(document.getElementById('touchControls')).display,
+    }));
+    await desk.close();
+    if (deskUi.touchClass || deskUi.fs !== 'none' || deskUi.fsPause !== 'none' || deskUi.controls !== 'none') {
+      throw new Error(`touch UI leaked onto the desktop page: ${JSON.stringify(deskUi)}`);
+    }
+
+    console.log('[touch] OK', JSON.stringify({ moved: +moved.toFixed(2), yaw: [yaw0, yaw1].map(v => +v.toFixed(2)), mag: [mag0, fired.mag] }));
+  } catch (e) {
+    failures++;
+    console.log(`[touch] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[touch] ${e}`));
+  await page.close();
+}
+
+
 try {
   await runMap('warehouse2', '/?map=warehouse2&tweap=smg&ctweap=smg', {
     botCheck: true,
@@ -2869,6 +3000,7 @@ try {
   await runShotgunCheck();
   await runKnifeCheck();
   await runMatchEndCheck();
+  await runTouchCheck();
 } finally {
   await browser.close();
 }

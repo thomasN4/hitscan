@@ -1496,10 +1496,12 @@ export class DefaultBrain implements BotBrain {
     // the cooldown expires, and the old blocked-sight retry path is gone: a
     // target that stops being seen stops being engaged (hold), not re-probed.
     // Cadence, magazine and reload are the FireController's; the brain only
-    // decides that this is a frame worth spending a round on.
+    // decides that this is a frame worth spending a round on. The eye-to-eye
+    // distance rides along so spray-capable weapons (issue #135) can gate the
+    // next burst on this burst's closing range.
     let wantShoot = false;
     if (dist3 < this.params.engageRange && this.fire.ready()) {
-      this.fire.pull();
+      this.fire.pull(dist3);
       wantShoot = true;
     }
 
@@ -1651,7 +1653,8 @@ export class DefaultBrain implements BotBrain {
       // Contact while holding: shoot it on the move. The focus is the
       // observed identity either way (so acquisition keeps probing the
       // threat and the executor's agreement can pass); the round only goes
-      // when the range gate and the weapon agree, exactly like engage.
+      // when the range gate and the weapon agree, exactly like engage —
+      // including the eye-to-eye distance spray-capable weapons gate on.
       const vis = view.visual;
       if (vis !== null) {
         this.focus = vis.id;
@@ -1660,7 +1663,7 @@ export class DefaultBrain implements BotBrain {
         const visDir = visDist > 1e-9 ? toVis.clone().multiplyScalar(1 / visDist) : view.facing.clone();
         let wantShoot = false;
         if (this.inRange(vis.dist3) && this.fire.ready()) {
-          this.fire.pull();
+          this.fire.pull(vis.dist3);
           wantShoot = true;
         }
         return {

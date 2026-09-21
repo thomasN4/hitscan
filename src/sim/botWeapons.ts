@@ -82,6 +82,23 @@ export interface BotRangedTuning extends BotWeaponPosture {
    * shot is its own decision — every semi-auto, and the shotgun.
    */
   burst: number;
+  /**
+   * Close-range spray mode for full-auto weapons (issue #135). All five must
+   * be present together, or none: a weapon with a partial spray row fails the
+   * suite rather than silently half-spraying.
+   *
+   * Inside sprayRangeM (eye-to-eye 3D) a burst sometimes becomes a spray —
+   * a longer commitment (sprayBurst) followed by a shorter pause
+   * (sprayPauseMin/Span) — taken with probability sprayChance per burst, so
+   * close fights vary between taps and sprays. Deliberate tuning, not a side
+   * effect of lowering the global pause: the base burst/pause above still
+   * paces every shot at range.
+   */
+  sprayRangeM?: number;
+  sprayBurst?: number;
+  sprayPauseMin?: number;
+  sprayPauseSpan?: number;
+  sprayChance?: number;
 }
 
 /**
@@ -101,10 +118,13 @@ export type BotWeaponTuning = BotRangedTuning | BotMeleeTuning;
  *
  * The tuning rule these numbers were chosen against: expected damage per
  * second at 10 m stays in roughly 6-12, where the pre-weapon bot sat at 6.1
- * (0.525 hit chance x 15 mean damage / 1.3 s cadence). The tranche changes bot
- * CHARACTER, not bot lethality — character comes from the shape of each curve,
- * not its height, which is why the divisors differ by an order of magnitude
- * while the resulting dps barely does.
+ * (0.525 hit chance x 15 mean damage / 1.3 s cadence). Issue #135 deliberately
+ * raises CLOSE-range lethality on top of that mid-range pin: smg/ak47 spray
+ * bursts (~5 rounds, ~0.7-0.9 s pauses, taken half the time inside ~8-9 m)
+ * lift contact dps to ~37-38 against ~19-21 for taps, while 10 m taps stay at
+ * ~10-11. The shotgun keeps its cliff (zero past ~10 m) and reaches contact
+ * by trigger and drift (engageRange 10, strafeFactor 0.5) rather than by a
+ * hotter curve — approach strengthened, cliff untouched.
  *
  * A full Record keyed by BotWeaponId, like every other per-weapon table in the
  * repo (VIEWMODELS, SHOT_SFX, AMBIENCE): widening WeaponId fails to compile
@@ -120,6 +140,10 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     hitChanceNear: 0.30, hitChanceDivisor: 70, hitChanceMin: 0.05,
     headChance: 0.12, legChance: 0.20,
     burst: 3, burstPauseMin: 0.9, burstPauseSpan: 0.6,
+    // Close spray (issue #135): inside 9 m half the bursts commit 5 rounds
+    // with a 0.7-1.1 s pause instead of 3 with 0.9-1.5 s — ~3.8 rps vs ~2.1,
+    // ~37 dps at contact vs ~21 for taps, still under the 40-dps gate.
+    sprayRangeM: 9, sprayBurst: 5, sprayPauseMin: 0.7, sprayPauseSpan: 0.4, sprayChance: 0.5,
     nearBand: 12, farBand: 24, engageRange: 55, strafeFactor: 0.5,
   },
   smg: {
@@ -129,6 +153,11 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     hitChanceNear: 0.30, hitChanceDivisor: 70, hitChanceMin: 0.05,
     headChance: 0.12, legChance: 0.20,
     burst: 3, burstPauseMin: 0.9, burstPauseSpan: 0.6,
+    // Close spray (issue #135): inside 8 m half the bursts commit 5 rounds
+    // with a 0.7-1.1 s pause — ~4.5 rps vs ~2.2, ~38 dps at contact vs ~19
+    // for taps, still under the 40-dps gate. Cadence only; bands/drift below
+    // stay pinned to DEFAULT_BRAIN_PARAMS (see below).
+    sprayRangeM: 8, sprayBurst: 5, sprayPauseMin: 0.7, sprayPauseSpan: 0.4, sprayChance: 0.5,
     // Bands, engage range and drift are DELIBERATELY the shipped
     // DEFAULT_BRAIN_PARAMS values (7 / 14 / 45 / 0.7) rather than tuned: the
     // smg is what every existing bot smoke phase is re-pinned to, so its
@@ -166,10 +195,18 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     // weapon at 57 dps point blank, four times any other. A shot pattern
     // lands on a body; letting every pellet roll for the skull models a
     // volley of aimed rounds, which is not what a choke does.
+    //
+    // Fair niche (issue #135, approach half): the cliff above is UNTOUCHED —
+    // the per-ray zero at range stays a design tool — and the bands with it
+    // (nearBand 2 / farBand 7 keep the 2-7 m window where the cliff pays).
+    // What moves is the trigger and the drift: engageRange 10 stops the
+    // 10-12 m decorative pulls that hit nothing by construction, so those
+    // frames close instead of cycling the pump; strafeFactor 0.5 spends less
+    // of the close on perpendicular orbit and more on radial closing.
     hitChanceNear: 0.42, hitChanceDivisor: 24, hitChanceMin: 0,
     headChance: 0.05, legChance: 0.20,
     burst: 1, burstPauseMin: 1.2, burstPauseSpan: 0.4,
-    nearBand: 2, farBand: 7, engageRange: 12, strafeFactor: 0.9,
+    nearBand: 2, farBand: 7, engageRange: 10, strafeFactor: 0.5,
   },
   sawnOff: {
     kind: 'ranged',
@@ -312,8 +349,14 @@ export interface FireController {
    * the burst-pause draw if this shot ended the burst. Ordering a pull that
    * ready() refused is a caller bug; the round is spent regardless, exactly as
    * the pre-weapon cooldown was.
+   * @param dist3 eye-to-eye 3D distance to the target this frame. Spray-capable
+   *   weapons (BotRangedTuning spray fields) read it at the burst's closing
+   *   shot to decide the NEXT burst: inside sprayRangeM the pause draw is
+   *   preceded by a spray-selection draw, so an in-range burst end spends two
+   *   draws and an out-of-range (or spray-less, or dist-less) one spends one.
+   *   Omitted in tests that pin the base cadence, where no spray is selected.
    */
-  pull(): void;
+  pull(dist3?: number): void;
   /**
    * Resolve the pull the executor is realizing, at post-move eye-to-eye
    * `dist`: one hit draw per ray, then one zone draw per LANDED ray.
@@ -378,6 +421,17 @@ export interface FirePosition extends FireController {
   waitFor(seconds: number): void;
 }
 
+/**
+ * Whether a ranged tuning row carries a complete close-range spray mode: all
+ * five spray fields present together, or none. A partial row is a caller bug —
+ * it would silently half-spray — so the suite fails it rather than guessing.
+ */
+export function hasSprayMode(t: BotRangedTuning): boolean {
+  const parts = [t.sprayRangeM, t.sprayBurst, t.sprayPauseMin, t.sprayPauseSpan, t.sprayChance];
+  if (parts.every(p => p === undefined)) return false;
+  return parts.every(p => p !== undefined);
+}
+
 /** The shipped FireController: one catalog firearm, fought by the table above. */
 export class WeaponFireController implements FirePosition {
   readonly weapon: BotWeaponId;
@@ -432,7 +486,7 @@ export class WeaponFireController implements FirePosition {
     return !this.inReload || this.def.perRound === true;
   }
 
-  pull(): void {
+  pull(dist3?: number): void {
     // Cancelling the logic is only half of a per-round interrupt (issue #123):
     // flipping inReload also drops the executor's reload pose on the same
     // frame, via its snap to rest while not reloading (bots.ts).
@@ -445,9 +499,21 @@ export class WeaponFireController implements FirePosition {
     // The burst ends when it runs out OR the magazine does; either way the
     // pause is drawn exactly once, so the draw count per pull is a function of
     // the burst position alone and never of how the burst happened to end.
+    // Spray (issue #135) adds exactly one selection draw ahead of that pause,
+    // and only at an in-range burst end of a spray-capable weapon: the closing
+    // shot's distance gates the NEXT burst, so a target crossing the line
+    // mid-burst sprays from the following burst, and the first burst of a life
+    // is always taps.
     if (this.burstLeft <= 0 || this.rounds <= 0) {
-      this.burstLeft = this.tuning.burst;
-      this.cooldown = this.tuning.burstPauseMin + this.rng() * this.tuning.burstPauseSpan;
+      const t = this.tuning;
+      const spraying = dist3 !== undefined
+        && hasSprayMode(t)
+        && dist3 < (t.sprayRangeM ?? Infinity)
+        && this.rng() < (t.sprayChance ?? 1);
+      this.burstLeft = spraying ? (t.sprayBurst ?? t.burst) : t.burst;
+      const pauseMin = spraying ? (t.sprayPauseMin ?? t.burstPauseMin) : t.burstPauseMin;
+      const pauseSpan = spraying ? (t.sprayPauseSpan ?? t.burstPauseSpan) : t.burstPauseSpan;
+      this.cooldown = pauseMin + this.rng() * pauseSpan;
     } else {
       this.cooldown = this.def.fireRate;
     }
@@ -618,6 +684,8 @@ export class MeleeFireController implements FirePosition {
   }
 
   pull(): void {
+    // A blade has no spray mode: the range gate is not taken, and the pause
+    // draw count (one per swing) is unchanged.
     this.cooldown = this.tuning.burstPauseMin + this.rng() * this.tuning.burstPauseSpan;
   }
 
@@ -724,8 +792,8 @@ export class BotLoadout implements FireController {
     return this.active.ready();
   }
 
-  pull(): void {
-    this.active.pull();
+  pull(dist3?: number): void {
+    this.active.pull(dist3);
   }
 
   resolve(dist: number): ShotOutcome {

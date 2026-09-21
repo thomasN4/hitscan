@@ -328,7 +328,7 @@ export function addStairs(
  * Walk-under needs no special case anywhere. collision.ts:blocks already
  * ignores a collider whose UNDERSIDE is at or above `feet + HEAD_HEIGHT`, so a
  * tread stops blocking as soon as the flight has climbed clear of a standing
- * body — at stepH 0.3 and treadT 0.16 that is the eighth tread up, leaving the
+ * body — at stepH 0.3 and treadT 0.16 that is the seventh tread up, leaving the
  * rest of the run open. The graph gets it for free too: sim/navGrid.ts seeds
  * ground into every column before probing surface tops, precisely so a floor
  * under something elevated keeps its cells.

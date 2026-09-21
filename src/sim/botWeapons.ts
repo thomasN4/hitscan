@@ -123,8 +123,9 @@ export type BotWeaponTuning = BotRangedTuning | BotMeleeTuning;
  * bursts (~5 rounds, ~0.7-0.9 s pauses, taken half the time inside ~8-9 m)
  * lift contact dps to ~37-38 against ~19-21 for taps, while 10 m taps stay at
  * ~10-11. The shotgun keeps its cliff (zero past ~10 m) and reaches contact
- * by trigger and drift (engageRange 10, strafeFactor 0.5) rather than by a
- * hotter curve — approach strengthened, cliff untouched.
+ * by cadence and closing (pause 1.1/0.3 for ~38 contact dps, farBand 9,
+ * strafeFactor 0.4, engageRange 10) rather than by a hotter curve —
+ * approach strengthened, cliff untouched.
  *
  * A full Record keyed by BotWeaponId, like every other per-weapon table in the
  * repo (VIEWMODELS, SHOT_SFX, AMBIENCE): widening WeaponId fails to compile
@@ -188,7 +189,9 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     // curve genuinely REACHES zero at 10.1 m, which is what makes a shotgun
     // bot safe to walk away from rather than merely unlikely to hit. It is
     // like the sawn-off, it hits exactly nothing at range, and
-    // that trade is what buys it ~34 dps at contact against ~18 for the smg.
+    // that trade is what buys it ~38 dps at contact against ~19 for smg taps
+    // (~37-38 for their close spray) — the premium narrowed by #135's spray,
+    // restored here by cadence rather than by touching the cliff.
     //
     // headChance is 0.05 — less than half the others — and that is the fix
     // the dps gate forced. Eight pellets each rolling a x4 headshot put this
@@ -196,17 +199,19 @@ export const BOT_WEAPON_TUNING: Record<BotWeaponId, BotWeaponTuning> = {
     // lands on a body; letting every pellet roll for the skull models a
     // volley of aimed rounds, which is not what a choke does.
     //
-    // Fair niche (issue #135, approach half): the cliff above is UNTOUCHED —
-    // the per-ray zero at range stays a design tool — and the bands with it
-    // (nearBand 2 / farBand 7 keep the 2-7 m window where the cliff pays).
-    // What moves is the trigger and the drift: engageRange 10 stops the
-    // 10-12 m decorative pulls that hit nothing by construction, so those
-    // frames close instead of cycling the pump; strafeFactor 0.5 spends less
-    // of the close on perpendicular orbit and more on radial closing.
+    // Fair niche (issue #135, approach half, plus the shotgun-vs-smg
+    // follow-up): the cliff above is UNTOUCHED — the per-ray zero at range
+    // stays a design tool — and the trigger with it (engageRange 10 keeps
+    // the 10-12 m decorative pulls off, so those frames close instead of
+    // cycling the pump). What moves is the contact cadence and the close:
+    // burstPause 1.1/0.3 (cycle 1.25 s, ~38 dps at contact, still under the
+    // 40-dps gate and above the 0.9 fireRate floor) and farBand 9 /
+    // strafeFactor 0.4, so less of the close is spent orbit-trading at
+    // 7-10 m where the smg hits and the cliff barely does.
     hitChanceNear: 0.42, hitChanceDivisor: 24, hitChanceMin: 0,
     headChance: 0.05, legChance: 0.20,
-    burst: 1, burstPauseMin: 1.2, burstPauseSpan: 0.4,
-    nearBand: 2, farBand: 7, engageRange: 10, strafeFactor: 0.5,
+    burst: 1, burstPauseMin: 1.1, burstPauseSpan: 0.3,
+    nearBand: 2, farBand: 9, engageRange: 10, strafeFactor: 0.4,
   },
   sawnOff: {
     kind: 'ranged',

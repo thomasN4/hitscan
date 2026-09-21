@@ -150,19 +150,23 @@ describe('BOT_WEAPON_TUNING', () => {
     expect(hasSprayMode(t)).toBe(false);
   });
 
-  test('the shotgun keeps its cliff and closes by trigger and drift', () => {
-    // Issue #135, approach half: the per-ray zero at range stays a design
-    // tool (divisor/min/near untouched — the zero still lands at ~10.1 m),
-    // the 2-7 m bands with it, and what moves is the decorative 10-12 m
-    // firing plus the orbit: engageRange 10, strafeFactor 0.5.
+  test('the shotgun keeps its cliff and closes by cadence and closing', () => {
+    // Issue #135, approach half, plus the shotgun-vs-smg follow-up: the
+    // per-ray zero at range stays a design tool (divisor/min/near untouched
+    // — the zero still lands at ~10.1 m) and the trigger with it
+    // (engageRange 10 keeps the decorative 10-12 m pulls off). What moves is
+    // the contact cadence (pause 1.1/0.3, ~38 dps at contact, still under
+    // the 40-dps gate) and the close (farBand 9, strafeFactor 0.4).
     const t = rangedTuning('shotgun');
     expect(t.hitChanceNear).toBe(0.42);
     expect(t.hitChanceDivisor).toBe(24);
     expect(t.hitChanceMin).toBe(0);
+    expect(t.burstPauseMin).toBe(1.1);
+    expect(t.burstPauseSpan).toBe(0.3);
     expect(t.nearBand).toBe(2);
-    expect(t.farBand).toBe(7);
+    expect(t.farBand).toBe(9);
     expect(t.engageRange).toBe(10);
-    expect(t.strafeFactor).toBe(0.5);
+    expect(t.strafeFactor).toBe(0.4);
     expect(hasSprayMode(t)).toBe(false);
   });
 

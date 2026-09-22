@@ -10,12 +10,23 @@ describe('sanitizeSettings', () => {
 
   test('a valid object round-trips unchanged, through JSON too', () => {
     const tuned = sanitizeSettings({
+      volume: 0.5,
       mouseSens: 1.4,
       touch: { hip: { sens: 1.3, accel: 0.6 }, ads: { sens: 0.7, accel: 0 }, opacity: 0.6, stickRadius: 70 },
       layout: { ...DEFAULT_SETTINGS.layout, fireR: { x: 0.8, y: 0.7, scale: 1.3 } },
     });
     expect(sanitizeSettings(JSON.parse(JSON.stringify(tuned)))).toEqual(tuned);
+    expect(tuned.volume).toBe(0.5);
     expect(tuned.layout.fireR).toEqual({ x: 0.8, y: 0.7, scale: 1.3 });
+  });
+
+  test('volume clamps to its limits and falls back per field', () => {
+    expect(sanitizeSettings({ volume: 99 }).volume).toBe(SETTING_LIMITS.volume.max);
+    expect(sanitizeSettings({ volume: -1 }).volume).toBe(SETTING_LIMITS.volume.min);
+    for (const bad of ['loud', NaN, Infinity, null]) {
+      expect(sanitizeSettings({ volume: bad }).volume).toBe(DEFAULT_SETTINGS.volume);
+    }
+    expect(DEFAULT_SETTINGS.volume).toBe(1);
   });
 
   test('clamps out-of-range values and falls back per field', () => {

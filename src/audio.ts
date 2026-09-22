@@ -11,14 +11,49 @@
 import type * as THREE from 'three';
 import { camera } from './core/engine';
 import { gameTime, type BotWeaponId } from './core/state';
+import { SETTING_LIMITS } from './core/settings';
 import type { ScheduledHandle } from './sim/gameClock';
 
 let audioCtx: AudioContext | undefined;
+/** Every sound's terminal node: per-sound gains feed this, it feeds the destination. */
+let masterGain: GainNode | undefined;
+/** Level staged before the first sound; ac() applies it when it builds the graph. */
+let pendingVolume = 1;
+
 function ac() {
   // Lazily created on first sound; browsers require a user gesture first,
   // which is guaranteed because the game only starts after clicking Play.
-  if (!audioCtx) audioCtx = new AudioContext();
+  if (!audioCtx) {
+    audioCtx = new AudioContext();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = pendingVolume;
+    masterGain.connect(audioCtx.destination);
+  }
   return audioCtx;
+}
+
+/**
+ * The master bus. Call only after ac(): ac() creates it alongside the
+ * context, so a miss here means corrupted module state rather than a
+ * missing sound.
+ */
+function master(): GainNode {
+  if (!masterGain) throw new Error('audio master bus read before ac() created it');
+  return masterGain;
+}
+
+/**
+ * Master output level, 0 (silent) to 2 (200%). Staged until the first sound
+ * builds the graph, then applied live — and it never creates the context
+ * itself, so calling it at settings-load time stays behind the Play gesture.
+ * Owned by settingsMenu.ts's commit path; game code never calls this per
+ * sound because every chain already terminates at master().
+ */
+export function setMasterVolume(v: number): void {
+  const lim = SETTING_LIMITS.volume;
+  const clamped = typeof v === 'number' && Number.isFinite(v) ? Math.min(lim.max, Math.max(lim.min, v)) : pendingVolume;
+  pendingVolume = clamped;
+  if (masterGain && audioCtx) masterGain.gain.value = clamped;
 }
 
 /** White-noise buffer of `dur` seconds. */
@@ -45,7 +80,7 @@ function playGunshot(vol = 0.35, freqBase = 900, dur = 0.12): void {
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(vol, ctx.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.connect(filter).connect(gain).connect(master());
   src.start();
 }
 
@@ -85,7 +120,7 @@ export function sfxKnife(): void {
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.18, ctx.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.connect(filter).connect(gain).connect(master());
   src.start();
 }
 
@@ -160,7 +195,7 @@ function playSwish(vol: number, freqBase: number, dur: number): void {
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(vol, ctx.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.connect(filter).connect(gain).connect(master());
   src.start();
 }
 
@@ -220,7 +255,7 @@ export function sfxFootstep(): void {
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.12 + Math.random() * 0.05, ctx.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
-  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.connect(filter).connect(gain).connect(master());
   src.start();
 }
 
@@ -232,5 +267,5 @@ export function sfxHurt(): void {
   o.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.15);
   g.gain.setValueAtTime(0.15, ctx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-  o.connect(g).connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.15);
+  o.connect(g).connect(master()); o.start(); o.stop(ctx.currentTime + 0.15);
 }

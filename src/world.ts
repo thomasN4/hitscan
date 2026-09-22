@@ -33,7 +33,7 @@ export const colliders: THREE.Box3[] = [];
  * A level change a walker can traverse but a grid of standable cells cannot
  * express cheaply — a stair flight, launch arc, or timed elevator ride.
  *
- * The navigation grid (sim/navGrid.ts) samples at 1 m, and a 0.75 m tread
+ * The navigation grid (sim/navGrid.ts) samples at 1 m, and a 0.3 m tread
  * means one cell along a flight climbs more than STEP_HEIGHT; sampled that
  * coarsely, every staircase reads as a wall. Rather than quadruple the sample
  * count to resolve treads, flights announce their own endpoints here and enter
@@ -320,7 +320,7 @@ export function addStairs(
  *
  * `addStairs` builds each step as a full-height box from the ground up, which
  * is what makes it bulletproof and also what makes it a wall: a solid flight
- * standing in the open is a 13 m wedge of cover. maps/warehouse2.ts puts both
+ * standing in the open is an 8.4 m wedge of cover. maps/warehouse2.ts puts both
  * its main flights in the middle of a 44 x 24 void, where that wedge would
  * dominate the space the void exists to create. These are the steel stairs the
  * greybox draws instead, and you can walk under them.
@@ -328,7 +328,7 @@ export function addStairs(
  * Walk-under needs no special case anywhere. collision.ts:blocks already
  * ignores a collider whose UNDERSIDE is at or above `feet + HEAD_HEIGHT`, so a
  * tread stops blocking as soon as the flight has climbed clear of a standing
- * body — at stepH 0.3 and treadT 0.16 that is the seventh tread up, leaving the
+ * body — at stepH 0.18 and treadT 0.16 that is the eleventh tread up, leaving the
  * rest of the run open. The graph gets it for free too: sim/navGrid.ts seeds
  * ground into every column before probing surface tops, precisely so a floor
  * under something elevated keeps its cells.

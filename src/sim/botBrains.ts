@@ -182,8 +182,10 @@ export const DEFAULT_BRAIN_PARAMS: BrainParams = {
   strafeFactor: 0.7,
   jukeRate: 0.5,
   engageRange: 45,
-  climbThreshold: 1.5, // ≈ 5 risers; well clear of STEP_HEIGHT's 0.3
-  climbExit: 0.45,     // just over one riser — keep routing to the last step
+  climbThreshold: 1.5, // ≈ 8 risers; well clear of STEP_HEIGHT's 0.18
+  climbExit: 0.09,     // under half a riser — keep routing until arrived, so
+                       // engage never inherits a mid-flight perch whose
+                       // lateral probes fall two treads (issue #141)
   stuckTime: 0.1,    // catch a tenth-second wedge; single-frame brushes still reset
   commitTime: 2,     // sustain the escape around a corner; see docs/bot-movement-tuning.md
   wallProbeRange: 1, // retained after sweeps: shorter feelers regressed backing away from walls

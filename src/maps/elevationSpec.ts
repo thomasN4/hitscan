@@ -16,12 +16,12 @@ import type { MapBox, MapSpec } from './mapSpec';
 export const ELEVATION_HALF = 60;
 
 /**
- * Riser height of every flight. MUST stay <= collision.ts:STEP_HEIGHT (0.3)
+ * Riser height of every flight. MUST stay <= collision.ts:STEP_HEIGHT (0.18)
  * or the treads become walls. Tread depth of every flight.
  */
-export const ELEVATION_STEP = { h: 0.3, d: 0.75 } as const;
+export const ELEVATION_STEP = { h: 0.18, d: 0.3 } as const;
 /**
- * Walk surface of every upper level. 3.6 = 12 risers exactly, and it clears
+ * Walk surface of every upper level. 3.6 = 20 risers exactly, and it clears
  * the ~1.45 m jump apex by a wide margin — resolveVertical does no head-bump
  * check while rising, so a walkable top within one jump of the floor below
  * could be jumped THROUGH and landed on.
@@ -102,9 +102,9 @@ export function elevationSpec(): MapSpec {
     { x: 22, y: DECK_Y - SLAB_T, z: 0, w: 16, h: SLAB_T, d: 4, kind: 'deck' },
     { x: 35, y: 0, z: 0, w: 10, h: DECK_Y, d: 12, kind: 'wall2' },
 
-    // C. West plateau, 3.0 m: a second, lower tier, so "bot shooting down at a
+    // C. West plateau, 2.88 m: a second, lower tier, so "bot shooting down at a
     // bot on another tier" is testable without either being at deck height.
-    { x: -38, y: 0, z: -30, w: 22, h: 3.0, d: 22, kind: 'wall2' },
+    { x: -38, y: 0, z: -30, w: 22, h: 2.88, d: 22, kind: 'wall2' },
 
     // D. Jump-only route — the control case. 1.2 m hops: over STEP_HEIGHT so
     // nobody walks up them, under the ~1.45 m jump apex so the PLAYER can.
@@ -119,19 +119,19 @@ export function elevationSpec(): MapSpec {
     ground: { minX: -W, maxX: W, minZ: -W, maxZ: W },
     boxes,
     flights: [
-      // Internal flight: 12 risers top out at exactly DECK_Y, flush with the
+      // Internal flight: 20 risers top out at exactly DECK_Y, flush with the
       // slab's south edge at z = 0.
-      { x: 4, y: 0, z: -9, width: 4, stepH: STEP_H, stepD: STEP_D, count: 12, dir: 'z+', open: false, kind: 'wall2' },
+      { x: 4, y: 0, z: -6, width: 4, stepH: STEP_H, stepD: STEP_D, count: 20, dir: 'z+', open: false, kind: 'wall2' },
       // External flight up the south face, ascending z- so the tall end lands
       // against the building at z = 12.5. Top tread and deck never touch — a
       // 0.5-deep notch a walker's circle (0.45/0.5) bridges while moving.
-      { x: 8, y: 0, z: 21.5, width: 4, stepH: STEP_H, stepD: STEP_D, count: 12, dir: 'z-', open: false, kind: 'wall2' },
+      { x: 8, y: 0, z: 18.5, width: 4, stepH: STEP_H, stepD: STEP_D, count: 20, dir: 'z-', open: false, kind: 'wall2' },
       // Tower stair, ascending z- so the tall end abuts the tower's south
       // face at z = 6.5.
-      { x: 35, y: 0, z: 15.5, width: 4, stepH: STEP_H, stepD: STEP_D, count: 12, dir: 'z-', open: false, kind: 'wall2' },
-      // Plateau flight: 10 risers = 3.0, flush with the plateau's east face at
+      { x: 35, y: 0, z: 12.5, width: 4, stepH: STEP_H, stepD: STEP_D, count: 20, dir: 'z-', open: false, kind: 'wall2' },
+      // Plateau flight: 16 risers = 2.88, flush with the plateau's east face at
       // x = -27. 6 m wide, unlike the 4 m flights.
-      { x: -19.5, y: 0, z: -30, width: 6, stepH: STEP_H, stepD: STEP_D, count: 10, dir: 'x-', open: false, kind: 'wall' },
+      { x: -22.2, y: 0, z: -30, width: 6, stepH: STEP_H, stepD: STEP_D, count: 16, dir: 'x-', open: false, kind: 'wall' },
     ],
     lifts: [],
     targets: [],

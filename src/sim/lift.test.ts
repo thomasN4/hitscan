@@ -4,8 +4,8 @@ import { launchFrom, launchApex, type LiftPad } from './lift';
 import { resolveVertical, HEAD_HEIGHT } from '../collision';
 import { GRAVITY } from './movement';
 
-/** maps/warehouse2.ts's pads: 4 x 4, 0.25 tall, throwing at 17 m/s. */
-const pad: LiftPad = { minX: 6, maxX: 10, minZ: -12, maxZ: -8, topY: 0.25, launchVel: 17 };
+/** maps/warehouse2.ts's pads: 4 x 4, 0.15 tall, throwing at 17 m/s. */
+const pad: LiftPad = { minX: 6, maxX: 10, minZ: -12, maxZ: -8, topY: 0.15, launchVel: 17 };
 const pads = [pad];
 
 /** Body radius the map is walked with — the larger of bot 0.5 and player 0.45. */
@@ -13,14 +13,14 @@ const R = 0.5;
 
 describe('launchFrom', () => {
   test('fires for a grounded body resting on the pad', () => {
-    expect(launchFrom(8, -10, 0.25, true, R, pads)).toBe(17);
+    expect(launchFrom(8, -10, 0.15, true, R, pads)).toBe(17);
   });
 
   test('does not fire for a body on the floor beside it', () => {
     // Same footprint, feet one pad-height lower. Without the resting check a
     // pad would throw anyone who merely walked past its edge.
     expect(launchFrom(8, -10, 0, true, R, pads)).toBeNull();
-    expect(launchFrom(2, -10, 0.25, true, R, pads)).toBeNull();
+    expect(launchFrom(2, -10, 0.15, true, R, pads)).toBeNull();
   });
 
   test('does not fire in mid-air', () => {
@@ -28,36 +28,36 @@ describe('launchFrom', () => {
     // velocity, resolveVertical reports airborne for the entire ascent, and
     // nothing can fire again until the body has landed somewhere. Drop it and
     // a body on a pad launches every frame.
-    expect(launchFrom(8, -10, 0.25, false, R, pads)).toBeNull();
+    expect(launchFrom(8, -10, 0.15, false, R, pads)).toBeNull();
   });
 
   test('fires when the footprint only clips the pad', () => {
     // Overlap, not containment — the same convention collision.ts:blocks uses.
     // Catching a corner of a lift should still throw you.
-    expect(launchFrom(10.4, -10, 0.25, true, R, pads)).toBe(17);
+    expect(launchFrom(10.4, -10, 0.15, true, R, pads)).toBe(17);
     // …but a footprint that merely touches the edge does not overlap it.
-    expect(launchFrom(10.5, -10, 0.25, true, R, pads)).toBeNull();
+    expect(launchFrom(10.5, -10, 0.15, true, R, pads)).toBeNull();
   });
 
   test('tolerates a float32-measured pad top', () => {
     // Pad tops are measured off mesh vertices stored as float32, the same
     // source collision.ts:COLLISION_EPSILON exists for.
-    expect(launchFrom(8, -10, 0.2500000372529, true, R, pads)).toBe(17);
+    expect(launchFrom(8, -10, 0.1500000372529, true, R, pads)).toBe(17);
   });
 
   test('an empty registry is not an error', () => {
-    expect(launchFrom(8, -10, 0.25, true, R, [])).toBeNull();
+    expect(launchFrom(8, -10, 0.15, true, R, [])).toBeNull();
   });
 });
 
 describe('launchApex', () => {
   test("warehouse2's pads clear its deck", () => {
-    // DECK_Y is 5.1. The margin is what makes the arc usable rather than
+    // DECK_Y is 5.04. The margin is what makes the arc usable rather than
     // merely sufficient: a body has to spend long enough ABOVE the deck to
     // travel the ~3 m onto it, because until it clears the slab its head is
     // underneath and slideMoveXZ will not let it move over.
-    expect(launchApex(17, GRAVITY)).toBeGreaterThan(5.1);
-    expect(launchApex(17, GRAVITY) - 5.1).toBeGreaterThan(0.5);
+    expect(launchApex(17, GRAVITY)).toBeGreaterThan(5.04);
+    expect(launchApex(17, GRAVITY) - 5.04).toBeGreaterThan(0.5);
   });
 
   test('agrees with the jump the player already has', () => {
@@ -69,7 +69,7 @@ describe('launchApex', () => {
 describe('a pad beneath an overhang', () => {
   // The relaunch bounce review-bot found on warehouse2: a pad whose far edge
   // sat ON the void lip threw bodies into the ring slab's underside. The head
-  // sweep in resolveVertical clamped the rise at feet 4.7 - HEAD_HEIGHT, the
+  // sweep in resolveVertical clamped the rise at feet 4.64 - HEAD_HEIGHT, the
   // body fell back onto the pad, and the pad fired again — forever. The fix
   // stands the pads LIP_GAP = 1 back from the lip (maps/warehouse2.ts), which
   // makes "footprint under the slab" and "footprint on the pad" disjoint.
@@ -78,12 +78,12 @@ describe('a pad beneath an overhang', () => {
   // to the ceiling sweep that would reintroduce the trap fails here rather
   // than in a play session.
   const slab = new THREE.Box3(
-    new THREE.Vector3(-29.5, 4.7, -19.5),
-    new THREE.Vector3(29.5, 5.1, -12),
+    new THREE.Vector3(-29.5, 4.64, -19.5),
+    new THREE.Vector3(29.5, 5.04, -12),
   );
-  const DECK_Y = 5.1;
-  const SLAB_UNDERSIDE = 4.7;
-  const PAD_TOP = 0.25;
+  const DECK_Y = 5.04;
+  const SLAB_UNDERSIDE = 4.64;
+  const PAD_TOP = 0.15;
   const DT = 1 / 60;
   const X = 8; // pad A's centre x
 
@@ -143,7 +143,7 @@ describe('a pad beneath an overhang', () => {
       const peak = peakFeet(z, shippedPads);
       if (peak === null) continue;
       fired++;
-      // A launch position under the slab would clamp at 4.7 - HEAD_HEIGHT
+      // A launch position under the slab would clamp at 4.64 - HEAD_HEIGHT
       // and fall back onto the pad — the bounce. None may exist.
       expect(peak).toBeGreaterThan(DECK_Y);
     }

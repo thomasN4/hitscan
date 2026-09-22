@@ -5,26 +5,26 @@
 // docs/maps/warehouse2.png. See maps/mapSpec.ts for the contract.
 //
 // Spatial grammar: VERTICAL. An 8 m catwalk ring runs the full perimeter at
-// 5.1 m around a 44 x 24 void cut to the floor, so the ring looks down on the
+// 5.04 m around a 44 x 24 void cut to the floor, so the ring looks down on the
 // floor and the floor looks up at the ring. Spawns are ASYMMETRIC — CTs muster
 // in the yard, Ts start already on the ring (core/state.ts:BOT_SPAWNS).
 import { segmentRun } from './mapSpec';
 import type { LiftSpec, MapBox, MapBoxKind, MapSpec } from './mapSpec';
 
 /** Riser height of every flight. MUST stay <= collision.ts:STEP_HEIGHT or treads become walls. */
-export const STEP_H = 0.3;
+export const STEP_H = 0.18;
 /** Tread depth of every flight. */
-export const STEP_D = 0.75;
+export const STEP_D = 0.3;
 /** Risers per flight — every flight on this map is the same climb. */
-export const RISERS = 17;
+export const RISERS = 28;
 /**
- * Catwalk walking surface. The greybox says 5.0; this is 5.1, because 5.0 /
+ * Catwalk walking surface. The greybox says 5.0; this is 5.04, because 5.0 /
  * STEP_HEIGHT is not a whole number and warehouse1's idiom (and elevation's)
- * is a deck height that is an exact multiple of the riser. 17 x 0.3 buys that
- * for 10 cm.
+ * is a deck height that is an exact multiple of the riser. 28 x 0.18 buys that
+ * for 4 cm.
  */
 export const DECK_Y = RISERS * STEP_H;
-/** Decking thickness. DECK_Y - SLAB_T = 4.7 m of headroom below, far over HEAD_HEIGHT. */
+/** Decking thickness. DECK_Y - SLAB_T = 4.64 m of headroom below, far over HEAD_HEIGHT. */
 export const SLAB_T = 0.4;
 /** Tread plate thickness on the open flights — thin, so you can walk under them. */
 export const TREAD_T = 0.16;
@@ -52,14 +52,14 @@ export const VOID_Z = SHELL_Z - RING;
 export const YARD_X = 44;
 export const YARD_Z = 34;
 
-/** Rail height and thickness. Top at 6.2, under a deck eye at 5.1 + 1.6 = 6.7. */
+/** Rail height and thickness. Top at 6.14, under a deck eye at 5.04 + 1.6 = 6.64. */
 export const RAIL_H = 1.1;
 export const RAIL_T = 0.16;
 /** Width of both main flights, and so of the rail gaps that receive them. */
 export const FLIGHT_W = 3.6;
 /** Clearance per side between the moving deck and the catwalk rail. */
 export const LIFT_GAP_MARGIN = 0.25;
-export const PAD_H = 0.25;
+export const PAD_H = 0.15;
 export const PAD_W = 4;
 export const LIFT_SPEED = 1.5;
 export const LIFT_DWELL = 2;
@@ -87,7 +87,7 @@ export const BAND = RING - WALL_T / 2;
 
 /** Centre z of the two void flights. The east one mirrors to -this. */
 export const FLIGHT_Z = 8;
-/** Mouth x of the void flights. RUN = 12.75, and 9.25 + 12.75 = VOID_X: the far edge lands exactly on the lip. */
+/** Mouth x of the void flights. RUN = 8.4, and 13.6 + 8.4 = VOID_X: the far edge lands exactly on the lip. */
 export const FLIGHT_MOUTH_X = VOID_X - RISERS * STEP_D;
 /** The yard flight's centre-line, clear of the shell wall at x = 30.5. */
 export const YARD_FLIGHT_X = 32.5;
@@ -96,7 +96,7 @@ export const YARD_FLIGHT_X = 32.5;
 const LIFT_A = { id: 'cargo-a', x: 8, z: -VOID_Z + PAD_W / 2, sign: -1 as const };
 const LIFT_B = { id: 'cargo-b', x: -8, z: VOID_Z - PAD_W / 2, sign: 1 as const };
 
-/** Rack height. Over a ground eye (1.6), under a deck eye (6.7) — nothing hides from the ring. */
+/** Rack height. Over a ground eye (1.6), under a deck eye (6.64) — nothing hides from the ring. */
 export const RACK_H = 3;
 /** Centre z of the two central racks; RACK_D deep, leaving a 4 m aisle between. */
 export const RACK_Z = 3;

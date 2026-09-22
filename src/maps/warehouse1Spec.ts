@@ -17,8 +17,8 @@ export const WAREHOUSE1_WALL_T = 2;
 export const WAREHOUSE1_SHELL_INNER = WAREHOUSE1_HALF - WAREHOUSE1_WALL_T / 2; // 59
 
 /** Riser/tread of every flight. STEP_H MUST stay <= collision.ts:STEP_HEIGHT. */
-export const WAREHOUSE1_STEP = { h: 0.3, d: 0.75 } as const;
-/** Mezzanine walk surface: 12 risers exactly, far above the ~1.45 m jump apex. */
+export const WAREHOUSE1_STEP = { h: 0.18, d: 0.3 } as const;
+/** Mezzanine walk surface: 20 risers exactly, far above the ~1.45 m jump apex. */
 export const WAREHOUSE1_DECK_Y = 3.6;
 /** Slab thickness; 3.2 m of headroom underneath, over HEAD_HEIGHT. */
 export const WAREHOUSE1_SLAB_T = 0.4;
@@ -41,7 +41,7 @@ export const WAREHOUSE1_RACK = {
 } as const;
 
 /** Dock top; over STEP_HEIGHT, under the jump apex — hence the flights. */
-export const WAREHOUSE1_DOCK_H = 1.2;
+export const WAREHOUSE1_DOCK_H = 1.08;
 /** Over STEP_HEIGHT, under the jump apex: the player vaults, bots walk around. */
 export const WAREHOUSE1_CONVEYOR_H = 0.9;
 /** Inner (low-x) end of a flank conveyor — aisle arithmetic builds to it. */
@@ -150,19 +150,19 @@ export function warehouse1Spec(): MapSpec {
     ground: { minX: -W, maxX: W, minZ: -W, maxZ: W },
     boxes,
     flights: [
-      // Two mezzanine flights, mirrored across z = 0: 12 risers top out level
-      // with the deck, 9 m of run puts the last tread flush on the slab edge
-      // (17 - 9 = 8 south, -17 + 9 = -8 north). Neither team starts closer.
-      { x: 0, y: 0, z: 17, width: 4, stepH: STEP_H, stepD: STEP_D, count: 12, dir: 'z-', open: false, kind: 'stair' },
-      { x: 0, y: 0, z: -17, width: 4, stepH: STEP_H, stepD: STEP_D, count: 12, dir: 'z+', open: false, kind: 'stair' },
-      // Dock flights: 4 risers = 1.2, 3 m of run flush on the dock face
-      // (42 + 3 = 45). Two per dock so a bot down either flank finds one —
+      // Two mezzanine flights, mirrored across z = 0: 20 risers top out level
+      // with the deck, 6 m of run puts the last tread flush on the slab edge
+      // (14 - 6 = 8 south, -14 + 6 = -8 north). Neither team starts closer.
+      { x: 0, y: 0, z: 14, width: 4, stepH: STEP_H, stepD: STEP_D, count: 20, dir: 'z-', open: false, kind: 'stair' },
+      { x: 0, y: 0, z: -14, width: 4, stepH: STEP_H, stepD: STEP_D, count: 20, dir: 'z+', open: false, kind: 'stair' },
+      // Dock flights: 6 risers = 1.08, 1.8 m of run flush on the dock face
+      // (43.2 + 1.8 = 45). Two per dock so a bot down either flank finds one —
       // without them bots could never get up and half of each spawn band
       // would be dead ground to them.
-      { x: 24, y: 0, z: 42, width: 6, stepH: STEP_H, stepD: STEP_D, count: 4, dir: 'z+', open: false, kind: 'stair' },
-      { x: -24, y: 0, z: 42, width: 6, stepH: STEP_H, stepD: STEP_D, count: 4, dir: 'z+', open: false, kind: 'stair' },
-      { x: 24, y: 0, z: -42, width: 6, stepH: STEP_H, stepD: STEP_D, count: 4, dir: 'z-', open: false, kind: 'stair' },
-      { x: -24, y: 0, z: -42, width: 6, stepH: STEP_H, stepD: STEP_D, count: 4, dir: 'z-', open: false, kind: 'stair' },
+      { x: 24, y: 0, z: 43.2, width: 6, stepH: STEP_H, stepD: STEP_D, count: 6, dir: 'z+', open: false, kind: 'stair' },
+      { x: -24, y: 0, z: 43.2, width: 6, stepH: STEP_H, stepD: STEP_D, count: 6, dir: 'z+', open: false, kind: 'stair' },
+      { x: 24, y: 0, z: -43.2, width: 6, stepH: STEP_H, stepD: STEP_D, count: 6, dir: 'z-', open: false, kind: 'stair' },
+      { x: -24, y: 0, z: -43.2, width: 6, stepH: STEP_H, stepD: STEP_D, count: 6, dir: 'z-', open: false, kind: 'stair' },
     ],
     lifts: [],
     targets: [],

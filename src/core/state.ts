@@ -1018,7 +1018,7 @@ export const BOT_SPAWNS: Record<MapName, Record<Team, SpawnZone>> = {
   // the shell wall at z = 20.5, the catwalk band short of the wall at
   // z = -19.5 and the void lip at z = -12.
   warehouse2: {
-    T:  { minX: -28, maxX: 28, minZ: -19, maxZ: -13, y: 5.1 },
+    T:  { minX: -28, maxX: 28, minZ: -19, maxZ: -13, y: 5.04 },
     CT: { minX: -26, maxX: 26, minZ:  23, maxZ:  32, y: 0 },
   },
 };
@@ -1057,7 +1057,7 @@ export interface FlagDef {
 export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
   arena: [],
   range: [],
-  // A (-38,3.0,-30): the plateau top's centre (22 x 22 at maps/elevation.ts,
+  // A (-38,2.88,-30): the plateau top's centre (22 x 22 at maps/elevation.ts,
   // so a 4.5 ring sits well inside), reached only up the east stair. C
   // (35,0,38): open ground south down the tower lane (whose stair base stands
   // at z = 15.5), deep in CT territory in the north-south lane the
@@ -1068,7 +1068,7 @@ export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
   // home flag starts inside its side's band: the openers are a ~48 m T run to
   // A and a ~30 m CT run to C.
   elevation: [
-    { id: 'A', x: -38, feetY: 3.0, z: -30, radius: 4.5 },
+    { id: 'A', x: -38, feetY: 2.88, z: -30, radius: 4.5 },
     { id: 'B', x: 0, feetY: 3.6, z: 0, radius: 4.5 },
     { id: 'C', x: 35, feetY: 0, z: 38, radius: 4.5 },
   ],
@@ -1337,7 +1337,7 @@ export interface MotionState {
   airLerp: number;
   /**
    * Smoothed ground height the CAMERA rides (m). Physics snaps the feet to
-   * support instantly — including 0.3 m step-ups on stairs — so the view
+   * support instantly — including 0.18 m step-ups on stairs — so the view
    * eases toward the true feet height instead of jittering per riser.
    * Camera y = groundSmoothY + eyeHeight − crouch drop.
    */

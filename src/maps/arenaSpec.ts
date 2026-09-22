@@ -39,7 +39,7 @@ const STACKED_CRATES: [number, number][] = [
 ];
 
 /** Raised platform with two access routes — the arena's elevation feature. */
-const PLATFORM = { x: 26, z: 35, w: 10, h: 2.4, d: 10 } as const;
+const PLATFORM = { x: 26, z: 35, w: 10, h: 2.34, d: 10 } as const;
 /** Jump-up ledge on the platform's west face: over walk-step height, under the ~1.45 m jump apex. */
 const LEDGE = { x: 19.5, z: 35, w: 3, h: 1.2, d: 3 } as const;
 
@@ -77,10 +77,10 @@ export function arenaSpec(): MapSpec {
     name: 'arena',
     ground: { minX: -W, maxX: W, minZ: -W, maxZ: W },
     boxes,
-    // South-face stair flight: 8 x 0.3 = 2.4, flush with the platform top;
-    // collision.ts climbs each riser automatically. Stairs x[24,28] z 24->30.
+    // South-face stair flight: 13 x 0.18 = 2.34, flush with the platform top;
+    // collision.ts climbs each riser automatically. Stairs x[24,28] z 26.1->30.
     flights: [
-      { x: 26, y: 0, z: 24, width: 4, stepH: 0.3, stepD: 0.75, count: 8, dir: 'z+', open: false, kind: 'stair' },
+      { x: 26, y: 0, z: 26.1, width: 4, stepH: 0.18, stepD: 0.3, count: 13, dir: 'z+', open: false, kind: 'stair' },
     ],
     lifts: [],
     targets: [],

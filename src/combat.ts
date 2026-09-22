@@ -162,7 +162,7 @@ export function respawn(useDirector = false): void {
     // The camera rides a smoothed ground height (player.ts eases it toward the
     // physics feet), so seed it AT the spawn floor — not 0. Dying on platform
     // geometry with a stale height would otherwise ease the view down from it
-    // over the first ~100 ms, and a 5.1 m spawn (warehouse2 T-side) would climb
+    // over the first ~100 ms, and a 5.04 m spawn (warehouse2 T-side) would climb
     // up from the shed floor instead of starting on the catwalk.
     motion.groundSmoothY = p.y;
   }

@@ -179,7 +179,7 @@ export function updateMovement(dt: number): void {
   camera.position.set(
     player.pos.x,
     // The eased ground height, not the physics one: stairs snap the feet up
-    // to 0.3 m per riser; the camera blends across them instead.
+    // to 0.18 m per riser; the camera blends across them instead.
     motion.groundSmoothY + player.eyeHeight - CROUCH_DROP * motion.crouchLerp,
     player.pos.z,
   );

@@ -260,7 +260,7 @@ export function buildNavGrid(opts: NavGridOptions): NavGrid {
     // …and every node ON the flight joins both ends, because a staircase is
     // traversable from anywhere along it, not only from its mouth.
     //
-    // Without this a bot partway up is stranded: treads are 0.75 m apart and
+    // Without this a bot partway up is stranded: treads are 0.3 m apart and
     // cells are 1 m, so consecutive tread nodes differ by more than
     // STEP_HEIGHT and the sampled grid refuses to connect them. The tread
     // nodes become isolated islands, and A* — correctly, given that graph —
@@ -370,8 +370,8 @@ function compact(
  *
  * Charging only the planar run, as this first did, breaks it the moment a
  * link has any rise at all: at the foot of the elevation map's internal
- * flight the true cost to the top is its 9 m run, while a heuristic adding
- * |Δy| asks for 12.6. Not a future-steep-staircase hazard — it was wrong for
+ * flight the true cost to the top is its 6 m run, while a heuristic adding
+ * |Δy| asks for 9.6. Not a future-steep-staircase hazard — it was wrong for
  * the maps already in the repo.
  */
 function edgeLength(from: NavNode, to: NavNode): number {

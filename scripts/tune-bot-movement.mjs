@@ -315,12 +315,12 @@ try {
         { name: 'arena-wall', start: [-25, 0, -1.6], goal: [8, 0, 4] },
         { name: 'arena-wall-reverse', start: [8, 0, 4], goal: [-25, 0, -1.6] },
       ] : map === 'warehouse2' ? [
-        { name: 'warehouse-yard-stairs', start: [32.5, 0, 17], goal: [32.5, 5.1, 1] },
+        { name: 'warehouse-yard-stairs', start: [32.5, 0, 12.5], goal: [32.5, 5.04, 1] },
         { name: 'warehouse-door', start: [0, 0, 25], goal: [0, 0, 17] },
         { name: 'warehouse-rack', start: [-12, 0, -1.4], goal: [20, 0, -6] },
         { name: 'warehouse-rack-reverse', start: [20, 0, -6], goal: [-12, 0, -1.4] },
       ] : [
-        { name: 'elevation-stairs', start: [8, 0, 22.5], goal: [8, 3.6, 10] },
+        { name: 'elevation-stairs', start: [8, 0, 19.5], goal: [8, 3.6, 10] },
       ];
       if (map === 'warehouse2') cases.push(...await page.evaluate(() =>
         window.movementTrial.world.elevators.flatMap(e => [

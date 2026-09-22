@@ -10,10 +10,10 @@
 // nothing wrong, stalling in phase wait past the deadline.
 //
 // The fix budgets those legs in GAME time and keeps wall time as a dead-man
-// failsafe only. Worst case on warehouse2 (maps/warehouse2.ts: PAD_H 0.25,
-// DECK_Y 5.1, LIFT_SPEED 1.5, LIFT_DWELL 2): travel = 4.85/1.5 ≈ 3.23 s;
+// failsafe only. Worst case on warehouse2 (maps/warehouse2.ts: PAD_H 0.15,
+// DECK_Y 5.04, LIFT_SPEED 1.5, LIFT_DWELL 2): travel = 4.89/1.5 ≈ 3.26 s;
 // arriving just as the deck departs the source costs 2*travel + dwell ≈
-// 8.47 s for the next source dock, plus the ≈3.23 s ride and the walk to the
+// 8.52 s for the next source dock, plus the ≈3.26 s ride and the walk to the
 // landing plus board/exit steps — ≈20 s all told. 30 s keeps ~1.5x headroom
 // in the clock the sim actually runs on.
 export const ELEVATOR_SMOKE_WALL_BUDGET_MS = 45000;

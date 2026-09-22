@@ -60,16 +60,16 @@ describe('collidesAt — blocking is relative to the feet', () => {
 
   test('float32-noisy tops still count as steppable and supportive', () => {
     // What Box3.setFromObject ACTUALLY yields for a tread built as exactly
-    // 0.3 tall: mesh vertices are float32, inflating max.y to
-    // 0.3000000059604645 (and dropping min.y to -5.96e-9). Without
+    // 0.18 tall: mesh vertices are float32, inflating max.y to
+    // 0.18000000715255737 (and dropping min.y to -5.96e-9). Without
     // COLLISION_EPSILON this walls off every real flight — caught live by
     // the smoke test's stairs phase.
     const noisyStep = new THREE.Box3(
       new THREE.Vector3(-1, -5.960464483090178e-9, -1),
-      new THREE.Vector3(1, 0.3000000059604645, 1),
+      new THREE.Vector3(1, 0.18000000715255737, 1),
     );
     expect(collidesAt(at(0, 0), PLAYER_RADIUS, 0, [noisyStep])).toBe(false);
-    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 0.3, [noisyStep])).toBe(0.3000000059604645);
+    expect(supportHeightAt(0, 0, PLAYER_RADIUS, 0.18, [noisyStep])).toBe(0.18000000715255737);
   });
 
   test('a knee-high crate blocks at ground feet', () => {
@@ -246,7 +246,7 @@ describe('resolveVertical', () => {
   });
 
   test('walking into a riser lifts the feet onto it (step-up)', () => {
-    // Standing with footprint overlapping a 0.3 riser: gravity nudges the
+    // Standing with footprint overlapping a 0.18 riser: gravity nudges the
     // feet down a hair, support catches the riser top one STEP_HEIGHT up.
     const riser = slab(2, 0, 0, STEP_HEIGHT, 1);
     const r = resolveVertical(0, -22 * 0.016, 0.016, 2, 0, PLAYER_RADIUS, [riser]);
@@ -286,11 +286,11 @@ describe('resolveVertical', () => {
   });
 
   test('descending one riser while grounded sticks to the lower tread', () => {
-    // The footprint just left the upper tread (top 0.6): support is the
-    // lower tread top 0.3, but gravity has only pulled the feet down a hair,
-    // so without the stick rule they free-fall ~0.29 m every tread.
+    // The footprint just left the upper tread (top 0.36): support is the
+    // lower tread top 0.18, but gravity has only pulled the feet down a hair,
+    // so without the stick rule they free-fall ~0.17 m every tread.
     const lower = slab(0, 0, 0, STEP_HEIGHT);
-    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower], true);
+    const r = resolveVertical(0.36, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower], true);
     expect(r.onGround).toBe(true);
     expect(r.feetY).toBe(STEP_HEIGHT);
     expect(r.velY).toBe(0);
@@ -298,30 +298,30 @@ describe('resolveVertical', () => {
 
   test('the same descent query without wasGrounded stays airborne', () => {
     const lower = slab(0, 0, 0, STEP_HEIGHT);
-    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower]);
+    const r = resolveVertical(0.36, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [lower]);
     expect(r.onGround).toBe(false);
     expect(r.feetY).toBeGreaterThan(STEP_HEIGHT);
   });
 
   test('grounded descent onto a float32-noisy tread still sticks', () => {
-    // The noise direction that matters here: a "0.3" riser measuring LOW
+    // The noise direction that matters here: a "0.18" riser measuring LOW
     // puts its top a hair OVER one STEP_HEIGHT below the feet — exactly
     // what COLLISION_EPSILON exists for on this comparison too.
-    const noisyTop = STEP_HEIGHT - 1.7881393432617188e-7; // float32 ULP below 0.3
+    const noisyTop = STEP_HEIGHT - 1.7881393432617188e-7; // float32 noise below 0.18
     const noisyLower = slab(0, 0, 0, noisyTop);
-    const r = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [noisyLower], true);
+    const r = resolveVertical(0.36, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [noisyLower], true);
     expect(r.onGround).toBe(true);
     expect(r.feetY).toBe(noisyTop);
   });
 
   test('the stick budget is exactly one STEP_HEIGHT plus epsilon', () => {
-    const deep = slab(0, 0, 0, 0.29);     // 0.31 below the feet: falls
-    const shallow = slab(0, 0, 0, 0.301); // 0.299 below: sticks
-    const deepR = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [deep], true);
-    const shallowR = resolveVertical(0.6, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [shallow], true);
+    const deep = slab(0, 0, 0, 0.17);     // 0.19 below the feet: falls
+    const shallow = slab(0, 0, 0, 0.181); // 0.179 below: sticks
+    const deepR = resolveVertical(0.36, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [deep], true);
+    const shallowR = resolveVertical(0.36, -22 * 0.016, 0.016, 0, 0, PLAYER_RADIUS, [shallow], true);
     expect(deepR.onGround).toBe(false);
     expect(shallowR.onGround).toBe(true);
-    expect(shallowR.feetY).toBe(0.301);
+    expect(shallowR.feetY).toBe(0.181);
   });
 
   test('a drop deeper than one step still goes airborne (ledge)', () => {
@@ -336,10 +336,10 @@ describe('resolveVertical', () => {
 
   test('jumping off a stair tread still rises (stick never blocks ascent)', () => {
     const lower = slab(0, 0, 0, STEP_HEIGHT);
-    const r = resolveVertical(0.6, 8, 0.05, 0, 0, PLAYER_RADIUS, [lower], true);
+    const r = resolveVertical(0.36, 8, 0.05, 0, 0, PLAYER_RADIUS, [lower], true);
     expect(r.onGround).toBe(false);
     expect(r.velY).toBe(8);
-    expect(r.feetY).toBeCloseTo(1.0);
+    expect(r.feetY).toBeCloseTo(0.76);
   });
 });
 
@@ -534,8 +534,8 @@ describe('slideMoveXZ', () => {
 // Unwedging — the escape that keeps a binary overlap test from being a trap.
 //
 // Fixture is the elevation map's real trap, reduced: the second-floor slab
-// x[6,14] y[3.2,3.6], and an entity standing on riser 5 of the internal
-// flight (feet 1.5) with its radius lapping the slab's west edge. The slab's
+// x[6,14] y[3.2,3.6], and an entity standing mid-flight on the internal
+// flight (feet 1.5, ~riser 8) with its radius lapping the slab's west edge. The slab's
 // underside is below that entity's head, so it blocks; and because collidesAt
 // only answers "inside or not", every direction was refused — the way out
 // included. Player and bot alike were pinned there permanently.

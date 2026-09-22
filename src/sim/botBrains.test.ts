@@ -474,11 +474,11 @@ describe('DefaultBrain routing', () => {
     const brain = calmBrain();
     expect(brain.decide(onRoute(), STEP_DT).mode).toBe('route');
     // Partway up a flight: under climbThreshold (1.5) but well over climbExit
-    // (0.45). Exiting here is the stall this replaced — one step short.
+    // (0.09). Exiting here is the stall this replaced — one step short.
     expect(brain.decide(onRoute({ rise: 1.2 }), STEP_DT).mode).toBe('route');
-    expect(brain.decide(onRoute({ rise: 0.5 }), STEP_DT).mode).toBe('route');
+    expect(brain.decide(onRoute({ rise: 0.3 }), STEP_DT).mode).toBe('route');
     // Arrived: rise closed.
-    expect(brain.decide(onRoute({ rise: 0.4 }), STEP_DT).mode).toBe('engage');
+    expect(brain.decide(onRoute({ rise: 0.05 }), STEP_DT).mode).toBe('engage');
   });
 
   it('does not start routing at a rise it would only continue at', () => {

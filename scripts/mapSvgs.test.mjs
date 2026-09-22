@@ -74,11 +74,11 @@ const renderSvg = (row) => renderMapSvg(
 // warehouse2 lip join, ...). A landing that moves without its map's join
 // moving routes bots at a point no staircase reaches.
 const FLIGHT_TOPS = {
-  arena: [[26, 2.4, 30]],
+  arena: [[26, 2.34, 30]],
   range: [],
-  elevation: [[4, 3.6, 0], [8, 3.6, 12.5], [35, 3.6, 6.5], [-27, 3.0, -30]],
-  warehouse1: [[0, 3.6, 8], [0, 3.6, -8], [24, 1.2, 45], [-24, 1.2, 45], [24, 1.2, -45], [-24, 1.2, -45]],
-  warehouse2: [[-22, 5.1, -8], [22, 5.1, 8], [32.5, 5.1, 3]],
+  elevation: [[4, 3.6, 0], [8, 3.6, 12.5], [35, 3.6, 6.5], [-27, 2.88, -30]],
+  warehouse1: [[0, 3.6, 8], [0, 3.6, -8], [24, 1.08, 45], [-24, 1.08, 45], [24, 1.08, -45], [-24, 1.08, -45]],
+  warehouse2: [[-22, 5.04, -8], [22, 5.04, 8], [32.5, 5.04, 3]],
 };
 
 // Entry counts per map: [boxes, flights, lifts, targets, labels]. A dropped

@@ -478,7 +478,7 @@ function candidateConfig(): SessionConfig {
   };
 }
 
-// ---------- Visibility toggles (called from main.ts's pointerlockchange) ----------
+// ---------- Visibility toggles (called from main.ts's onPlayChange) ----------
 
 export function hideAllMenus(): void {
   startMenu.style.display = 'none';

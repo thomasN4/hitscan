@@ -30,10 +30,6 @@ export function detectTouchMode(search: string): boolean {
     ?? matchMedia('(pointer: coarse)').matches;
 }
 
-export function isTouchMode(): boolean {
-  return touchMode;
-}
-
 /**
  * Wire capture changes to `cb`. Desktop listens for pointerlockchange on
  * `canvas`; touch mode additionally releases when the page is hidden (an app

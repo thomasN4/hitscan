@@ -577,8 +577,9 @@ export function shoot(): void {
 const ADS_RATE = 12;
 
 export function updateWeapon(dt: number): void {
-  // Dead players don't shoot, reload or blend. exitPointerLock() fires
-  // pointerlockchange asynchronously, so at least one frame runs with
+  // Dead players don't shoot, reload or blend. releasePlay() releases capture
+  // asynchronously on desktop (exitPointerLock fires pointerlockchange) and
+  // synchronously in touch mode, so at least one frame runs with
   // alive === false and locked === true; without this guard a held LMB
   // would spend ammo and could still score a kill from that frame.
   if (!player.alive) return;

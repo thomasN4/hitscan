@@ -26,8 +26,8 @@ export const RISERS = 28;
 export const DECK_Y = RISERS * STEP_H;
 /** Decking thickness. DECK_Y - SLAB_T = 4.64 m of headroom below, far over HEAD_HEIGHT. */
 export const SLAB_T = 0.4;
-/** Tread plate thickness on the open flights — thin, so you can walk under them. */
-export const TREAD_T = 0.16;
+/** Tread plate thickness on the open flights — thin steel, so the flight reads open and you can walk under it. */
+export const TREAD_T = 0.06;
 
 /** Shell half-extents (to the wall centre-line), wall thickness, wall height. */
 export const SHELL_X = 30;

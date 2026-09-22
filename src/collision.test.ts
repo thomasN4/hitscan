@@ -345,8 +345,8 @@ describe('resolveVertical', () => {
 
 // Rising into a ceiling — the head is swept, not just the feet.
 //
-// Fixture is an open-tread plate: top 4.7, underside 4.4 (warehouse2's TREAD_T
-// shape). Before the ceiling sweep a rising body passed straight through it —
+// Fixture is a thin open-tread-shaped plate: top 4.7, underside 4.4. Before
+// the ceiling sweep a rising body passed straight through it —
 // the head is above the support query's reach and the vertical stage ignored
 // velY > 0 entirely — so a jump under a flight put the head inside the tread.
 describe('resolveVertical ceiling sweep', () => {

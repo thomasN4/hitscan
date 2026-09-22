@@ -214,8 +214,8 @@ describe('stairLink', () => {
 });
 
 describe('openTreadBase', () => {
-  // maps/warehouse2.ts's two main flights: 28 risers of 0.18 on 0.16 plate.
-  const STEP_H = 0.18, TREAD_T = 0.16, COUNT = 28;
+  // maps/warehouse2.ts's two main flights: 28 risers of 0.18 on 0.06 plate.
+  const STEP_H = 0.18, TREAD_T = 0.06, COUNT = 28;
 
   test('tread TOPS land exactly where a solid flight\'s step tops do', () => {
     // This is the whole contract. addStairs builds step i as a full-height box
@@ -247,7 +247,7 @@ describe('openTreadBase', () => {
       collidesAt(new THREE.Vector3(0, 0, 0), 0.5, 0, [tread(i)]);
 
     // First tread whose plate hangs clear of a standing body's head (follows
-    // HEAD_HEIGHT: bases run 0.02 + 0.18i, so 1.75 clears from tread 10).
+    // HEAD_HEIGHT: bases run 0.12 + 0.18i, so 1.75 clears from tread 10).
     const firstOpen = Array.from({ length: COUNT }, (_, i) => i)
       .findIndex(i => openTreadBase(0, i, STEP_H, TREAD_T) >= HEAD_HEIGHT);
     expect(firstOpen).toBe(10);

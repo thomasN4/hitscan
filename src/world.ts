@@ -381,7 +381,9 @@ export function addOpenStairs(
       mat);
   }
 
-  // Stringers: one rotated beam per side, spanning mouth to landing.
+  // Stringers: one rotated beam per side, spanning mouth to landing. Slim
+  // steel (0.12 x 0.22) to match the thin tread plates — anything heavier
+  // reads as a solid ramp from the side and closes the open flight.
   const totalRun = count * stepD;
   const totalRise = count * stepH;
   const angle = Math.atan2(totalRise, totalRun);
@@ -391,9 +393,10 @@ export function addOpenStairs(
   const parts: THREE.Mesh[] = [];
   for (const side of [-1, 1] as const) {
     const beam = new THREE.Mesh(
-      new THREE.BoxGeometry(alongZ ? 0.2 : length, 0.34, alongZ ? length : 0.2),
+      new THREE.BoxGeometry(alongZ ? 0.12 : length, 0.22, alongZ ? length : 0.12),
       mat);
-    const offset = side * (width / 2 - 0.1);
+    // Outer faces stay flush with the tread edges, as before.
+    const offset = side * (width / 2 - 0.06);
     beam.position.set(
       alongZ ? x + offset : x + sign * totalRun / 2,
       y + totalRise / 2 - 0.2,

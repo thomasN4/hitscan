@@ -330,7 +330,7 @@ export function warehouse2Spec(): MapSpec {
     ground: { minX: -YARD_X, maxX: YARD_X, minZ: -YARD_Z, maxZ: YARD_Z },
     boxes,
     // D. Three open flights — thin treads you walk under (world.ts:addOpenStairs).
-    // Built solid they would be two 13 m wedges of cover in the middle of the
+    // Built solid they would be two 8.4 m wedges of cover in the middle of the
     // hole the map exists for. The void pair mirrors by a 180-degree turn about
     // the origin; the yard flight is the only way up that never touches the
     // interior, arriving through the +x port at z [-3,3].

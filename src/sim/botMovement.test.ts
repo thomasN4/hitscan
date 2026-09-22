@@ -129,7 +129,7 @@ describe('warehouse2: engaged bots keep their footing (#127)', () => {
 
   // Catwalk just inside the middle north port (x -6..-2), enemy 4.5 m in
   // front on the ring: inside nearBand, and the band would only be restored
-  // 7 m out — past the port's outer lip, over a 5.1 m drop to the yard.
+  // 7 m out — past the port's outer lip, over a 5.04 m drop to the yard.
   const windowStart = new THREE.Vector3(-4, DECK_Y, -INNER_Z + 0.5);
   const windowTarget = new THREE.Vector3(-4, DECK_Y, -INNER_Z + 5);
 

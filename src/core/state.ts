@@ -1031,7 +1031,7 @@ export type MatchMode = 'tdm' | 'dom';
  *
  * `feetY` is the walk surface the flag sits on (like SpawnZone.y), so a flag
  * need not sit at grade — on elevation only C does (0), while B stands on the
- * building slab at 3.6 and A on the plateau crown at 3.0. Capture counts
+ * building slab at 3.6 and A on the plateau crown at 2.88. Capture counts
  * bodies whose feet are within VERTICAL_TOL of the flag (sim/domination.ts),
  * so the deck fight and the ground floor below it never bleed into each
  * other.
@@ -1060,7 +1060,7 @@ export const DOM_FLAGS: Record<MapName, FlagDef[]> = {
   // A (-38,2.88,-30): the plateau top's centre (22 x 22 at maps/elevation.ts,
   // so a 4.5 ring sits well inside), reached only up the east stair. C
   // (35,0,38): open ground south down the tower lane (whose stair base stands
-  // at z = 15.5), deep in CT territory in the north-south lane the
+  // at z = 12.5), deep in CT territory in the north-south lane the
   // bridge/tower deck overlooks — the T sniper view down that lane is the
   // point. B (0,3.6,0): the second-floor slab west of the stairwell hole
   // (x[2,6], z[-9,0]) — the deck fight the map was built to observe. The

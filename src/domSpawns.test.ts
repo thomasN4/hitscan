@@ -14,11 +14,11 @@ function lcg(seed: number): () => number {
   };
 }
 
-// Elevation fixture: A crowns the plateau at (-38,3.0,-30), B the slab at
+// Elevation fixture: A crowns the plateau at (-38,2.88,-30), B the slab at
 // (0,3.6,0); the T home pocket is x 10..50, z -55..-30 at y 0. Neither ring
 // (outer 10 m) reaches the other ring or the T pocket, so classifying a
 // respawn by planar distance is unambiguous.
-const A = { x: -38, y: 3.0, z: -30 };
+const A = { x: -38, y: 2.88, z: -30 };
 const B = { x: 0, y: 3.6, z: 0 };
 // The band's inner edge is the wider of the global floor and the flag's own
 // capture radius (4.5 on elevation), so a respawn never lands on the point it

@@ -21,19 +21,19 @@
 import * as THREE from 'three';
 import { GRAVITY } from './sim/movement';
 
-/** Tallest riser an entity auto-climbs rather than collides with. */
-export const STEP_HEIGHT = 0.3;
+/** Tallest riser an entity auto-climbs rather than collides with. Real-scale stairs (issue #141). */
+export const STEP_HEIGHT = 0.18;
 /** Top of the entity's collision span, relative to its feet. Tracks the ~1.75 m bot visual top (issue #137). */
 export const HEAD_HEIGHT = 1.75;
 /**
  * Slack for the elevation comparisons, in metres.
  *
  * Collider AABBs are measured from meshes whose vertices are stored as
- * FLOAT32, so a tread built as exactly 0.3 tall measures
- * 0.3000000059604645 — a few nanometres too tall. Without this slack every
+ * FLOAT32, so a tread built as exactly 0.18 tall measures
+ * 0.18000000715255737 — a few nanometres too tall. Without this slack every
  * exact-height riser reads a hair above feet + STEP_HEIGHT and walls off
  * the entire flight (the smoke test caught exactly that). Orders of
- * magnitude: float32 noise ~5e-9, this epsilon 1e-6, STEP_HEIGHT 0.3.
+ * magnitude: float32 noise ~7e-9, this epsilon 1e-6, STEP_HEIGHT 0.18.
  */
 export const COLLISION_EPSILON = 1e-6;
 

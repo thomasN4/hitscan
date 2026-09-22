@@ -345,11 +345,11 @@ describe('DOM_FLAGS', () => {
     expect(DOM_FLAGS.elevation.map(f => f.id)).toEqual(['A', 'B', 'C']);
     const [a, b, c] = [DOM_FLAGS.elevation[0]!, DOM_FLAGS.elevation[1]!, DOM_FLAGS.elevation[2]!];
     expect(b).toMatchObject({ x: 0, feetY: 3.6, z: 0 });
-    // A crowns the T-side plateau (3.0 top at maps/elevation.ts); C stands
+    // A crowns the T-side plateau (2.88 top at maps/elevation.ts); C stands
     // south down the tower lane, deep in CT territory in the lane the bridge
     // overlooks. Pinned exactly: moving a flag is a layout decision,
     // and the reachability/capture checks below assume these spots.
-    expect(a).toMatchObject({ x: -38, feetY: 3.0, z: -30 });
+    expect(a).toMatchObject({ x: -38, feetY: 2.88, z: -30 });
     expect(c).toMatchObject({ x: 35, feetY: 0, z: 38 });
   });
 

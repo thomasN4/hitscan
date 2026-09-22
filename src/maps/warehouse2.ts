@@ -6,10 +6,10 @@
 // docs/maps/warehouse2.png. All geometry still goes through world.ts.
 //
 // The third full combat map, and the first whose spatial grammar is VERTICAL:
-// an 8 m catwalk ring runs the full perimeter at 5.1 m, and the 44 x 24 middle
+// an 8 m catwalk ring runs the full perimeter at 5.04 m, and the 44 x 24 middle
 // is cut away entirely, so the ring looks down on the floor and the floor
 // looks up at the ring. Five ideas hold it together — the ring sees everything
-// and hides nothing (rail tops out at 6.2, under a deck eye at 6.7); the shell
+// and hides nothing (rail tops out at 6.14, under a deck eye at 6.64); the shell
 // wall is two registers with independent gaps; the main flights stand in the
 // open void and are OPEN; the cargo lifts cycle floor <-> ring; spawns are
 // ASYMMETRIC (CTs in the yard, Ts already on the ring). Numbers behind each

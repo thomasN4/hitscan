@@ -9,7 +9,7 @@ import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
 import { buildNavGrid, findPath, navNode, nearestNode, pickPatrolNode, type NavGrid, type NavLinkSpec, type NavProbe } from './navGrid';
 
-const STEP = 0.3;
+const STEP = 0.18;
 const HEAD = 2;
 
 /**
@@ -156,7 +156,7 @@ describe('one-way links', () => {
   // INTERMEDIATE node the directed edges have to reach: a floor at y 1.5
   // straddling the wall band (its cell centre at z 6.5 clears the band at
   // 6..6.4). The sampled grid cannot connect it to either end — 1.5 m rises,
-  // 5x STEP_HEIGHT — so it is an island unless the link's directed edges
+  // 8x STEP_HEIGHT — so it is an island unless the link's directed edges
   // join it, which is what makes these assertions non-vacuous.
   const withMidStep = () => world(
     [{ minX: 0, maxX: 10, minZ: 6, maxZ: 6.4 }],

@@ -26,7 +26,7 @@ import { buildNavGrid, findPath, findTransportPath, type RouteWaypoint, type Nav
 export const NAV_RADIUS = 0.5;
 
 /**
- * Sample spacing (m). Deliberately coarser than the 0.75 m stair treads: at
+ * Sample spacing (m). Deliberately coarser than the 0.3 m stair treads: at
  * this size one cell along a flight climbs more than STEP_HEIGHT, so flights
  * read as walls and enter the graph as NavLink edges instead. Resolving
  * treads by sampling would need 0.5 m and quadruple the build.

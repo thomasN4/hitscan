@@ -39,22 +39,22 @@ let failures = 0;
 //   bottomZ   z past which the descent counts as back on open ground...
 //   bottomDir ...compared with >= when +1, <= when -1 (flights face both ways)
 const STAIRS = {
-  // Arena: the raised platform's south flight, 8 x 0.3 = 2.4.
-  arena: { start: [26, 1.6, 22.5], upYaw: Math.PI, deckFeet: 2.4, downYaw: 0, bottomZ: 23, bottomDir: -1 },
-  // Elevation: the two-story building's EXTERNAL south flight, 12 x 0.3 = 3.6.
+  // Arena: the raised platform's south flight, 13 x 0.18 = 2.34.
+  arena: { start: [26, 1.6, 24.5], upYaw: Math.PI, deckFeet: 2.34, downYaw: 0, bottomZ: 25.1, bottomDir: -1 },
+  // Elevation: the two-story building's EXTERNAL south flight, 20 x 0.18 = 3.6.
   // Deliberately the outside one — it is the flight a player uses without
   // entering the building, so this phase stays independent of the interior.
-  elevation: { start: [8, 1.6, 22.5], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 22, bottomDir: 1 },
-  // warehouse1: the south mezzanine flight, mouth at z = 17 ascending z-.
-  warehouse1: { start: [0, 1.6, 18], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 17.5, bottomDir: 1 },
-  // warehouse2: the YARD flight, mouth at z = 15.75 on x = 32.5, ascending z-.
+  elevation: { start: [8, 1.6, 19.5], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 19, bottomDir: 1 },
+  // warehouse1: the south mezzanine flight, mouth at z = 14 ascending z-.
+  warehouse1: { start: [0, 1.6, 15], upYaw: 0, deckFeet: 3.6, downYaw: Math.PI, bottomZ: 14.5, bottomDir: 1 },
+  // warehouse2: the YARD flight, mouth at z = 11.4 on x = 32.5, ascending z-.
   // Deliberately the outdoor one, for the same reason as elevation's: it is
   // the flight a player uses without entering the building, so this phase
   // stays independent of the interior. It is an open flight like the two in
   // the void (world.ts:addOpenStairs) — the climb/descend assertions hold for
   // thin treads exactly as for solid risers, since tread TOPS sit at the same
   // heights either way.
-  warehouse2: { start: [32.5, 1.6, 17], upYaw: 0, deckFeet: 5.1, downYaw: Math.PI, bottomZ: 16.25, bottomDir: 1 },
+  warehouse2: { start: [32.5, 1.6, 12.5], upYaw: 0, deckFeet: 5.04, downYaw: Math.PI, bottomZ: 11.9, bottomDir: 1 },
 };
 
 async function runMap(name, url, { sprintCheck = false, configCheck = false, botCheck = false, stairsCheck = null, liftCheck = null } = {}) {
@@ -1697,15 +1697,20 @@ async function runBotClimbCheck() {
       cs.game.locked = true;
       cs.player.hp = 100000; // the bot shoots back; the climb is what matters
       // Player on the second-floor slab, directly up the fall line of the
-      // internal flight (which runs x [2,6], z -9 -> 0, deck at 3.6).
-      // z = 6, not 8: the sightline from the stair foot must clear the
-      // top step's riser face (z -0.75, top 3.6), and with the 1.6 m bot
+      // internal flight (which runs x [2,6], z -6 -> 0, deck at 3.6).
+      // z = 6.8, not 8: the sightline from the stair foot must clear the
+      // top step's riser face (z -0.3, top 3.6), and with the 1.6 m bot
       // eye the z = 8 ray meets it exactly head-on, which the bot never
-      // acquires through.
-      cs.player.pos.set(4, 3.6 + 1.6, 6);
+      // acquires through. 6.8 also keeps the finish outside the 7 m
+      // nearBand, so the bot approaches up the last risers instead of
+      // backing off them (botBrains:engage).
+      cs.player.pos.set(4, 3.6 + 1.6, 6.8);
       const bot = cs.bots[0];
       if (!bot) return { fail: 'no bot spawned on the elevation map' };
-      bot.mesh.position.set(4, 0, -10); // just north of the first riser
+      // South of the internal flight's mouth (z -6): far enough back that
+      // the sightline to the deck clears the slab edge at z 0 — the same
+      // geometry the old z -10 held against the old mouth at z -9.
+      bot.mesh.position.set(4, 0, -10); // just south of the first riser
       let maxFeet = 0;
       let groundedFrames = 0;
       const t0 = performance.now();
@@ -1719,13 +1724,13 @@ async function runBotClimbCheck() {
       return {
         maxFeet: +maxFeet.toFixed(2),
         gainedDeck: maxFeet >= 3.55,
-        risersClimbed: Math.round(maxFeet / 0.3),
+        risersClimbed: Math.round(maxFeet / 0.18),
         groundedFrames,
       };
     });
     if (result.fail) throw new Error(result.fail);
     // The geometry gate: one riser proves the flight is climbable at all.
-    if (result.maxFeet < 0.25) throw new Error(`bot never gained a single riser — is a riser taller than STEP_HEIGHT? ${JSON.stringify(result)}`);
+    if (result.maxFeet < 0.15) throw new Error(`bot never gained a single riser — is a riser taller than STEP_HEIGHT? ${JSON.stringify(result)}`);
     // The policy gate: the bot must actually arrive.
     if (!result.gainedDeck) throw new Error(`bot never reached the deck (feet ${result.maxFeet}) — routing regressed: ${JSON.stringify(result)}`);
     console.log('[botClimb] OK', JSON.stringify(result));
@@ -1739,7 +1744,7 @@ async function runBotClimbCheck() {
 
 // The unwedge escape, end to end (collision.ts:slideMoveXZ).
 //
-// Stands the player at the exact coordinate that used to soft-lock: riser 5 of
+// Stands the player at the exact coordinate that used to soft-lock: mid-flight on
 // the elevation map's internal flight, radius lapping the x >= 6 second-floor
 // slab whose underside sits below head height at feet 1.5. Before the escape
 // existed, every direction was refused here — all four cardinals plus jump,
@@ -1759,7 +1764,10 @@ async function runWedgeCheck() {
     const result = await page.evaluate(async () => {
       const cs = window.__cs;
       cs.game.started = true; cs.game.locked = true; cs.player.hp = 100000; cs.game.pitch = 0;
-      const TRAP = { x: 6.15, feet: 1.5, z: -6.42 };
+      // Mid-flight on the internal flight (z -6 -> 0), radius lapping the
+      // x >= 6 second-floor slab whose underside sits below head height at
+      // feet 1.5 — reseated from z -6.42 when the flight shortened.
+      const TRAP = { x: 6.15, feet: 1.5, z: -3.5 };
       const attempt = async (yaw) => {
         cs.player.pos.set(TRAP.x, TRAP.feet + cs.player.eyeHeight, TRAP.z);
         cs.player.vel.set(0, 0, 0);

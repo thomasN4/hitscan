@@ -141,24 +141,24 @@ describe('createSolidBox', () => {
 // If the arithmetic here and the geometry there ever disagree, bots route to a
 // point no staircase reaches, and nothing else in the suite would notice.
 describe('stairLink', () => {
-  const STEP_H = 0.3, STEP_D = 0.75;
+  const STEP_H = 0.18, STEP_D = 0.3;
 
-  test("elevation's internal flight: 12 risers to the slab's south edge", () => {
-    const link = stairLink(4, 0, -9, 4, STEP_H, STEP_D, 12, 'z+');
-    expect([link.bottom.x, link.bottom.y, link.bottom.z]).toEqual([4, 0, -9]);
+  test("elevation's internal flight: 20 risers to the slab's south edge", () => {
+    const link = stairLink(4, 0, -6, 4, STEP_H, STEP_D, 20, 'z+');
+    expect([link.bottom.x, link.bottom.y, link.bottom.z]).toEqual([4, 0, -6]);
     expect(link.top.x).toBeCloseTo(4, 12);
     expect(link.top.y).toBeCloseTo(3.6, 12); // DECK_Y
     expect(link.top.z).toBeCloseTo(0, 12);
   });
 
   test("elevation's external flight ascends z- to the building face", () => {
-    const link = stairLink(8, 0, 21.5, 4, STEP_H, STEP_D, 12, 'z-');
+    const link = stairLink(8, 0, 18.5, 4, STEP_H, STEP_D, 20, 'z-');
     expect(link.top.y).toBeCloseTo(3.6, 12);
     expect(link.top.z).toBeCloseTo(12.5, 12);
   });
 
   test("elevation's tower flight abuts the tower's south face", () => {
-    const link = stairLink(35, 0, 15.5, 4, STEP_H, STEP_D, 12, 'z-');
+    const link = stairLink(35, 0, 12.5, 4, STEP_H, STEP_D, 20, 'z-');
     expect(link.top.y).toBeCloseTo(3.6, 12);
     expect(link.top.z).toBeCloseTo(6.5, 12);
   });
@@ -166,22 +166,22 @@ describe('stairLink', () => {
   test("elevation's plateau flight ascends x- to the plateau's east face", () => {
     // 6 m wide, unlike the 4 m flights — navigation reads halfWidth to tell
     // which sampled nodes count as being ON the flight.
-    const link = stairLink(-19.5, 0, -30, 6, STEP_H, STEP_D, 10, 'x-');
+    const link = stairLink(-22.2, 0, -30, 6, STEP_H, STEP_D, 16, 'x-');
     expect(link.halfWidth).toBe(3);
     expect(link.top.x).toBeCloseTo(-27, 12);
-    expect(link.top.y).toBeCloseTo(3, 12); // the plateau's lower tier
+    expect(link.top.y).toBeCloseTo(2.88, 12); // the plateau's lower tier
     expect(link.top.z).toBeCloseTo(-30, 12);
   });
 
-  test("arena's flight reaches the 2.4 m platform", () => {
-    const link = stairLink(26, 0, 24, 4, STEP_H, STEP_D, 8, 'z+');
-    expect(link.top.y).toBeCloseTo(2.4, 12);
+  test("arena's flight reaches the 2.34 m platform", () => {
+    const link = stairLink(26, 0, 26.1, 4, STEP_H, STEP_D, 13, 'z+');
+    expect(link.top.y).toBeCloseTo(2.34, 12);
     expect(link.top.z).toBeCloseTo(30, 12);
   });
 
   test("warehouse1's south mezzanine flight lands on the slab's south edge", () => {
-    // maps/warehouse1.ts: "17 - 9 = 8 south", flush with the slab edge at z = 8.
-    const link = stairLink(0, 0, 17, 4, STEP_H, STEP_D, 12, 'z-');
+    // maps/warehouse1.ts: "14 - 6 = 8 south", flush with the slab edge at z = 8.
+    const link = stairLink(0, 0, 14, 4, STEP_H, STEP_D, 20, 'z-');
     expect(link.top.y).toBeCloseTo(3.6, 12); // DECK_Y
     expect(link.top.z).toBeCloseTo(8, 12);
   });
@@ -189,33 +189,33 @@ describe('stairLink', () => {
   test("warehouse1's north mezzanine flight mirrors it across z = 0", () => {
     // The mirror is the map's fairness claim — if these two stop being
     // reflections, one team is closer to the high ground than the other.
-    const south = stairLink(0, 0, 17, 4, STEP_H, STEP_D, 12, 'z-');
-    const north = stairLink(0, 0, -17, 4, STEP_H, STEP_D, 12, 'z+');
+    const south = stairLink(0, 0, 14, 4, STEP_H, STEP_D, 20, 'z-');
+    const north = stairLink(0, 0, -14, 4, STEP_H, STEP_D, 20, 'z+');
     expect(north.top.y).toBeCloseTo(south.top.y, 12);
     expect(north.top.z).toBeCloseTo(-south.top.z, 12);
     expect(north.bottom.z).toBeCloseTo(-south.bottom.z, 12);
   });
 
-  test("warehouse1's dock flight reaches the 1.2 m lip", () => {
-    // 4 risers, not 12: the dock is a step-up height, so the flight exists
+  test("warehouse1's dock flight reaches the 1.08 m lip", () => {
+    // 6 risers, not 20: the dock is a step-up height, so the flight exists
     // purely so bots (which cannot jump) are not shut out of it.
-    const link = stairLink(24, 0, 42, 6, STEP_H, STEP_D, 4, 'z+');
+    const link = stairLink(24, 0, 43.2, 6, STEP_H, STEP_D, 6, 'z+');
     expect(link.halfWidth).toBe(3);
-    expect(link.top.y).toBeCloseTo(1.2, 12);
+    expect(link.top.y).toBeCloseTo(1.08, 12);
     expect(link.top.z).toBeCloseTo(45, 12); // the dock platform's inner face
   });
 
   test('a flight based above ground carries its base into both ends', () => {
     const link = stairLink(0, 5, 0, 4, STEP_H, STEP_D, 4, 'x+');
     expect(link.bottom.y).toBe(5);
-    expect(link.top.y).toBeCloseTo(6.2, 12);
-    expect(link.top.x).toBeCloseTo(3, 12);
+    expect(link.top.y).toBeCloseTo(5.72, 12);
+    expect(link.top.x).toBeCloseTo(1.2, 12);
   });
 });
 
 describe('openTreadBase', () => {
-  // maps/warehouse2.ts's two main flights: 17 risers of 0.3 on 0.16 plate.
-  const STEP_H = 0.3, TREAD_T = 0.16, COUNT = 17;
+  // maps/warehouse2.ts's two main flights: 28 risers of 0.18 on 0.06 plate.
+  const STEP_H = 0.18, TREAD_T = 0.06, COUNT = 28;
 
   test('tread TOPS land exactly where a solid flight\'s step tops do', () => {
     // This is the whole contract. addStairs builds step i as a full-height box
@@ -236,21 +236,21 @@ describe('openTreadBase', () => {
   });
 
   test('the flight is walk-under above a standing body, and solid below it', () => {
-    // The reason these stairs exist: built solid they would be a 13 m wedge of
+    // The reason these stairs exist: built solid they would be an 8.4 m wedge of
     // cover standing in the middle of warehouse2's void. Nothing implements
     // walk-under — collision.ts:blocks already ignores a collider whose
     // UNDERSIDE is at or above feet + HEAD_HEIGHT, so it falls out of the
     // tread heights alone, and this pins that it actually does.
     const tread = (i: number): THREE.Box3 => new THREE.Box3().setFromObject(
-      createSolidBox(0, openTreadBase(0, i, STEP_H, TREAD_T), 0, 3.6, TREAD_T, 0.75));
+      createSolidBox(0, openTreadBase(0, i, STEP_H, TREAD_T), 0, 3.6, TREAD_T, 0.3));
     const blocks = (i: number): boolean =>
       collidesAt(new THREE.Vector3(0, 0, 0), 0.5, 0, [tread(i)]);
 
     // First tread whose plate hangs clear of a standing body's head (follows
-    // HEAD_HEIGHT: bases run 0.14 + 0.3i, so 1.75 clears from tread 6).
+    // HEAD_HEIGHT: bases run 0.12 + 0.18i, so 1.75 clears from tread 10).
     const firstOpen = Array.from({ length: COUNT }, (_, i) => i)
       .findIndex(i => openTreadBase(0, i, STEP_H, TREAD_T) >= HEAD_HEIGHT);
-    expect(firstOpen).toBe(6);
+    expect(firstOpen).toBe(10);
 
     // Tread 0 is the step you take onto the flight, not a wall — its top is
     // one riser up, which collision.ts reads as floor.
@@ -277,11 +277,11 @@ describe('coplanarTopOverlaps', () => {
     new THREE.Box3(new THREE.Vector3(minX, 0, minZ), new THREE.Vector3(maxX, top, maxZ));
 
   test('finds two up-facing surfaces sharing a plane and a footprint', () => {
-    // The warehouse2 sill, to scale: wall top and deck top both at 5.1,
+    // The warehouse2 sill, to scale: wall top and deck top both at 5.04,
     // overlapping over the wall's inner half-thickness.
-    const found = coplanarTopOverlaps([at(29.5, 30.5, -6, 20, 5.1), at(22, 30, -12, 12, 5.1)]);
+    const found = coplanarTopOverlaps([at(29.5, 30.5, -6, 20, 5.04), at(22, 30, -12, 12, 5.04)]);
     expect(found).toHaveLength(1);
-    expect(found[0]!.y).toBeCloseTo(5.1, 6);
+    expect(found[0]!.y).toBeCloseTo(5.04, 6);
     expect(found[0]!.area).toBeCloseTo(0.5 * 18, 6);
     expect(found[0]!.minX).toBeCloseTo(29.5, 6);
     expect(found[0]!.maxX).toBeCloseTo(30, 6);
@@ -299,7 +299,7 @@ describe('coplanarTopOverlaps', () => {
     // Decking stopping at the wall's inner face. The faces touch along a line
     // and share no area, which is exactly what the repair produces; a
     // predicate that flagged this would have no clean state to report.
-    expect(coplanarTopOverlaps([at(29.5, 30.5, 0, 10, 5.1), at(22, 29.5, 0, 10, 5.1)])).toHaveLength(0);
+    expect(coplanarTopOverlaps([at(29.5, 30.5, 0, 10, 5.04), at(22, 29.5, 0, 10, 5.04)])).toHaveLength(0);
   });
 
   test('tolerates float32 noise at map scale', () => {
@@ -307,16 +307,16 @@ describe('coplanarTopOverlaps', () => {
     // is ~2e-6. A join built to the same number twice must not read as a fight.
     const noise = 2e-6;
     expect(coplanarTopOverlaps([
-      at(29.5, 30.5, 0, 10, 5.1),
-      at(22, 29.5 + noise, 0, 10, 5.1 + noise),
+      at(29.5, 30.5, 0, 10, 5.04),
+      at(22, 29.5 + noise, 0, 10, 5.04 + noise),
     ])).toHaveLength(0);
   });
 
   test('a slab RESTING on a wall is fine — only tops are compared', () => {
     // The rail sits on the deck: its base is coplanar with the deck's top, but
     // the two faces point opposite ways and backface culling draws one of them.
-    const deck = at(0, 10, 0, 10, 5.1);
-    const rail = new THREE.Box3(new THREE.Vector3(0, 5.1, 0), new THREE.Vector3(10, 6.2, 10));
+    const deck = at(0, 10, 0, 10, 5.04);
+    const rail = new THREE.Box3(new THREE.Vector3(0, 5.04, 0), new THREE.Vector3(10, 6.14, 10));
     expect(coplanarTopOverlaps([deck, rail])).toHaveLength(0);
   });
 
@@ -334,8 +334,8 @@ describe('resetWorld', () => {
   test('empties every registry in place', () => {
     const before = { solids, colliders, navLinks, liftPads };
     registerSolidBox(box());
-    navLinks.push(stairLink(0, 0, 0, 4, 0.3, 0.75, 4, 'z+'));
-    liftPads.push({ minX: -2, maxX: 2, minZ: -2, maxZ: 2, topY: 0.25, launchVel: 17 });
+    navLinks.push(stairLink(0, 0, 0, 4, 0.18, 0.3, 4, 'z+'));
+    liftPads.push({ minX: -2, maxX: 2, minZ: -2, maxZ: 2, topY: 0.15, launchVel: 17 });
     resetWorld();
     expect(solids).toHaveLength(0);
     expect(colliders).toHaveLength(0);

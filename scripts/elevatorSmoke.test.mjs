@@ -22,8 +22,8 @@ test('player-leg wall budget is unchanged', () => {
 });
 
 test('transport game budget covers the worst-case warehouse2 leg', () => {
-  // maps/warehouse2.ts: PAD_H 0.25, DECK_Y 5.1, LIFT_SPEED 1.5, LIFT_DWELL 2.
-  const travel = (5.1 - 0.25) / 1.5;
+  // maps/warehouse2.ts: PAD_H 0.15, DECK_Y 5.04, LIFT_SPEED 1.5, LIFT_DWELL 2.
+  const travel = (5.04 - 0.15) / 1.5;
   const worstWait = 2 * travel + 2; // arrive just as the deck departs the source
   const walkBoardExitMargin = 8;
   expect(BOT_TRANSPORT_GAME_BUDGET_SEC).toBeGreaterThanOrEqual(Math.ceil(worstWait + travel + walkBoardExitMargin));

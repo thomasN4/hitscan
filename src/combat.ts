@@ -18,12 +18,13 @@ import { findFreeSpawn } from './collision';
 import { colliders } from './world';
 import { flashDamageVignette, clearVignette, botKillTag, addKillfeed, updateScore, updateHUD } from './hud';
 import { showLoadoutPicker, showEndScreen } from './menu';
+import { releasePlay } from './playControl';
 
 /**
  * Apply damage to the player. On death: awards the killer's side its score
  * (TDM only — creditKill is a no-op in domination, where kills are worth
- * nothing), releases pointer lock (which pauses the loop) and shows the death
- * screen.
+ * nothing), releases play input — pointer lock, or touch capture — which
+ * pauses the loop, and shows the death screen.
  * @param dmg raw damage; caller decides falloff/accuracy
  * @param attackerName display name for the killfeed — required so the
  *   compiler flags any future caller that would revive the anonymous
@@ -56,8 +57,8 @@ export function damagePlayer(dmg: number, attackerName: string): void {
     if (attacker) attacker.kills++;
     addKillfeed(`${attackerName}${botKillTag(attacker)} killed You`);
     updateScore();
-    document.exitPointerLock();
-    // Wall clock ON PURPOSE: pointer lock was just released, so game time is
+    releasePlay();
+    // Wall clock ON PURPOSE: play input was just released, so game time is
     // frozen — a pausable schedule here would never fire and the death
     // screen would never show. The delay exists to be seen while paused.
     // Small delay so the killer's shot is visible before the menu covers it.
@@ -182,6 +183,11 @@ export function respawn(useDirector = false): void {
   motion.airLerp = 0;
   motion.crouchLerp = 0;
   input.crouching = false; // else a death while crouch-toggled respawns you crouched
+  // The sights and the trigger too. On desktop an RMB/LMB release clears them
+  // on the way to the menu, but the touch ADS button is a TOGGLE and nothing
+  // releases it — a death while aimed respawned you aimed.
+  input.aiming = false;
+  input.shooting = false;
   wpn.adsLerp = 0;
   armLoadout();   // refills both loadout positions and mirrors the primary into `weapon`
   wpn.slot = 0;
@@ -235,7 +241,7 @@ export function checkRoundEnd(): void {
  * (domination.ts:updateDomination) or the clock did (decideDomWinner);
  * callers announce their own killfeed line first.
  *
- * Pointer lock is released first so the loop stops simulating; the screen
+ * Play input (pointer lock / touch capture) is released first so the loop stops simulating; the screen
  * then reveals on a WALL-clock delay for the same reason damagePlayer's
  * death picker uses one — game time freezes the moment lock drops, so a
  * pausable schedule here would never fire. The beat lets the final
@@ -244,6 +250,6 @@ export function checkRoundEnd(): void {
 export function endMatch(winner: MatchWinner): void {
   if (session.matchOver) return;
   session.matchOver = true;
-  document.exitPointerLock();
+  releasePlay();
   setTimeout(() => showEndScreen(winner), 600);
 }

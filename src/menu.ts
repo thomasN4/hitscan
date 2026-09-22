@@ -3,7 +3,9 @@
 //
 // Split out of main.ts alongside hud.ts's ownership rule: hud.ts writes the
 // in-game HUD, this module writes everything inside #startMenu / #pauseMenu /
-// #loadoutScreen / #endScreen.
+// #loadoutScreen / #endScreen — plus the <body> `touch` class, which is what
+// swaps the menus' desktop key hints for touch copy and reveals the
+// fullscreen toggles (touch mode only: a desktop browser has F11).
 // Like hud.ts it grabs references through an init*() function called once by
 // main.ts (after the session config has been parsed into core/state), and a
 // missing id is a named startup error via hud.ts:requireEl.
@@ -264,11 +266,48 @@ function buildCards(): void {
 }
 
 /**
+ * Fullscreen toggles, one in the start menu and one in the pause menu. Shown
+ * only in touch mode, and hidden there too where the page cannot go
+ * fullscreen (iPhone Safari has no element fullscreen). Entering also tries
+ * to pin landscape; browsers that refuse just keep rotating.
+ */
+function initFullscreenToggles(): void {
+  const btns = [requireEl('fullscreenBtn'), requireEl('fullscreenBtnPause')];
+  if (!document.fullscreenEnabled) {
+    for (const b of btns) b.style.display = 'none';
+    return;
+  }
+  const label = (): void => {
+    for (const b of btns) b.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+  };
+  const toggle = (): void => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => { /* already left */ });
+      return;
+    }
+    document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => lockLandscape())
+      .catch(() => { /* refused: stay windowed, the label says so */ });
+  };
+  for (const b of btns) b.onclick = toggle;
+  document.addEventListener('fullscreenchange', label);
+  label();
+}
+
+/** Best effort: ScreenOrientation.lock is Android-only and absent from the DOM typings. */
+function lockLandscape(): void {
+  const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+  o.lock?.('landscape').catch(() => { /* unsupported or refused */ });
+}
+
+/**
  * Resolve every menu element + build the picker cards, initialize the form
  * from the applied session config, and wire Play/Resume/Quit/Deploy. Call
  * once at startup, AFTER main.ts has written the parsed config into `session`.
  */
-export function initMenus(handlers: MenuHandlers): void {
+export function initMenus(handlers: MenuHandlers, opts: { touch: boolean }): void {
+  document.body.classList.toggle('touch', opts.touch);
+  if (opts.touch) initFullscreenToggles();
   startMenu = requireEl('startMenu');
   pauseMenu = requireEl('pauseMenu');
   loadoutScreen = requireEl('loadoutScreen');
@@ -439,7 +478,7 @@ function candidateConfig(): SessionConfig {
   };
 }
 
-// ---------- Visibility toggles (called from main.ts's pointerlockchange) ----------
+// ---------- Visibility toggles (called from main.ts's onPlayChange) ----------
 
 export function hideAllMenus(): void {
   startMenu.style.display = 'none';

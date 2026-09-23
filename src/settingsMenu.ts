@@ -16,7 +16,7 @@
 // whichever one opened it, so Back just hides it again.
 import { settings } from './core/state';
 import { DEFAULT_SETTINGS, SETTING_LIMITS, sanitizeSettings, sliderPositionToVolume, volumeToSliderPosition, type Settings } from './core/settings';
-import { setMasterVolume } from './audio';
+import { syncMasterVolume } from './audio';
 import { requireEl } from './hud';
 import { applyTouchSettings, startLayoutEdit } from './touchControls';
 
@@ -33,8 +33,8 @@ export function loadStoredSettings(): void {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw !== null) assignSettings(sanitizeSettings(JSON.parse(raw)));
   } catch { /* storage unavailable or corrupt: keep the defaults */ }
-  // Stage the level for the first sound; never creates the AudioContext itself.
-  setMasterVolume(settings.volume);
+  // Push the level to the bus if built (otherwise ac() reads the slice); never creates the AudioContext itself.
+  syncMasterVolume();
 }
 
 function saveSettings(): void {
@@ -80,7 +80,7 @@ function refreshForm(): void {
 /** Apply a changed slice: persist it, push the level to the master bus, and restyle the touch controls if they exist. */
 function commit(): void {
   saveSettings();
-  setMasterVolume(settings.volume);
+  syncMasterVolume();
   if (touchMode) applyTouchSettings();
 }
 

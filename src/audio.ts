@@ -10,15 +10,21 @@
 // declaration detail of the types package. Erased under verbatimModuleSyntax.
 import type * as THREE from 'three';
 import { camera } from './core/engine';
-import { gameTime, type BotWeaponId } from './core/state';
+import { gameTime, settings, type BotWeaponId } from './core/state';
 import { DEFAULT_SETTINGS, SETTING_LIMITS } from './core/settings';
 import type { ScheduledHandle } from './sim/gameClock';
 
 let audioCtx: AudioContext | undefined;
 /** Every sound's terminal node: per-sound gains feed this, it feeds the destination. */
 let masterGain: GainNode | undefined;
-/** Level staged before the first sound; ac() applies it when it builds the graph. */
-let pendingVolume = DEFAULT_SETTINGS.volume;
+
+/** Gain value for the slice's master level; the slice is sanitized on write, this only guards the node. */
+function volumeForBus(): number {
+  const lim = SETTING_LIMITS.volume;
+  const v = settings.volume;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DEFAULT_SETTINGS.volume;
+  return Math.min(lim.max, Math.max(lim.min, v));
+}
 
 function ac() {
   // Lazily created on first sound; browsers require a user gesture first,
@@ -26,7 +32,9 @@ function ac() {
   if (!audioCtx) {
     audioCtx = new AudioContext();
     masterGain = audioCtx.createGain();
-    masterGain.gain.value = pendingVolume;
+    // Read the live slice at graph-build time: no staged copy, so the
+    // settings slice stays the single source of truth.
+    masterGain.gain.value = volumeForBus();
     masterGain.connect(audioCtx.destination);
   }
   return audioCtx;
@@ -43,17 +51,16 @@ function master(): GainNode {
 }
 
 /**
- * Master output level, 0 (silent) to 3 (300%). Staged until the first sound
- * builds the graph, then applied live — and it never creates the context
- * itself, so calling it at settings-load time stays behind the Play gesture.
- * Owned by settingsMenu.ts's commit path; game code never calls this per
- * sound because every chain already terminates at master().
+ * Push the settings slice's master level, 0 (silent) to 3 (300%), to the bus.
+ * Reads (never writes) the slice, so settings stays the single source of
+ * truth. Applies live when the graph exists; otherwise the next ac() build
+ * reads the slice — and it never creates the context itself, so calling it at
+ * settings-load time stays behind the Play gesture. Owned by settingsMenu.ts's
+ * load/commit path; game code never calls this per sound because every chain
+ * already terminates at master().
  */
-export function setMasterVolume(v: number): void {
-  const lim = SETTING_LIMITS.volume;
-  const clamped = typeof v === 'number' && Number.isFinite(v) ? Math.min(lim.max, Math.max(lim.min, v)) : pendingVolume;
-  pendingVolume = clamped;
-  if (masterGain && audioCtx) masterGain.gain.value = clamped;
+export function syncMasterVolume(): void {
+  if (masterGain && audioCtx) masterGain.gain.value = volumeForBus();
 }
 
 /** White-noise buffer of `dur` seconds. */

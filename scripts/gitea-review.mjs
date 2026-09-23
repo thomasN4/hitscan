@@ -31,7 +31,7 @@ export const marker = (sha) => `<!-- ai-review:${sha} -->`;
 const legacyMarker = (sha) => `<!-- claude-review:${sha} -->`;
 const reviewerNames = new Map([
   ['claude', 'Claude'],
-  ['codex', 'GPT-5.6 Sol'],
+  ['codex', 'GPT-6 Sol'],
   ['opencode', 'OpenCode / Muse Spark 1.3 Contributor'],
 ]);
 

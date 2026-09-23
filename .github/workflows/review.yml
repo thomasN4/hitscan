@@ -186,7 +186,7 @@ jobs:
       - name: Install Codex
         run: |
           # Do not let a PR-owned .npmrc select what runs beside the credential.
-          (cd /tmp && npm i -g --ignore-scripts @openai/codex@0.149.1)
+          (cd /tmp && npm i -g --ignore-scripts @openai/codex@0.156.1)
 
           # Codex ships a static bwrap in its pinned Linux npm artifact. Put
           # that binary at the distribution path so the runner host's Ubuntu

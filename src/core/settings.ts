@@ -1,5 +1,6 @@
-// core/settings.ts — player preferences: look sensitivity/acceleration, and
-// the touch controls' opacity, stick size and on-screen layout.
+// core/settings.ts — player preferences: master volume, look
+// sensitivity/acceleration, and the touch controls' opacity, stick size and
+// on-screen layout.
 //
 // Pure and Node-importable, like sessionConfig.ts: the live slice is
 // core/state.ts:settings, localStorage IO lives in settingsMenu.ts, and this
@@ -41,6 +42,8 @@ export interface TouchSettings {
 export interface Settings {
   /** Bumped only by a shape change a sanitizer cannot bridge. */
   version: 1;
+  /** Master output multiplier, 0 (silent) to 3 (300%); applied by audio.ts's master gain. */
+  volume: number;
   /** Multiplier of sim/look.ts:MOUSE_BASE_SENS. */
   mouseSens: number;
   touch: TouchSettings;
@@ -50,6 +53,7 @@ export interface Settings {
 interface Limits { min: number; max: number }
 
 export const SETTING_LIMITS = {
+  volume: { min: 0, max: 3 },
   sens: { min: 0.1, max: 5 },
   accel: { min: 0, max: 3 },
   opacity: { min: 0.15, max: 1 },
@@ -66,6 +70,7 @@ export const SETTING_LIMITS = {
  */
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
+  volume: 1.5,
   mouseSens: 1,
   touch: {
     hip: { sens: 1, accel: 1.3 },
@@ -85,6 +90,16 @@ export const DEFAULT_SETTINGS: Settings = {
     weapons: { x: 0.859, y: 0.077, scale: 1 },
   },
 };
+
+/** Square-law slider: more travel for quiet levels, with zero still silent. */
+export function sliderPositionToVolume(position: number): number {
+  return SETTING_LIMITS.volume.max * (position / 100) ** 2;
+}
+
+/** Inverse of sliderPositionToVolume for showing stored gain values. */
+export function volumeToSliderPosition(volume: number): number {
+  return 100 * Math.sqrt(volume / SETTING_LIMITS.volume.max);
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -136,6 +151,7 @@ export function sanitizeSettings(raw: unknown): Settings {
   const d = DEFAULT_SETTINGS;
   return {
     version: 1,
+    volume: num(field(raw, 'volume'), SETTING_LIMITS.volume, d.volume),
     mouseSens: num(field(raw, 'mouseSens'), SETTING_LIMITS.sens, d.mouseSens),
     touch: {
       hip: tuning(field(touch, 'hip'), d.touch.hip),

@@ -15,7 +15,8 @@
 // Opened from a Settings button in the start and pause menus. It overlays
 // whichever one opened it, so Back just hides it again.
 import { settings } from './core/state';
-import { DEFAULT_SETTINGS, SETTING_LIMITS, sanitizeSettings, type Settings } from './core/settings';
+import { DEFAULT_SETTINGS, SETTING_LIMITS, sanitizeSettings, sliderPositionToVolume, volumeToSliderPosition, type Settings } from './core/settings';
+import { syncMasterVolume } from './audio';
 import { requireEl } from './hud';
 import { applyTouchSettings, startLayoutEdit } from './touchControls';
 
@@ -32,6 +33,8 @@ export function loadStoredSettings(): void {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw !== null) assignSettings(sanitizeSettings(JSON.parse(raw)));
   } catch { /* storage unavailable or corrupt: keep the defaults */ }
+  // Push the level to the bus if built (otherwise ac() reads the slice); never creates the AudioContext itself.
+  syncMasterVolume();
 }
 
 function saveSettings(): void {
@@ -48,14 +51,16 @@ interface Slider {
 }
 
 const times = (v: number): string => `${v.toFixed(2)}×`;
+const percent = (v: number): string => `${Math.round(v * 100)}%`;
 
 const SLIDERS: readonly Slider[] = [
+  { id: 'setVolume', lim: { min: 0, max: 100 }, step: 1, get: s => volumeToSliderPosition(s.volume), set: (s, v) => { s.volume = sliderPositionToVolume(v); }, fmt: v => percent(sliderPositionToVolume(v)) },
   { id: 'setMouseSens', lim: SETTING_LIMITS.sens, step: 0.05, get: s => s.mouseSens, set: (s, v) => { s.mouseSens = v; }, fmt: times },
   { id: 'setHipSens', lim: SETTING_LIMITS.sens, step: 0.05, get: s => s.touch.hip.sens, set: (s, v) => { s.touch.hip.sens = v; }, fmt: times },
   { id: 'setHipAccel', lim: SETTING_LIMITS.accel, step: 0.05, get: s => s.touch.hip.accel, set: (s, v) => { s.touch.hip.accel = v; }, fmt: v => v.toFixed(2) },
   { id: 'setAdsSens', lim: SETTING_LIMITS.sens, step: 0.05, get: s => s.touch.ads.sens, set: (s, v) => { s.touch.ads.sens = v; }, fmt: times },
   { id: 'setAdsAccel', lim: SETTING_LIMITS.accel, step: 0.05, get: s => s.touch.ads.accel, set: (s, v) => { s.touch.ads.accel = v; }, fmt: v => v.toFixed(2) },
-  { id: 'setOpacity', lim: SETTING_LIMITS.opacity, step: 0.05, get: s => s.touch.opacity, set: (s, v) => { s.touch.opacity = v; }, fmt: v => `${Math.round(v * 100)}%` },
+  { id: 'setOpacity', lim: SETTING_LIMITS.opacity, step: 0.05, get: s => s.touch.opacity, set: (s, v) => { s.touch.opacity = v; }, fmt: percent },
   { id: 'setStick', lim: SETTING_LIMITS.stickRadius, step: 1, get: s => s.touch.stickRadius, set: (s, v) => { s.touch.stickRadius = v; }, fmt: v => `${v}px` },
 ];
 
@@ -72,9 +77,10 @@ function refreshForm(): void {
   }
 }
 
-/** Apply a changed slice: persist it, and restyle the touch controls if they exist. */
+/** Apply a changed slice: persist it, push the level to the master bus, and restyle the touch controls if they exist. */
 function commit(): void {
   saveSettings();
+  syncMasterVolume();
   if (touchMode) applyTouchSettings();
 }
 

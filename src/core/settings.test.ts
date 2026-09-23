@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_SETTINGS, SETTING_LIMITS, TOUCH_CONTROL_IDS, defaultLayout, sanitizeSettings } from './settings';
+import { DEFAULT_SETTINGS, SETTING_LIMITS, TOUCH_CONTROL_IDS, defaultLayout, sanitizeSettings, sliderPositionToVolume, volumeToSliderPosition } from './settings';
 
 describe('sanitizeSettings', () => {
   test('garbage of any shape yields the defaults', () => {
@@ -10,12 +10,23 @@ describe('sanitizeSettings', () => {
 
   test('a valid object round-trips unchanged, through JSON too', () => {
     const tuned = sanitizeSettings({
+      volume: 0.5,
       mouseSens: 1.4,
       touch: { hip: { sens: 1.3, accel: 0.6 }, ads: { sens: 0.7, accel: 0 }, opacity: 0.6, stickRadius: 70 },
       layout: { ...DEFAULT_SETTINGS.layout, fireR: { x: 0.8, y: 0.7, scale: 1.3 } },
     });
     expect(sanitizeSettings(JSON.parse(JSON.stringify(tuned)))).toEqual(tuned);
+    expect(tuned.volume).toBe(0.5);
     expect(tuned.layout.fireR).toEqual({ x: 0.8, y: 0.7, scale: 1.3 });
+  });
+
+  test('volume clamps to its limits and falls back per field', () => {
+    expect(sanitizeSettings({ volume: 99 }).volume).toBe(SETTING_LIMITS.volume.max);
+    expect(sanitizeSettings({ volume: -1 }).volume).toBe(SETTING_LIMITS.volume.min);
+    for (const bad of ['loud', NaN, Infinity, null]) {
+      expect(sanitizeSettings({ volume: bad }).volume).toBe(DEFAULT_SETTINGS.volume);
+    }
+    expect(DEFAULT_SETTINGS.volume).toBe(1.5);
   });
 
   test('clamps out-of-range values and falls back per field', () => {
@@ -47,5 +58,19 @@ describe('sanitizeSettings', () => {
     expect(DEFAULT_SETTINGS.layout.fireR.x).not.toBe(0);
     expect(DEFAULT_SETTINGS.touch.hip.sens).toBe(1);
     expect(defaultLayout()).toEqual(DEFAULT_SETTINGS.layout);
+  });
+});
+
+describe('volume slider mapping', () => {
+  test('mutes at zero, reaches 3× at the end, and gives finer control below halfway', () => {
+    expect(sliderPositionToVolume(0)).toBe(0);
+    expect(sliderPositionToVolume(50)).toBe(0.75);
+    expect(sliderPositionToVolume(100)).toBe(3);
+  });
+
+  test('places saved gain values back at their corresponding slider positions', () => {
+    for (const gain of [0, 0.5, 1, 1.5, 2, 3]) {
+      expect(sliderPositionToVolume(volumeToSliderPosition(gain))).toBeCloseTo(gain);
+    }
   });
 });

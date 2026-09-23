@@ -1541,10 +1541,12 @@ export function keyHeld(code: string): boolean {
 }
 
 /**
- * Player preferences (core/settings.ts): look sensitivity/acceleration and
- * the touch layout. ONE writer — settingsMenu.ts, which loads it from
- * localStorage at startup and applies slider/editor changes — and read by
- * main.ts (mouse look) and touchControls.ts. Starts as a fresh copy of the
- * defaults so a Node test importing state never sees storage.
+ * Player preferences (core/settings.ts): master volume, look
+ * sensitivity/acceleration and the touch layout. ONE writer —
+ * settingsMenu.ts, which loads it from localStorage at startup and applies
+ * slider/editor changes — and read by main.ts (mouse look) and
+ * touchControls.ts; settingsMenu.ts pushes the level into audio.ts's master
+ * gain. Starts as a fresh copy of the defaults so a Node test importing
+ * state never sees storage.
  */
 export const settings: Settings = sanitizeSettings(undefined);

@@ -2982,6 +2982,23 @@ async function runTouchCheck() {
     await frames(2);
     if (!(await shown('#settingsScreen'))) throw new Error('Settings did not open from the pause menu');
     if (await page.$eval('#setMouseSens', el => el.offsetParent !== null)) throw new Error('desktop mouse slider shown in touch mode');
+    const initialVolume = await page.evaluate(() => ({
+      gain: window.__cs.settings.volume,
+      max: document.getElementById('setVolume').max,
+      readout: document.getElementById('setVolumeOut').textContent,
+    }));
+    if (initialVolume.gain !== 1.5 || initialVolume.max !== '100' || initialVolume.readout !== '150%') {
+      throw new Error(`volume default or slider range wrong: ${JSON.stringify(initialVolume)}`);
+    }
+    const quietVolume = await page.evaluate(() => {
+      const el = document.getElementById('setVolume');
+      el.value = '50';
+      el.dispatchEvent(new Event('input'));
+      return { gain: window.__cs.settings.volume, readout: document.getElementById('setVolumeOut').textContent };
+    });
+    if (quietVolume.gain !== 0.75 || quietVolume.readout !== '75%') {
+      throw new Error(`volume slider curve wrong at midpoint: ${JSON.stringify(quietVolume)}`);
+    }
     await page.evaluate(() => {
       const el = document.getElementById('setHipSens');
       el.value = '1.5';
@@ -3015,16 +3032,17 @@ async function runTouchCheck() {
     });
     if (!exported.same) throw new Error('Copy settings did not export the live settings');
 
-    // Both survive a reload (localStorage), and the reloaded layout is applied.
+    // Volume, sensitivity and layout survive a reload; the layout is applied.
     await page.reload({ waitUntil: 'networkidle0' });
     await page.waitForFunction(() => !document.getElementById('playBtn').disabled, { timeout: 20000 });
     const persisted = await page.evaluate(() => ({
+      volume: window.__cs.settings.volume,
       sens: window.__cs.settings.touch.hip.sens,
       x: window.__cs.settings.layout.fireR.x,
       css: document.getElementById('tcFire').style.getPropertyValue('--x'),
     }));
     await page.evaluate(() => localStorage.removeItem('acsc.settings'));
-    if (persisted.sens !== 1.5 || persisted.x !== edited.x || Number(persisted.css) !== edited.x) {
+    if (persisted.volume !== 0.75 || persisted.sens !== 1.5 || persisted.x !== edited.x || Number(persisted.css) !== edited.x) {
       throw new Error(`settings did not persist across a reload: ${JSON.stringify(persisted)}`);
     }
 

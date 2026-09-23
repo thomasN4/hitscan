@@ -101,7 +101,7 @@ describe('AI review workflow', () => {
 
   test('sources reviewer tools from pinned npm artifacts without APT', () => {
     expect(workflow).not.toContain('apt-get');
-    expect(codexJob).toContain('@openai/codex@0.149.1');
+    expect(codexJob).toContain('@openai/codex@0.156.1');
     expect(codexJob).toContain("-path '*/codex-resources/bwrap'");
     expect(codexJob).toContain('install -m 0755 "$bundled_bwrap" /usr/bin/bwrap');
     expect(opencodeJob).toContain('@vscode/ripgrep@1.18.0');

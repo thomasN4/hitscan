@@ -112,6 +112,20 @@ describe('weapon presentation timelines', () => {
     expect(crossedCue(0.5, 0.6, 0.3)).toBe(false);
     expect(weaponPose({ ...input, now: 12 }).pump).toBe(0);
   });
+
+  // Issue #143 reshaped where the swing goes, not when: contact on the swing
+  // frame, follow-through settled well inside the 0.45 s cadence.
+  test('the knife swing peaks on contact and settles before the next swing', () => {
+    const fireInterval = WEAPONS.knife.fireRate;
+    const at = (phase: number, id: WeaponId = 'knife') =>
+      weaponPose({ ...idle, id, shotAt: 10, fireInterval, now: 10 + phase * fireInterval }).swing;
+    expect(at(0)).toBe(1);
+    expect(at(0.4)).toBeGreaterThan(0);
+    expect(at(0.4)).toBeLessThan(1);
+    expect(at(0.85)).toBe(0);
+    expect(at(1)).toBe(0);
+    expect(at(0, 'pistol')).toBe(0);
+  });
 });
 
 

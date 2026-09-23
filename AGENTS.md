@@ -145,7 +145,7 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    - Gitea has no draft flag on the pull request itself. `--draft` prepends
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
-   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a trailer naming the model that wrote that text, in `Name <email>` form, chosen by the same rule as commit messages: `Co-authored-by: <model>` when the user posts it, `Authored-by: <model>` when `code-bot` does.
+   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a footer crediting the AI(s) involved in that text — every one that contributed, not only the one that posted it, so a Plan Relay PR credits its executor as well as its planner. The footer's form is open: a `Name <email>` trailer chosen by the same rule as commit messages (`Co-authored-by: <model>` when the user posts it, `Authored-by: <model>` when `code-bot` does), a tool's own credit line such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`, or both. The one thing it may not be is absent. Commit messages keep the stricter trailer rule above, because a trailer is what Git and Gitea can parse there.
 5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
@@ -416,8 +416,8 @@ and a planner waiting on it cannot tell the difference from the outside:
   correctness bug, or when it violates a rule in Architecture rules or Gotchas
   learned the hard way. Style and preference findings are answered in the PR
   thread, `tea comments add <index> --login code-bot --repo thomasN4/another-cs-clone`,
-  ending in the `Authored-by`
-  trailer that a `code-bot` post takes — and do not restart the loop.
+  ending in the AI-credit footer that step 4 of the workflow requires of every
+  PR comment — and do not restart the loop.
 - **A failed reviewer posts nothing at all.** A usage limit or provider error
   exits the model command nonzero, which fails the Review step it runs in and
   skips everything after it; the export step's empty-file check is the narrower

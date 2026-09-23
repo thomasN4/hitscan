@@ -6,7 +6,7 @@ const SHA = 'abc123';
 describe('Gitea review identity', () => {
   test.each([
     ['claude', 'Claude'],
-    ['codex', 'GPT-5.6 Sol'],
+    ['codex', 'GPT-6 Sol'],
     ['opencode', 'OpenCode / Muse Spark 1.3 Contributor'],
   ])('labels %s output as %s', (reviewer, name) => {
     const body = composeBody('## Bugs\n\n- finding', SHA, reviewer);
@@ -15,7 +15,7 @@ describe('Gitea review identity', () => {
   });
 
   test('uses the selected provider for a clean review', () => {
-    expect(composeBody('NO FINDINGS', SHA, 'codex')).toContain('**GPT-5.6 Sol review** — no findings.');
+    expect(composeBody('NO FINDINGS', SHA, 'codex')).toContain('**GPT-6 Sol review** — no findings.');
     expect(composeBody('NO FINDINGS', SHA, 'opencode')).toContain('**OpenCode / Muse Spark 1.3 Contributor review** — no findings.');
   });
 

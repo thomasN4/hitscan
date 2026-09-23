@@ -10,7 +10,7 @@ and iterated locally without pushing a branch:
     --append-system-prompt "$(cat scripts/review-prompt.md)" \
     --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
 
-  codex exec --model gpt-5.6-sol \
+  codex exec --model gpt-6-sol \
     --config 'model_reasoning_effort="high"' \
     --config 'default_permissions="review"' \
     --config "permissions.review={extends=\":read-only\", filesystem={\"${CODEX_HOME:-$HOME/.codex}\"=\"deny\"}}" \

@@ -146,7 +146,7 @@ jobs:
           echo "reviewer=$reviewer" >> "$GITHUB_OUTPUT"
 
   codex_review:
-    name: GPT-5.6 Sol PR review
+    name: GPT-6 Sol PR review
     needs: prepare
     if: >-
       needs.prepare.outputs.reviewed != 'true'
@@ -219,7 +219,7 @@ jobs:
             -- \
             sh -c 'test -r package.json && test ! -w package.json && test ! -r /codex-home/auth.json'
 
-      - name: Review with GPT-5.6 Sol
+      - name: Review with GPT-6 Sol
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         # Codex's custom permission profile is the mutation and credential-read
@@ -233,11 +233,11 @@ jobs:
           REVIEW_PROMPT="Review the pull request titled \"$PR_TITLE\", whose base commit is $BASE_SHA and head commit is $HEAD_SHA.
 
           $(cat /tmp/review-prompt.md)"
-          (sleep 600; echo "::warning::GPT-5.6 Sol review is still running after 10 minutes; allowing it to continue to the workflow's hard limit.") &
+          (sleep 600; echo "::warning::GPT-6 Sol review is still running after 10 minutes; allowing it to continue to the workflow's hard limit.") &
           warning_pid=$!
           trap 'kill "$warning_pid" 2>/dev/null || true' EXIT
           codex exec \
-            --model gpt-5.6-sol \
+            --model gpt-6-sol \
             --config 'model_reasoning_effort="high"' \
             --config 'default_permissions="review"' \
             --config "$CODEX_REVIEW_PROFILE" \

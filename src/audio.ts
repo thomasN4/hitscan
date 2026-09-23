@@ -11,14 +11,14 @@
 import type * as THREE from 'three';
 import { camera } from './core/engine';
 import { gameTime, type BotWeaponId } from './core/state';
-import { SETTING_LIMITS } from './core/settings';
+import { DEFAULT_SETTINGS, SETTING_LIMITS } from './core/settings';
 import type { ScheduledHandle } from './sim/gameClock';
 
 let audioCtx: AudioContext | undefined;
 /** Every sound's terminal node: per-sound gains feed this, it feeds the destination. */
 let masterGain: GainNode | undefined;
 /** Level staged before the first sound; ac() applies it when it builds the graph. */
-let pendingVolume = 1;
+let pendingVolume = DEFAULT_SETTINGS.volume;
 
 function ac() {
   // Lazily created on first sound; browsers require a user gesture first,
@@ -43,7 +43,7 @@ function master(): GainNode {
 }
 
 /**
- * Master output level, 0 (silent) to 2 (200%). Staged until the first sound
+ * Master output level, 0 (silent) to 3 (300%). Staged until the first sound
  * builds the graph, then applied live — and it never creates the context
  * itself, so calling it at settings-load time stays behind the Play gesture.
  * Owned by settingsMenu.ts's commit path; game code never calls this per

@@ -42,7 +42,7 @@ export interface TouchSettings {
 export interface Settings {
   /** Bumped only by a shape change a sanitizer cannot bridge. */
   version: 1;
-  /** Master output multiplier, 0 (silent) to 2 (200%); applied by audio.ts's master gain. */
+  /** Master output multiplier, 0 (silent) to 3 (300%); applied by audio.ts's master gain. */
   volume: number;
   /** Multiplier of sim/look.ts:MOUSE_BASE_SENS. */
   mouseSens: number;
@@ -53,7 +53,7 @@ export interface Settings {
 interface Limits { min: number; max: number }
 
 export const SETTING_LIMITS = {
-  volume: { min: 0, max: 2 },
+  volume: { min: 0, max: 3 },
   sens: { min: 0.1, max: 5 },
   accel: { min: 0, max: 3 },
   opacity: { min: 0.15, max: 1 },
@@ -70,7 +70,7 @@ export const SETTING_LIMITS = {
  */
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
-  volume: 1,
+  volume: 1.5,
   mouseSens: 1,
   touch: {
     hip: { sens: 1, accel: 1.3 },
@@ -90,6 +90,16 @@ export const DEFAULT_SETTINGS: Settings = {
     weapons: { x: 0.859, y: 0.077, scale: 1 },
   },
 };
+
+/** Square-law slider: more travel for quiet levels, with zero still silent. */
+export function sliderPositionToVolume(position: number): number {
+  return SETTING_LIMITS.volume.max * (position / 100) ** 2;
+}
+
+/** Inverse of sliderPositionToVolume for showing stored gain values. */
+export function volumeToSliderPosition(volume: number): number {
+  return 100 * Math.sqrt(volume / SETTING_LIMITS.volume.max);
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

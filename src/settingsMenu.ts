@@ -15,7 +15,7 @@
 // Opened from a Settings button in the start and pause menus. It overlays
 // whichever one opened it, so Back just hides it again.
 import { settings } from './core/state';
-import { DEFAULT_SETTINGS, SETTING_LIMITS, sanitizeSettings, type Settings } from './core/settings';
+import { DEFAULT_SETTINGS, SETTING_LIMITS, sanitizeSettings, sliderPositionToVolume, volumeToSliderPosition, type Settings } from './core/settings';
 import { setMasterVolume } from './audio';
 import { requireEl } from './hud';
 import { applyTouchSettings, startLayoutEdit } from './touchControls';
@@ -54,7 +54,7 @@ const times = (v: number): string => `${v.toFixed(2)}×`;
 const percent = (v: number): string => `${Math.round(v * 100)}%`;
 
 const SLIDERS: readonly Slider[] = [
-  { id: 'setVolume', lim: SETTING_LIMITS.volume, step: 0.05, get: s => s.volume, set: (s, v) => { s.volume = v; }, fmt: percent },
+  { id: 'setVolume', lim: { min: 0, max: 100 }, step: 1, get: s => volumeToSliderPosition(s.volume), set: (s, v) => { s.volume = sliderPositionToVolume(v); }, fmt: v => percent(sliderPositionToVolume(v)) },
   { id: 'setMouseSens', lim: SETTING_LIMITS.sens, step: 0.05, get: s => s.mouseSens, set: (s, v) => { s.mouseSens = v; }, fmt: times },
   { id: 'setHipSens', lim: SETTING_LIMITS.sens, step: 0.05, get: s => s.touch.hip.sens, set: (s, v) => { s.touch.hip.sens = v; }, fmt: times },
   { id: 'setHipAccel', lim: SETTING_LIMITS.accel, step: 0.05, get: s => s.touch.hip.accel, set: (s, v) => { s.touch.hip.accel = v; }, fmt: v => v.toFixed(2) },

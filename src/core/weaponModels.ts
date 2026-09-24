@@ -24,6 +24,16 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
       : (id === 'smg' || id === 'ak47') ? { x: 0.25, y: 0.14 } : { x: 0.24, y: 0.15 };
   const sightLine = id === 'pistol' ? -0.004 : id === 'revolver' ? 0.037 : id === 'shotgun' ? .034 : id === 'sawnOff' ? .008 : 0;
   body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' || id === 'sawnOff' ? -0.50 : id === 'shotgun' ? -.46 : -0.57);
+  // Held parallel to the view axis, the knife showed its pommel end-on and
+  // read as a pencil aimed at the horizon. A forward grip instead: the handle
+  // rises from below the frame's lower-right edge, where the hand would be, and
+  // the blade is tipped up and in to aim at the crosshair ~1.5 m out, inside
+  // melee reach (issue #143). Yaw/pitch are derived from that aim point, so a
+  // position change must re-derive them.
+  if (id === 'knife') {
+    body.position.set(0.25, -0.27, -0.46);
+    body.rotation.set(0.278, 0.228, -0.25, 'YXZ');
+  }
   group.add(body);
   const authored = createAuthoredWeaponRig(id, weaponAssets[id]);
   body.add(authored.root);

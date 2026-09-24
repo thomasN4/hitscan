@@ -76,8 +76,8 @@
       "id": "knife",
       "source": "assets/source/knife.blend",
       "output": "public/assets/knife.glb",
-      "sourceSha256": "091c34a1506486301d1d9caa9ff3b3e2153da192cbc2ad607f1f13fab3e35bbe",
-      "outputSha256": "1ca7055ef1da3c5a5e3592d052db642916030c75bd161547a045e2b0d8e46ff3",
+      "sourceSha256": "0cca9c066498870b795f560461f6c7f1b48a2c5796431991cd6057e41b9714cb",
+      "outputSha256": "c60ad55c5ee04b5d2471378702a9099fa14eed426223d2d99078c7a2fb603e71",
       "stats": {
         "vertices": 5726,
         "meshes": 3,

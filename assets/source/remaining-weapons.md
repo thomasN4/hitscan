@@ -12,7 +12,9 @@ recesses and separate moving assemblies. Runtime GLBs use the existing cel palet
   handle's receiver slot clears its lift before the rearward pull. The bolt body
   uses the receiver's blued-steel finish so it retains contrast in the cel palette.
 - Knife: clip-point blade with broad ground bevel facets, guard, steel tang,
-  ribbed rubber grip and a pommel with a lanyard opening.
+  ribbed rubber grip and a pommel with a lanyard opening. It is 0.30 m overall,
+  a real combat knife's length; `KNIFE_SCALE` shrank the first 0.571 m build
+  uniformly, bevels included (issue #143).
 
 Coordinates are metres, Y up and forward -Z. Moving assemblies already use the
 export names: `mechanism_magazine`, `mechanism_slide` (SMG) and `mechanism_bolt`

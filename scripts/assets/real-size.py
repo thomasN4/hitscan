@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # weapon each one stands in for:
 REAL_SIZE = {
     'pistol': .70,    # 0.21 m  (full-size service pistol, 0.19-0.22 m)
-    'revolver': .85,  # 0.27 m  (5 in .44 Magnum, 0.26-0.30 m)
+    'revolver': .85,  # 0.27 m; 0.32 m once its barrel is 7.5 in (create-weapon-previews.py)
     'sawnOff': .80,   # 0.39 m  (pistol-grip sawn-off); bore 18.4 mm = 12 gauge
     'smg': .80,       # 0.68 m  (MP5 / UMP, 0.68-0.69 m)
     'shotgun': .92,   # 0.99 m  (18-20 in pump gun, 0.99-1.0 m)

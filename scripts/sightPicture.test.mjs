@@ -183,8 +183,8 @@ test('revolver front crest is visible through the rear notch throughout firing',
     const caster = new Raycaster(EYE,new Vector3(0,-.0002,-.575).normalize());
     const hit = caster.intersectObjects(visibleMeshes(gun),false)[0];
     expect(hit, `front blade at cycle ${i/20}`).toBeDefined();
-    expect(hit.distance).toBeGreaterThan(.60);
-    expect(hit.distance).toBeLessThan(.62);
+    expect(hit.distance).toBeGreaterThan(.64);
+    expect(hit.distance).toBeLessThan(.66);
   }
 });
 

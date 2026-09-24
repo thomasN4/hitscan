@@ -203,15 +203,23 @@ def loaded_chambers(brass, dark):
     return parts
 
 
+# The .44 Magnum is the one-headshot sidearm; a 7.5 in barrel (at real size,
+# after real-size.py's 0.85) reads as the long-range hand cannon it is.
+# Everything forward of the frame moves by this; the ejector rod stays
+# cylinder-length, as on the real guns.
+BARREL_EXTENSION=.0494
+
+
 def revolver():
+    e=BARREL_EXTENSION
     steel,dark,wood,grain,silver,brass=setup()
     frame=profile('Frame', [(-.068,.025),(.041,.025),(.066,-.008),(.057,-.067),(.020,-.086),(-.065,-.081)],.040,steel,.003)
     cut(frame,box('Cylinder window cutter',(.100,.080,.070),(0,-.027,-.014),dark,.001))
-    barrel=cyl('Barrel',.016,.160,(0,-.003,-.139),steel)
-    cut(barrel,cyl('Bore cutter',.0105,.17,(0,-.003,-.139),dark))
-    box('Barrel top rib',(.024,.011,.160),(0,.013,-.139),steel,.0015)
-    underlug=profile('Underlug',[(-.218,-.010),(-.058,-.010),(-.058,-.046),(-.198,-.046),(-.218,-.030)],.029,steel,.002)
-    cut(underlug,cyl('Underlug bore clearance',.0105,.17,(0,-.003,-.139),dark))
+    barrel=cyl('Barrel',.016,.160+e,(0,-.003,-.139-e/2),steel)
+    cut(barrel,cyl('Bore cutter',.0105,.17+e,(0,-.003,-.139-e/2),dark))
+    box('Barrel top rib',(.024,.011,.160+e),(0,.013,-.139-e/2),steel,.0015)
+    underlug=profile('Underlug',[(-.218-e,-.010),(-.058,-.010),(-.058,-.046),(-.198-e,-.046),(-.218-e,-.030)],.029,steel,.002)
+    cut(underlug,cyl('Underlug bore clearance',.0105,.17+e,(0,-.003,-.139-e/2),dark))
     cylinder=cyl('Cylinder / six chamber rotor',.039,.060,(0,-.029,-.015),steel,72)
     for i in range(6):
         a=i*math.tau/6
@@ -237,13 +245,13 @@ def revolver():
     tube('Trigger',[(0,-.068,.005),(0,-.087,-.004),(0,-.091,-.014)],.0025,silver)
     profile('Hammer',[(.036,-.009),(.057,.036),(.075,.036),(.059,.009),(.051,-.027)],.013,steel,.001)
     box('Rear sight',(.022,.007,.015),(0,.030,.026),dark,.001)
-    box('Front sight',(.005,.013,.017),(0,.025,-.205),dark,.001)
+    box('Front sight',(.005,.013,.017),(0,.025,-.205-e),dark,.001)
     box('Cylinder release',(.005,.013,.019),(-.022,-.021,.040),silver,.001)
     marker('Grip.Primary',(0,-.102,.061))
     marker('Mechanism.CylinderAxis',(0,-.029,-.015))
     marker('Mechanism.CranePivot',(-.021,-.057,.018))
     marker('Mechanism.HammerPivot',(0,-.018,.049))
-    marker('Muzzle',(0,-.003,-.220))
+    marker('Muzzle',(0,-.003,-.220-e))
 
 
 def save_and_render(name, target, scale):
@@ -297,4 +305,4 @@ if __name__=='__main__':
     shotgun()
     save_and_render('shotgun',(0,-.035,-.080),1.23)
     revolver()
-    save_and_render('revolver',(0,-.053,-.060),.48)
+    save_and_render('revolver',(0,-.053,-.060-BARREL_EXTENSION/2),.48+BARREL_EXTENSION)

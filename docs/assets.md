@@ -49,7 +49,7 @@ pivots all keep their relationships and the sight line scales with the gun:
 | Weapon | Scale | Overall length | Real reference |
 | --- | --- | --- | --- |
 | pistol | 0.70 | 0.21 m | full-size service pistol, 0.19–0.22 m |
-| revolver | 0.85 | 0.27 m | 5 in .44 Magnum, 0.26–0.30 m |
+| revolver | 0.85 | 0.32 m | 7.5 in .44 Magnum (barrel lengthened after the pass) |
 | sawnOff | 0.80 | 0.39 m | pistol-grip sawn-off; 18.4 mm (12-gauge) bore |
 | smg | 0.80 | 0.68 m | MP5 / UMP, 0.68–0.69 m |
 | shotgun | 0.92 | 0.99 m | 18–20 in pump gun |
@@ -59,7 +59,12 @@ pivots all keep their relationships and the sight line scales with the gun:
 
 The revolver's cylinder is additionally trimmed to 0.75 of its radius about its
 own axis, so it stays round and keeps indexing. It comes out at 50 mm with
-11.5 mm chambers: .44 Magnum proportions, for the one-headshot sidearm. Two steel fills close the frame
+11.5 mm chambers: .44 Magnum proportions, for the one-headshot sidearm. Its
+barrel was then lengthened 42 mm to 7.5 in, the long-range hand-cannon length
+that fits that role. In the source this was a one-off `bpy` stretch of the
+barrel, top rib and underlug, with the front sight and `Muzzle` marker moved
+along. In the generator it is `BARREL_EXTENSION`, so a regenerated revolver
+keeps it. The ejector rod stays cylinder-length, as on the real guns. Two steel fills close the frame
 window above and below it. The loading marker moved into the source as
 `Reload.Chamber`, so the exporter no longer hard-codes a chamber position that
 the trim would have left behind.

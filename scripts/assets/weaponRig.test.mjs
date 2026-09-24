@@ -217,7 +217,7 @@ test('sawn-off shells follow the rotated bores and restore after cancellation', 
 const REAL_LENGTH = {
   knife: [.28, .32],     // combat knife
   pistol: [.19, .23],    // full-size service pistol
-  revolver: [.25, .30],  // 5 in .44 Magnum
+  revolver: [.30, .34],  // 7.5 in .44 Magnum
   sawnOff: [.35, .50],   // pistol-grip sawn-off
   smg: [.64, .72],       // MP5 / UMP
   shotgun: [.95, 1.05],  // 18-20 in pump gun

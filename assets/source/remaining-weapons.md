@@ -22,11 +22,11 @@ export names: `mechanism_magazine`, `mechanism_slide` (SMG) and `mechanism_bolt`
 `magazine_out` and `Muzzle` markers. The knife has only `grip_right` and
 `blade_tip`; no fake loading port or firearm action is required.
 
-The SMG magazine extracts 235 mm downward, clearing its long neck. The sniper
+The SMG magazine extracts 188 mm downward, clearing its long neck. The sniper
 magazine extracts 180 mm downward. These paths drive runtime presentation;
 the rifles roll about their receivers to keep extraction visible, while
 existing TypeScript clocks still determine reload completion and ammunition.
-The SMG action moves 45 mm rearward; the sniper bolt lifts 1.15 radians about its
+The SMG action moves 36 mm rearward; the sniper bolt lifts 1.15 radians about its
 authored axis and pulls 105 mm rearward. There are no baked animation clips.
 
 Regenerate sources and hero/profile/underside previews with:

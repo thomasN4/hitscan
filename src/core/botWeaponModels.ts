@@ -42,6 +42,8 @@ export interface BotWeaponRig {
   muzzle: THREE.Object3D | null;
   /** Firing/reloading nodes, renamed for scene queries (see below). */
   mechanisms: AuthoredWeaponRig['mechanisms'];
+  /** Slide/pump/bolt stroke, the authored rig's; 0 without one. */
+  actionTravel: number;
   /** Rest pose of every mechanism node, for absolute (non-accumulating) posing. */
   rest: Map<THREE.Object3D, { position: THREE.Vector3; rotation: THREE.Euler }>;
   /** Extraction marker for the reload displacement; set exactly when mechanisms.magazine is. */
@@ -109,7 +111,7 @@ export function createBotWeaponRig(id: BotWeaponId): BotWeaponRig {
   mount.traverse(node => {
     if (node instanceof THREE.Mesh) node.castShadow = false;
   });
-  return { mount, muzzle: authored.muzzle ?? null, mechanisms, rest,
+  return { mount, muzzle: authored.muzzle ?? null, mechanisms, rest, actionTravel: authored.actionTravel,
     magazineOut: authored.magazineOut, port: authored.port };
 }
 
@@ -172,12 +174,12 @@ export function poseBotWeaponRig(
   if (m.hinge) m.hinge.rotation.x -= Math.PI / 5 * pose.reloadBlend;
   const kick = botShotKick(pose.shotAge);
   if (kick > 0.001) {
-    if (m.slide) m.slide.position.z += 0.045 * kick;
+    if (m.slide) m.slide.position.z += rig.actionTravel * kick;
     if (m.bolt) {
       m.bolt.rotation.z += 1.15 * kick;
-      m.bolt.position.z += 0.105 * kick;
+      m.bolt.position.z += rig.actionTravel * kick;
     }
-    if (m.pump) m.pump.position.z += 0.095 * kick;
+    if (m.pump) m.pump.position.z += rig.actionTravel * kick;
     if (m.hammer) m.hammer.rotation.x += 0.5 * kick;
   }
   // Documented pairing (weaponAssets.ts): magazineOut/port exist exactly when

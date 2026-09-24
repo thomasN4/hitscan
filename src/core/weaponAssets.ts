@@ -14,8 +14,20 @@ export interface AuthoredWeaponRig {
   bladeTip?: THREE.Object3D;
   chambers?: readonly [THREE.Object3D, THREE.Object3D];
   magazineOut?: THREE.Object3D;
+  /** Full-stroke travel (m) of the slide, pump or bolt along authored +z; 0 without one. */
+  actionTravel: number;
   mechanisms: Partial<Record<'hinge' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'slide' | 'magazine' | 'bolt', THREE.Object3D>>;
 }
+/**
+ * Action stroke per weapon, sized to the real-sized models
+ * (scripts/assets/real-size.py): scaled with the gun it moves, so a shrunken
+ * slide does not overshoot its frame. Shared by the viewmodel and bot mounts,
+ * which make the same motion from either side.
+ */
+const ACTION_TRAVEL: Record<AuthoredWeaponId, number> = {
+  pistol: 0.032, smg: 0.036, ak47: 0.042, shotgun: 0.087, sniper: 0.105,
+  revolver: 0, sawnOff: 0, knife: 0,
+};
 function required(root: THREE.Object3D, name: string): THREE.Object3D {
   const matches: THREE.Object3D[] = [];
   root.traverse(node => { if (node.name === name) matches.push(node); });
@@ -50,12 +62,12 @@ export function createAuthoredWeaponRig(id: AuthoredWeaponId, asset: THREE.Objec
       throw new Error(`Weapon asset: incompatible ${id} mechanism hierarchy`);
     const travel = magazineOut.position.clone().sub(port.position);
     if (![...travel.toArray()].every(Number.isFinite) || Math.abs(travel.x) > 1e-6
-      || travel.y >= -0.13 || (id === 'pistol' ? travel.z <= 0 : Math.abs(travel.z) > 1e-6) || travel.length() > .3)
+      || travel.y >= -0.10 || (id === 'pistol' ? travel.z <= 0 : Math.abs(travel.z) > 1e-6) || travel.length() > .3)
       throw new Error(`Weapon asset: invalid ${id} magazine path`);
   }
   if (id === 'knife' && (grip.parent !== root || required(root, 'blade_tip').parent !== root))
     throw new Error('Weapon asset: incompatible knife attachment hierarchy');
-  return { root, grip, support, port, magazineOut, chambers,
+  return { root, grip, support, port, magazineOut, chambers, actionTravel: ACTION_TRAVEL[id],
     muzzle: id === 'knife' ? undefined : required(root, 'Muzzle'),
     bladeTip: id === 'knife' ? required(root, 'blade_tip') : undefined, mechanisms };
 }

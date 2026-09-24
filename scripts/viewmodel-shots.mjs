@@ -1,4 +1,5 @@
 // Repeatable hip, ADS and reload views for every first-person weapon.
+// CS_VIEWMODEL_IDS=smg,pistol limits the run to a subset.
 // CS_SMOKE_BASE=http://localhost:5178 CS_VIEWMODEL_QUERY='?map=arena&style=ligne-claire' \
 //   node scripts/viewmodel-shots.mjs [outDir]
 // Defaults to the range; also works against production preview. Uses the real
@@ -19,14 +20,14 @@ const browser = await puppeteer.launch({
 const errors = [];
 
 try {
-  for (const id of ['smg', 'sniper', 'shotgun', 'pistol', 'revolver', 'knife']) {
+  for (const id of (process.env.CS_VIEWMODEL_IDS?.split(',') ?? ['smg', 'ak47', 'sniper', 'shotgun', 'pistol', 'revolver', 'sawnOff', 'knife'])) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 720 });
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text()); });
     await page.evaluateOnNewDocument(id => {
-      const primary = ['smg', 'sniper', 'shotgun'].includes(id) ? id : 'smg';
-      const secondary = ['pistol', 'revolver'].includes(id) ? id : 'pistol';
+      const primary = ['smg', 'ak47', 'sniper', 'shotgun'].includes(id) ? id : 'smg';
+      const secondary = ['pistol', 'revolver', 'sawnOff'].includes(id) ? id : 'pistol';
       sessionStorage.setItem('acsc.loadout', JSON.stringify({ primary, secondary }));
     }, id);
     await page.goto(new URL(QUERY, BASE).href, { waitUntil: 'networkidle0', timeout: 20000 });
@@ -43,11 +44,15 @@ try {
       document.getElementById('hud').style.display = 'block';
     });
     if (id === 'knife') await page.keyboard.press('Digit3');
-    else if (id === 'pistol' || id === 'revolver') await page.keyboard.press('Digit2');
+    else if (id === 'pistol' || id === 'revolver' || id === 'sawnOff') await page.keyboard.press('Digit2');
+    // Wait out the 0.4 s deploy (sim/weaponSwap.ts:SWAP_DELAY), which refuses ADS.
     await page.evaluate(async () => {
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const cs = window.__cs;
+      const start = cs.gameTime.now();
+      while (cs.gameTime.now() - start < 0.5) await new Promise(r => requestAnimationFrame(r));
     });
-    assert.equal(await page.evaluate(() => window.__cs.weapon.name), id.toUpperCase());
+    const label = { ak47: 'AK-47', sawnOff: 'SAWN-OFF' }[id] ?? id.toUpperCase();
+    assert.equal(await page.evaluate(() => window.__cs.weapon.name), label);
     await page.screenshot({ path: `${OUT}/${id}-hip.png` });
 
     await page.evaluate(() => window.dispatchEvent(new MouseEvent('mousedown', { button: 2 })));

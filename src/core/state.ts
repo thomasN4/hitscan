@@ -431,6 +431,14 @@ export const RECOIL_CAP = 6;
 export const RECOIL_YAW_CAP = 3;
 /** Base (hip-fire) vertical FOV in degrees; every zoom target sits below this. */
 export const BASE_FOV = 75;
+/**
+ * Camera near plane (m). A shouldered stock runs back past the eye, so the near
+ * plane always cuts it; at real size the SMG's stock strut sits 44 mm under the
+ * sight line, and the cut stays below the 55-degree ADS frame only while this
+ * is under 0.085 (scripts/sightPicture.test.mjs). Not smaller than it needs to
+ * be: the far/near ratio is what the depth buffer's precision spreads over.
+ */
+export const CAMERA_NEAR = 0.075;
 
 /**
  * Which weapon POSITION is live: 0 = primary, 1 = secondary, 2 = knife.

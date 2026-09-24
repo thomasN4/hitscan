@@ -5,6 +5,7 @@ This explicitly regenerates assets/source/pistol.blend; preserve manual edits fi
 Game coordinates: metres, Y up, -Z forward. Visual asset only.
 """
 import math
+import runpy
 from pathlib import Path
 import bpy
 import bmesh
@@ -12,6 +13,8 @@ from mathutils import Matrix, Vector
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'assets/previews'
 OUT.mkdir(parents=True, exist_ok=True)
+_real_size = runpy.run_path(str(Path(__file__).with_name('real-size.py')))
+rescale_to_real_size, REAL_SIZE_APPLIED = _real_size['rescale_to_real_size'], _real_size['APPLIED']
 (ROOT / 'assets/source').mkdir(parents=True, exist_ok=True)
 
 
@@ -103,6 +106,10 @@ def marker(name, loc):
 def setup():
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
+    # A fresh design is drawn at its original size. Without this, a run that
+    # builds two guns in one scene (shotgun, then revolver) refuses the second
+    # one's scale as already applied.
+    bpy.context.scene.pop(REAL_SIZE_APPLIED, None)
     return (material('Charcoal blued steel',(.105,.13,.145)),
             material('Recess / rubber',(.025,.032,.037)),
             material('Warm walnut',(.36,.16,.075)),
@@ -111,6 +118,10 @@ def setup():
             material('Brass',(.62,.40,.12)))
 
 def save_and_render(name, target, scale):
+    # Designs are drawn at their original size; the saved source is real-sized.
+    s=rescale_to_real_size(name)
+    target=tuple(s*v for v in target)
+    scale*=s
     scene=bpy.context.scene
     scene['Design status']='Model review candidate; no runtime integration or animation changes'
     scene['Coordinate convention']='Y up, -Z forward; metres'

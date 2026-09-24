@@ -155,7 +155,7 @@ describe('botWeaponModels', () => {
     if (!slide) throw new Error('pistol mock lost its slide');
     const restZ = slide.position.z;
     poseBotWeaponRig(rig, { shotAge: 0, reloadBlend: 0 });
-    expect(slide.position.z).toBeCloseTo(restZ + 0.045, 10);
+    expect(slide.position.z).toBeCloseTo(restZ + 0.032, 10);
     poseBotWeaponRig(rig, { shotAge: 10, reloadBlend: 0 });
     expect(slide.position.z).toBeCloseTo(restZ, 10);
     expect(botShotKick(Number.NEGATIVE_INFINITY)).toBe(0);

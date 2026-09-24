@@ -38,6 +38,66 @@ native Z-up convention is deliberately not used here. Export uses
 `export_yup=False` to avoid rotating these coordinates a second time. Apply mesh
 transforms before export. No textures or animation clips are needed.
 
+## Real-world size
+
+The first builds were drawn oversized: the pistol (0.30 m) nearly as long as the
+revolver, the SMG (0.85 m) longer than any real SMG, and the revolver's
+cylinder 78 mm across, about twice a real one. `scripts/assets/real-size.py`
+scales each source uniformly about its origin, so proportions, markers and
+pivots all keep their relationships and the sight line scales with the gun:
+
+| Weapon | Scale | Overall length | Real reference |
+| --- | --- | --- | --- |
+| pistol | 0.70 | 0.21 m | full-size service pistol, 0.19–0.22 m |
+| revolver | 0.85 | 0.32 m | 7.5 in .44 Magnum (barrel lengthened after the pass) |
+| sawnOff | 0.80 | 0.39 m | pistol-grip sawn-off; 18.4 mm (12-gauge) bore |
+| smg | 0.80 | 0.68 m | MP5 / UMP, 0.68–0.69 m |
+| shotgun | 0.92 | 0.99 m | 18–20 in pump gun |
+| ak47 | 0.935 | 0.88 m | AKM, 0.88 m |
+| sniper | — | 1.14 m | already real-sized |
+| knife | — | 0.30 m | already real-sized (issue #143) |
+
+The revolver's cylinder is additionally trimmed to 0.75 of its radius about its
+own axis, so it stays round and keeps indexing. It comes out at 50 mm with
+11.5 mm chambers: .44 Magnum proportions, for the one-headshot sidearm. Its
+barrel was then lengthened 42 mm to 7.5 in, the long-range hand-cannon length
+that fits that role. In the source this was a one-off `bpy` stretch of the
+barrel, top rib and underlug, with the front sight and `Muzzle` marker moved
+along. In the generator it is `BARREL_EXTENSION`, so a regenerated revolver
+keeps it. The ejector rod stays cylinder-length, as on the real guns. Two steel fills close the frame
+window above and below it. The loading marker moved into the source as
+`Reload.Chamber`, so the exporter no longer hard-codes a chamber position that
+the trim would have left behind.
+
+The script records the applied factor in the scene (`Real-size scale`), so a
+second run changes nothing. The design generators call the same
+`rescale_to_real_size()` before saving, so a regenerated source comes out at
+the same size. Millimetre figures elsewhere in this file that predate the pass
+(the 5 mm hammer drop, the 37 mm ADS reference) describe the geometry as it was
+drawn and are 0.85× that in the shipped revolver.
+
+Sizes the code carries alongside the assets were scaled with them:
+`weaponModels.ts`'s sight lines and loose cartridges, the per-weapon action
+stroke in `weaponAssets.ts:ACTION_TRAVEL`, and the shell paths in the
+shotgun, revolver and sawn-off presentations. `weaponRig.test.mjs` pins every
+weapon's length to its real range.
+
+## First-person hold
+
+Every firearm viewmodel is placed by one rule rather than per-weapon offsets
+(`weaponModels.ts`, solved by `sim/viewmodelHold.ts:hipHold`). At the hip its
+`grip_right` marker sits on one shared hand point, and the bore is turned to
+cross the crosshair 3 m out, so each weapon shows at its real size with the
+same inward cant. Aiming unwinds that cant about the hand, then puts the sight
+line on the view axis. A long gun whose butt would still end inside the frame
+at the hip (the SMG's short stock) is drawn back along its bore until its last
+5 cm clears the bottom edge with view bob, by a measured amount
+(`sim/viewmodelHold.ts:slideToClear`), which keeps it on the same aim point.
+Long guns are shouldered with the butt on the eye plane,
+and handguns sit with their origin 0.44 m out. The knife keeps its own
+hand-derived hold (issue #143). `scripts/viewmodel-shots.mjs` captures hip,
+ADS and reload views of all eight weapons for comparison.
+
 ## Optional live connection
 
 Tested: Blender 5.2.0 LTS, blender-mcp 1.9.1, add-on protocol 5.
@@ -146,7 +206,10 @@ its slide, preserving the aiming heights. The revolver source has a notched rear
 sight and a front blade raised to the existing 37 mm ADS reference. Its front
 blade remains seated on the barrel rib; the lowered hammer is preserved. These
 are manual source edits, so the initial design generators will overwrite them.
-Runtime ADS offsets and mechanism animations are unchanged.
+They left the runtime ADS offsets and mechanism animations as they were. Both
+have since moved with the real-size pass: ADS offsets are derived from each
+model (see "First-person hold"), and slide, pump and bolt strokes come from
+`weaponAssets.ts:ACTION_TRAVEL`.
 
 The sight tests now probe the pistol supports where sky gaps used to appear and
 raycast through the revolver notch to its front blade throughout firing. The

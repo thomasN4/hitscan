@@ -19,6 +19,6 @@ export function poseSawnOffReload(vm: WeaponViewModel, pose: WeaponPose): void {
     shell.visible = extracting || index < pose.shellCount;
     shell.quaternion.copy(hinge.quaternion);
     shell.position.copy(attachmentPoint(chamber, vm.body))
-      .addScaledVector(direction, extracting ? -.024 + .13 * pose.extraction : .12 - .144 * pose.insert);
+      .addScaledVector(direction, extracting ? -.019 + .104 * pose.extraction : .096 - .115 * pose.insert);
   }
 }

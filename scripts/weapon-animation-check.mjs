@@ -155,7 +155,7 @@ try {
           const rest = idle.parts['weapon-mechanism-magazine'].position;
           const mag = pose.parts['weapon-mechanism-magazine'].position;
           assert.ok(Math.abs(mag[0]-rest[0]) < 1e-6 && Math.abs(mag[2]-rest[2]) < 1e-6, 'Rifle magazine must follow its vertical well');
-          if (label === 'insert') assert.ok(mag[1]-rest[1] < (id === 'smg' ? -.23 : -.17), 'Magazine must clear the well');
+          if (label === 'insert') assert.ok(mag[1]-rest[1] < (id === 'smg' ? -.18 : -.17), 'Magazine must clear the well');
           if (label === 'seat') assert.ok(Math.hypot(...mag.map((v,i)=>v-rest[i])) < 1e-6, 'Magazine must reseat');
         }
         if (id === 'pistol') {
@@ -163,7 +163,7 @@ try {
           const mag = pose.parts['weapon-mechanism-magazine'].position;
           const dy = mag[1] - rest[1], dz = mag[2] - rest[2];
           assert.ok(Math.abs(dz + .32 * dy) < 1e-6, 'Magazine must track the grip slope');
-          if (label === 'insert') assert.ok(dy < -.17 && dz > .05, 'Magazine must clear the well');
+          if (label === 'insert') assert.ok(dy < -.12 && dz > .035, 'Magazine must clear the well');
           if (label === 'seat') assert.ok(Math.hypot(...mag.map((v,i)=>v-rest[i])) < 1e-6, 'Magazine must reseat');
           assert.deepEqual(pose.parts['weapon-mechanism-slide'].position, idle.parts['weapon-mechanism-slide'].position, 'Partial reload must not rack the slide');
         }
@@ -190,7 +190,7 @@ try {
         const chargeAt = await page.evaluate(() => window.__cs.weapon.reloadEnd - window.__cs.weapon.reloadTime * .14);
         await freezeAt(page, chargeAt);
         const charged = await snapshot(page);
-        assert.ok(charged.parts['weapon-mechanism-slide'].position[2] > idle.parts['weapon-mechanism-slide'].position[2] + .04);
+        assert.ok(charged.parts['weapon-mechanism-slide'].position[2] > idle.parts['weapon-mechanism-slide'].position[2] + .025);
         const mag = charged.parts['weapon-mechanism-magazine'].position;
         assert.ok(Math.hypot(...mag.map((v,i)=>v-idle.parts['weapon-mechanism-magazine'].position[i])) < 1e-6);
         await page.screenshot({ path: `${OUT}/${id}-empty-charge.png` });

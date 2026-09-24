@@ -10,6 +10,6 @@ export function poseRevolverReload(vm: WeaponViewModel, pose: WeaponPose): void 
   if (!rig.port || !shell) throw new Error('Revolver is missing its authored reload rig');
   const port = attachmentPoint(rig.port, vm.body);
   // The cartridge enters from behind the cylinder, along the barrel axis.
-  shell.position.copy(port).add(new THREE.Vector3(0, 0, .070 - .066 * pose.insert));
+  shell.position.copy(port).add(new THREE.Vector3(0, 0, .060 - .056 * pose.insert));
   shell.visible = pose.shell && pose.insert < .95;
 }

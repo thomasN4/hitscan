@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Box3, Group, Raycaster, Triangle, Vector3 } from 'three';
 import { viewmodelRecoil } from '../src/sim/recoil.ts';
-import { WEAPONS, RECOIL_CAP, BASE_FOV } from '../src/core/state.ts';
+import { WEAPONS, RECOIL_CAP, BASE_FOV, CAMERA_NEAR } from '../src/core/state.ts';
 import { createWeaponViewModel } from '../src/core/weaponModels.ts';
 import { poseWeapon } from '../src/core/weaponPresentation.ts';
 import { weaponPose } from '../src/sim/weaponAnimation.ts';
@@ -106,13 +106,13 @@ function nearestInAimCone(gun) {
 // measured against the shipped assets across the fire cycle. Infinity means the
 // cone is empty at every phase.
 const AIM_STATION = {
-  sawnOff: 0.68, // bead crest at the end of the short barrels
-  ak47: 0.91, // front sight crest beyond the clear rear notch (0.924 m).
-  smg: 0.73,       // front post crest, on the axis (0.736)
-  sniper: 0.66,    // scope body during the ADS blend (0.668), not a sight — see below
-  shotgun: 0.97,   // brass bead, on the axis (0.976)
-  pistol: Infinity,
-  revolver: 0.40,  // aligned rear shoulders at 0.407; the old hammer answers 0.392
+  sawnOff: 0.63, // bead crest at the end of the short barrels (0.637)
+  ak47: 0.79, // front sight crest beyond the clear rear notch (0.792 m).
+  smg: 0.54,       // front post crest, on the axis (0.544)
+  sniper: 0.28,    // scope eyepiece during the ADS blend (0.280), not a sight — see below
+  shotgun: 0.93,   // brass bead, on the axis (0.930)
+  pistol: 0.49,    // front sight crest, on the axis (0.493 with the slide back)
+  revolver: 0.40,  // aligned rear shoulders at 0.412; the old hammer answers 0.399
   knife: Infinity,
 };
 
@@ -167,7 +167,7 @@ test('the check is not vacuous: the old hammer signature fails it', () => {
 test('pistol sight feet connect to the slide instead of leaving sky gaps', () => {
   const { gun, vm } = rig('pistol', 1, 0);
   const caster = new Raycaster();
-  for (const [y,z] of [[-.0185,-.126],[-.0195,.088]]) {
+  for (const [y,z] of [[-.01295,-.0882],[-.01365,.0616]]) {
     const origin = vm.body.localToWorld(new Vector3(.1,y,z));
     caster.set(origin, new Vector3(-1,0,0));
     const hit = caster.intersectObjects(visibleMeshes(gun),false)[0];
@@ -183,7 +183,7 @@ test('revolver front crest is visible through the rear notch throughout firing',
     const caster = new Raycaster(EYE,new Vector3(0,-.0002,-.575).normalize());
     const hit = caster.intersectObjects(visibleMeshes(gun),false)[0];
     expect(hit, `front blade at cycle ${i/20}`).toBeDefined();
-    expect(hit.distance).toBeGreaterThan(.63);
+    expect(hit.distance).toBeGreaterThan(.64);
     expect(hit.distance).toBeLessThan(.66);
   }
 });
@@ -193,7 +193,7 @@ test('revolver front crest is visible through the rear notch throughout firing',
 // triangles rather than assuming there is a separately named stock mesh.
 test('SMG near-plane cuts stay outside the frame through ADS and recoil', () => {
   const triangle = new Triangle();
-  const near = 0.1;
+  const near = CAMERA_NEAR;
   for (let step = 0; step <= 20; step++) {
     const ads = step / 20;
     const fov = BASE_FOV + (WEAPONS.smg.zoomFovs[0] - BASE_FOV) * ads;
@@ -230,12 +230,45 @@ test('SMG butt-pad rear stays below the ADS frame', () => {
       const positions = mesh.geometry.getAttribute('position');
       for (let i = 0; i < positions.count; i++) {
         const point = new Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld);
-        // The exported stock/pad rear occupies body-local z >= 0.4 m.
-        if (vm.body.worldToLocal(point.clone()).z < 0.4) continue;
+        // The exported stock/pad rear occupies body-local z >= 0.32 m.
+        if (vm.body.worldToLocal(point.clone()).z < 0.32) continue;
         rearVertices++;
         expect(point.y - point.z * slope, `rear vertex ${i}`).toBeLessThan(0);
       }
     }
     expect(rearVertices).toBeGreaterThan(100);
+  }
+});
+
+// The mirror of the ADS check above, at the hip: with every grip on one hand
+// point, a short stock (the real-sized SMG's) ended just inside the frame's
+// lower edge and showed its butt plate. The edge is the vertical FOV's, so it
+// holds at every aspect ratio.
+test('long-gun butts stay below the hip frame', () => {
+  const slope = Math.tan(BASE_FOV * Math.PI / 360);
+  for (const id of ['smg', 'ak47', 'sniper', 'shotgun']) {
+    for (const cycle of [0, 0.25, 0.5, 1]) {
+      for (const recoil of [0, viewmodelRecoil(RECOIL_CAP, WEAPONS[id].recoilKick)]) {
+        const { gun, vm } = rig(id, 0, cycle, recoil);
+        const vertices = visibleMeshes(gun).flatMap(mesh => {
+          const positions = mesh.geometry.getAttribute('position');
+          return Array.from({ length: positions.count }, (_, i) =>
+            new Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld));
+        });
+        // Body-local z is model z; the butt is its last 5 cm (weaponModels.ts BUTT_PLATE).
+        const local = vertices.map(point => vm.body.worldToLocal(point.clone()).z);
+        const rear = Math.max(...local);
+        let plate = 0;
+        for (const [i, point] of vertices.entries()) {
+          {
+            if (local[i] < rear - 0.05) continue;
+            plate++;
+            if (point.z > -CAMERA_NEAR) continue;
+            expect(point.y - point.z * slope, `${id} cycle ${cycle} recoil ${recoil} vertex ${i}`).toBeLessThan(0);
+          }
+        }
+        expect(plate, `${id} butt`).toBeGreaterThan(10);
+      }
+    }
   }
 });

@@ -25,8 +25,12 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
     node.position.copy(rest.position);
     node.rotation.copy(rest.rotation);
   }
-  const { mechanisms: m, group } = vm;
+  const { mechanisms: m, group, body, hold } = vm;
   const travel = vm.authored.actionTravel;
+  // The hip cant unwinds as the sights come up; at ads = 1 the body is exactly
+  // the straight aim pose that aimOffset was computed against.
+  body.position.lerpVectors(hold.hip.position, hold.aim.position, ads);
+  body.quaternion.slerpQuaternions(hold.hip.quaternion, hold.aim.quaternion, ads);
   const quiet = (1 - ads) * (1 - pose.reload);
   // Reloading tilts the weapon to the right and dips it slightly; it does not
   // travel. The z push-back and the per-weapon reload yaw that used to live here

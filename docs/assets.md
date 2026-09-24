@@ -76,6 +76,18 @@ stroke in `weaponAssets.ts:ACTION_TRAVEL`, and the shell paths in the
 shotgun, revolver and sawn-off presentations. `weaponRig.test.mjs` pins every
 weapon's length to its real range.
 
+## First-person hold
+
+Every firearm viewmodel is placed by one rule rather than per-weapon offsets
+(`weaponModels.ts`, solved by `sim/viewmodelHold.ts:hipHold`). At the hip its
+`grip_right` marker sits on one shared hand point, and the bore is turned to
+cross the crosshair 3 m out, so each weapon shows at its real size with the
+same inward cant. Aiming unwinds that cant about the hand, then puts the sight
+line on the view axis. Long guns are shouldered with the butt on the eye plane,
+and handguns sit with their origin 0.44 m out. The knife keeps its own
+hand-derived hold (issue #143). `scripts/viewmodel-shots.mjs` captures hip,
+ADS and reload views of all eight weapons for comparison.
+
 ## Optional live connection
 
 Tested: Blender 5.2.0 LTS, blender-mcp 1.9.1, add-on protocol 5.

@@ -9,11 +9,14 @@ import { poseShotgunReload } from './shotgunPresentation';
 import { poseRevolverReload } from './revolverPresentation';
 
 /**
- * Knife thrust (m) down the view axis at the swing's peak. Matches the bot
- * mount's KNIFE_JAB (bots.ts) so the attack is one motion — a jab — in both
- * views (issue #143).
+ * Knife thrust (m) down the view axis at the swing's peak — the same jab the
+ * bot mount makes (bots.ts:KNIFE_JAB), so the attack reads as one motion in
+ * both views (issue #143). Sized to the prop rather than copied from the bot's
+ * 0.18 m, which is an arm's extension in world space: on the 0.30 m knife held
+ * ~0.46 m from the eye, 0.18 m shrinks it by over a quarter on screen and
+ * lifts the whole handle into view.
  */
-const KNIFE_THRUST = 0.18;
+const KNIFE_THRUST = 0.10;
 
 /** Apply absolute offsets to saved rest transforms, never accumulate rotations. */
 export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
@@ -28,10 +31,10 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
   // travel. The z push-back and the per-weapon reload yaw that used to live here
   // existed to hold a magwell or loading port inside a fixed arm's reach, and
   // with the arms gone they only shrink the prop and swing it off its own frame.
-  // The knife swing is a pure translation down -z: the blade already points
-  // there, so perspective carries the tip in toward the crosshair. Any pitch,
-  // yaw or roll pivots the prop about the eye and reads as a slash across the
-  // frame instead of a stab.
+  // The knife swing is a pure translation down -z: the blade is held aimed at
+  // the crosshair (weaponModels.ts), so perspective carries the tip in toward
+  // it. Any pitch, yaw or roll pivots the prop about the eye and reads as a
+  // slash across the frame instead of a stab.
   group.position.set(-0.10 * pose.reload,
     -0.05 * pose.reload - 0.12 * pose.draw - 0.055 * running + Math.sin(now * 1.7) * 0.0012 * quiet,
     -KNIFE_THRUST * pose.swing + 0.07 * pose.draw);

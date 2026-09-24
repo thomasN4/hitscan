@@ -1,7 +1,7 @@
 import { test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { PerspectiveCamera, Vector3 } from 'three';
+import { Box3, PerspectiveCamera, Vector3 } from 'three';
 import { BASE_FOV } from '../../src/core/state.ts';
 import { createAuthoredWeaponRig, attachmentPoint } from '../../src/core/weaponAssets.ts';
 import { validateWeaponGlb } from './weapon-pipeline.mjs';
@@ -135,7 +135,7 @@ for (const id of ['smg','sniper','ak47']) {
 }
 test('knife has a blade tip and no firearm mechanisms or loading markers',async()=>{
   const vm=createWeaponViewModel('knife',{knife:await asset('knife')});
-  expect(vm.authored.bladeTip.position.z).toBeLessThan(-.4);
+  expect(vm.authored.bladeTip.position.z).toBeLessThan(-.2);
   expect(vm.authored.port).toBeUndefined();
   expect(vm.authored.muzzle).toBeUndefined();
   expect(vm.authored.magazineOut).toBeUndefined();
@@ -208,4 +208,12 @@ test('sawn-off shells follow the rotated bores and restore after cancellation', 
     expect(vm.mechanisms.shellLeft.visible).toBe(false);
     expect(vm.mechanisms.shellRight.visible).toBe(false);
   }
+});
+
+// Issue #143: the knife was first built 0.571 m overall, nearly twice the
+// pistol beside it. A real combat knife is ~0.30 m; keep it there.
+test('knife is authored at a real combat knife length', async () => {
+  const size = new Box3().setFromObject(await asset('knife')).getSize(new Vector3());
+  expect(size.z).toBeGreaterThan(.28);
+  expect(size.z).toBeLessThan(.32);
 });

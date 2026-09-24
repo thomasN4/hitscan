@@ -215,14 +215,23 @@ def sniper():
     save_and_render('sniper',(0,-.10,-.12),1.32)
 
 
+# The knife was first drawn 0.571 m overall — nearly twice the pistol and
+# longer than the sawn-off (issue #143). Every length below, bevels included,
+# is scaled uniformly to a real combat knife's ~0.30 m, keeping the design.
+KNIFE_SCALE = .525
+
+
 def knife():
+    k=KNIFE_SCALE
+    def s(*v):
+        return tuple(k*x for x in v)
     steel,dark,_,_,silver,_=setup()
     # Full bevel facets taper from a central ridge to the sharpened perimeter.
-    outline=[(-.051,-.032),(-.29,-.032),(-.413,-.065),(-.29,-.103),(-.051,-.103)]
-    inner=[(-.057,-.049),(-.281,-.049),(-.378,-.065),(-.281,-.083),(-.057,-.083)]
+    outline=[s(*p) for p in [(-.051,-.032),(-.29,-.032),(-.413,-.065),(-.29,-.103),(-.051,-.103)]]
+    inner=[s(*p) for p in [(-.057,-.049),(-.281,-.049),(-.378,-.065),(-.281,-.083),(-.057,-.083)]]
     verts=[(0,y,z) for z,y in outline]
     for side in (-1,1):
-        verts += [(side*.004,y,z) for z,y in inner]
+        verts += [(side*k*.004,y,z) for z,y in inner]
     faces=[tuple(range(9,4,-1)),tuple(range(10,15))]
     for i in range(5):
         j=(i+1)%5
@@ -236,17 +245,17 @@ def knife():
     blade=bpy.data.objects.new('Clip-point blade with ground edge',mesh)
     bpy.context.collection.objects.link(blade)
     mesh.materials.append(silver)
-    box('Steel tang',(.008,.044,.188),(0,-.066,.035),steel,.001)
-    box('Beveled guard',(.050,.103,.020),(0,-.066,-.035),steel,.005)
-    cyl('Rubber grip core',.028,.155,(0,-.066,.058),dark)
+    box('Steel tang',s(.008,.044,.188),s(0,-.066,.035),steel,k*.001)
+    box('Beveled guard',s(.050,.103,.020),s(0,-.066,-.035),steel,k*.005)
+    cyl('Rubber grip core',k*.028,k*.155,s(0,-.066,.058),dark)
     for z in (.003,.024,.045,.066,.087,.108,.129):
-        ring('Grip traction rib',.028,.002,(0,-.066,z),steel)
-    cap=cyl('Pommel with lanyard hole',.032,.018,(0,-.066,.149),steel)
-    hole=cyl('Lanyard cutter',.005,.08,(0,-.066,.149),dark,24)
+        ring('Grip traction rib',k*.028,k*.002,s(0,-.066,z),steel)
+    cap=cyl('Pommel with lanyard hole',k*.032,k*.018,s(0,-.066,.149),steel)
+    hole=cyl('Lanyard cutter',k*.005,k*.08,s(0,-.066,.149),dark,24)
     hole.rotation_euler.y=math.pi/2
     cut(cap,hole)
-    fixed_markers((0,-.066,.058),None,(0,-.065,-.413))
-    save_and_render('knife',(0,-.065,-.126),.70)
+    fixed_markers(s(0,-.066,.058),None,s(0,-.065,-.413))
+    save_and_render('knife',s(0,-.065,-.126),k*.70)
 
 
 if __name__ == '__main__':

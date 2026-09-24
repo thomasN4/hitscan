@@ -13,20 +13,20 @@ async function asset(id) {
   const buffer=new ArrayBuffer(bytes.length); new Uint8Array(buffer).set(bytes);
   return (await new GLTFLoader().parseAsync(buffer,'')).scene;
 }
-for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff']) {
+for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff','longbow']) {
   test(`${id} export contract rejects corrupt data and missing mechanisms`, async()=>{
     const bytes=readFileSync(new URL(`../../public/assets/${id}.glb`,import.meta.url));
     expect(validateWeaponGlb(bytes,id).vertices).toBeGreaterThan(1000);
     expect(()=>validateWeaponGlb(bytes.subarray(0,-8),id)).toThrow('Truncated');
     const source=await asset(id);
-    const marker=id==='knife'?'blade_tip':'reload_port';
+    const marker=id==='knife'?'blade_tip':id==='longbow'?'string_top':'reload_port';
     source.getObjectByName(marker).name='missing';
     expect(()=>createAuthoredWeaponRig(id,source)).toThrow(marker);
   });
   test(`${id} moving assemblies clone independently`,async()=>{
     const source=await asset(id);
     const a=createAuthoredWeaponRig(id,source), b=createAuthoredWeaponRig(id,source);
-    const key=id==='sawnOff'?'hinge':id==='shotgun'?'pump':id==='revolver'?'cylinder':'magazine';
+    const key=id==='sawnOff'?'hinge':id==='shotgun'?'pump':id==='revolver'?'cylinder':id==='longbow'?'limbUpper':'magazine';
     const movingA=id==='knife'?a.grip:a.mechanisms[key];
     const movingB=id==='knife'?b.grip:b.mechanisms[key];
     movingA.rotation.z+=1;
@@ -231,6 +231,46 @@ for (const [id, [min, max]] of Object.entries(REAL_LENGTH)) {
     expect(size.z).toBeLessThan(max);
   });
 }
+test('the longbow is a 1.8 m war bow at a 0.17 m brace', async () => {
+  const source = await asset('longbow');
+  // Stood upright, so its length is its height rather than z; horn nocks included.
+  const size = new Box3().setFromObject(source).getSize(new Vector3());
+  expect(size.y).toBeGreaterThan(1.80);
+  expect(size.y).toBeLessThan(1.95);
+  const rig = createAuthoredWeaponRig('longbow', source);
+  const brace = attachmentPoint(rig.stringTop, rig.root).z - attachmentPoint(rig.muzzle, rig.root).z;
+  expect(brace).toBeGreaterThan(.15);
+  expect(brace).toBeLessThan(.21);
+});
+test('the longbow draw flexes the limbs, pulls the string and resets without residue', async () => {
+  const vm = createWeaponViewModel('longbow', { longbow: await asset('longbow') });
+  const input = { id: 'longbow', now: 10, shotAt: -10, fireInterval: .6, switchedAt: 0, hasOutgoing: false,
+    aiming: false, reloading: false, reloadStartedAt: -10, reloadT: 0, roundInterval: 2.4, lastRound: false,
+    emptyReload: false, closeAt: -10, closeBlend: 0 };
+  const read = () => {
+    vm.group.updateMatrixWorld(true);
+    return { tip: attachmentPoint(vm.authored.stringTop, vm.body), nock: vm.mechanisms.stringUpper.position.clone(),
+      arrow: vm.mechanisms.nockedArrow.position.clone(), shown: vm.mechanisms.nockedArrow.visible };
+  };
+  poseWeapon(vm, 'longbow', weaponPose({ ...input, bowDraw: 0 }), 10, 0, 0);
+  const rest = read();
+  expect(rest.shown).toBe(true);
+  poseWeapon(vm, 'longbow', weaponPose({ ...input, bowDraw: 1 }), 10, 0, 0);
+  const drawn = read();
+  // The nock comes back the 0.52 m draw; the tips follow the string in.
+  expect(drawn.nock.z - rest.nock.z).toBeCloseTo(.52, 3);
+  expect(drawn.tip.z).toBeGreaterThan(rest.tip.z + .08);
+  expect(drawn.arrow.z).toBeGreaterThan(rest.arrow.z + .45);
+  // Loosed: the string is empty for the first half of the nocking interval.
+  poseWeapon(vm, 'longbow', weaponPose({ ...input, shotAt: 9.9 }), 10, 0, 0);
+  expect(read().shown).toBe(false);
+  poseWeapon(vm, 'longbow', weaponPose({ ...input, loaded: false }), 10, 0, 0);
+  expect(read().shown).toBe(false);
+  poseWeapon(vm, 'longbow', weaponPose({ ...input, bowDraw: 0 }), 10, 0, 0);
+  const again = read();
+  expect(again.tip.distanceTo(rest.tip)).toBeLessThan(1e-9);
+  expect(again.nock.distanceTo(rest.nock)).toBeLessThan(1e-9);
+});
 test('the revolver cylinder is a .44 Magnum six-shot diameter', async () => {
   const rotor = (await asset('revolver')).getObjectByName('mechanism_rotor');
   const size = new Box3().setFromObject(rotor).getSize(new Vector3());

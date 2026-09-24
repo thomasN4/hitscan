@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { GameClock, type ScheduledHandle } from '../sim/gameClock';
 import { SoundRing } from '../sim/soundEvents';
+import type { ArrowBody } from '../sim/arrow';
 import type { BrainMode } from '../sim/botBrains';
 // A value import, like GameClock and SoundRing above: sim/domination.ts takes
 // only `type Team` back, so nothing is circular at runtime.
@@ -28,7 +29,7 @@ import { sanitizeSettings, type Settings } from './settings';
 export type WeaponClass = 'primary' | 'secondary' | 'melee';
 
 /** Catalog ids — stable strings; the loadout slice and the picker use them. */
-export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'pistol' | 'revolver' | 'sawnOff' | 'knife';
+export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'longbow' | 'pistol' | 'revolver' | 'sawnOff' | 'knife';
 
 /**
  * Weapons a BOT may hold. Since tranche 7b that is the WHOLE catalog, the
@@ -37,12 +38,17 @@ export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'pistol' | 'revol
  * 7a exclusion that kept blades away from a die it had no meaning for is gone.
  *
  * The alias survives the widening because its job survives it: every Record
- * over it — sim/botWeapons.ts's tuning, core/weaponAssets.ts's mechanism
- * table, audio.ts's attack tones — still fails to compile until a new weapon
- * says how a bot uses it. What changed is the answer a blade gives, not
- * whether one is demanded.
+ * over it — sim/botWeapons.ts's tuning, audio.ts's attack tones — still fails
+ * to compile until a new weapon says how a bot uses it. What changed is the
+ * answer a blade gives, not whether one is demanded. (core/weaponAssets.ts's
+ * tables are over the full WeaponId: they describe the authored models, which
+ * the player's viewmodels need whether or not a bot ever mounts one.)
+ *
+ * The longbow is the one exclusion: it is player-only, so no bot table owes
+ * it an entry and no bot path can be handed one. Its draw/loose trigger and
+ * travelling arrows mean nothing to the per-ray hit die bots fire through.
  */
-export type BotWeaponId = WeaponId;
+export type BotWeaponId = Exclude<WeaponId, 'longbow'>;
 
 /**
  * Primary firearms — the catalog weapons a bot may carry in its PRIMARY
@@ -180,6 +186,20 @@ export interface WeaponDef {
    * pairing, exactly like range/arcRad. Absent means 1 (no backstab bonus).
    */
   backstabMult?: number;
+  /**
+   * Bow: seconds from brace to full draw while LMB is held (sim/bow.ts).
+   * Its presence is what makes a weapon a bow — the trigger draws on press
+   * and looses a travelling arrow on release (arrows.ts) instead of firing a
+   * hitscan ray. Required together with `launchSpeed`; validateWeapons owns
+   * the pairing.
+   */
+  drawTime?: number;
+  /**
+   * Bow: arrow speed (m/s) off the string at full draw; a partial draw
+   * launches proportionally slower. `damage` is what an arrow does arriving
+   * at this speed — drag and a short draw scale it down (sim/bow.ts).
+   */
+  launchSpeed?: number;
 }
 
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
@@ -344,6 +364,30 @@ export const bots: Bot[] = [];
 export const impacts: Impact[] = [];
 /** Persistent wall decals (see effects.ts); FIFO-capped, oldest recycled. */
 export const bulletHoles: THREE.Mesh[] = [];
+
+/**
+ * One loosed arrow in flight (arrows.ts). The flight state is ArrowBody's —
+ * `pos` is the TIP, and it starts at the eye so the arrow leaves along the
+ * crosshair like a bullet does.
+ */
+export interface Arrow extends ArrowBody {
+  mesh: THREE.Object3D;
+  /**
+   * Where the mesh is drawn relative to `pos` at launch: from the eye to the
+   * nocked arrow on the viewmodel. It decays to zero over the first few
+   * frames, so the arrow visibly leaves the bow without its path — or its
+   * hit — ever leaving the eye line. Cosmetic only.
+   */
+  launchOffset: THREE.Vector3;
+  /** Recent tip positions, newest last, for the flight trail. */
+  trail: THREE.Vector3[];
+  trailLine: THREE.Line;
+}
+
+/** Arrows in flight; arrows.ts advances and retires them. */
+export const arrows: Arrow[] = [];
+/** Arrows standing in walls and floors; FIFO-capped like bulletHoles. */
+export const stuckArrows: THREE.Object3D[] = [];
 /**
  * What has been audible lately, for BOTS to read — the gameplay half of a
  * sound, beside audio.ts's WebAudio half for the player's ears. Emitters are
@@ -551,6 +595,30 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     scopedOverlay: true, // full-screen scope reticle replaces the viewmodel
     semiAuto: true,      // one shot per LMB press; holding does nothing
     unscopeOnShot: true, // firing kicks you out of the scope (re-press RMB)
+  },
+  longbow: {
+    name: 'LONGBOW', class: 'primary',
+    magSize: 12, reserveMax: 24, // quiver + a spare sheaf; R restocks the quiver
+    fireRate: 0.6,   // nocking the next arrow after a release — the draw below
+                     // comes on top, so the real cadence is ~1.5 s per arrow
+    reloadTime: 2.4,
+    damage: 80,      // at full launch speed: two body arrows, legs x0.75.
+    headshotMult: 3, // 240 to the head — one arrow, even a slowed one
+    zoomFovs: [62],  // the bow comes up to the cheek; no optic
+    spreadMul: 0.08, // anchored at the cheek: ~0.0026 rad standing, ±4 cm at 30 m
+    inherent: 0.03,  // loosed from the hip there is no anchor: ±1° of scatter
+    crosshairGain: 1, // draw the literal cone, like the shotgun — 6x on a
+                      // hip cone this wide pins the arms at the cap
+    sprayKick: 0.1, sprayCap: 1.5,
+    sprayRecover: 0.1, // input = 0.1/0.6 ≈ 0.167/s — clears the bound
+    recoilKick: 0.8, recoilRecover: 8, // semiAuto exemption: the string's jolt
+                                       // settles long before the next nock
+    punchRad: 0.006,  // ~0.3° nod on release — there is no powder charge
+    yawKick: 0.3, yawRecover: 8,
+    scopedOverlay: false,
+    semiAuto: true,   // one arrow per press
+    drawTime: 0.9,    // brace to full draw
+    launchSpeed: 58,  // m/s — a ~70 lb longbow with a ~30 g war arrow
   },
   shotgun: {
     name: 'SHOTGUN',
@@ -796,6 +864,7 @@ export const weapon: LiveWeapon = {
  */
 export function armLoadout(): void {
   wpn.animation = freshWeaponAnimation();
+  wpn.bowDrawAt = null;
   SLOTS.forEach(i => {
     const def = WEAPONS[equippedId(i)];
     ammoStore[i].mag = def.magSize;
@@ -1338,6 +1407,11 @@ export interface WeaponDynamics {
   emptyReloadLatch: boolean;
   /** Delayed whole-mag reload clicks; cancelled by every reload teardown. */
   reloadSfxHandle: ScheduledHandle | undefined;
+  /**
+   * Game time the bowstring started back, or null at brace. Bow only; every
+   * let-down, loose, swap and re-arm (armLoadout) returns it to null.
+   */
+  bowDrawAt: number | null;
   /** Cosmetic event clocks; negative infinity means no event in this life. */
   animation: WeaponAnimationState;
 }
@@ -1412,6 +1486,7 @@ export const wpn: WeaponDynamics = {
   triggerLatch: false,
   emptyReloadLatch: false,
   reloadSfxHandle: undefined,
+  bowDrawAt: null,
   animation: freshWeaponAnimation(),
 };
 

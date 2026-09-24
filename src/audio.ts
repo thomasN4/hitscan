@@ -134,6 +134,36 @@ export function sfxKnife(): void {
 /** Knife connect: dull, meaty thunk — the swing's payoff. */
 export const sfxKnifeHit = (): void => playGunshot(0.25, 300, 0.09);
 
+/**
+ * Longbow release: the string's twang — a short low pluck that sags in pitch
+ * as it damps — over a soft whoosh of the arrow leaving. No powder, so no
+ * report: this is also why a loose makes no soundEvents entry (weapons.ts).
+ */
+export function sfxBow(): void {
+  const ctx = ac();
+  const t = ctx.currentTime;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(160, t);
+  o.frequency.exponentialRampToValueAtTime(95, t + 0.16);
+  g.gain.setValueAtTime(0.32, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  o.connect(g).connect(master());
+  o.start(); o.stop(t + 0.18);
+  playSwish(0.12, 1800, 0.14);
+}
+
+/** Longbow draw: a faint creak of the limbs taking the load. */
+export function sfxBowDraw(): void {
+  playSwish(0.05, 420, 0.35);
+}
+
+/** An arrow striking wood, stone or flesh: a dull thunk, quieter with distance. */
+export function sfxArrowHit(pos: THREE.Vector3): void {
+  const d = camera.position.distanceTo(pos);
+  playGunshot(Math.max(0.03, 0.22 - d / 150), 260, 0.08);
+}
+
 /** Weapon switch: short metallic click. */
 export const sfxSwitch = (): void => playGunshot(0.1, 1800, 0.04);
 

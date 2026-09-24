@@ -160,6 +160,17 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     } else if (def.range !== undefined || def.arcRad !== undefined || def.backstabMult !== undefined) {
       out.push(`${name}: range/arcRad/backstabMult without melee does nothing — only a melee weapon swings`);
     }
+    if (def.drawTime !== undefined || def.launchSpeed !== undefined) {
+      if (!(def.drawTime !== undefined && def.drawTime > 0)) {
+        out.push(`${name}: drawTime ${num(def.drawTime ?? NaN)} must be > 0 on a bow — an instant draw makes every release a full-power shot`);
+      }
+      if (!(def.launchSpeed !== undefined && def.launchSpeed > 0)) {
+        out.push(`${name}: launchSpeed ${num(def.launchSpeed ?? NaN)} must be > 0 on a bow — the arrow never leaves the string`);
+      }
+      if (def.melee || def.pellets !== undefined) {
+        out.push(`${name}: a bow (drawTime/launchSpeed) cannot also be melee or fire pellets — its trigger looses one arrow`);
+      }
+    }
     if (!(def.damage > 0)) {
       out.push(`${name}: damage ${num(def.damage)} must be > 0 — the weapon cannot hurt anything`);
     }

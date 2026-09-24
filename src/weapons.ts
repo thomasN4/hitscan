@@ -4,7 +4,9 @@
 // Damage model: weapon.damage per torso hit, legs x0.75, head x
 // weapon.headshotMult (stats per weapon in core.WEAPONS). Bullets are
 // hitscan: a single ray from the camera; the NEAREST intersection across
-// walls + bot parts wins, so cover always blocks damage.
+// walls + bot parts wins, so cover always blocks damage. The longbow is the
+// exception: it looses a travelling arrow (arrows.ts) that the same
+// nearest-hit rule judges when it arrives.
 import * as THREE from 'three';
 import { poseWeapon } from './core/weaponPresentation';
 import { weaponPose, crossedCue, shotgunPump, shotgunChambering } from './sim/weaponAnimation';
@@ -18,10 +20,13 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
          equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
          type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
 import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
-         sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch, sfxZoom } from './audio';
+         sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch, sfxZoom,
+         sfxBow, sfxBowDraw } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
+import { spawnArrow } from './arrows';
+import { nockedArrowTip } from './core/bowPresentation';
 import { GUNSHOT_RADIUS_M } from './sim/soundEvents';
 import { botFor } from './bots';
 import { computeSpread, crosshairGapPx } from './sim/accuracy';
@@ -40,6 +45,7 @@ import { damageForPart, partForMesh } from './sim/damage';
 import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
 import { isSprintActive } from './sim/movement';
 import { isDeploying } from './sim/weaponSwap';
+import { launchSpeed, planBowTrigger, bowDrawFraction } from './sim/bow';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -150,6 +156,7 @@ const SHOT_SFX: Record<WeaponId, () => void> = {
   pistol: sfxPistol,
   revolver: sfxRevolver,
   knife: sfxKnife,
+  longbow: sfxBow,
 };
 
 const raycaster = new THREE.Raycaster();
@@ -170,6 +177,7 @@ export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
     pistol: createWeaponViewModel('pistol', weaponAssets),
     revolver: createWeaponViewModel('revolver', weaponAssets),
     knife: createWeaponViewModel('knife', weaponAssets),
+    longbow: createWeaponViewModel('longbow', weaponAssets),
   };
   for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
   camera.add(gunGroup);
@@ -299,6 +307,7 @@ export function switchWeapon(slot: WeaponSlot): void {
   // that completion check against the INCOMING weapon's stats with the stale
   // reloadEnd — an instant free reload.
   cancelReload();
+  wpn.bowDrawAt = null; // a drawn bow is let down, never loosed, by a swap
   wpn.animation = freshWeaponAnimation();
   wpn.animation.switchedAt = gameTime.now();
   wpn.animation.outgoingId = equippedId(wpn.slot);
@@ -412,11 +421,100 @@ function swingMelee(def: WeaponDef): void {
     damageBot(hit.payload, dmg, hit.part);
   }
 
+  applyKick(def);
+}
+
+/**
+ * One trigger pull's recoil and spray: applied once per pull, AFTER the
+ * shot has left, so it steers only the FOLLOWING shots. The horizontal half
+ * is a signed random walk, so sprays wander sideways unpredictably and have
+ * to be steered back rather than just pulled down.
+ */
+function applyKick(def: WeaponDef): void {
   wpn.recoil = Math.min(wpn.recoil + def.recoilKick, RECOIL_CAP);
   wpn.recoilYaw = THREE.MathUtils.clamp(
     wpn.recoilYaw + (Math.random() * 2 - 1) * def.yawKick,
     -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
   wpn.spray = Math.min(wpn.spray + def.sprayKick, def.sprayCap);
+}
+
+/**
+ * Loose the nocked arrow at draw `fraction`. It leaves the EYE along the
+ * crosshair — the same pre-kick aim and live cone a bullet would take — and
+ * from there flies under gravity and drag (arrows.ts), so the drop is the
+ * archer's to judge. The mesh is drawn from the bow's nocked arrow and eases
+ * onto that line (arrows.ts:LAUNCH_SETTLE); the hit never leaves it.
+ *
+ * Deliberately silent to bots: no soundEvents entry. A bow has no report,
+ * and what gives an archer away is the arrow arriving (combat.ts:damageBot
+ * turns the victim toward its source).
+ */
+function looseArrow(def: WeaponDef, fraction: number): void {
+  weapon.mag--;
+  weapon.lastShot = gameTime.now();
+  wpn.animation.shotAt = weapon.lastShot;
+  wpn.animation.previousShotAge = -1;
+  wpn.animation.closeAt = -Infinity;
+  SHOT_SFX[equippedId(wpn.slot)]();
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  const dir = shotDirection(currentAimPitch(), currentAimYaw(), wpn.spread);
+  // Documented pairing (validateWeapons): a bow always carries launchSpeed.
+  const velocity = dir.multiplyScalar(launchSpeed(fraction, def.launchSpeed ?? 0));
+  spawnArrow(origin, velocity, nockedArrowTip(VIEWMODELS.longbow, new THREE.Vector3()));
+  applyKick(def);
+}
+
+/**
+ * The bow's trigger, in place of the fire-on-press gate: hold LMB to draw,
+ * release to loose (sim/bow.ts:planBowTrigger decides). A new draw waits for
+ * the next arrow to be nocked (fireRate after the last loose), the deploy
+ * window and any reload; sprinting, a reload or a swap mid-draw lets the
+ * string down, and the latch then wants a fresh press rather than redrawing
+ * on its own the moment the interruption ends.
+ */
+function updateBowTrigger(def: WeaponDef, deploying: boolean): void {
+  const now = gameTime.now();
+  const sprinting = currentSprintActive(effectiveCrouching());
+  if (!input.shooting) {
+    wpn.triggerLatch = false;
+    wpn.emptyReloadLatch = false;
+  } else if (wpn.bowDrawAt === null && weapon.mag <= 0 && !weapon.reloading && !wpn.emptyReloadLatch) {
+    // An empty quiver: the press restocks it, as a dry trigger reloads a gun,
+    // and the latch keeps a held press from drawing the first new arrow.
+    wpn.emptyReloadLatch = true;
+    wpn.triggerLatch = true;
+    if (!sprinting) tryReload();
+  }
+  const action = planBowTrigger({
+    now,
+    drawStartedAt: wpn.bowDrawAt,
+    held: input.shooting,
+    ready: !wpn.triggerLatch && !deploying && !weapon.reloading && !sprinting
+      && weapon.mag > 0 && now - weapon.lastShot >= weapon.fireRate,
+    interrupted: deploying || weapon.reloading || sprinting,
+    // Documented pairing (validateWeapons): a bow always carries drawTime.
+    drawTime: def.drawTime ?? 1,
+  });
+  if (action.kind === 'start') {
+    wpn.bowDrawAt = now;
+    sfxBowDraw();
+  } else if (action.kind === 'loose') {
+    wpn.bowDrawAt = null;
+    looseArrow(def, action.fraction);
+  } else if (action.kind === 'letDown') {
+    wpn.bowDrawAt = null;
+    wpn.triggerLatch = input.shooting;
+  }
+}
+
+/**
+ * Let a drawn bow down without loosing. Pausing, dying and the end screen
+ * all release capture, and whatever clears LMB meanwhile (a mouseup in the
+ * menu, the blur reset) would otherwise read as a release on the first
+ * frame back: a paused draw must never fire itself on resume.
+ */
+export function letDownBow(): void {
+  wpn.bowDrawAt = null;
 }
 
 /**
@@ -551,15 +649,8 @@ export function shoot(): void {
   // point: the recoil below steers only FOLLOWING shots.
   for (let i = 0; i < pellets; i++) fireRay();
 
-  // Recoil/spray kicks are applied once per trigger pull, AFTER the rays:
-  // eight pellets must not cost eight kicks.
-  wpn.recoil = Math.min(wpn.recoil + def.recoilKick, RECOIL_CAP);
-  // Horizontal noise: a signed random walk, so sprays wander sideways
-  // unpredictably and have to be steered back rather than just pulled down.
-  wpn.recoilYaw = THREE.MathUtils.clamp(
-    wpn.recoilYaw + (Math.random() * 2 - 1) * def.yawKick,
-    -RECOIL_YAW_CAP, RECOIL_YAW_CAP);
-  wpn.spray = Math.min(wpn.spray + def.sprayKick, def.sprayCap);
+  // Once per trigger pull, AFTER the rays: eight pellets must not cost eight kicks.
+  applyKick(def);
 
   // One marker per trigger pull, red if ANY pellet reached a head.
   if (anyHit) showHitmarker(anyHead);
@@ -689,7 +780,10 @@ export function updateWeapon(dt: number): void {
 
   // Trigger: the smg is full-auto while LMB held; single-press weapons fire
   // once per press — the latch blocks repeats until the button is released.
-  if (!input.shooting) {
+  // A bow draws on the press and looses on the release instead.
+  if (def.drawTime !== undefined) {
+    updateBowTrigger(def, deploying);
+  } else if (!input.shooting) {
     wpn.triggerLatch = false;
     wpn.emptyReloadLatch = false;
   }
@@ -742,7 +836,8 @@ function updateWeaponPresentation(): void {
     switchedAt: animation.switchedAt, hasOutgoing: animation.outgoingId !== null, aiming: input.aiming || wpn.adsLerp > 0.01,
     reloading: weapon.reloading, reloadStartedAt: animation.reloadStartedAt, reloadT,
     roundInterval: interval, lastRound: weapon.mag + 1 >= weapon.magSize || session.map !== 'range' && weapon.reserve === 1,
-    emptyReload: animation.emptyReload, reloadSpent: animation.reloadSpent, reloadShells: animation.reloadShells, closeAt: animation.closeAt, closeBlend: animation.closeBlend });
+    emptyReload: animation.emptyReload, reloadSpent: animation.reloadSpent, reloadShells: animation.reloadShells, closeAt: animation.closeAt, closeBlend: animation.closeBlend,
+    bowDraw: wpn.bowDrawAt === null ? 0 : bowDrawFraction(now - wpn.bowDrawAt, def.drawTime ?? 1), loaded: weapon.mag > 0 });
   animation.reloadBlend = id === 'sawnOff' ? pose.breakOpen : pose.reload;
   poseWeapon(VIEWMODELS[id], id, pose, now, wpn.adsLerp, motion.runLerp);
   if (pose.holster && animation.outgoingId !== null && animation.outgoingId !== id) {

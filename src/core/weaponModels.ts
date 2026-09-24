@@ -5,6 +5,7 @@ import { createCelMaterial } from './materials';
 import { BASE_FOV, CAMERA_NEAR, type WeaponId } from './state';
 import { hipHold, rotateYawPitch, slideToClear, type Vec3 } from '../sim/viewmodelHold';
 import { attachmentPoint, createAuthoredWeaponRig, type AuthoredWeaponRig, type WeaponAssets } from './weaponAssets';
+import { createArrowModel } from './arrowModel';
 
 /** A body pose: camera-space position of the model origin, and its rotation. */
 interface BodyPose { position: THREE.Vector3; quaternion: THREE.Quaternion }
@@ -13,7 +14,8 @@ export interface WeaponViewModel {
   authored: AuthoredWeaponRig;
   group: THREE.Group;
   body: THREE.Group;
-  mechanisms: Partial<Record<'hinge' | 'shellLeft' | 'shellRight' | 'magazine' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'bolt' | 'slide' | 'shell', THREE.Object3D>>;
+  mechanisms: Partial<Record<'hinge' | 'shellLeft' | 'shellRight' | 'magazine' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'bolt' | 'slide' | 'shell'
+    | 'limbUpper' | 'limbLower' | 'stringUpper' | 'stringLower' | 'nockedArrow', THREE.Object3D>>;
   rest: Map<THREE.Object3D, { position: THREE.Vector3; rotation: THREE.Euler }>;
   /**
    * Body pose at the hip and just before ADS; weaponPresentation.ts:poseWeapon
@@ -42,6 +44,19 @@ const SHOULDERED: ReadonlySet<WeaponId> = new Set(['smg', 'ak47', 'sniper', 'sho
 const BUTT_PLATE = 0.05;
 /** View bob can raise the hip weapon this much (m): player.ts's walking bobAmt. */
 const HIP_BOB = 0.02;
+/**
+ * The longbow's arrow pass, camera space (m). At the hip the bow is carried
+ * low and left, canted so the upper limb leaves the frame near its top centre
+ * instead of crossing the crosshair. Raised, the arrow runs under the eye to
+ * a mouth-corner anchor, as an instinctive archer's does: at full draw the
+ * nock and fletching sit below the frame, the shaft rises out of its lower
+ * edge to the pass just under the crosshair, and the cant keeps the stave a
+ * few degrees clear of it on the bow-hand side.
+ */
+const BOW_HIP = { x: -0.14, y: -0.13, z: -0.70 };
+const BOW_HIP_ROLL = -0.25;
+const BOW_AIM = { x: 0.015, y: -0.085, z: -0.80 };
+const BOW_AIM_ROLL = -0.22;
 
 /** Model-space vertices of every mesh under `root` (unparented) with z beyond `z`. */
 function verticesBehind(root: THREE.Object3D, z: number): Vec3[] {
@@ -82,7 +97,21 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   const sightLine = id === 'pistol' ? -0.0028 : id === 'revolver' ? 0.03145 : id === 'shotgun' ? .03128 : id === 'sawnOff' ? .0064 : 0;
   let hold: WeaponViewModel['hold'];
   let aimOffset: WeaponViewModel['aimOffset'];
-  if (id === 'knife') {
+  if (id === 'longbow') {
+    // Hip: the arrow line converges on the crosshair like every bore does,
+    // with the cant added about the arrow pass (the model origin) so it does
+    // not swing the arrow off that line. The bow never changes its hand
+    // between the poses; ADS carries it by aimOffset alone.
+    authored.root.updateMatrixWorld(true);
+    const pass = attachmentPoint(required(authored.muzzle, id), authored.root);
+    const hip = hipHold(pass, { x: pass.x, y: pass.y, z: pass.z - 1 }, BOW_HIP, HIP_CONVERGENCE);
+    const position = new THREE.Vector3(hip.position.x, hip.position.y, hip.position.z);
+    hold = {
+      hip: { position, quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(hip.pitch, hip.yaw, BOW_HIP_ROLL, 'YXZ')) },
+      aim: { position, quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, BOW_AIM_ROLL, 'YXZ')) },
+    };
+    aimOffset = { x: BOW_AIM.x - pass.x - position.x, y: BOW_AIM.y - pass.y - position.y, z: BOW_AIM.z - pass.z - position.z };
+  } else if (id === 'knife') {
     // Held parallel to the view axis, the knife showed its pommel end-on and
     // read as a pencil aimed at the horizon. A forward grip instead: the handle
     // rises from below the frame's lower-right edge, where the hand would be, and
@@ -150,6 +179,21 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
       mechanisms[key] = shell;
       shell.visible = false;
     }
+  }
+  if (id === 'longbow') {
+    // The string and the nocked arrow follow the draw every frame
+    // (bowPresentation.ts), so they are built here rather than authored.
+    const linen = createCelMaterial({ color: 0xe8dfc4 });
+    for (const key of ['stringUpper', 'stringLower'] as const) {
+      const geometry = new THREE.CylinderGeometry(0.0013, 0.0013, 1, 6);
+      geometry.translate(0, 0.5, 0); // base at the origin, unit length up +y
+      const string = new THREE.Mesh(geometry, linen);
+      body.add(string);
+      mechanisms[key] = string;
+    }
+    const arrow = createArrowModel();
+    body.add(arrow);
+    mechanisms.nockedArrow = arrow;
   }
   const rest: WeaponViewModel['rest'] = new Map();
   for (const [key, node] of Object.entries(mechanisms)) {

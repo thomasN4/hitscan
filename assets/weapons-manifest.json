@@ -3,7 +3,7 @@
   "blender": "5.2.1 LTS",
   "gltfAddon": "5.2.40",
   "exporter": "scripts/assets/export-weapons.py",
-  "exporterSha256": "5d32cab90b3dba6f59618efbedc67d0601ad11fe44d44d085e9f03b0bee80cbd",
+  "exporterSha256": "638e6dc2b9b2e5893f9c6782cc8c4c74052ce67e44d956dd7b02ff95b73c261a",
   "settings": {
     "format": "GLB",
     "export_yup": false,
@@ -106,6 +106,18 @@
         "vertices": 12686,
         "meshes": 7,
         "bytes": 356556
+      }
+    },
+    {
+      "id": "longbow",
+      "source": "assets/source/longbow.blend",
+      "output": "public/assets/longbow.glb",
+      "sourceSha256": "273667504d75ddbd4a148ebd774d53d6acde0a6b07546668e9bc5959c63b6fa4",
+      "outputSha256": "a8572702ccb2bb75f76fdab9af7c04dda188965b0274c4f3846487cd5416474f",
+      "stats": {
+        "vertices": 2232,
+        "meshes": 10,
+        "bytes": 76204
       }
     }
   ]

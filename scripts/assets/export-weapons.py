@@ -25,7 +25,7 @@ def group(name, names, pivot):
         obj.matrix_world=world
     return node
 
-for weapon in ('shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff'):
+for weapon in ('shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff','longbow'):
     bpy.ops.wm.open_mainfile(filepath=str(ROOT/f'assets/source/{weapon}.blend'))
     for obj in list(bpy.context.scene.objects):
         if obj.type in ('CAMERA','LIGHT'):

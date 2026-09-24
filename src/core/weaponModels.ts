@@ -2,8 +2,8 @@
 // Coordinates are metres: the muzzle points down -z. The outer group owns poses.
 import * as THREE from 'three';
 import { createCelMaterial } from './materials';
-import type { WeaponId } from './state';
-import { hipHold } from '../sim/viewmodelHold';
+import { BASE_FOV, CAMERA_NEAR, type WeaponId } from './state';
+import { hipHold, rotateYawPitch, slideToClear, type Vec3 } from '../sim/viewmodelHold';
 import { attachmentPoint, createAuthoredWeaponRig, type AuthoredWeaponRig, type WeaponAssets } from './weaponAssets';
 
 /** A body pose: camera-space position of the model origin, and its rotation. */
@@ -38,6 +38,27 @@ const HIP_CONVERGENCE = 3;
 /** Handgun sight-line origin distance at full ADS (m), arms extended. */
 const HANDGUN_ADS_DEPTH = 0.44;
 const SHOULDERED: ReadonlySet<WeaponId> = new Set(['smg', 'ak47', 'sniper', 'shotgun']);
+/** Depth (m) of the stock's rear taken as its butt: the SMG's pad alone is ~4 cm. */
+const BUTT_PLATE = 0.05;
+/** View bob can raise the hip weapon this much (m): player.ts's walking bobAmt. */
+const HIP_BOB = 0.02;
+
+/** Model-space vertices of every mesh under `root` (unparented) with z beyond `z`. */
+function verticesBehind(root: THREE.Object3D, z: number): Vec3[] {
+  root.updateMatrixWorld(true);
+  const out: Vec3[] = [];
+  const v = new THREE.Vector3();
+  root.traverse(node => {
+    if (!(node instanceof THREE.Mesh)) return;
+    const mesh = node as THREE.Mesh<THREE.BufferGeometry, THREE.Material | THREE.Material[]>;
+    const position = mesh.geometry.getAttribute('position');
+    for (let i = 0; i < position.count; i++) {
+      v.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+      if (v.z > z) out.push({ x: v.x, y: v.y, z: v.z });
+    }
+  });
+  return out;
+}
 
 function required(node: THREE.Object3D | undefined, id: WeaponId): THREE.Object3D {
   if (!node) throw new Error(`Viewmodel: ${id} has no muzzle to hold by`);
@@ -54,6 +75,7 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   const authored = createAuthoredWeaponRig(id, weaponAssets[id]);
   // Measured while the root is still unparented, so the box is in model space.
   const butt = new THREE.Box3().setFromObject(authored.root).max.z;
+  const buttPlate = SHOULDERED.has(id) ? verticesBehind(authored.root, butt - BUTT_PLATE) : [];
   body.add(authored.root);
   // Authored sight height above the model origin; scaled with each model to
   // real size (scripts/assets/real-size.py).
@@ -76,6 +98,12 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
     const grip = attachmentPoint(authored.grip, authored.root);
     const muzzle = attachmentPoint(required(authored.muzzle, id), authored.root);
     const hip = hipHold(grip, muzzle, HIP_GRIP, HIP_CONVERGENCE);
+    // A stock shorter than the others (the real-sized SMG's) would end inside
+    // the frame's lower edge with the grip on the shared hand point; draw it
+    // back along its bore until the butt plate is out of view. Measured, so a
+    // stock that already runs off the frame does not move.
+    const slide = slideToClear(buttPlate, hip, Math.tan(BASE_FOV * Math.PI / 360), CAMERA_NEAR, HIP_BOB);
+    const back = rotateYawPitch({ x: 0, y: 0, z: 1 }, hip.yaw, hip.pitch);
     // Straight, with the grip still on the hand point: ADS unwinds the cant
     // about the hand rather than swinging the gun about the eye.
     const aim = new THREE.Vector3(HIP_GRIP.x - grip.x, HIP_GRIP.y - grip.y, HIP_GRIP.z - grip.z);
@@ -83,7 +111,7 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
     // stock runs out of view below the eye instead of standing in the frame.
     const depth = SHOULDERED.has(id) ? butt : HANDGUN_ADS_DEPTH;
     hold = {
-      hip: { position: new THREE.Vector3(hip.position.x, hip.position.y, hip.position.z),
+      hip: { position: new THREE.Vector3(hip.position.x, hip.position.y, hip.position.z).addScaledVector(new THREE.Vector3(back.x, back.y, back.z), slide),
         quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(hip.pitch, hip.yaw, 0, 'YXZ')) },
       aim: { position: aim, quaternion: new THREE.Quaternion() },
     };

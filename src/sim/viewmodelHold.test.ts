@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { Euler, Vector3 } from 'three';
-import { hipHold, rotateYawPitch } from './viewmodelHold';
+import { hipHold, rotateYawPitch, slideToClear } from './viewmodelHold';
 
 const anchor = { x: 0.22, y: -0.26, z: -0.44 };
 // A rifle and a pistol, grip and muzzle markers in model space (m).
@@ -41,4 +41,33 @@ describe('hipHold', () => {
       expect(hold.pitch).toBeGreaterThan(0);
     });
   }
+});
+
+describe('slideToClear', () => {
+  const hold = hipHold(weapons.rifle.grip, weapons.rifle.muzzle, anchor, 3);
+  const slope = Math.tan(75 * Math.PI / 360);
+  const place = (p: { x: number; y: number; z: number }, slide: number) => {
+    const r = rotateYawPitch(p, hold.yaw, hold.pitch);
+    const back = rotateYawPitch({ x: 0, y: 0, z: 1 }, hold.yaw, hold.pitch);
+    return { y: hold.position.y + r.y + back.y * slide, z: hold.position.z + r.z + back.z * slide };
+  };
+
+  test('a point already out of frame needs no slide', () => {
+    expect(slideToClear([{ x: 0, y: -0.3, z: 0.1 }], hold, slope, 0.075, 0)).toBe(0);
+  });
+
+  test('a butt in frame slides back until it clears, and no further than a step past', () => {
+    const butt = { x: 0, y: -0.02, z: 0.2 };
+    expect(place(butt, 0).y).toBeGreaterThan(place(butt, 0).z * slope);
+    const slide = slideToClear([butt], hold, slope, 0.075, 0.02);
+    expect(slide).toBeGreaterThan(0);
+    const at = place(butt, slide);
+    expect(at.z > -0.075 || at.y + 0.02 < at.z * slope).toBe(true);
+    const before = place(butt, slide - 0.005);
+    expect(before.z > -0.075 || before.y + 0.02 < before.z * slope).toBe(false);
+  });
+
+  test('a point that can never clear is a named error, not a silent zero', () => {
+    expect(() => slideToClear([{ x: 0, y: 5, z: -5 }], hold, slope, 0.075, 0)).toThrow(/no slide/);
+  });
 });

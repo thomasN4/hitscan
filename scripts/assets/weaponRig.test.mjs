@@ -217,7 +217,7 @@ test('sawn-off shells follow the rotated bores and restore after cancellation', 
 const REAL_LENGTH = {
   knife: [.28, .32],     // combat knife
   pistol: [.19, .23],    // full-size service pistol
-  revolver: [.25, .30],  // 5-6 in .357
+  revolver: [.25, .30],  // 5 in .44 Magnum
   sawnOff: [.35, .50],   // pistol-grip sawn-off
   smg: [.64, .72],       // MP5 / UMP
   shotgun: [.95, 1.05],  // 18-20 in pump gun
@@ -231,7 +231,7 @@ for (const [id, [min, max]] of Object.entries(REAL_LENGTH)) {
     expect(size.z).toBeLessThan(max);
   });
 }
-test('the revolver cylinder is a real six-shot diameter', async () => {
+test('the revolver cylinder is a .44 Magnum six-shot diameter', async () => {
   const rotor = (await asset('revolver')).getObjectByName('mechanism_rotor');
   const size = new Box3().setFromObject(rotor).getSize(new Vector3());
   expect(size.x).toBeGreaterThan(.040);

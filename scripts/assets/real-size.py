@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # weapon each one stands in for:
 REAL_SIZE = {
     'pistol': .70,    # 0.21 m  (full-size service pistol, 0.19-0.22 m)
-    'revolver': .85,  # 0.27 m  (5-6 in .357 revolver, 0.26-0.30 m)
+    'revolver': .85,  # 0.27 m  (5 in .44 Magnum, 0.26-0.30 m)
     'sawnOff': .80,   # 0.39 m  (pistol-grip sawn-off); bore 18.4 mm = 12 gauge
     'smg': .80,       # 0.68 m  (MP5 / UMP, 0.68-0.69 m)
     'shotgun': .92,   # 0.99 m  (18-20 in pump gun, 0.99-1.0 m)
@@ -34,9 +34,11 @@ REAL_SIZE = {
 }
 # The sniper (1.14 m) and knife (0.30 m, issue #143) are already real-sized.
 
-# After the uniform pass the cylinder is still 66 mm across on a 34 mm frame;
-# a real six-shot .357 cylinder is 40-44 mm. Trimmed about its own axis it
-# stays round and keeps indexing; its length along the bore is untouched.
+# After the uniform pass the cylinder is still 66 mm across on a 34 mm frame.
+# The revolver is the one-headshot sidearm, a .44 Magnum: a six-shot N-frame
+# cylinder is ~44 mm with ~11.7 mm chambers. Trimmed, this one is 50 mm with
+# 11.5 mm chambers. About its own axis it stays round and keeps indexing; its
+# length along the bore is untouched.
 REVOLVER_CYLINDER_TRIM = .75
 CYLINDER_PARTS = ('Cylinder / six chamber rotor', 'Extractor hub')
 # Top chamber centre before any scaling: the chamber the crane swing exposes.

@@ -239,3 +239,36 @@ test('SMG butt-pad rear stays below the ADS frame', () => {
     expect(rearVertices).toBeGreaterThan(100);
   }
 });
+
+// The mirror of the ADS check above, at the hip: with every grip on one hand
+// point, a short stock (the real-sized SMG's) ended just inside the frame's
+// lower edge and showed its butt plate. The edge is the vertical FOV's, so it
+// holds at every aspect ratio.
+test('long-gun butts stay below the hip frame', () => {
+  const slope = Math.tan(BASE_FOV * Math.PI / 360);
+  for (const id of ['smg', 'ak47', 'sniper', 'shotgun']) {
+    for (const cycle of [0, 0.25, 0.5, 1]) {
+      for (const recoil of [0, viewmodelRecoil(RECOIL_CAP, WEAPONS[id].recoilKick)]) {
+        const { gun, vm } = rig(id, 0, cycle, recoil);
+        const vertices = visibleMeshes(gun).flatMap(mesh => {
+          const positions = mesh.geometry.getAttribute('position');
+          return Array.from({ length: positions.count }, (_, i) =>
+            new Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld));
+        });
+        // Body-local z is model z; the butt is its last 5 cm (weaponModels.ts BUTT_PLATE).
+        const local = vertices.map(point => vm.body.worldToLocal(point.clone()).z);
+        const rear = Math.max(...local);
+        let plate = 0;
+        for (const [i, point] of vertices.entries()) {
+          {
+            if (local[i] < rear - 0.05) continue;
+            plate++;
+            if (point.z > -CAMERA_NEAR) continue;
+            expect(point.y - point.z * slope, `${id} cycle ${cycle} recoil ${recoil} vertex ${i}`).toBeLessThan(0);
+          }
+        }
+        expect(plate, `${id} butt`).toBeGreaterThan(10);
+      }
+    }
+  }
+});

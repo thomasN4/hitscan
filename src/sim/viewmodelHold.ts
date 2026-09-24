@@ -52,3 +52,28 @@ export function hipHold(grip: Vec3, muzzle: Vec3, anchor: Vec3, convergence: num
   const g = rotateYawPitch(grip, yaw, pitch);
   return { position: { x: anchor.x - g.x, y: anchor.y - g.y, z: anchor.z - g.z }, yaw, pitch };
 }
+
+/**
+ * How far (m) to slide a hold back along its own bore until every point in
+ * `points` (model space) is out of the bottom of the frame: below the edge
+ * `slope` = tan(vfov / 2), or behind the near plane. `lift` is how far the
+ * view may raise them (view bob), so the clearance survives it.
+ *
+ * Sliding along the bore keeps the bore line through the convergence point,
+ * so the hold still aims where hipHold put it; only the grip leaves its hand
+ * point, by exactly the returned distance. 0 when the points already clear.
+ */
+export function slideToClear(points: readonly Vec3[], hold: HipHold, slope: number, near: number,
+  lift: number, step = 0.005, limit = 0.3): number {
+  const back = rotateYawPitch({ x: 0, y: 0, z: 1 }, hold.yaw, hold.pitch);
+  const placed = points.map(p => {
+    const r = rotateYawPitch(p, hold.yaw, hold.pitch);
+    return { x: hold.position.x + r.x, y: hold.position.y + r.y, z: hold.position.z + r.z };
+  });
+  const clear = (slide: number) => placed.every(p => {
+    const y = p.y + back.y * slide + lift, z = p.z + back.z * slide;
+    return z > -near || y < z * slope;
+  });
+  for (let slide = 0; slide <= limit; slide += step) if (clear(slide)) return slide;
+  throw new Error(`Viewmodel hold: no slide within ${limit} m clears the frame`);
+}

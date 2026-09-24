@@ -17,7 +17,7 @@
 // consumer for a violation the contract already rules out. See main.ts for
 // the required init order.
 import * as THREE from 'three';
-import { AMBIENCE, BASE_FOV, type MapName } from './state';
+import { AMBIENCE, BASE_FOV, CAMERA_NEAR, type MapName } from './state';
 
 export let renderer: THREE.WebGLRenderer;
 export let scene: THREE.Scene;
@@ -96,7 +96,7 @@ export function initEngine(map: MapName, opts?: { lowFx?: boolean }): void {
 
   // FOV is animated by weapons.ts when aiming (BASE_FOV hip-fire -> per-weapon
   // zoom targets, down to ~6° at full sniper zoom).
-  camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.1, 300);
+  camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, CAMERA_NEAR, 300);
 
   scene.add(new THREE.HemisphereLight(amb.hemiSky, amb.hemiGround, amb.hemiIntensity));
   const sun = new THREE.DirectionalLight(amb.sunColor, amb.sunIntensity);

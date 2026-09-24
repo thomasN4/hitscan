@@ -43,7 +43,7 @@ test('revolver cartridge follows the exposed chamber and closes without pose res
     const opened=attachmentPoint(vm.authored.port,vm.body);
     expect(opened.x).toBeLessThan(closed.x-.04);
     // The cartridge tracks the swung-out chamber, not the rest-pose port.
-    expect(vm.mechanisms.shell.position.distanceTo(opened.clone().add(new Vector3(0,0,.070-.066*weaponPose({...input,reloadT:t}).insert)))).toBeLessThan(1e-6);
+    expect(vm.mechanisms.shell.position.distanceTo(opened.clone().add(new Vector3(0,0,.060-.056*weaponPose({...input,reloadT:t}).insert)))).toBeLessThan(1e-6);
   }
   poseWeapon(vm,'revolver',weaponPose({...input,reloading:false}),10,0,0);
   expect(attachmentPoint(vm.authored.port,vm.body).distanceTo(closed)).toBeLessThan(1e-6);
@@ -66,8 +66,8 @@ test('pistol magazine follows the authored well and restores after every reload 
   const rest=magazine.position.clone(), slideRest=slide.position.clone();
   const input={id:'pistol',now:10,shotAt:-10,fireInterval:.25,switchedAt:0,hasOutgoing:false,aiming:false,reloading:true,reloadStartedAt:9,reloadT:0,roundInterval:2,lastRound:false,emptyReload:false,closeAt:0,closeBlend:0};
   const travel=attachmentPoint(vm.authored.magazineOut,vm.body).sub(attachmentPoint(vm.authored.port,vm.body));
-  expect(travel.y).toBeLessThan(-.13);
-  expect(travel.z).toBeGreaterThan(.04);
+  expect(travel.y).toBeLessThan(-.12);
+  expect(travel.z).toBeGreaterThan(.035);
   for (const emptyReload of [false,true]) for(let i=0;i<=100;i++) {
     const pose=weaponPose({...input,reloadT:i/100,emptyReload});
     poseWeapon(vm,'pistol',pose,10,0,0);
@@ -84,7 +84,7 @@ test('pistol magazine follows the authored well and restores after every reload 
     expect(slide.position.distanceTo(slideRest)).toBeLessThan(1e-6);
   }
   poseWeapon(vm,'pistol',weaponPose({...input,reloading:false,shotAt:9.97}),10,0,0);
-  expect(slide.position.z-slideRest.z).toBeCloseTo(.045);
+  expect(slide.position.z-slideRest.z).toBeCloseTo(.032);
   expect(magazine.position.distanceTo(rest)).toBeLessThan(1e-6);
 });
 
@@ -118,7 +118,7 @@ for (const id of ['smg','sniper','ak47']) {
         charged=true;
         expect(magazine.position.distanceTo(rest)).toBeLessThan(1e-6);
         const action=vm.mechanisms[id!=='sniper'?'slide':'bolt'];
-        expect(action.position.z-vm.rest.get(action).position.z).toBeGreaterThan(.04);
+        expect(action.position.z-vm.rest.get(action).position.z).toBeGreaterThan(.03);
       }
       const frozen=magazine.position.clone();
       poseWeapon(vm,id,pose,10,0,0);
@@ -211,9 +211,29 @@ test('sawn-off shells follow the rotated bores and restore after cancellation', 
 });
 
 // Issue #143: the knife was first built 0.571 m overall, nearly twice the
-// pistol beside it. A real combat knife is ~0.30 m; keep it there.
-test('knife is authored at a real combat knife length', async () => {
-  const size = new Box3().setFromObject(await asset('knife')).getSize(new Vector3());
-  expect(size.z).toBeGreaterThan(.28);
-  expect(size.z).toBeLessThan(.32);
+// pistol beside it, and the pistol, SMG and revolver cylinder were oversized
+// too (scripts/assets/real-size.py). Overall length against the real weapon
+// each stands in for, so a regenerated or re-edited source cannot drift back.
+const REAL_LENGTH = {
+  knife: [.28, .32],     // combat knife
+  pistol: [.19, .23],    // full-size service pistol
+  revolver: [.25, .30],  // 5-6 in .357
+  sawnOff: [.35, .50],   // pistol-grip sawn-off
+  smg: [.64, .72],       // MP5 / UMP
+  shotgun: [.95, 1.05],  // 18-20 in pump gun
+  ak47: [.85, .90],      // AKM
+  sniper: [1.08, 1.24],  // M24 / AWP
+};
+for (const [id, [min, max]] of Object.entries(REAL_LENGTH)) {
+  test(`${id} is authored at a real ${id} length`, async () => {
+    const size = new Box3().setFromObject(await asset(id)).getSize(new Vector3());
+    expect(size.z).toBeGreaterThan(min);
+    expect(size.z).toBeLessThan(max);
+  });
+}
+test('the revolver cylinder is a real six-shot diameter', async () => {
+  const rotor = (await asset('revolver')).getObjectByName('mechanism_rotor');
+  const size = new Box3().setFromObject(rotor).getSize(new Vector3());
+  expect(size.x).toBeGreaterThan(.040);
+  expect(size.x).toBeLessThan(.052);
 });

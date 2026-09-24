@@ -5,6 +5,7 @@ This explicitly regenerates assets/source/pistol.blend; preserve manual edits fi
 Game coordinates: metres, Y up, -Z forward. Visual asset only.
 """
 import math
+import runpy
 from pathlib import Path
 import bpy
 import bmesh
@@ -12,6 +13,7 @@ from mathutils import Matrix, Vector
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'assets/previews'
 OUT.mkdir(parents=True, exist_ok=True)
+rescale_to_real_size = runpy.run_path(str(Path(__file__).with_name('real-size.py')))['rescale_to_real_size']
 (ROOT / 'assets/source').mkdir(parents=True, exist_ok=True)
 
 
@@ -111,6 +113,10 @@ def setup():
             material('Brass',(.62,.40,.12)))
 
 def save_and_render(name, target, scale):
+    # Designs are drawn at their original size; the saved source is real-sized.
+    s=rescale_to_real_size(name)
+    target=tuple(s*v for v in target)
+    scale*=s
     scene=bpy.context.scene
     scene['Design status']='Model review candidate; no runtime integration or animation changes'
     scene['Coordinate convention']='Y up, -Z forward; metres'

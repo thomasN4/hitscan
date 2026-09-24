@@ -38,6 +38,44 @@ native Z-up convention is deliberately not used here. Export uses
 `export_yup=False` to avoid rotating these coordinates a second time. Apply mesh
 transforms before export. No textures or animation clips are needed.
 
+## Real-world size
+
+The first builds were drawn oversized: the pistol (0.30 m) nearly as long as the
+revolver, the SMG (0.85 m) longer than any real SMG, and the revolver's
+cylinder 78 mm across, about twice a real one. `scripts/assets/real-size.py`
+scales each source uniformly about its origin, so proportions, markers and
+pivots all keep their relationships and the sight line scales with the gun:
+
+| Weapon | Scale | Overall length | Real reference |
+| --- | --- | --- | --- |
+| pistol | 0.70 | 0.21 m | full-size service pistol, 0.19–0.22 m |
+| revolver | 0.85 | 0.27 m | 5–6 in .357, 0.26–0.30 m |
+| sawnOff | 0.80 | 0.39 m | pistol-grip sawn-off; 18.4 mm (12-gauge) bore |
+| smg | 0.80 | 0.68 m | MP5 / UMP, 0.68–0.69 m |
+| shotgun | 0.92 | 0.99 m | 18–20 in pump gun |
+| ak47 | 0.935 | 0.88 m | AKM, 0.88 m |
+| sniper | — | 1.14 m | already real-sized |
+| knife | — | 0.30 m | already real-sized (issue #143) |
+
+The revolver's cylinder is additionally trimmed to 0.75 of its radius about its
+own axis, so it stays round and keeps indexing. Two steel fills close the frame
+window above and below it. The loading marker moved into the source as
+`Reload.Chamber`, so the exporter no longer hard-codes a chamber position that
+the trim would have left behind.
+
+The script records the applied factor in the scene (`Real-size scale`), so a
+second run changes nothing. The design generators call the same
+`rescale_to_real_size()` before saving, so a regenerated source comes out at
+the same size. Millimetre figures elsewhere in this file that predate the pass
+(the 5 mm hammer drop, the 37 mm ADS reference) describe the geometry as it was
+drawn and are 0.85× that in the shipped revolver.
+
+Sizes the code carries alongside the assets were scaled with them:
+`weaponModels.ts`'s sight lines and loose cartridges, the per-weapon action
+stroke in `weaponAssets.ts:ACTION_TRAVEL`, and the shell paths in the
+shotgun, revolver and sawn-off presentations. `weaponRig.test.mjs` pins every
+weapon's length to its real range.
+
 ## Optional live connection
 
 Tested: Blender 5.2.0 LTS, blender-mcp 1.9.1, add-on protocol 5.

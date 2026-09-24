@@ -22,6 +22,7 @@ This command **overwrites pistol.blend**. Preserve manual edits before running
 it again. It does not touch the shotgun or revolver. Renders are written to
 `assets/previews/`. Tested with Blender 5.2.0 LTS.
 
-The fitted magazine follows the cut well along `(0, -0.180, 0.05760)` metres.
+The fitted magazine follows the cut well along `(0, -0.126, 0.04032)` metres
+(`(0, -0.180, 0.05760)` as drawn, before the real-size pass in `docs/assets.md`).
 The generator verifies rest containment and 101 extraction poses against the
 beveled geometry. The exposed floorplate remains below the grip.

@@ -26,6 +26,7 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
     node.rotation.copy(rest.rotation);
   }
   const { mechanisms: m, group } = vm;
+  const travel = vm.authored.actionTravel;
   const quiet = (1 - ads) * (1 - pose.reload);
   // Reloading tilts the weapon to the right and dips it slightly; it does not
   // travel. The z push-back and the per-weapon reload yaw that used to live here
@@ -49,12 +50,12 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
     group.rotation.z += chambering.roll;
   }
   if (m.magazine) poseMagazine(vm, pose);
-  if (m.pump) m.pump.position.z += 0.095 * pose.pump;
+  if (m.pump) m.pump.position.z += travel * pose.pump;
   if (m.bolt) {
     m.bolt.rotation.z += 1.15 * Math.max(pose.boltLift, pose.charge);
-    m.bolt.position.z += 0.105 * Math.max(pose.boltPull, pose.charge);
+    m.bolt.position.z += travel * Math.max(pose.boltPull, pose.charge);
   }
-  if (m.slide) m.slide.position.z += 0.045 * Math.max(pose.slide, pose.charge);
+  if (m.slide) m.slide.position.z += travel * Math.max(pose.slide, pose.charge);
   if (m.cylinder) {
     m.cylinder.rotation.z += 1.60 * pose.cylinder;
   }

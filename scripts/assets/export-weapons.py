@@ -49,10 +49,9 @@ for weapon in ('shotgun','revolver','pistol','smg','sniper','knife','ak47','sawn
         crane=group('mechanism_cylinder',[rotor.name,'Cylinder crane','Ejector rod'],bpy.data.objects['Mechanism.CranePivot'].location)
         group('mechanism_hammer',['Hammer'],bpy.data.objects['Mechanism.HammerPivot'].location)
         bpy.data.objects['Grip.Primary'].name='grip_right'
-        port=bpy.data.objects.new('reload_port',None)
-        bpy.context.scene.collection.objects.link(port)
-        port.location=(0,-.003,.019)
-        bpy.context.view_layer.update()
+        # Authored at the top chamber, so it follows the cylinder's real-size trim.
+        port=bpy.data.objects['Reload.Chamber']
+        port.name='reload_port'
         world=port.matrix_world.copy()
         port.parent=crane
         port.matrix_world=world

@@ -16,7 +16,7 @@ export function poseShotgunReload(vm: WeaponViewModel, pose: WeaponPose): void {
   // the muzzle past the top edge at the shotgun's 60-degree ADS fov. The bound
   // is pinned in scripts/shotgunPresentation.test.mjs.
   const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(.65, .12, 2.60));
-  const receiverLocal = new THREE.Vector3(0, -.025, .0).add(vm.body.position);
+  const receiverLocal = new THREE.Vector3(0, -.023, .0).add(vm.body.position);
   const receiver = receiverLocal.clone().applyQuaternion(vm.group.quaternion).add(vm.group.position);
   receiver.lerp(new THREE.Vector3(0, -.16, -.50), amount);
   receiver.z += .04 * Math.sin(Math.PI * amount); // Ease the turn inward, then back.
@@ -31,7 +31,7 @@ export function poseShotgunReload(vm: WeaponViewModel, pose: WeaponPose): void {
   if (!shell) throw new Error('Shotgun viewmodel is missing its loading shell');
   // The visible shell travels nose-first along the tube axis, starting just
   // below the loading port.
-  shell.position.copy(attachmentPoint(rig.port, vm.body)).add(new THREE.Vector3(.0, -.065 + .045 * pose.insert, .07 - .075 * pose.insert));
+  shell.position.copy(attachmentPoint(rig.port, vm.body)).add(new THREE.Vector3(.0, -.060 + .041 * pose.insert, .064 - .069 * pose.insert));
   // Release into the tube before the next shell is retrieved.
   shell.visible = pose.shell && pose.insert < .95;
 }

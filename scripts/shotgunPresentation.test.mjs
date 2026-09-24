@@ -99,7 +99,7 @@ test('ADS chambering resets absolutely and preserves the authored pump travel', 
     poseWeapon(vm, 'shotgun', chambering, 10, 1, 0);
     expect(vm.group.position.y - position.y).toBeCloseTo(-.03);
     expect(vm.group.rotation.z - rotation.z).toBeCloseTo(Math.PI / 30);
-    expect(vm.mechanisms.pump.position.z - pumpZ).toBeCloseTo(.095);
+    expect(vm.mechanisms.pump.position.z - pumpZ).toBeCloseTo(.087);
   }
   poseWeapon(vm, 'shotgun', rest, 10, 1, 0);
   expect(vm.group.position.distanceTo(position)).toBe(0);

@@ -133,7 +133,7 @@ export function validateWeaponGlb(bytes, id) {
       const end = gltf.nodes[nodeIndex('magazine_out')].translation;
       assert.ok(start?.length === 3 && end?.length === 3 && [...start, ...end].every(Number.isFinite));
       const travel = end.map((value, i) => value - start[i]);
-      assert.ok(Math.abs(travel[0]) < 1e-6 && travel[1] < -.13
+      assert.ok(Math.abs(travel[0]) < 1e-6 && travel[1] < -.10
         && (id === 'pistol' ? travel[2] > 0 : Math.abs(travel[2]) < 1e-6)
         && Math.hypot(...travel) < .3, `Invalid ${id} magazine path`);
     }

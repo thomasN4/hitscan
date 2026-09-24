@@ -22,7 +22,9 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   const offset = id === 'sniper' ? { x: 0.26, y: 0.12 }
     : id === 'shotgun' ? { x: 0.20, y: 0.105 }
       : (id === 'smg' || id === 'ak47') ? { x: 0.25, y: 0.14 } : { x: 0.24, y: 0.15 };
-  const sightLine = id === 'pistol' ? -0.004 : id === 'revolver' ? 0.037 : id === 'shotgun' ? .034 : id === 'sawnOff' ? .008 : 0;
+  // Authored sight height above the model origin; scaled with each model to
+  // real size (scripts/assets/real-size.py).
+  const sightLine = id === 'pistol' ? -0.0028 : id === 'revolver' ? 0.03145 : id === 'shotgun' ? .03128 : id === 'sawnOff' ? .0064 : 0;
   body.position.set(offset.x, -offset.y, id === 'pistol' || id === 'revolver' || id === 'sawnOff' ? -0.50 : id === 'shotgun' ? -.46 : -0.57);
   // Held parallel to the view axis, the knife showed its pommel end-on and
   // read as a pencil aimed at the horizon. A forward grip instead: the handle
@@ -36,9 +38,12 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   }
   group.add(body);
   const authored = createAuthoredWeaponRig(id, weaponAssets[id]);
+  // Measured while the root is still unparented, so the box is in model space.
+  const butt = new THREE.Box3().setFromObject(authored.root).max.z;
   body.add(authored.root);
   const mechanisms: WeaponViewModel['mechanisms'] = { ...authored.mechanisms };
-  // Loose reload cartridges remain lightweight effects, separate from weapon assets.
+  // Loose reload cartridges remain lightweight effects, separate from weapon
+  // assets, sized to the real-sized chambers they feed.
   function cartridge(radius: number, length: number, color: number): THREE.Mesh {
     const geometry = new THREE.CylinderGeometry(radius, radius, length, 20);
     geometry.rotateX(Math.PI / 2);
@@ -47,10 +52,10 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
     return mesh;
   }
   if (id === 'shotgun' || id === 'revolver') {
-    const shell = id === 'shotgun' ? cartridge(.011, .055, 0xa94d39) : cartridge(.008, .034, 0xc6994f);
+    const shell = id === 'shotgun' ? cartridge(.0101, .0506, 0xa94d39) : cartridge(.0051, .0289, 0xc6994f);
     if (id === 'shotgun') {
-      const base = cartridge(.012, .009, 0xc6994f);
-      base.position.z = .027;
+      const base = cartridge(.011, .0083, 0xc6994f);
+      base.position.z = .0248;
       shell.add(base);
     }
     body.add(shell);
@@ -59,9 +64,9 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
   }
   if (id === 'sawnOff') {
     for (const key of ['shellLeft', 'shellRight'] as const) {
-      const shell = cartridge(.010, .055, 0xa94d39);
-      const base = cartridge(.011, .009, 0xc6994f);
-      base.position.z = .027;
+      const shell = cartridge(.008, .044, 0xa94d39);
+      const base = cartridge(.0088, .0072, 0xc6994f);
+      base.position.z = .0216;
       shell.add(base);
       body.add(shell);
       mechanisms[key] = shell;
@@ -74,7 +79,9 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
     rest.set(node, { position: node.position.clone(), rotation: node.rotation.clone() });
   }
   return { authored, group, body, mechanisms, rest,
-    // Shoulder the SMG close enough that the butt pad falls below the frame.
-    // Keep the stock's near-plane intersection below the view even during recoil.
-    aimOffset: { x: -offset.x, y: offset.y - sightLine, z: (id === 'smg' || id === 'ak47') ? 0.10 : 0.06 } };
+    // Shouldered, the butt ends on the eye plane (a cheek weld), so the stock
+    // runs out of view below the eye; the real-sized SMG's stock is too short
+    // to clear the frame any further forward.
+    aimOffset: { x: -offset.x, y: offset.y - sightLine,
+      z: (id === 'smg' || id === 'ak47') ? 0.57 - butt : 0.06 } };
 }

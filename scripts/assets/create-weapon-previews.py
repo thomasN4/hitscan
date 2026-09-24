@@ -6,6 +6,7 @@ Coordinates match the viewmodels: Y up, -Z muzzle direction, metres.
 These are visual-review candidates; attachment markers are provisional.
 """
 import math
+import runpy
 from pathlib import Path
 import bpy
 from mathutils import Matrix, Vector
@@ -13,6 +14,7 @@ from mathutils import Matrix, Vector
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'assets/previews'
 OUT.mkdir(parents=True, exist_ok=True)
+rescale_to_real_size = runpy.run_path(str(Path(__file__).with_name('real-size.py')))['rescale_to_real_size']
 
 
 def material(name, color):
@@ -240,6 +242,10 @@ def revolver():
 
 
 def save_and_render(name, target, scale):
+    # Designs are drawn at their original size; the saved source is real-sized.
+    s=rescale_to_real_size(name)
+    target=tuple(s*v for v in target)
+    scale*=s
     scene=bpy.context.scene
     scene['Design status']='Model review candidate; no runtime integration or animation changes'
     scene['Coordinate convention']='Y up, -Z forward; metres'

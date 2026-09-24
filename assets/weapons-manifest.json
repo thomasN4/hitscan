@@ -3,7 +3,7 @@
   "blender": "5.2.1 LTS",
   "gltfAddon": "5.2.40",
   "exporter": "scripts/assets/export-weapons.py",
-  "exporterSha256": "98bc504abdd19131cdc0d99a54d7df0b5059174e4712e50c67fbc96de18b49c7",
+  "exporterSha256": "5d32cab90b3dba6f59618efbedc67d0601ad11fe44d44d085e9f03b0bee80cbd",
   "settings": {
     "format": "GLB",
     "export_yup": false,
@@ -16,48 +16,48 @@
       "id": "shotgun",
       "source": "assets/source/shotgun.blend",
       "output": "public/assets/shotgun.glb",
-      "sourceSha256": "0e8c3983d65eda7cc3b2d9b281b62f1375105aca27f43ed5cc801d03d25d7652",
-      "outputSha256": "4111029cdcef5a3c84f48fea8a4264a0b85bcfd339fbafbc6655cd2578d79fe3",
+      "sourceSha256": "2c1a4e22c96eecaf1ebfea6e54026b2d5b67f2dd1a5bee92d9413e42ec07655e",
+      "outputSha256": "b26c4869d1cc9d6c08ce425ef0f3ea44b43c9003cbf9c14ba4bb074a36d78fe0",
       "stats": {
         "vertices": 30098,
         "meshes": 9,
-        "bytes": 848220
+        "bytes": 848224
       }
     },
     {
       "id": "revolver",
       "source": "assets/source/revolver.blend",
       "output": "public/assets/revolver.glb",
-      "sourceSha256": "914c68f2eb26bdac10c1b1228251e5e05444a30ec9dae95028e23ca1425fb951",
-      "outputSha256": "0e29dca8775eac9aedde3b3172f80a11212f045da2d2858129bb40cb90303022",
+      "sourceSha256": "b79174e2eb2b694541de96328e9a3c1ba4cd64ecc033521960d6ff228d2e2a05",
+      "outputSha256": "b457c150b447a81a2639595fbad98455b131f2f410e5e61fc08c932bcc288409",
       "stats": {
-        "vertices": 25326,
+        "vertices": 25758,
         "meshes": 13,
-        "bytes": 727836
+        "bytes": 739596
       }
     },
     {
       "id": "pistol",
       "source": "assets/source/pistol.blend",
       "output": "public/assets/pistol.glb",
-      "sourceSha256": "f8331cf053e7298fb11997754d6b50f173c32e6b5603232a583ee9765bee4e93",
-      "outputSha256": "007fb4d48caf18e055b09ac07495216d2cbe818069a3472a1a64d5a400b6a8d3",
+      "sourceSha256": "abf3174687129a12ae194a2ec741e0edd5e4951fb391007839d4db7d695fb701",
+      "outputSha256": "083d4aab499815ef59b9e3951818c24ff2652fde2fae8a23e6fa513a26bb6959",
       "stats": {
-        "vertices": 26322,
+        "vertices": 26318,
         "meshes": 9,
-        "bytes": 753456
+        "bytes": 753376
       }
     },
     {
       "id": "smg",
       "source": "assets/source/smg.blend",
       "output": "public/assets/smg.glb",
-      "sourceSha256": "e1df6351fe74ce47d87c5f1c5e2cecbb52dc7670ec6e0e42482d78b02195123b",
-      "outputSha256": "a9c1e32d824c1259e1dfb327f4311fda23919941a3ebc858f456d6c59745b2f6",
+      "sourceSha256": "44a989d0e054a47074361ba44e5197c0dd862687c5a456414149af23dca4dec3",
+      "outputSha256": "c16c54f6e99371ea03d8a6fa845fd7b467512e593d195044b222be5d83f5c5f1",
       "stats": {
-        "vertices": 28714,
+        "vertices": 28718,
         "meshes": 7,
-        "bytes": 862744
+        "bytes": 862844
       }
     },
     {
@@ -88,24 +88,24 @@
       "id": "ak47",
       "source": "assets/source/ak47.blend",
       "output": "public/assets/ak47.glb",
-      "sourceSha256": "36e357109cb8919b0e2231afe11ef7dd4d4ad6fff8d078a502737237cd9b43d7",
-      "outputSha256": "d8fca944dad300c5af71b913bccad8a4e1efd4a88e2853561051747f3ddf8287",
+      "sourceSha256": "1c907b9058692d3b828b6ea15a4b3b997d87803187bd191d3fc41a27152ae041",
+      "outputSha256": "21398aa33dc55ed0d7d151714104e8296ceac287792d3aae89c8b62748c139e7",
       "stats": {
         "vertices": 21322,
         "meshes": 8,
-        "bytes": 609676
+        "bytes": 609684
       }
     },
     {
       "id": "sawnOff",
       "source": "assets/source/sawnOff.blend",
       "output": "public/assets/sawnOff.glb",
-      "sourceSha256": "6421238ee5ec5985c7da797dda8b7fb5da5788363ede7e6b013862bf4f58e5fd",
-      "outputSha256": "77cf7e0216d1fba2c8abb0b8c4c7690cc172f94cd3f8fcba2b70cd0d5f14d49e",
+      "sourceSha256": "838b2e700bfd7a5e7d62d87d3ee4b28bf08d08ffb3340ae224a8196c998476b2",
+      "outputSha256": "b3193c32df04f5aed2583d03b4a6cabf7ba28de06fe18eb7c7abf868848d3ff6",
       "stats": {
         "vertices": 12686,
         "meshes": 7,
-        "bytes": 356532
+        "bytes": 356556
       }
     }
   ]

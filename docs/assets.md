@@ -206,7 +206,10 @@ its slide, preserving the aiming heights. The revolver source has a notched rear
 sight and a front blade raised to the existing 37 mm ADS reference. Its front
 blade remains seated on the barrel rib; the lowered hammer is preserved. These
 are manual source edits, so the initial design generators will overwrite them.
-Runtime ADS offsets and mechanism animations are unchanged.
+They left the runtime ADS offsets and mechanism animations as they were. Both
+have since moved with the real-size pass: ADS offsets are derived from each
+model (see "First-person hold"), and slide, pump and bolt strokes come from
+`weaponAssets.ts:ACTION_TRAVEL`.
 
 The sight tests now probe the pistol supports where sky gaps used to appear and
 raycast through the revolver notch to its front blade throughout firing. The

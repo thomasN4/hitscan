@@ -22,7 +22,7 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
 import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch, sfxZoom,
          sfxBow, sfxBowDraw, sfxSwordThrust, sfxSwordSlash, sfxSwordHit } from './audio';
-import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
+import { showHitmarker, showDamageNumber, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
 import { spawnArrow } from './arrows';
@@ -448,6 +448,7 @@ function swingMelee(def: WeaponDef, attack: MeleeAttackDef, alt: boolean): void 
       dmg *= def.backstabMult ?? 1; // documented default: absent means no bonus
     }
     damageBot(hit.payload, dmg, hit.part);
+    showDamageNumber(hit.at, dmg, hit.part === 'head');
   }
 
   applyKick(def);
@@ -633,6 +634,9 @@ export function shoot(): void {
 
   let anyHit = false;
   let anyHead = false;
+  // One damage number per bot per trigger pull: a blast's pellets sum on
+  // their victim, shown where the first of them landed.
+  const struck = new Map<Bot, { at: THREE.Vector3; total: number; head: boolean }>();
 
   /** One hitscan ray: sample the cone, take the nearest intersection. */
   const fireRay = (): void => {
@@ -662,7 +666,15 @@ export function shoot(): void {
       const part = partForMesh(bot, hit.object);
       anyHit = true;
       anyHead = anyHead || part === 'head';
-      damageBot(bot, damageForPart(weapon, part), part);
+      const dmg = damageForPart(weapon, part);
+      damageBot(bot, dmg, part);
+      const tally = struck.get(bot);
+      if (tally) {
+        tally.total += dmg;
+        tally.head ||= part === 'head';
+      } else {
+        struck.set(bot, { at: hit.point.clone(), total: dmg, head: part === 'head' });
+      }
     } else {
       spawnImpact(hit.point);
       // Decal needs the surface normal in world space; face.normal is
@@ -683,6 +695,7 @@ export function shoot(): void {
 
   // One marker per trigger pull, red if ANY pellet reached a head.
   if (anyHit) showHitmarker(anyHead);
+  for (const tally of struck.values()) showDamageNumber(tally.at, tally.total, tally.head);
 }
 
 /**

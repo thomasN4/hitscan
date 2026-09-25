@@ -2254,8 +2254,10 @@ async function runLongbowCheck() {
       const stuck0 = cs.stuckArrows.length;
       const t0 = cs.gameTime.now();
       while (bot.hp === 100 && cs.gameTime.now() - t0 < 1.5) await wait(16);
+      await wait(50);
       const hit = { hp: bot.hp, alive: bot.alive, flight: +(cs.gameTime.now() - t0).toFixed(3),
-        arrows: cs.arrows.length, stuck: cs.stuckArrows.length - stuck0 };
+        arrows: cs.arrows.length, stuck: cs.stuckArrows.length - stuck0,
+        popups: [...document.querySelectorAll('#damageNumbers .dmgnum')].filter(e => e.style.display === 'block').map(e => e.textContent) };
       window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
 
       // An arrow loosed at the ground in front stays standing in it.
@@ -2288,6 +2290,7 @@ async function runLongbowCheck() {
     // Torso ~79 (alive at ~21), legs ~59, head kills: any of the three is a real hit.
     if (hit.alive && !(100 - hit.hp >= 55 && 100 - hit.hp <= 80)) throw new Error(`arrow damage off the speed-scaled table: ${JSON.stringify(hit)}`);
     if (hit.arrows !== 0 || hit.stuck !== 0) throw new Error(`an arrow in a body was left flying or standing: ${JSON.stringify(hit)}`);
+    if (hit.alive && !hit.popups.includes(String(100 - hit.hp))) throw new Error(`the arrow's popup does not match its damage: ${JSON.stringify(hit)}`);
     if (ground.stuck !== 1 || ground.arrows !== 0) throw new Error(`the ground arrow did not stay standing: ${JSON.stringify(ground)}`);
     if (ground.parent !== 'Mesh') throw new Error(`the stuck arrow is not parented to the surface it hit: ${JSON.stringify(ground)}`);
     if (!(ground.trailPoints >= 3)) throw new Error(`the flight trail did not grow in flight: ${JSON.stringify(ground)}`);
@@ -2362,9 +2365,11 @@ async function runSwordCheck() {
       };
       const stroke = async b => { button(b, true); await gwait(0.1); button(b, false); await gwait(0.1); };
 
+      const popupTexts = () => [...document.querySelectorAll('#damageNumbers .dmgnum')].filter(e => e.style.display === 'block').map(e => e.textContent);
       await place(2.2, 0);
       await stroke(0);
       const thrustAhead = bot.hp;
+      const thrustPopups = popupTexts();
       await place(0.9, 0);
       await stroke(0);
       const thrustClose = bot.hp;
@@ -2380,6 +2385,7 @@ async function runSwordCheck() {
       button(2, true);
       await gwait(0.1);
       const slashLed = bot.hp;
+      const slashPopups = popupTexts();
       // Still held: recovered, but the latch must refuse a second slash.
       bot.hp = 100;
       cs.weapon.lastShot = -9;
@@ -2390,7 +2396,7 @@ async function runSwordCheck() {
       cs.weapon.lastShot = -9;
       button(2, true); await gwait(0.1); button(2, false);
       const repressHp = bot.hp;
-      return { armed, thrustAhead, thrustClose, thrustOffAxis, slashCentred, slashLed, heldHp, repressHp, adsMax: +adsMax.toFixed(3) };
+      return { armed, thrustAhead, thrustPopups, thrustClose, thrustOffAxis, slashCentred, slashLed, slashPopups, heldHp, repressHp, adsMax: +adsMax.toFixed(3) };
     });
     if (result.fail) throw new Error(result.fail);
     const r = result;
@@ -2401,6 +2407,8 @@ async function runSwordCheck() {
     if (r.thrustOffAxis !== 100) throw new Error(`the narrow thrust hit a bot 35° off-axis: hp ${r.thrustOffAxis}`);
     if (!(took(r.slashLed) >= 55 && took(r.slashLed) <= 60)) throw new Error(`a slash led to where the cut ends must take ~60: took ${took(r.slashLed)}`);
     if (!(took(r.slashCentred) > 0 && took(r.slashCentred) <= 45)) throw new Error(`a slash centred on the crosshair must land clearly short of 60: took ${took(r.slashCentred)}`);
+    if (!r.thrustPopups.includes('75')) throw new Error(`no 75 popped up for the thrust: ${JSON.stringify(r.thrustPopups)}`);
+    if (!r.slashPopups.includes(String(took(r.slashLed)))) throw new Error(`the slash's popup does not match its damage ${took(r.slashLed)}: ${JSON.stringify(r.slashPopups)}`);
     if (r.heldHp !== 100) throw new Error(`a held RMB slashed twice: hp ${r.heldHp}`);
     if (!(took(r.repressHp) >= 55)) throw new Error(`a fresh RMB press did not slash again: hp ${r.repressHp}`);
     if (r.adsMax > 0.01) throw new Error(`RMB blended into ADS on the sword: ${r.adsMax}`);
@@ -2410,6 +2418,92 @@ async function runSwordCheck() {
     console.log(`[sword] FAIL: ${e.message}`);
   }
   errors.push(...mapErrors.map(e => `[sword] ${e}`));
+  await page.close();
+}
+
+// Damage numbers: one popup per bot per trigger pull at the point of impact,
+// reading what the hit dealt — pinned on a shotgun blast, whose eight pellets
+// must sum into ONE number — and the settings checkbox, driven through its
+// real change event, must stop them. The stored settings are removed after,
+// so later phases see the defaults.
+async function runDamageNumbersCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=0&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1500));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const gwait = async s => { const t0 = cs.gameTime.now(); while (cs.gameTime.now() - t0 < s) await wait(16); };
+      const popupTexts = () => [...document.querySelectorAll('#damageNumbers .dmgnum')].filter(e => e.style.display === 'block').map(e => e.textContent);
+      document.getElementById('playBtn').click();
+      const card = name => [...document.querySelectorAll('.wcard')].find(b => b.textContent.includes(name));
+      card('SHOTGUN').click();
+      card('PISTOL').click();
+      document.getElementById('deployBtn').click();
+      cs.game.started = true;
+      cs.game.locked = true;
+      await gwait(0.6);
+      cs.player.hp = 100000;
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+      bot.update = () => {};
+      // A lane free of colliders, so every pellet that misses the bot is not
+      // stopped by cover it should have hit.
+      const laneClear = (x, z) => cs.colliders.every(b => !(b.max.y > 0.3 && b.min.y < 2.2
+        && b.max.x > x - 0.9 && b.min.x < x + 0.9 && b.max.z > z - 5 && b.min.z < z + 0.6));
+      let lane = null;
+      for (let r = 0; r <= 40 && !lane; r += 2) {
+        for (let x = -r; x <= r && !lane; x += 2) for (const z of [-r, r]) if (!lane && laneClear(x, z)) lane = { x, z };
+      }
+      if (!lane) return { fail: 'no clear lane found on the arena' };
+      cs.player.pos.set(lane.x, cs.player.pos.y, lane.z);
+      cs.player.vel.set(0, 0, 0);
+      cs.game.yaw = 0;
+      bot.mesh.position.set(lane.x, cs.player.pos.y - cs.player.eyeHeight, lane.z - 3);
+      await gwait(0.1);
+      const torso = bot.torso.getWorldPosition(bot.torso.position.clone());
+      cs.game.pitch = Math.atan2(torso.y - cs.player.pos.y, 3);
+      const blast = async () => {
+        bot.hp = 1000;
+        cs.weapon.lastShot = -9;
+        window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+        await gwait(0.08);
+        window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+        await gwait(0.05);
+        return { took: 1000 - bot.hp, popups: popupTexts() };
+      };
+      const on = await blast();
+      await gwait(1.0); // let it expire
+      // Through the real screen: opening it fills the form from the slice.
+      document.getElementById('settingsBtn').click();
+      const box = document.getElementById('setDamageNumbers');
+      const shownChecked = box.checked;
+      box.click(); // the real change event: settingsMenu commits the slice
+      const setting = cs.settings.damageNumbers;
+      const off = await blast();
+      box.click();
+      const restored = cs.settings.damageNumbers;
+      document.getElementById('settingsBackBtn').click();
+      try { localStorage.removeItem('acsc.settings'); } catch { /* storage unavailable */ }
+      return { on, shownChecked, setting, off, restored };
+    });
+    if (result.fail) throw new Error(result.fail);
+    const { on, shownChecked, setting, off, restored } = result;
+    if (!(on.took > 0)) throw new Error(`the blast missed the bot 3 m ahead: ${JSON.stringify(on)}`);
+    if (on.popups.length !== 1 || on.popups[0] !== String(on.took)) throw new Error(`one blast must pop exactly one summed number: ${JSON.stringify(on)}`);
+    if (!shownChecked) throw new Error('the settings screen showed damage numbers unticked while they are on');
+    if (setting !== false || restored !== true) throw new Error(`the checkbox did not drive the setting: off=${setting} back=${restored}`);
+    if (!(off.took > 0) || off.popups.length !== 0) throw new Error(`popups still appeared with the setting off: ${JSON.stringify(off)}`);
+    console.log('[damageNumbers] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[damageNumbers] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[damageNumbers] ${e}`));
   await page.close();
 }
 
@@ -3354,6 +3448,7 @@ try {
   await runKnifeCheck();
   await runLongbowCheck();
   await runSwordCheck();
+  await runDamageNumbersCheck();
   await runMatchEndCheck();
   await runTouchCheck();
 } finally {

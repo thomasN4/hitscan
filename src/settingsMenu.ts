@@ -4,7 +4,7 @@
 // A sanctioned DOM writer beside hud.ts, menu.ts and touchControls.ts,
 // confined to #settingsScreen. It is also the ONE writer of
 // core/state.ts:settings: it loads the stored copy at startup, and applies
-// slider changes, resets and the layout editor's result. Storage IO lives
+// slider and checkbox changes, resets and the layout editor's result. Storage IO lives
 // here because state.ts must stay Node-pure; core/settings.ts:sanitizeSettings
 // owns what may be applied, the same split the loadout uses (menu.ts +
 // sanitizeLoadout).
@@ -64,16 +64,34 @@ const SLIDERS: readonly Slider[] = [
   { id: 'setStick', lim: SETTING_LIMITS.stickRadius, step: 1, get: s => s.touch.stickRadius, set: (s, v) => { s.touch.stickRadius = v; }, fmt: v => `${v}px` },
 ];
 
+/** An on/off preference: a checkbox with an On/Off readout. */
+interface Toggle {
+  id: string;
+  get(s: Settings): boolean;
+  set(s: Settings, v: boolean): void;
+}
+
+const TOGGLES: readonly Toggle[] = [
+  { id: 'setDamageNumbers', get: s => s.damageNumbers, set: (s, v) => { s.damageNumbers = v; } },
+];
+
 let screen: HTMLElement, statusEl: HTMLElement, exportEl: HTMLTextAreaElement;
 let touchMode = false;
 const inputs: { slider: Slider; input: HTMLInputElement; out: HTMLElement }[] = [];
+const checks: { toggle: Toggle; input: HTMLInputElement; out: HTMLElement }[] = [];
 
-/** Push the slice's values into every slider and readout. */
+const onOff = (v: boolean): string => v ? 'On' : 'Off';
+
+/** Push the slice's values into every slider, checkbox and readout. */
 function refreshForm(): void {
   for (const { slider, input, out } of inputs) {
     const v = slider.get(settings);
     input.value = String(v);
     out.textContent = slider.fmt(v);
+  }
+  for (const { toggle, input, out } of checks) {
+    input.checked = toggle.get(settings);
+    out.textContent = onOff(input.checked);
   }
 }
 
@@ -131,6 +149,16 @@ export function initSettingsMenu(opts: { touch: boolean }): void {
       commit();
     });
     inputs.push({ slider, input, out });
+  }
+  for (const toggle of TOGGLES) {
+    const input = requireEl(toggle.id) as HTMLInputElement;
+    const out = requireEl(`${toggle.id}Out`);
+    input.addEventListener('change', () => {
+      toggle.set(settings, input.checked);
+      out.textContent = onOff(input.checked);
+      commit();
+    });
+    checks.push({ toggle, input, out });
   }
 
   requireEl('settingsBtn').onclick = openSettings;

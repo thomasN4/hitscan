@@ -1,5 +1,5 @@
 // hud.ts — all DOM manipulation for the 2D overlay (health, ammo, score,
-// kill feed, crosshair, hit/damage feedback).
+// kill feed, crosshair, hit/damage feedback, damage numbers).
 //
 // The HUD elements are plain markup in index.html; this module grabs the
 // references once and exposes small update functions. Nothing else should
@@ -7,8 +7,11 @@
 //
 // NOTE: functions here read core/state.ts directly rather than taking
 // params — acceptable because the HUD is a pure view of that state.
-import { player, weapon, input, wpn, score, session, bots, dom, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
+import * as THREE from 'three';
+import { camera } from './core/engine';
+import { player, weapon, input, wpn, score, session, bots, dom, settings, gameTime, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
 import { isLowAmmo } from './sim/ammo';
+import { damageNumberFrame } from './sim/damageNumbers';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -66,9 +69,67 @@ export function initHUD(touch = false): void {
   weaponName = el('weaponName');
   botDebug = el('botDebug');
   domFlagsEl = el('domFlags');
+  const layer = el('damageNumbers');
+  for (let i = 0; i < DAMAGE_POOL; i++) {
+    const node = document.createElement('div');
+    node.className = 'dmgnum';
+    layer.appendChild(node);
+    popups.push({ el: node, at: new THREE.Vector3(), born: -Infinity, live: false });
+  }
 }
 
 let hitmarkerTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ---------- Damage numbers ----------
+/** Popups alive at once; a new one past this recycles the oldest. */
+const DAMAGE_POOL = 24;
+interface Popup { el: HTMLElement; at: THREE.Vector3; born: number; live: boolean }
+const popups: Popup[] = [];
+let nextPopup = 0;
+const projected = new THREE.Vector3();
+
+/**
+ * Pop `amount` up at the world point `at` where a hit landed; red and larger
+ * for a head. The number is what the hit dealt, before any clamp to the
+ * victim's remaining HP — a 240 headshot reads 240 — because it is a tuning
+ * readout as much as feedback. Callers are the player's three hit sites
+ * (weapons.ts shoot/swingMelee, arrows.ts); bot-on-bot damage shows nothing.
+ */
+export function showDamageNumber(at: THREE.Vector3, amount: number, head: boolean): void {
+  if (!settings.damageNumbers || popups.length === 0) return;
+  // Bound-guarded: a ring index into the fixed pool built by initHUD.
+  const popup = popups[nextPopup]!;
+  nextPopup = (nextPopup + 1) % popups.length;
+  popup.at.copy(at);
+  popup.born = gameTime.now();
+  popup.live = true;
+  popup.el.textContent = String(Math.round(amount));
+  popup.el.classList.toggle('head', head);
+}
+
+/**
+ * Move every live popup to its impact point's place on screen this frame.
+ * Game-clock ages, so popups hold still under the pause menu with the rest
+ * of the HUD; one behind the camera is hidden rather than drawn mirrored.
+ */
+function updateDamageNumbers(): void {
+  const now = gameTime.now();
+  for (const popup of popups) {
+    if (!popup.live) continue;
+    const frame = settings.damageNumbers ? damageNumberFrame(now - popup.born) : null;
+    projected.copy(popup.at).project(camera);
+    if (frame === null || projected.z > 1) {
+      if (frame === null) popup.live = false;
+      popup.el.style.display = 'none';
+      continue;
+    }
+    const x = (projected.x + 1) / 2 * window.innerWidth;
+    const y = (1 - projected.y) / 2 * window.innerHeight - frame.rise;
+    popup.el.style.display = 'block';
+    popup.el.style.opacity = String(frame.opacity);
+    popup.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${frame.scale})`;
+  }
+}
 
 /**
  * Flash the X-shaped marker at screen center.
@@ -218,6 +279,7 @@ let lastName = '';
 let lastZoomLabel = '';
 export function updateHUD(): void {
   applyCrosshairVisibility();
+  updateDamageNumbers();
   hpText.textContent = String(Math.max(0, Math.round(player.hp)));
   healthFill.style.width = Math.max(0, player.hp) + '%';
   // Color shifts green -> orange -> red as HP drops.

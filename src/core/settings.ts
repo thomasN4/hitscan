@@ -48,6 +48,8 @@ export interface Settings {
   mouseSens: number;
   touch: TouchSettings;
   layout: TouchLayout;
+  /** Pop the damage each hit deals up at its point of impact (hud.ts:showDamageNumber). */
+  damageNumbers: boolean;
 }
 
 interface Limits { min: number; max: number }
@@ -89,6 +91,7 @@ export const DEFAULT_SETTINGS: Settings = {
     pause: { x: 0.043, y: 0.082, scale: 1 },
     weapons: { x: 0.859, y: 0.077, scale: 1 },
   },
+  damageNumbers: true,
 };
 
 /** Square-law slider: more travel for quiet levels, with zero still silent. */
@@ -148,6 +151,7 @@ export function sanitizeLayout(raw: unknown): TouchLayout {
  */
 export function sanitizeSettings(raw: unknown): Settings {
   const touch = field(raw, 'touch');
+  const damageNumbers = field(raw, 'damageNumbers');
   const d = DEFAULT_SETTINGS;
   return {
     version: 1,
@@ -160,5 +164,7 @@ export function sanitizeSettings(raw: unknown): Settings {
       stickRadius: num(field(touch, 'stickRadius'), SETTING_LIMITS.stickRadius, d.touch.stickRadius),
     },
     layout: sanitizeLayout(field(raw, 'layout')),
+    // Additive field: a copy stored before it existed loads with the default.
+    damageNumbers: typeof damageNumbers === 'boolean' ? damageNumbers : d.damageNumbers,
   };
 }

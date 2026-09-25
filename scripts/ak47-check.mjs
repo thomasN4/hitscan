@@ -54,8 +54,8 @@ try {
     cs.player.pos.set(12, cs.player.eyeHeight, -7);
     // Aim at the head's actual world position, not a hard-coded height, so the
     // next body-proportion change can't silently break this (issue #152).
-    // player.pos carries the only in-page Vector3 constructor — THREE itself
-    // is not exposed on window.__cs.
+    // getWorldPosition needs a Vector3 to write into; THREE itself is not
+    // exposed in-page, so borrow the constructor from player.pos.
     target.mesh.updateMatrixWorld(true);
     const headPos = target.head.getWorldPosition(new cs.player.pos.constructor());
     const aimDx = headPos.x - cs.player.pos.x;

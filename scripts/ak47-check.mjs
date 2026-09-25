@@ -52,7 +52,16 @@ try {
     target.mesh.position.set(12, 0, -15); target.mesh.rotation.y = 0;
     cs.bots.find(b => b.team === 'CT').mesh.position.set(-12, 0, -15);
     cs.player.pos.set(12, cs.player.eyeHeight, -7);
-    cs.game.pitch = Math.atan2(2 - cs.player.eyeHeight, 8); cs.game.yaw = 0;
+    // Aim at the head's actual world position, not a hard-coded height, so the
+    // next body-proportion change can't silently break this (issue #152).
+    // player.pos carries the only in-page Vector3 constructor — THREE itself
+    // is not exposed on window.__cs.
+    target.mesh.updateMatrixWorld(true);
+    const headPos = target.head.getWorldPosition(new cs.player.pos.constructor());
+    const aimDx = headPos.x - cs.player.pos.x;
+    const aimDz = headPos.z - cs.player.pos.z;
+    cs.game.pitch = Math.atan2(headPos.y - cs.player.pos.y, Math.hypot(aimDx, aimDz));
+    cs.game.yaw = Math.atan2(-aimDx, -aimDz);
     for (let i = 0; i < 30; i++) await frame();
     const random = Math.random;
     Math.random = () => .5; // Centered scatter isolates hit-zone wiring, not hit probability.

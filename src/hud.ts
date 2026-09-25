@@ -116,6 +116,11 @@ export function showDamageNumber(at: THREE.Vector3, amount: number, head: boolea
  */
 function updateDamageNumbers(): void {
   const now = gameTime.now();
+  // updateCamera set this frame's rotation, but the view matrix project()
+  // reads is only rebuilt inside renderer.render(), after the HUD: without
+  // this, every popup is placed through LAST frame's view and trails the
+  // world by a frame under mouse look and recoil.
+  camera.updateWorldMatrix(true, false);
   for (const popup of popups) {
     if (!popup.live) continue;
     const frame = settings.damageNumbers ? damageNumberFrame(now - popup.born) : null;

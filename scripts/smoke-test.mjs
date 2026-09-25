@@ -2396,7 +2396,21 @@ async function runSwordCheck() {
       cs.weapon.lastShot = -9;
       button(2, true); await gwait(0.1); button(2, false);
       const repressHp = bot.hp;
-      return { armed, thrustAhead, thrustPopups, thrustClose, thrustOffAxis, slashCentred, slashLed, slashPopups, heldHp, repressHp, adsMax: +adsMax.toFixed(3) };
+      // Review of #156: RMB held after a slash must not leave the player at
+      // ADS walking speed with sprint refused — the sword never raises sights.
+      // Last, because sprinting moves the player off the fixture.
+      cs.weapon.lastShot = -9;
+      button(2, true);
+      await gwait(0.1);
+      const aimingAfterSlash = cs.game.aiming;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      await gwait(0.4);
+      const runLerpWhileHeld = +cs.game.runLerp.toFixed(2);
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
+      button(2, false);
+      return { armed, thrustAhead, thrustPopups, thrustClose, thrustOffAxis, slashCentred, slashLed, slashPopups, heldHp, repressHp, aimingAfterSlash, runLerpWhileHeld, adsMax: +adsMax.toFixed(3) };
     });
     if (result.fail) throw new Error(result.fail);
     const r = result;
@@ -2412,6 +2426,8 @@ async function runSwordCheck() {
     if (r.heldHp !== 100) throw new Error(`a held RMB slashed twice: hp ${r.heldHp}`);
     if (!(took(r.repressHp) >= 55)) throw new Error(`a fresh RMB press did not slash again: hp ${r.repressHp}`);
     if (r.adsMax > 0.01) throw new Error(`RMB blended into ADS on the sword: ${r.adsMax}`);
+    if (r.aimingAfterSlash !== false) throw new Error('a slash left input.aiming set: the sword would walk at ADS speed while RMB stays held');
+    if (!(r.runLerpWhileHeld > 0.5)) throw new Error(`sprint was refused with RMB held after a slash: runLerp ${r.runLerpWhileHeld}`);
     console.log('[sword] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

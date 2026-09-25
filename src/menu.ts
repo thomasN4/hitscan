@@ -239,10 +239,12 @@ export function showEndScreen(winner: MatchWinner): void {
 
 function buildCards(): void {
   for (const [id, def] of Object.entries(WEAPONS)) {
-    // Melee defs build no card: the knife is carried always and picked never
-    // (the hint below the Deploy button says so). Skipping here is what keeps
-    // it out of the secondary column, where the non-primary branch would
-    // otherwise drop it.
+    // The knife (class 'melee') builds no card: it is carried always and
+    // picked never (the hint below the Deploy button says so). Skipping here
+    // is what keeps it out of the secondary column, where the non-primary
+    // branch would otherwise drop it. The skip is by CLASS, not def.melee: a
+    // blade that is a picked sidearm (the arming sword, class 'secondary')
+    // builds its card like any other.
     if (def.class === 'melee') continue;
     // Object.entries widens to string; the card click handler narrows via a
     // catalog lookup instead of trusting the attribute. The class is captured

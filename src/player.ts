@@ -28,6 +28,7 @@ import {
   currentAimPitch,
   currentAimYaw,
   currentSprintActive,
+  aimingSights,
   currentViewmodelRecoil,
   viewmodelAimOffset,
 } from './weapons';
@@ -88,7 +89,7 @@ export function updateMovement(dt: number): void {
   // can't crouch mid-air to shrink the camera.
   const crouching = effectiveCrouching();
   const sprinting = currentSprintActive(crouching);
-  const speed = speedFor({ crouching, aiming: input.aiming, running: sprinting, runLerp: motion.runLerp });
+  const speed = speedFor({ crouching, aiming: aimingSights(), running: sprinting, runLerp: motion.runLerp });
 
   const forward = new THREE.Vector3(-Math.sin(aim.yaw), 0, -Math.cos(aim.yaw));
   // Right = forward rotated -90° about Y (cross of forward x up)

@@ -29,7 +29,7 @@ import { sanitizeSettings, type Settings } from './settings';
 export type WeaponClass = 'primary' | 'secondary' | 'melee';
 
 /** Catalog ids — stable strings; the loadout slice and the picker use them. */
-export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'longbow' | 'pistol' | 'revolver' | 'sawnOff' | 'knife';
+export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'longbow' | 'pistol' | 'revolver' | 'sawnOff' | 'armingSword' | 'knife';
 
 /**
  * Weapons a BOT may hold. Since tranche 7b that is the WHOLE catalog, the
@@ -44,11 +44,13 @@ export type WeaponId = 'smg' | 'ak47' | 'sniper' | 'shotgun' | 'longbow' | 'pist
  * tables are over the full WeaponId: they describe the authored models, which
  * the player's viewmodels need whether or not a bot ever mounts one.)
  *
- * The longbow is the one exclusion: it is player-only, so no bot table owes
- * it an entry and no bot path can be handed one. Its draw/loose trigger and
- * travelling arrows mean nothing to the per-ray hit die bots fire through.
+ * The longbow and the arming sword are excluded: both are player-only, so
+ * no bot table owes them an entry and no bot path can be handed one. The
+ * bow's draw/loose trigger and travelling arrows mean nothing to the per-ray
+ * hit die bots fire through; the sword's second (RMB) attack has no bot
+ * policy to choose it.
  */
-export type BotWeaponId = Exclude<WeaponId, 'longbow'>;
+export type BotWeaponId = Exclude<WeaponId, 'longbow' | 'armingSword'>;
 
 /**
  * Primary firearms — the catalog weapons a bot may carry in its PRIMARY
@@ -187,6 +189,18 @@ export interface WeaponDef {
    */
   backstabMult?: number;
   /**
+   * A melee weapon's SECOND attack, on RMB (the fields above are the LMB
+   * one). Only a melee def may carry it — RMB raises sights on anything else —
+   * and it shares the def's headshotMult and backstabMult: one blade, two
+   * ways to use it. The sword thrusts on LMB and slashes on RMB.
+   */
+  altAttack?: MeleeAttackDef;
+  /**
+   * Where the def's own (LMB) melee stroke lands hardest; see
+   * StrokeSweetSpot. Absent means flat damage — the knife's contract.
+   */
+  sweetSpot?: StrokeSweetSpot;
+  /**
    * Bow: seconds from brace to full draw while LMB is held (sim/bow.ts).
    * Its presence is what makes a weapon a bow — the trigger draws on press
    * and looses a travelling arrow on release (arrows.ts) instead of firing a
@@ -200,6 +214,37 @@ export interface WeaponDef {
    * at this speed — drag and a short draw scale it down (sim/bow.ts).
    */
   launchSpeed?: number;
+}
+
+/**
+ * Where a melee stroke lands hardest, fixed in VIEW space: `distance` metres
+ * out along a direction `left`/`down` off the aim axis (tangent-plane angles,
+ * radians). A struck part within `full` metres of that point takes the
+ * stroke's whole damage; beyond, it falls linearly to `floor` (a fraction)
+ * at `full + fade` and holds there. Hit detection is untouched — this only
+ * scales what a connecting stroke deals (sim/melee.ts:sweetSpotFactor).
+ */
+export interface StrokeSweetSpot {
+  distance: number;
+  left: number;
+  down: number;
+  full: number;
+  fade: number;
+  floor: number;
+}
+
+/** One melee attack's reach, cone, damage and recovery; see WeaponDef.altAttack. */
+export interface MeleeAttackDef {
+  /** Zone damage before multipliers, as WeaponDef.damage. */
+  damage: number;
+  /** Seconds before the blade can attack again, either way. */
+  fireRate: number;
+  /** Metres from the eye the strike reaches. */
+  range: number;
+  /** Total apex angle (rad) of the strike cone. */
+  arcRad: number;
+  /** Where the stroke lands hardest; absent means flat damage across the cone. */
+  sweetSpot?: StrokeSweetSpot;
 }
 
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
@@ -735,6 +780,42 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     semiAuto: true,     // one shot per LMB press; holding does nothing
     perRound: true,     // chamber-by-chamber reload; firing cancels the rest (playtest round 2)
   },
+  armingSword: {
+    name: 'ARMING SWORD', class: 'secondary', // a knight's sidearm, in the sidearm column
+    magSize: 0, reserveMax: 0, reloadTime: 0, // a blade: no rounds, no reload (see the knife)
+    // LMB: the THRUST — the point driven along the view axis. Reaches past
+    // the knife (arm plus a 0.76 m blade) and hits hardest, but its cone is
+    // narrow, so it has to be aimed.
+    fireRate: 0.7,
+    damage: 75,      // two thrusts kill; legs x0.75
+    headshotMult: 1, // no head premium, for the knife's reason: the cone
+                     // strikes the NEAREST part, and up close that is the head
+    range: 2.6,
+    arcRad: 0.35,    // ~20° total
+    backstabMult: 2, // from behind a stroke at its sweet spot kills outright (150 / 120)
+    // The point lands hardest at full extension: whole damage from 2.0 to
+    // 2.6 m, and about half at contact, where there is no room to drive it.
+    sweetSpot: { distance: 2.3, left: 0, down: 0, full: 0.3, fade: 1.4, floor: 0.5 },
+    // RMB: the SLASH — a wide cut across the front. It lands hardest where the
+    // cut ENDS, low left of the crosshair (the animation's finish), and falls
+    // off from there: led onto a target it deals 60, a lazy cut centred on the
+    // crosshair ~34, the cone's far edge ~21. Playtesting found the flat 60
+    // anywhere in an ~80° cone far easier to land than the thrust.
+    altAttack: {
+      damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, // ~80° sweep
+      sweetSpot: { distance: 2.0, left: 0.52, down: 0.26, full: 0.35, fade: 1.2, floor: 0.35 }, // 30° left, 15° low
+    },
+    zoomFovs: [70],  // placeholder for the non-empty-zoomFovs invariant; no sights
+    spreadMul: 1, inherent: 0.002, // no cone to sample; feeds the crosshair gap only
+    sprayKick: 0.06, sprayCap: 1.5,
+    sprayRecover: 0.07, // input = 0.06/0.8 = 0.075/s at the slower attack — clears the bound
+    recoilKick: 0.6, recoilRecover: 8,
+    punchRad: 0.008, // a small camera nod per stroke; the prop carries the motion
+    yawKick: 0.3, yawRecover: 8,
+    scopedOverlay: false,
+    semiAuto: true,  // one stroke per press
+    melee: true,
+  },
   knife: {
     name: 'KNIFE',
     class: 'melee',  // not a picker column — always carried (key 3), never picked
@@ -869,6 +950,8 @@ export const weapon: LiveWeapon = {
 export function armLoadout(): void {
   wpn.animation = freshWeaponAnimation();
   wpn.bowDrawAt = null;
+  wpn.altLatch = false;
+  wpn.lastStrokeAlt = false;
   SLOTS.forEach(i => {
     const def = WEAPONS[equippedId(i)];
     ammoStore[i].mag = def.magSize;
@@ -1416,6 +1499,13 @@ export interface WeaponDynamics {
    * let-down, loose, swap and re-arm (armLoadout) returns it to null.
    */
   bowDrawAt: number | null;
+  /** Edge detector for a melee altAttack on RMB: armed by a slash, released with RMB. */
+  altLatch: boolean;
+  /**
+   * The last stroke was the def's altAttack. Its fireRate, not the def's,
+   * then gates the next stroke either way — one blade, one recovery.
+   */
+  lastStrokeAlt: boolean;
   /** Cosmetic event clocks; negative infinity means no event in this life. */
   animation: WeaponAnimationState;
 }
@@ -1491,6 +1581,8 @@ export const wpn: WeaponDynamics = {
   emptyReloadLatch: false,
   reloadSfxHandle: undefined,
   bowDrawAt: null,
+  altLatch: false,
+  lastStrokeAlt: false,
   animation: freshWeaponAnimation(),
 };
 

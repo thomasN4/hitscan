@@ -2300,6 +2300,119 @@ async function runLongbowCheck() {
   await page.close();
 }
 
+// Arming sword: the player-only melee SECONDARY with two strokes. Pins the
+// picker card in the sidearm column, key 2 arming a blade (ammo readout
+// hidden, R inert, RMB never blending into ADS), and both strokes' cones and
+// sweet spots E2E against a frozen bot: the LMB thrust lands its full 75 at
+// full extension, less up close, and misses a bot 35° off-axis; the wide RMB
+// slash deals ~60 led onto a bot where the cut ends (low left) but clearly
+// less centred on the crosshair; a held RMB slashes once, and only a fresh
+// press slashes again.
+async function runSwordCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=0&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1500));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const gwait = async s => { const t0 = cs.gameTime.now(); while (cs.gameTime.now() - t0 < s) await wait(16); };
+      const button = (b, down) => window.dispatchEvent(new MouseEvent(down ? 'mousedown' : 'mouseup', { button: b }));
+      document.getElementById('playBtn').click();
+      const card = name => [...document.querySelectorAll('.wcard')].find(b => b.textContent.includes(name));
+      const swordCard = card('ARMING SWORD');
+      if (!swordCard) return { fail: 'no ARMING SWORD card in the picker' };
+      if (!document.getElementById('colSecondary')?.contains(swordCard)) return { fail: 'ARMING SWORD card is not in the secondary column' };
+      card('SMG').click();
+      swordCard.click();
+      document.getElementById('deployBtn').click();
+      cs.game.started = true;
+      cs.game.locked = true;
+      await gwait(0.3);
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+      await gwait(0.6); // the deploy window refuses strokes and RMB
+      const armed = { name: cs.weapon.name, ammoHidden: document.getElementById('magText').style.display === 'none' };
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+      await gwait(0.2);
+      armed.reloading = cs.weapon.reloading;
+
+      cs.player.hp = 100000;
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+      bot.update = () => {};
+      cs.game.yaw = 0;
+      const feetY = cs.player.pos.y - cs.player.eyeHeight;
+      // Place the bot `dist` m out at `deg` off the view axis, facing the
+      // player (no backstab), and aim the pitch at its torso.
+      // Place the bot `dist` m out at `deg` off the view axis (negative is
+      // left), facing the player (no backstab), and aim at its torso — or
+      // `above` rad over it, which drops the torso that far below the crosshair.
+      const place = async (dist, deg, above = 0) => {
+        const a = deg * Math.PI / 180;
+        bot.mesh.position.set(cs.player.pos.x + dist * Math.sin(a), feetY, cs.player.pos.z - dist * Math.cos(a));
+        bot.mesh.rotation.y = a;
+        bot.hp = 100;
+        await gwait(0.05);
+        const torso = bot.torso.getWorldPosition(bot.torso.position.clone());
+        cs.game.pitch = Math.atan2(torso.y - cs.player.pos.y, dist) + above;
+        cs.weapon.lastShot = -9; // the cadence gate must not eat a fresh stroke
+      };
+      const stroke = async b => { button(b, true); await gwait(0.1); button(b, false); await gwait(0.1); };
+
+      await place(2.2, 0);
+      await stroke(0);
+      const thrustAhead = bot.hp;
+      await place(0.9, 0);
+      await stroke(0);
+      const thrustClose = bot.hp;
+      await place(2.0, 35);
+      await stroke(0);
+      const thrustOffAxis = bot.hp;
+      await place(2.0, 0);
+      await stroke(2);
+      const slashCentred = bot.hp;
+      // Where the cut ends: 30° left, 15° below the crosshair, 2 m out.
+      await place(2.0, -30, 0.26);
+      let adsMax = 0;
+      button(2, true);
+      await gwait(0.1);
+      const slashLed = bot.hp;
+      // Still held: recovered, but the latch must refuse a second slash.
+      bot.hp = 100;
+      cs.weapon.lastShot = -9;
+      for (let i = 0; i < 10; i++) { adsMax = Math.max(adsMax, cs.game.adsLerp); await gwait(0.03); }
+      const heldHp = bot.hp;
+      button(2, false);
+      await gwait(0.05);
+      cs.weapon.lastShot = -9;
+      button(2, true); await gwait(0.1); button(2, false);
+      const repressHp = bot.hp;
+      return { armed, thrustAhead, thrustClose, thrustOffAxis, slashCentred, slashLed, heldHp, repressHp, adsMax: +adsMax.toFixed(3) };
+    });
+    if (result.fail) throw new Error(result.fail);
+    const r = result;
+    if (r.armed.name !== 'ARMING SWORD' || !r.armed.ammoHidden || r.armed.reloading) throw new Error(`key 2 did not arm a blade: ${JSON.stringify(r.armed)}`);
+    const took = hp => 100 - hp;
+    if (r.thrustAhead !== 25) throw new Error(`the thrust at full extension must take exactly 75 (hp 25), got ${r.thrustAhead}`);
+    if (!(took(r.thrustClose) >= 37 && took(r.thrustClose) < 75)) throw new Error(`a thrust at 0.9 m must land short of 75 but at least half: took ${took(r.thrustClose)}`);
+    if (r.thrustOffAxis !== 100) throw new Error(`the narrow thrust hit a bot 35° off-axis: hp ${r.thrustOffAxis}`);
+    if (!(took(r.slashLed) >= 55 && took(r.slashLed) <= 60)) throw new Error(`a slash led to where the cut ends must take ~60: took ${took(r.slashLed)}`);
+    if (!(took(r.slashCentred) > 0 && took(r.slashCentred) <= 45)) throw new Error(`a slash centred on the crosshair must land clearly short of 60: took ${took(r.slashCentred)}`);
+    if (r.heldHp !== 100) throw new Error(`a held RMB slashed twice: hp ${r.heldHp}`);
+    if (!(took(r.repressHp) >= 55)) throw new Error(`a fresh RMB press did not slash again: hp ${r.repressHp}`);
+    if (r.adsMax > 0.01) throw new Error(`RMB blended into ADS on the sword: ${r.adsMax}`);
+    console.log('[sword] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[sword] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[sword] ${e}`));
+  await page.close();
+}
+
 // Knife: the always-carried fallback (key 3). Pins the position-3 swap
 // through the real keybind, the hidden ammo readout while knifing, the
 // inert R/RMB paths (a blade holds no rounds and raises no sights), the
@@ -3240,6 +3353,7 @@ try {
   await runShotgunCheck();
   await runKnifeCheck();
   await runLongbowCheck();
+  await runSwordCheck();
   await runMatchEndCheck();
   await runTouchCheck();
 } finally {

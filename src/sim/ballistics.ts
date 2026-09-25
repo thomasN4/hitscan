@@ -14,8 +14,13 @@ import * as THREE from 'three';
 /** Euler order shared by the camera and every shot. Do not change one alone. */
 export const EULER_ORDER = 'YXZ';
 
-/** Build a unit world-space direction from view-space x/y deflections. */
-function directed(x: number, y: number, pitch: number, yaw: number): THREE.Vector3 {
+/**
+ * Build a unit world-space direction from view-space x/y deflections (the
+ * tangent-plane offsets against a -1 forward). Shared by the shots below and
+ * by sim/melee.ts's stroke sweet spots, so both place view-space points with
+ * the one Euler order.
+ */
+export function viewDirection(x: number, y: number, pitch: number, yaw: number): THREE.Vector3 {
   return new THREE.Vector3(x, y, -1)
     .normalize()
     .applyEuler(new THREE.Euler(pitch, yaw, 0, EULER_ORDER));
@@ -42,7 +47,7 @@ export function shotDirection(
   spread: number,
   rng: () => number = Math.random,
 ): THREE.Vector3 {
-  return directed((rng() - 0.5) * spread, (rng() - 0.5) * spread, pitch, yaw);
+  return viewDirection((rng() - 0.5) * spread, (rng() - 0.5) * spread, pitch, yaw);
 }
 
 /**
@@ -69,5 +74,5 @@ export function pelletShotDirection(
 ): THREE.Vector3 {
   const x = ((rng() - 0.5) * spread) + ((rng() - 0.5) * pelletCone);
   const y = ((rng() - 0.5) * spread) + ((rng() - 0.5) * pelletCone);
-  return directed(x, y, pitch, yaw);
+  return viewDirection(x, y, pitch, yaw);
 }

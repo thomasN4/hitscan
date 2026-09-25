@@ -220,6 +220,51 @@ describe('bow pairing', () => {
   });
 });
 
+describe('melee altAttack', () => {
+  const SWORD = WEAPONS.armingSword;
+
+  test('the shipped sword passes', () => {
+    expect(matching([SWORD], 'altAttack')).toHaveLength(0);
+  });
+
+  test('a firearm altAttack is a dead field', () => {
+    expect(matching([tuned({ altAttack: { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4 } })], 'SMG', 'altAttack without melee')).toHaveLength(1);
+  });
+
+  test('zero, NaN or out-of-range fields are flagged', () => {
+    const alt = (over: Partial<NonNullable<WeaponDef['altAttack']>>): WeaponDef =>
+      tuned({ altAttack: { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, ...over } }, SWORD);
+    expect(matching([alt({ damage: 0 })], 'ARMING SWORD', 'altAttack.damage')).toHaveLength(1);
+    expect(matching([alt({ range: NaN })], 'ARMING SWORD', 'altAttack.range')).toHaveLength(1);
+    expect(matching([alt({ fireRate: -1 })], 'ARMING SWORD', 'altAttack.fireRate')).toHaveLength(1);
+    expect(matching([alt({ arcRad: 4 })], 'ARMING SWORD', 'altAttack.arcRad')).toHaveLength(1);
+    expect(matching([alt({ fireRate: 10 })], 'ARMING SWORD', 'bloom')).toHaveLength(1);
+  });
+});
+
+describe('stroke sweet spots', () => {
+  const SWORD = WEAPONS.armingSword;
+  const SPOT = { distance: 2, left: 0, down: 0, full: 0.3, fade: 1, floor: 0.5 };
+
+  test('the shipped sword passes, both strokes', () => {
+    expect(matching([SWORD], 'sweetSpot')).toHaveLength(0);
+  });
+
+  test('a spot out of reach, outside its cone, or with a broken falloff is flagged', () => {
+    expect(matching([tuned({ sweetSpot: { ...SPOT, distance: 3 } }, SWORD)], 'ARMING SWORD', 'sweetSpot.distance')).toHaveLength(1);
+    expect(matching([tuned({ sweetSpot: { ...SPOT, left: 0.4 } }, SWORD)], 'ARMING SWORD', 'outside its cone')).toHaveLength(1);
+    expect(matching([tuned({ sweetSpot: { ...SPOT, fade: 0 } }, SWORD)], 'ARMING SWORD', 'fade > 0')).toHaveLength(1);
+    expect(matching([tuned({ sweetSpot: { ...SPOT, floor: 0 } }, SWORD)], 'ARMING SWORD', 'sweetSpot.floor')).toHaveLength(1);
+    expect(matching([tuned({ sweetSpot: { ...SPOT, floor: 1.2 } }, SWORD)], 'ARMING SWORD', 'sweetSpot.floor')).toHaveLength(1);
+    const alt = { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, sweetSpot: { ...SPOT, left: 0.9 } };
+    expect(matching([tuned({ altAttack: alt }, SWORD)], 'ARMING SWORD', 'altAttack.sweetSpot', 'outside its cone')).toHaveLength(1);
+  });
+
+  test('a firearm sweet spot is a dead field', () => {
+    expect(matching([tuned({ sweetSpot: SPOT })], 'SMG', 'sweetSpot without melee')).toHaveLength(1);
+  });
+});
+
 describe('a fully valid def', () => {
   test('returns []', () => {
     expect(validateWeapons([{ ...SMG }])).toEqual([]);

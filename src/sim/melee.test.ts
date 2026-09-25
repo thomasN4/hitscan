@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { BACKSTAB_MIN_ALIGNMENT, isBackstab, meleeSwing, type MeleeCandidate } from './melee';
+import { BACKSTAB_MIN_ALIGNMENT, isBackstab, meleeSwing, sweetSpotAngle, sweetSpotFactor, sweetSpotPoint, type MeleeCandidate } from './melee';
+import type { StrokeSweetSpot } from '../core/state';
 
 /** Eye at the origin looking down -z (the arena's default facing). Tracks the 1.6 m player/bot eye. */
 const EYE = new THREE.Vector3(0, 1.6, 0);
@@ -151,3 +152,38 @@ describe('isBackstab', () => {
     expect(forward).toEqual(snapshot[2]);
   });
 });
+
+describe('stroke sweet spots', () => {
+  const SPOT: StrokeSweetSpot = { distance: 2, left: 0, down: 0, full: 0.3, fade: 1.0, floor: 0.4 };
+
+  test('meleeSwing reports where the winning part was struck', () => {
+    const at = new THREE.Vector3(0, 1.6, -1.5);
+    const hit = meleeSwing(EYE, FORWARD, 2.0, 0.6, [candidate('a', 'torso', at)]);
+    expect(hit?.at).toBe(at);
+  });
+
+  test('whole damage on the plateau, linear through the fade, held at the floor', () => {
+    const spot = sweetSpotPoint(EYE, 0, 0, SPOT);
+    const along = (d: number): THREE.Vector3 => spot.clone().add(new THREE.Vector3(0, 0, d));
+    expect(sweetSpotFactor(spot, spot, SPOT)).toBe(1);
+    expect(sweetSpotFactor(along(0.3), spot, SPOT)).toBe(1);
+    expect(sweetSpotFactor(along(0.8), spot, SPOT)).toBeCloseTo(0.7, 12);
+    expect(sweetSpotFactor(along(1.3), spot, SPOT)).toBeCloseTo(0.4, 12);
+    expect(sweetSpotFactor(along(5), spot, SPOT)).toBe(0.4);
+  });
+
+  test('left and down place the spot left of and below the aim, and it follows the aim', () => {
+    const lowLeft = { ...SPOT, left: 0.5, down: 0.25 };
+    const p = sweetSpotPoint(EYE, 0, 0, lowLeft);
+    expect(p.x).toBeLessThan(0);
+    expect(p.y).toBeLessThan(EYE.y);
+    expect(p.z).toBeLessThan(0);
+    expect(p.distanceTo(EYE)).toBeCloseTo(2, 12);
+    // Turned a quarter left (yaw +π/2 faces -x), "left" now points toward +z.
+    const turned = sweetSpotPoint(EYE, 0, Math.PI / 2, lowLeft);
+    expect(turned.x).toBeLessThan(0);
+    expect(turned.z).toBeGreaterThan(0);
+    expect(sweetSpotAngle(lowLeft)).toBeCloseTo(Math.atan(Math.hypot(Math.tan(0.5), Math.tan(0.25))), 12);
+  });
+});
+

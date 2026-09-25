@@ -3,7 +3,7 @@
   "blender": "5.2.1 LTS",
   "gltfAddon": "5.2.40",
   "exporter": "scripts/assets/export-weapons.py",
-  "exporterSha256": "638e6dc2b9b2e5893f9c6782cc8c4c74052ce67e44d956dd7b02ff95b73c261a",
+  "exporterSha256": "05839e1a5d46f1ba09e1d711c4c669a45ae5650533214ee41258dbd4062259c3",
   "settings": {
     "format": "GLB",
     "export_yup": false,
@@ -118,6 +118,18 @@
         "vertices": 2232,
         "meshes": 10,
         "bytes": 76204
+      }
+    },
+    {
+      "id": "armingSword",
+      "source": "assets/source/armingSword.blend",
+      "output": "public/assets/armingSword.glb",
+      "sourceSha256": "4e43ac91f282965e1b7c8ac61c4a7c9f7193fef5055aedd71fb0ab13dc66edb6",
+      "outputSha256": "5a7d46ac89093d9ef27645042e39e9fbd9c60fc45920a006978317d6d6ffe694",
+      "stats": {
+        "vertices": 6704,
+        "meshes": 3,
+        "bytes": 190676
       }
     }
   ]

@@ -2,7 +2,7 @@
 
 Editable sources under `assets/source/`: `shotgun.blend`, `revolver.blend`,
 `pistol.blend`, `smg.blend`, `sniper.blend`, `knife.blend`, `ak47.blend`, `sawnOff.blend`,
-and `longbow.blend`.
+`longbow.blend`, and `armingSword.blend`.
 Runtime exports live under `public/assets/` with the matching `.glb` names. The
 game retains procedural maps and synthesized audio — bots hold the same
 authored weapon models as the player, mounted third-person on their aim
@@ -21,7 +21,7 @@ npm run build
 edited sources, preserves them, writes GLB, validates the result, then records
 source/output/export-script SHA-256 hashes and settings in
 `assets/weapons-manifest.json`. Commit sources, GLBs and manifest together.
-`assets:check` verifies all nine committed GLBs without Blender.
+`assets:check` verifies all ten committed GLBs without Blender.
 The exporter disables audio via `ALSOFT_DRIVERS=null` for headless Linux machines.
 
 The manifest also records `gltfAddon` (e.g. `"5.2.40"`), the Khronos glTF
@@ -58,6 +58,7 @@ pivots all keep their relationships and the sight line scales with the gun:
 | sniper | — | 1.14 m | already real-sized |
 | knife | — | 0.30 m | already real-sized (issue #143) |
 | longbow | — | 1.91 m | drawn at real size: English war bow, 1.82 m nock to nock |
+| armingSword | — | 0.93 m | drawn at real size: Oakeshott type XII, 0.76 m blade |
 
 The revolver's cylinder is additionally trimmed to 0.75 of its radius about its
 own axis, so it stays round and keeps indexing. It comes out at 50 mm with
@@ -241,7 +242,7 @@ CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-animation-check.mjs /tmp
 CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-assets-check.mjs
 ```
 
-The asset checks cover missing/corrupt files and one-load startup for all nine
+The asset checks cover missing/corrupt files and one-load startup for all ten
 assets. Unit checks exercise exported contracts, independent clones, magazine
 paths, action restoration and aiming visibility. Runtime palette and framing
 are reviewed in the browser; the studio renders use Workbench material colors.
@@ -371,4 +372,28 @@ Only the stave is authored. The string and the nocked arrow move with the draw
 every frame (`core/bowPresentation.ts`), and loosed arrows fly as world entities
 (`arrows.ts`). All three are built in code (`core/arrowModel.ts`, the
 cartridge pattern above). The bow is player-only, so it has no bot mount.
+
+## Arming sword
+
+`scripts/assets/create-arming-sword.py` generates `armingSword.blend`:
+
+```sh
+ALSOFT_DRIVERS=null blender --background --factory-startup --python-exit-code 1 --python scripts/assets/create-arming-sword.py
+npm run assets:export
+```
+
+An Oakeshott type XII knightly sword, 0.93 m overall. It has a 0.76 m blade
+of lozenge section with a fuller down its first two thirds, tapering to a
+thrusting point; a straight 0.20 m cross; a leather-wrapped grip and a wheel
+pommel. The grip's centre is the origin and the blade points down -z, with
+the edges along y. The contract is the knife's: `grip_right` and `blade_tip`
+are fixed at the root, and there are no mechanisms. `weaponAssets.ts` and
+`weapon-pipeline.mjs` treat both blades with one test.
+
+In first person it is held in a plow guard (`weaponModels.ts`). The hilt sits
+low right and the point is aimed at the crosshair 2.5 m out, so the blade
+frames a target without covering it. The LMB thrust reuses the knife's jab,
+driven 0.30 m. The RMB slash rotates the blade about the grip
+(`core/swordPresentation.ts`), from high right to low left across the frame.
+It is player-only, so it has no bot mount.
 

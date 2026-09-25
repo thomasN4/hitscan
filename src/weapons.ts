@@ -42,7 +42,7 @@ import {
 } from './sim/recoil';
 import { shotDirection, pelletShotDirection } from './sim/ballistics';
 import { damageForPart, partForMesh } from './sim/damage';
-import { isBackstab, meleeSwing, type MeleeCandidate } from './sim/melee';
+import { isBackstab, meleeSwing, sweetSpotFactor, sweetSpotPoint, type MeleeCandidate } from './sim/melee';
 import { isSprintActive } from './sim/movement';
 import { isDeploying } from './sim/weaponSwap';
 import { launchSpeed, planBowTrigger, bowDrawFraction } from './sim/bow';
@@ -395,7 +395,7 @@ function strokeCadence(def: WeaponDef): number {
 /** The def's own (LMB) melee attack, in the altAttack's shape. */
 function primaryStroke(def: WeaponDef): MeleeAttackDef {
   // Documented pairing (validateWeapons): range/arcRad exist exactly when melee.
-  return { damage: def.damage, fireRate: def.fireRate, range: def.range ?? 0, arcRad: def.arcRad ?? 0 };
+  return { damage: def.damage, fireRate: def.fireRate, range: def.range ?? 0, arcRad: def.arcRad ?? 0, sweetSpot: def.sweetSpot };
 }
 
 /**
@@ -419,7 +419,9 @@ function swingMelee(def: WeaponDef, attack: MeleeAttackDef, alt: boolean): void 
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
   // Exact aim direction — spread 0 samples no cone; a swing has none.
-  const dir = shotDirection(currentAimPitch(), currentAimYaw(), 0);
+  const pitch = currentAimPitch();
+  const yaw = currentAimYaw();
+  const dir = shotDirection(pitch, yaw, 0);
   const candidates: MeleeCandidate<Bot>[] = [];
   for (const bot of bots) {
     if (!bot.alive || bot.team === session.playerTeam) continue;
@@ -437,7 +439,11 @@ function swingMelee(def: WeaponDef, attack: MeleeAttackDef, alt: boolean): void 
     // selection. The bot group's local +Z is its world facing (Bot.update
     // maintains the invariant), and the bearing reads horizontal X/Z only.
     const victimForward = hit.payload.mesh.getWorldDirection(new THREE.Vector3());
-    let dmg = damageForPart({ damage: attack.damage, headshotMult: def.headshotMult }, hit.part);
+    // Where the part was struck scales the stroke before the zone does: the
+    // sweet spot sits in view space, placed with this stroke's own aim.
+    const factor = attack.sweetSpot
+      ? sweetSpotFactor(hit.at, sweetSpotPoint(origin, pitch, yaw, attack.sweetSpot), attack.sweetSpot) : 1;
+    let dmg = damageForPart({ damage: Math.round(attack.damage * factor), headshotMult: def.headshotMult }, hit.part);
     if (isBackstab(origin, hit.payload.mesh.position, victimForward)) {
       dmg *= def.backstabMult ?? 1; // documented default: absent means no bonus
     }

@@ -12,7 +12,8 @@
 // accepted simplification over the hitscan path.
 
 import * as THREE from 'three';
-import type { HitZone } from '../core/state';
+import type { HitZone, StrokeSweetSpot } from '../core/state';
+import { viewDirection } from './ballistics';
 
 /**
  * Module epsilon: a length below it counts as degenerate (no direction to
@@ -82,6 +83,8 @@ export interface SwingHit<P> {
   part: HitZone;
   /** Eye-to-strike-point distance in metres (<= `range`). */
   distance: number;
+  /** The struck part's point (world space), for sweetSpotFactor. */
+  at: THREE.Vector3;
 }
 
 /**
@@ -115,8 +118,34 @@ export function meleeSwing<P>(
     const align = dist < EPSILON ? 1 : offset.dot(dir) / dist;
     if (dist > range || align < halfArcCos) continue;
     if (best === undefined || dist < best.distance) {
-      best = { payload: c.payload, part: c.zone, distance: dist };
+      best = { payload: c.payload, part: c.zone, distance: dist, at: c.at };
     }
   }
   return best;
 }
+
+/**
+ * The world point a stroke's sweet spot sits at for this aim: `spot.distance`
+ * out from the eye along its view-space direction, placed with the same
+ * pitch/yaw (and Euler order, via ballistics.viewDirection) as the stroke.
+ */
+export function sweetSpotPoint(origin: THREE.Vector3, pitch: number, yaw: number, spot: StrokeSweetSpot): THREE.Vector3 {
+  const dir = viewDirection(-Math.tan(spot.left), -Math.tan(spot.down), pitch, yaw);
+  return origin.clone().addScaledVector(dir, spot.distance);
+}
+
+/** Off-axis angle (rad) of a sweet spot's direction — what must sit inside the stroke's cone. */
+export function sweetSpotAngle(spot: StrokeSweetSpot): number {
+  return Math.atan(Math.hypot(Math.tan(spot.left), Math.tan(spot.down)));
+}
+
+/**
+ * Fraction of a stroke's damage a strike at `at` deals: 1 within `full` of
+ * the spot, falling linearly to `floor` over the next `fade` metres, and
+ * `floor` beyond.
+ */
+export function sweetSpotFactor(at: THREE.Vector3, spotPoint: THREE.Vector3, spot: StrokeSweetSpot): number {
+  const past = Math.max(0, at.distanceTo(spotPoint) - spot.full);
+  return Math.max(spot.floor, 1 - (1 - spot.floor) * past / spot.fade);
+}
+

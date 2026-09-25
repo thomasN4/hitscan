@@ -2302,10 +2302,12 @@ async function runLongbowCheck() {
 
 // Arming sword: the player-only melee SECONDARY with two strokes. Pins the
 // picker card in the sidearm column, key 2 arming a blade (ammo readout
-// hidden, R inert, RMB never blending into ADS), and the two cones E2E
-// against a frozen bot: the LMB thrust lands 75 dead ahead but misses a bot
-// 35° off-axis, which the wide RMB slash then cuts for 60; a held RMB slashes
-// once, and only a fresh press slashes again.
+// hidden, R inert, RMB never blending into ADS), and both strokes' cones and
+// sweet spots E2E against a frozen bot: the LMB thrust lands its full 75 at
+// full extension, less up close, and misses a bot 35° off-axis; the wide RMB
+// slash deals ~60 led onto a bot where the cut ends (low left) but clearly
+// less centred on the crosshair; a held RMB slashes once, and only a fresh
+// press slashes again.
 async function runSwordCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -2345,14 +2347,17 @@ async function runSwordCheck() {
       const feetY = cs.player.pos.y - cs.player.eyeHeight;
       // Place the bot `dist` m out at `deg` off the view axis, facing the
       // player (no backstab), and aim the pitch at its torso.
-      const place = async (dist, deg) => {
+      // Place the bot `dist` m out at `deg` off the view axis (negative is
+      // left), facing the player (no backstab), and aim at its torso — or
+      // `above` rad over it, which drops the torso that far below the crosshair.
+      const place = async (dist, deg, above = 0) => {
         const a = deg * Math.PI / 180;
         bot.mesh.position.set(cs.player.pos.x + dist * Math.sin(a), feetY, cs.player.pos.z - dist * Math.cos(a));
         bot.mesh.rotation.y = a;
         bot.hp = 100;
         await gwait(0.05);
         const torso = bot.torso.getWorldPosition(bot.torso.position.clone());
-        cs.game.pitch = Math.atan2(torso.y - cs.player.pos.y, dist);
+        cs.game.pitch = Math.atan2(torso.y - cs.player.pos.y, dist) + above;
         cs.weapon.lastShot = -9; // the cadence gate must not eat a fresh stroke
       };
       const stroke = async b => { button(b, true); await gwait(0.1); button(b, false); await gwait(0.1); };
@@ -2360,14 +2365,21 @@ async function runSwordCheck() {
       await place(2.2, 0);
       await stroke(0);
       const thrustAhead = bot.hp;
+      await place(0.9, 0);
+      await stroke(0);
+      const thrustClose = bot.hp;
       await place(2.0, 35);
       await stroke(0);
       const thrustOffAxis = bot.hp;
-      await place(2.0, 35);
+      await place(2.0, 0);
+      await stroke(2);
+      const slashCentred = bot.hp;
+      // Where the cut ends: 30° left, 15° below the crosshair, 2 m out.
+      await place(2.0, -30, 0.26);
       let adsMax = 0;
       button(2, true);
       await gwait(0.1);
-      const slashOffAxis = bot.hp;
+      const slashLed = bot.hp;
       // Still held: recovered, but the latch must refuse a second slash.
       bot.hp = 100;
       cs.weapon.lastShot = -9;
@@ -2378,16 +2390,19 @@ async function runSwordCheck() {
       cs.weapon.lastShot = -9;
       button(2, true); await gwait(0.1); button(2, false);
       const repressHp = bot.hp;
-      return { armed, thrustAhead, thrustOffAxis, slashOffAxis, heldHp, repressHp, adsMax: +adsMax.toFixed(3) };
+      return { armed, thrustAhead, thrustClose, thrustOffAxis, slashCentred, slashLed, heldHp, repressHp, adsMax: +adsMax.toFixed(3) };
     });
     if (result.fail) throw new Error(result.fail);
     const r = result;
     if (r.armed.name !== 'ARMING SWORD' || !r.armed.ammoHidden || r.armed.reloading) throw new Error(`key 2 did not arm a blade: ${JSON.stringify(r.armed)}`);
-    if (r.thrustAhead !== 25) throw new Error(`the thrust dead ahead must take exactly 75 (hp 25), got ${r.thrustAhead}`);
+    const took = hp => 100 - hp;
+    if (r.thrustAhead !== 25) throw new Error(`the thrust at full extension must take exactly 75 (hp 25), got ${r.thrustAhead}`);
+    if (!(took(r.thrustClose) >= 37 && took(r.thrustClose) < 75)) throw new Error(`a thrust at 0.9 m must land short of 75 but at least half: took ${took(r.thrustClose)}`);
     if (r.thrustOffAxis !== 100) throw new Error(`the narrow thrust hit a bot 35° off-axis: hp ${r.thrustOffAxis}`);
-    if (r.slashOffAxis !== 40) throw new Error(`the slash must cut the 35° bot for exactly 60 (hp 40), got ${r.slashOffAxis}`);
+    if (!(took(r.slashLed) >= 55 && took(r.slashLed) <= 60)) throw new Error(`a slash led to where the cut ends must take ~60: took ${took(r.slashLed)}`);
+    if (!(took(r.slashCentred) > 0 && took(r.slashCentred) <= 45)) throw new Error(`a slash centred on the crosshair must land clearly short of 60: took ${took(r.slashCentred)}`);
     if (r.heldHp !== 100) throw new Error(`a held RMB slashed twice: hp ${r.heldHp}`);
-    if (r.repressHp !== 40) throw new Error(`a fresh RMB press did not slash again: hp ${r.repressHp}`);
+    if (!(took(r.repressHp) >= 55)) throw new Error(`a fresh RMB press did not slash again: hp ${r.repressHp}`);
     if (r.adsMax > 0.01) throw new Error(`RMB blended into ADS on the sword: ${r.adsMax}`);
     console.log('[sword] OK', JSON.stringify(result));
   } catch (e) {

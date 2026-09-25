@@ -196,6 +196,11 @@ export interface WeaponDef {
    */
   altAttack?: MeleeAttackDef;
   /**
+   * Where the def's own (LMB) melee stroke lands hardest; see
+   * StrokeSweetSpot. Absent means flat damage — the knife's contract.
+   */
+  sweetSpot?: StrokeSweetSpot;
+  /**
    * Bow: seconds from brace to full draw while LMB is held (sim/bow.ts).
    * Its presence is what makes a weapon a bow — the trigger draws on press
    * and looses a travelling arrow on release (arrows.ts) instead of firing a
@@ -211,6 +216,23 @@ export interface WeaponDef {
   launchSpeed?: number;
 }
 
+/**
+ * Where a melee stroke lands hardest, fixed in VIEW space: `distance` metres
+ * out along a direction `left`/`down` off the aim axis (tangent-plane angles,
+ * radians). A struck part within `full` metres of that point takes the
+ * stroke's whole damage; beyond, it falls linearly to `floor` (a fraction)
+ * at `full + fade` and holds there. Hit detection is untouched — this only
+ * scales what a connecting stroke deals (sim/melee.ts:sweetSpotFactor).
+ */
+export interface StrokeSweetSpot {
+  distance: number;
+  left: number;
+  down: number;
+  full: number;
+  fade: number;
+  floor: number;
+}
+
 /** One melee attack's reach, cone, damage and recovery; see WeaponDef.altAttack. */
 export interface MeleeAttackDef {
   /** Zone damage before multipliers, as WeaponDef.damage. */
@@ -221,6 +243,8 @@ export interface MeleeAttackDef {
   range: number;
   /** Total apex angle (rad) of the strike cone. */
   arcRad: number;
+  /** Where the stroke lands hardest; absent means flat damage across the cone. */
+  sweetSpot?: StrokeSweetSpot;
 }
 
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
@@ -768,10 +792,19 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                      // strikes the NEAREST part, and up close that is the head
     range: 2.6,
     arcRad: 0.35,    // ~20° total
-    backstabMult: 2, // from behind either attack kills outright (150 / 120)
-    // RMB: the SLASH — a wide cut across the front that forgives aim for less
-    // damage and reach.
-    altAttack: { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4 }, // ~80° sweep
+    backstabMult: 2, // from behind a stroke at its sweet spot kills outright (150 / 120)
+    // The point lands hardest at full extension: whole damage from 2.0 to
+    // 2.6 m, and about half at contact, where there is no room to drive it.
+    sweetSpot: { distance: 2.3, left: 0, down: 0, full: 0.3, fade: 1.4, floor: 0.5 },
+    // RMB: the SLASH — a wide cut across the front. It lands hardest where the
+    // cut ENDS, low left of the crosshair (the animation's finish), and falls
+    // off from there: led onto a target it deals 60, a lazy cut centred on the
+    // crosshair ~34, the cone's far edge ~21. Playtesting found the flat 60
+    // anywhere in an ~80° cone far easier to land than the thrust.
+    altAttack: {
+      damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, // ~80° sweep
+      sweetSpot: { distance: 2.0, left: 0.52, down: 0.26, full: 0.35, fade: 1.2, floor: 0.35 }, // 30° left, 15° low
+    },
     zoomFovs: [70],  // placeholder for the non-empty-zoomFovs invariant; no sights
     spreadMul: 1, inherent: 0.002, // no cone to sample; feeds the crosshair gap only
     sprayKick: 0.06, sprayCap: 1.5,

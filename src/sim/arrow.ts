@@ -78,3 +78,20 @@ export function advanceArrow<T>(body: ArrowBody, dt: number, cast: SegmentCast<T
   }
   return null;
 }
+
+/** One sample of an arrow's recent path, stamped with the flight age it was taken at. */
+export interface TrailPoint {
+  at: THREE.Vector3;
+  age: number;
+}
+
+/**
+ * Drop trail samples older than `seconds` behind `age`, oldest first, always
+ * keeping the newest two so a line has something to draw. By age rather than
+ * by count: a count sized from an average frame time drifts once the list is
+ * trimmed, and the trail shrank to a stub as the arrow flew.
+ */
+export function trimTrail(trail: TrailPoint[], age: number, seconds: number): void {
+  // Bound-guarded: length > 2 before the read.
+  while (trail.length > 2 && age - trail[0]!.age > seconds) trail.shift();
+}

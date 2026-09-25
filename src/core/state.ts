@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { GameClock, type ScheduledHandle } from '../sim/gameClock';
 import { SoundRing } from '../sim/soundEvents';
-import type { ArrowBody } from '../sim/arrow';
+import type { ArrowBody, TrailPoint } from '../sim/arrow';
 import type { BrainMode } from '../sim/botBrains';
 // A value import, like GameClock and SoundRing above: sim/domination.ts takes
 // only `type Team` back, so nothing is circular at runtime.
@@ -165,7 +165,7 @@ export interface WeaponDef {
   /**
    * Melee weapon: swings instead of firing — no ammo, no reload, no cone —
    * and the trigger path branches to a short-range arc test (sim/melee.ts).
-   * Absent means a firearm. RMB is inert while held.
+   * Absent means a ranged weapon (a firearm, or the bow). RMB is inert while held.
    */
   melee?: boolean;
   /**
@@ -400,14 +400,17 @@ export interface Arrow extends ArrowBody {
    * hit — ever leaving the eye line. Cosmetic only.
    */
   launchOffset: THREE.Vector3;
-  /** Recent tip positions, newest last, for the flight trail. */
-  trail: THREE.Vector3[];
+  /** Recent positions, newest last, for the flight trail. */
+  trail: TrailPoint[];
   trailLine: THREE.Line;
 }
 
 /** Arrows in flight; arrows.ts advances and retires them. */
 export const arrows: Arrow[] = [];
-/** Arrows standing in walls and floors; FIFO-capped like bulletHoles. */
+/**
+ * Arrows standing in walls and floors, each parented to the solid it struck
+ * so a moving elevator deck carries its arrows; FIFO-capped like bulletHoles.
+ */
 export const stuckArrows: THREE.Object3D[] = [];
 /**
  * What has been audible lately, for BOTS to read — the gameplay half of a

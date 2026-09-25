@@ -15,7 +15,10 @@ const HEAD_LENGTH = 0.055;
 const FLETCH_LENGTH = 0.16;
 const FLETCH_HEIGHT = 0.018;
 
-// One material set for every arrow: dozens can stand in the walls at once.
+// One geometry and material set for every arrow: dozens can stand in the
+// walls at once, and a loosed arrow's mesh is dropped without disposal when
+// it expires, so nothing per-arrow may own a GPU buffer. Never dispose these.
+let geometries: { shaft: THREE.BufferGeometry; head: THREE.BufferGeometry; nock: THREE.BufferGeometry; vane: THREE.BufferGeometry } | undefined;
 let materials: { shaft: THREE.Material; head: THREE.Material; fletch: THREE.Material; cock: THREE.Material; nock: THREE.Material } | undefined;
 
 function arrowMaterials(): NonNullable<typeof materials> {
@@ -31,29 +34,17 @@ function arrowMaterials(): NonNullable<typeof materials> {
   return materials;
 }
 
-/** Build a fresh arrow; the caller owns and positions it. */
-export function createArrowModel(): THREE.Group {
-  const m = arrowMaterials();
-  const group = new THREE.Group();
-  group.name = 'arrow';
-
+function arrowGeometries(): NonNullable<typeof geometries> {
+  if (geometries) return geometries;
   const shaft = new THREE.CylinderGeometry(SHAFT_RADIUS, SHAFT_RADIUS, ARROW_LENGTH - HEAD_LENGTH, 8);
   shaft.rotateX(Math.PI / 2);
   shaft.translate(0, 0, HEAD_LENGTH + (ARROW_LENGTH - HEAD_LENGTH) / 2);
-  group.add(new THREE.Mesh(shaft, m.shaft));
-
   const head = new THREE.ConeGeometry(SHAFT_RADIUS * 1.25, HEAD_LENGTH, 4);
   head.rotateX(-Math.PI / 2);
   head.translate(0, 0, HEAD_LENGTH / 2);
-  group.add(new THREE.Mesh(head, m.head));
-
   const nock = new THREE.CylinderGeometry(SHAFT_RADIUS * 1.1, SHAFT_RADIUS * 1.1, 0.018, 8);
   nock.rotateX(Math.PI / 2);
   nock.translate(0, 0, ARROW_LENGTH - 0.009);
-  group.add(new THREE.Mesh(nock, m.nock));
-
-  // Three vanes at 120°, the cock feather standing straight out to the left
-  // (away from the stave for a right-handed archer's arrow pass).
   const vane = new THREE.BufferGeometry();
   const back = ARROW_LENGTH - 0.03;
   const front = back - FLETCH_LENGTH;
@@ -62,8 +53,23 @@ export function createArrowModel(): THREE.Group {
     0, FLETCH_HEIGHT, back - 0.02, 0, FLETCH_HEIGHT * 0.35, front + 0.01, 0, 0, front,
   ], 3));
   vane.computeVertexNormals();
+  geometries = { shaft, head, nock, vane };
+  return geometries;
+}
+
+/** Build a fresh arrow; the caller owns and positions it. */
+export function createArrowModel(): THREE.Group {
+  const m = arrowMaterials();
+  const g = arrowGeometries();
+  const group = new THREE.Group();
+  group.name = 'arrow';
+  group.add(new THREE.Mesh(g.shaft, m.shaft));
+  group.add(new THREE.Mesh(g.head, m.head));
+  group.add(new THREE.Mesh(g.nock, m.nock));
+  // Three vanes at 120°, the cock feather standing straight out to the left
+  // (away from the stave for a right-handed archer's arrow pass).
   for (let i = 0; i < 3; i++) {
-    const mesh = new THREE.Mesh(vane, i === 0 ? m.cock : m.fletch);
+    const mesh = new THREE.Mesh(g.vane, i === 0 ? m.cock : m.fletch);
     mesh.rotation.z = Math.PI / 2 + i * (2 * Math.PI / 3);
     group.add(mesh);
   }

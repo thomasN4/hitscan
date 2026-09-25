@@ -123,8 +123,15 @@ function stick(arrow: Arrow, surface: THREE.Object3D): void {
 export function updateArrows(dt: number): void {
   if (arrows.length === 0) return;
   // One target set per frame for every arrow, as shoot() gathers per pull.
+  // updateBots has just moved the bodies, but their parts' world matrices
+  // are only refreshed by the render (or bots.ts's own fire/melee flush), so
+  // a raycast here would see where each bot stood LAST frame. Flush first.
   const targets: THREE.Object3D[] = [...solids];
-  for (const bot of bots) if (bot.alive) targets.push(bot.head, bot.torso, bot.legs);
+  for (const bot of bots) {
+    if (!bot.alive) continue;
+    bot.mesh.updateMatrixWorld(true);
+    targets.push(bot.head, bot.torso, bot.legs);
+  }
   const cast = (from: THREE.Vector3, to: THREE.Vector3): SegmentHit<Struck> | null => {
     const span = to.distanceTo(from);
     if (span === 0) return null;

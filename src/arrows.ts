@@ -167,7 +167,7 @@ export function updateArrows(dt: number): void {
           const dealt = damageForPart({ damage, headshotMult: def.headshotMult }, part);
           showHitmarker(part === 'head');
           damageBot(bot, dealt, part);
-          showDamageNumber(hit.point, dealt, part === 'head');
+          showDamageNumber(hit.point, dealt, part === 'head', def);
         }
       }
     } else if (arrow.age > ARROW_MAX_AGE || arrow.pos.y < FLOOR_Y) {

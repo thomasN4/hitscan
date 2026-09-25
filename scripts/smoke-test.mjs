@@ -2439,7 +2439,8 @@ async function runSwordCheck() {
 
 // Damage numbers: one popup per bot per trigger pull at the point of impact,
 // reading what the hit dealt — pinned on a shotgun blast, whose eight pellets
-// must sum into ONE number — and the settings checkbox, driven through its
+// must sum into ONE number, coloured partway along the shotgun's yellow-to-red
+// span — and the settings checkbox, driven through its
 // real change event, must stop them. The stored settings are removed after,
 // so later phases see the defaults.
 async function runDamageNumbersCheck() {
@@ -2490,7 +2491,8 @@ async function runDamageNumbersCheck() {
         await gwait(0.08);
         window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
         await gwait(0.05);
-        return { took: 1000 - bot.hp, popups: popupTexts() };
+        const colors = [...document.querySelectorAll('#damageNumbers .dmgnum')].filter(e => e.style.display === 'block').map(e => e.style.color);
+        return { took: 1000 - bot.hp, popups: popupTexts(), colors };
       };
       const on = await blast();
       await gwait(1.0); // let it expire
@@ -2511,6 +2513,10 @@ async function runDamageNumbersCheck() {
     const { on, shownChecked, setting, off, restored } = result;
     if (!(on.took > 0)) throw new Error(`the blast missed the bot 3 m ahead: ${JSON.stringify(on)}`);
     if (on.popups.length !== 1 || on.popups[0] !== String(on.took)) throw new Error(`one blast must pop exactly one summed number: ${JSON.stringify(on)}`);
+    // A body blast sits low in the shotgun's span (up to eight pellets in the
+    // head): coloured from the def, so neither the yellow nor the red end.
+    const green = Number(/^rgb\(255, (\d+), \d+\)$/.exec(on.colors[0] ?? '')?.[1]);
+    if (!(green > 45 && green < 225)) throw new Error(`the blast's number was not ramped between yellow and red: ${JSON.stringify(on.colors)}`);
     if (!shownChecked) throw new Error('the settings screen showed damage numbers unticked while they are on');
     if (setting !== false || restored !== true) throw new Error(`the checkbox did not drive the setting: off=${setting} back=${restored}`);
     if (!(off.took > 0) || off.popups.length !== 0) throw new Error(`popups still appeared with the setting off: ${JSON.stringify(off)}`);

@@ -9,9 +9,9 @@
 // params — acceptable because the HUD is a pure view of that state.
 import * as THREE from 'three';
 import { camera } from './core/engine';
-import { player, weapon, input, wpn, score, session, bots, dom, settings, gameTime, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape } from './core/state';
+import { player, weapon, input, wpn, score, session, bots, dom, settings, gameTime, WEAPONS, BASE_FOV, equippedId, type Bot as BotShape, type WeaponDef } from './core/state';
 import { isLowAmmo } from './sim/ammo';
-import { damageNumberFrame } from './sim/damageNumbers';
+import { damageNumberFrame, damageNumberColor, damageHeat, damageSpan } from './sim/damageNumbers';
 
 /**
  * Fetch an element by id, or fail loudly at startup naming it.
@@ -89,13 +89,14 @@ let nextPopup = 0;
 const projected = new THREE.Vector3();
 
 /**
- * Pop `amount` up at the world point `at` where a hit landed; red and larger
- * for a head. The number is what the hit dealt, before any clamp to the
+ * Pop `amount` up at the world point `at` where a hit landed, coloured from
+ * yellow to red by where it sits in `def`'s own damage span
+ * (sim/damageNumbers.ts:damageSpan), and larger for a head. The number is what the hit dealt, before any clamp to the
  * victim's remaining HP — a 240 headshot reads 240 — because it is a tuning
  * readout as much as feedback. Callers are the player's three hit sites
  * (weapons.ts shoot/swingMelee, arrows.ts); bot-on-bot damage shows nothing.
  */
-export function showDamageNumber(at: THREE.Vector3, amount: number, head: boolean): void {
+export function showDamageNumber(at: THREE.Vector3, amount: number, head: boolean, def: WeaponDef): void {
   if (!settings.damageNumbers || popups.length === 0) return;
   // Bound-guarded: a ring index into the fixed pool built by initHUD.
   const popup = popups[nextPopup]!;
@@ -104,6 +105,7 @@ export function showDamageNumber(at: THREE.Vector3, amount: number, head: boolea
   popup.born = gameTime.now();
   popup.live = true;
   popup.el.textContent = String(Math.round(amount));
+  popup.el.style.color = damageNumberColor(damageHeat(amount, damageSpan(def)));
   popup.el.classList.toggle('head', head);
 }
 

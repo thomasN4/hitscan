@@ -458,7 +458,7 @@ function swingMelee(def: WeaponDef, attack: MeleeAttackDef, alt: boolean): void 
       dmg *= def.backstabMult ?? 1; // documented default: absent means no bonus
     }
     damageBot(hit.payload, dmg, hit.part);
-    showDamageNumber(hit.at, dmg, hit.part === 'head');
+    showDamageNumber(hit.at, dmg, hit.part === 'head', def);
   }
 
   applyKick(def);
@@ -705,7 +705,7 @@ export function shoot(): void {
 
   // One marker per trigger pull, red if ANY pellet reached a head.
   if (anyHit) showHitmarker(anyHead);
-  for (const tally of struck.values()) showDamageNumber(tally.at, tally.total, tally.head);
+  for (const tally of struck.values()) showDamageNumber(tally.at, tally.total, tally.head, def);
 }
 
 /**

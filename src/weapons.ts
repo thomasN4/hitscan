@@ -57,11 +57,22 @@ function currentDef(): WeaponDef {
   return WEAPONS[equippedId(wpn.slot)];
 }
 
+/**
+ * Whether the held secondary button is raising SIGHTS, for movement's speed
+ * tier and sprint precedence. On a blade it never is: input.aiming there only
+ * means RMB is down (the sword's slash button; inert on the knife), and
+ * reading it raw put a knife or sword holder at ADS walking speed with sprint
+ * refused for as long as RMB was held.
+ */
+export function aimingSights(): boolean {
+  return input.aiming && !currentDef().melee;
+}
+
 /** Live sprint policy shared with player.ts, including stance precedence. */
 export function currentSprintActive(crouching: boolean): boolean {
   return isSprintActive({
     sprintHeld: input.running,
-    aiming: input.aiming,
+    aiming: aimingSights(),
     crouching,
     // The touch stick counts as a direction on each axis it points along,
     // so a rim push sprints exactly where W-plus-Shift would.
@@ -310,7 +321,6 @@ export function switchWeapon(slot: WeaponSlot): void {
   // reloadEnd — an instant free reload.
   cancelReload();
   wpn.bowDrawAt = null; // a drawn bow is let down, never loosed, by a swap
-  wpn.altLatch = false;
   wpn.lastStrokeAlt = false;
   wpn.animation = freshWeaponAnimation();
   wpn.animation.switchedAt = gameTime.now();
@@ -823,15 +833,15 @@ export function updateWeapon(dt: number): void {
     }
   }
   // A melee def with an altAttack strikes it on RMB instead of raising
-  // sights: input.aiming is the shared "secondary button held" signal (RMB,
+  // sights: input.aiming is the shared "secondary button pressed" signal (RMB,
   // or the touch ADS toggle, both through tryRaiseSights, which already
-  // refuses it inside the deploy window). One stroke per press.
-  if (def.altAttack) {
-    if (!input.aiming) wpn.altLatch = false;
-    else if (!wpn.altLatch && !deploying && gameTime.now() - weapon.lastShot >= strokeCadence(def)) {
-      swingMelee(def, def.altAttack, true);
-      wpn.altLatch = true;
-    }
+  // refuses it inside the deploy window). The stroke CLEARS it, as
+  // unscopeOnShot does: one stroke per press, a held RMB does nothing more
+  // until re-pressed (mouseup re-clears harmlessly), and the touch toggle pops
+  // back off so each tap is one slash. A press during recovery waits for it.
+  if (def.altAttack && input.aiming && !deploying && gameTime.now() - weapon.lastShot >= strokeCadence(def)) {
+    swingMelee(def, def.altAttack, true);
+    input.aiming = false;
   }
 
   updateWeaponPresentation();

@@ -950,7 +950,6 @@ export const weapon: LiveWeapon = {
 export function armLoadout(): void {
   wpn.animation = freshWeaponAnimation();
   wpn.bowDrawAt = null;
-  wpn.altLatch = false;
   wpn.lastStrokeAlt = false;
   SLOTS.forEach(i => {
     const def = WEAPONS[equippedId(i)];
@@ -1499,8 +1498,6 @@ export interface WeaponDynamics {
    * let-down, loose, swap and re-arm (armLoadout) returns it to null.
    */
   bowDrawAt: number | null;
-  /** Edge detector for a melee altAttack on RMB: armed by a slash, released with RMB. */
-  altLatch: boolean;
   /**
    * The last stroke was the def's altAttack. Its fireRate, not the def's,
    * then gates the next stroke either way — one blade, one recovery.
@@ -1581,7 +1578,6 @@ export const wpn: WeaponDynamics = {
   emptyReloadLatch: false,
   reloadSfxHandle: undefined,
   bowDrawAt: null,
-  altLatch: false,
   lastStrokeAlt: false,
   animation: freshWeaponAnimation(),
 };

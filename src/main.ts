@@ -401,7 +401,6 @@ async function start(): Promise<void> {
     get triggerLatch() { return wpn.triggerLatch; }, set triggerLatch(v: boolean) { wpn.triggerLatch = v; },
     get emptyReloadLatch() { return wpn.emptyReloadLatch; }, set emptyReloadLatch(v: boolean) { wpn.emptyReloadLatch = v; },
     get bowDrawAt() { return wpn.bowDrawAt; }, set bowDrawAt(v: number | null) { wpn.bowDrawAt = v; },
-    get altLatch() { return wpn.altLatch; }, set altLatch(v: boolean) { wpn.altLatch = v; },
     get lastStrokeAlt() { return wpn.lastStrokeAlt; }, set lastStrokeAlt(v: boolean) { wpn.lastStrokeAlt = v; },
     get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },
     get moveLerp() { return motion.moveLerp; }, set moveLerp(v: number) { motion.moveLerp = v; },

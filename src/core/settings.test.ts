@@ -20,6 +20,15 @@ describe('sanitizeSettings', () => {
     expect(tuned.layout.fireR).toEqual({ x: 0.8, y: 0.7, scale: 1.3 });
   });
 
+  test('damage numbers: a boolean is kept, anything else (or absence) is on', () => {
+    expect(sanitizeSettings({ damageNumbers: false }).damageNumbers).toBe(false);
+    expect(sanitizeSettings({ damageNumbers: true }).damageNumbers).toBe(true);
+    for (const bad of ['no', 0, null]) expect(sanitizeSettings({ damageNumbers: bad }).damageNumbers).toBe(true);
+    // A copy stored before the field existed still loads, with it on.
+    expect(sanitizeSettings({ volume: 0.5 }).damageNumbers).toBe(true);
+    expect(DEFAULT_SETTINGS.damageNumbers).toBe(true);
+  });
+
   test('volume clamps to its limits and falls back per field', () => {
     expect(sanitizeSettings({ volume: 99 }).volume).toBe(SETTING_LIMITS.volume.max);
     expect(sanitizeSettings({ volume: -1 }).volume).toBe(SETTING_LIMITS.volume.min);

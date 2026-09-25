@@ -14,7 +14,7 @@ import { createArrowModel } from './core/arrowModel';
 import { solids } from './world';
 import { botFor } from './bots';
 import { damageBot } from './combat';
-import { showHitmarker } from './hud';
+import { showHitmarker, showDamageNumber } from './hud';
 import { sfxArrowHit } from './audio';
 import { advanceArrow, trimTrail, ARROW_MAX_AGE, type SegmentHit } from './sim/arrow';
 import { arrowDamage } from './sim/bow';
@@ -164,8 +164,10 @@ export function updateArrows(dt: number): void {
         if (bot.team !== session.playerTeam) {
           const part = partForMesh(bot, hit.payload.object);
           const damage = arrowDamage(def.damage, arrow.vel.length(), fullSpeed);
+          const dealt = damageForPart({ damage, headshotMult: def.headshotMult }, part);
           showHitmarker(part === 'head');
-          damageBot(bot, damageForPart({ damage, headshotMult: def.headshotMult }, part), part);
+          damageBot(bot, dealt, part);
+          showDamageNumber(hit.point, dealt, part === 'head', def);
         }
       }
     } else if (arrow.age > ARROW_MAX_AGE || arrow.pos.y < FLOOR_Y) {

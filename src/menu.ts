@@ -252,9 +252,12 @@ function buildCards(): void {
     const el = document.createElement('button');
     el.className = 'wcard';
     const dps = def.pellets !== undefined ? `${def.damage}\u00d7${def.pellets}` : String(def.damage);
+    // A bow's cycle is its full draw on top of the nock, and it holds arrows.
+    const cycle = def.fireRate + (def.drawTime ?? 0);
+    const unit = def.drawTime !== undefined ? 'arrows' : 'rounds';
     el.innerHTML =
       `<span class="wname">${def.name}</span>` +
-      `<span class="wstats">${dps} dmg \u00b7 ${(1 / def.fireRate).toFixed(1)}/s \u00b7 ${def.magSize} rounds</span>`;
+      `<span class="wstats">${dps} dmg \u00b7 ${(1 / cycle).toFixed(1)}/s \u00b7 ${def.magSize} ${unit}</span>`;
     el.onclick = () => {
       sel[cls] = id as WeaponId;
       focusCol = cls;

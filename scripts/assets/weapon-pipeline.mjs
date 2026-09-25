@@ -80,7 +80,7 @@ export function validateWeaponGlb(bytes, id) {
   assert.equal(gltf.buffers.length, 1);
   assert.ok(!gltf.buffers[0].uri && gltf.buffers[0].byteLength <= bytes.length - length - 28);
   assert.ok(!gltf.images?.length && !gltf.animations?.length && !gltf.extensionsRequired?.length);
-  assert.ok(['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47', 'sawnOff'].includes(id), 'Unknown weapon asset');
+  assert.ok(['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47', 'sawnOff', 'longbow'].includes(id), 'Unknown weapon asset');
   const parts = {
     sawnOff: ['grip_left', 'mechanism_hinge', 'chamber_left', 'chamber_right'],
     shotgun: ['grip_left', 'mechanism_pump'], revolver: ['mechanism_cylinder', 'mechanism_rotor', 'mechanism_hammer'],
@@ -88,8 +88,10 @@ export function validateWeaponGlb(bytes, id) {
     ak47: ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'],
     smg: ['grip_left', 'mechanism_slide', 'mechanism_magazine', 'magazine_out'],
     sniper: ['grip_left', 'mechanism_bolt', 'mechanism_magazine', 'magazine_out'], knife: ['blade_tip'],
+    longbow: ['mechanism_limbUpper', 'mechanism_limbLower', 'string_top', 'string_bottom'],
   };
-  const required = ['grip_right', ...(id === 'knife' ? [] : ['reload_port', 'Muzzle']), ...parts[id]];
+  // A bow has an arrow pass (Muzzle) but nothing to load through a port.
+  const required = ['grip_right', ...(id === 'knife' ? [] : id === 'longbow' ? ['Muzzle'] : ['reload_port', 'Muzzle']), ...parts[id]];
   for (const name of required) assert.equal(gltf.nodes.filter(n => n.name === name).length, 1, `Missing/duplicate ${name}`);
   const palettes = {
     sawnOff: ['Brass', 'Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Warm walnut'],
@@ -97,6 +99,7 @@ export function validateWeaponGlb(bytes, id) {
     smg: ['Brushed steel', 'Charcoal blued steel', 'Recess / rubber'],
     sniper: ['Brushed steel', 'Charcoal blued steel', 'Olive composite', 'Recess / rubber'],
     knife: ['Brushed steel', 'Charcoal blued steel', 'Recess / rubber'],
+    longbow: ['Grip leather', 'Horn', 'Yew heartwood', 'Yew sapwood'],
     pistol: ['Brushed steel', 'Charcoal blued steel', 'Ivory sight inserts', 'Recess / rubber', 'Satin graphite slide', 'Slate grip panels'],
     shotgun: ['Brass', 'Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Walnut end grain', 'Warm walnut'],
     revolver: ['Brass', 'Brushed steel', 'Charcoal blued steel', 'Recess / rubber', 'Walnut end grain', 'Warm walnut'],
@@ -111,6 +114,14 @@ export function validateWeaponGlb(bytes, id) {
     const roots = gltf.scenes[gltf.scene].nodes;
     for (const name of ['grip_right', 'mechanism_hinge'])
       assert.ok(roots.includes(nodeIndex(name)), `Detached attachment ${name}`);
+  } else if (id === 'longbow') {
+    // Each string marker rides its own limb, so the draw's flex carries it;
+    // everything else is fixed to the stave.
+    const roots = gltf.scenes[gltf.scene].nodes;
+    for (const name of ['grip_right', 'Muzzle', 'mechanism_limbUpper', 'mechanism_limbLower'])
+      assert.ok(roots.includes(nodeIndex(name)), `longbow attachment must be fixed at root: ${name}`);
+    for (const [limb, tip] of [['mechanism_limbUpper', 'string_top'], ['mechanism_limbLower', 'string_bottom']])
+      assert.ok(gltf.nodes[nodeIndex(limb)].children.includes(nodeIndex(tip)), `Detached attachment ${tip}`);
   } else if (id === 'shotgun' || id === 'revolver') {
     const owner = gltf.nodes[nodeIndex(id === 'shotgun' ? 'mechanism_pump' : 'mechanism_cylinder')];
     for (const name of id === 'shotgun' ? ['grip_left'] : ['mechanism_rotor', 'reload_port'])
@@ -160,7 +171,7 @@ export function weaponPipeline(mode) {
     const previous = readPreviousGltfAddon();
     if (previous && previous !== gltfAddon)
       console.warn(`glTF add-on moved ${previous} -> ${gltfAddon}; outputs differing only by exporter version still normalize byte-identical`);
-    const assets = ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff'].map(id => {
+    const assets = ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff','longbow'].map(id => {
       const source=`assets/source/${id}.blend`, output=`public/assets/${id}.glb`;
       const normalized = normalizeWeaponGlb(readFileSync(root+output));
       writeFileSync(root+output, normalized);
@@ -171,7 +182,7 @@ export function weaponPipeline(mode) {
     const manifest=JSON.parse(readFileSync(root+manifestPath));
     assert.equal(manifest.exporterSha256,hash(exporter),'Weapon exporter changed: run assets:export');
     assert.match(manifest.gltfAddon ?? '', /^\d+\.\d+\.\d+$/, 'Weapon manifest lacks gltfAddon: run assets:export');
-    assert.deepEqual(manifest.assets.map(asset => asset.id).sort(), ['ak47','knife','pistol','revolver','sawnOff','shotgun','smg','sniper']);
+    assert.deepEqual(manifest.assets.map(asset => asset.id).sort(), ['ak47','knife','longbow','pistol','revolver','sawnOff','shotgun','smg','sniper']);
     const entries = manifest.assets.map(asset => ({ asset, bytes: readFileSync(root + asset.output) }));
     const seen = entries.map(({ asset, bytes }) => readGlbGenerator(bytes, asset.id));
     assert.equal(new Set(seen).size, 1, `Mixed exporter versions across GLBs ${[...new Set(seen)]}: run assets:export`);

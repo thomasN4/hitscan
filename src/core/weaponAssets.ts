@@ -14,9 +14,12 @@ export interface AuthoredWeaponRig {
   bladeTip?: THREE.Object3D;
   chambers?: readonly [THREE.Object3D, THREE.Object3D];
   magazineOut?: THREE.Object3D;
+  /** Bow only: where the string meets each limb tip. Children of the limbs, so the flex carries them. */
+  stringTop?: THREE.Object3D;
+  stringBottom?: THREE.Object3D;
   /** Full-stroke travel (m) of the slide, pump or bolt along authored +z; 0 without one. */
   actionTravel: number;
-  mechanisms: Partial<Record<'hinge' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'slide' | 'magazine' | 'bolt', THREE.Object3D>>;
+  mechanisms: Partial<Record<'hinge' | 'pump' | 'cylinder' | 'rotor' | 'hammer' | 'slide' | 'magazine' | 'bolt' | 'limbUpper' | 'limbLower', THREE.Object3D>>;
 }
 /**
  * Action stroke per weapon, sized to the real-sized models
@@ -26,7 +29,7 @@ export interface AuthoredWeaponRig {
  */
 const ACTION_TRAVEL: Record<AuthoredWeaponId, number> = {
   pistol: 0.032, smg: 0.036, ak47: 0.042, shotgun: 0.087, sniper: 0.105,
-  revolver: 0, sawnOff: 0, knife: 0,
+  revolver: 0, sawnOff: 0, knife: 0, longbow: 0,
 };
 function required(root: THREE.Object3D, name: string): THREE.Object3D {
   const matches: THREE.Object3D[] = [];
@@ -40,11 +43,12 @@ export function createAuthoredWeaponRig(id: AuthoredWeaponId, asset: THREE.Objec
   const mechanismNames: Record<AuthoredWeaponId, ReadonlyArray<keyof AuthoredWeaponRig['mechanisms']>> = {
     sawnOff: ['hinge'], shotgun: ['pump'], revolver: ['cylinder', 'rotor', 'hammer'], pistol: ['slide', 'magazine'],
     ak47: ['slide', 'magazine'], smg: ['slide', 'magazine'], sniper: ['bolt', 'magazine'], knife: [],
+    longbow: ['limbUpper', 'limbLower'],
   };
   const mechanisms: AuthoredWeaponRig['mechanisms'] = {};
   for (const key of mechanismNames[id]) mechanisms[key] = required(root, `mechanism_${key}`);
-  const support = id !== 'revolver' && id !== 'knife' ? required(root, 'grip_left') : grip;
-  const port = id === 'knife' ? undefined : required(root, 'reload_port');
+  const support = id !== 'revolver' && id !== 'knife' && id !== 'longbow' ? required(root, 'grip_left') : grip;
+  const port = id === 'knife' || id === 'longbow' ? undefined : required(root, 'reload_port');
   if (id === 'shotgun' && support.parent !== mechanisms.pump
     || id === 'revolver' && (port?.parent !== mechanisms.cylinder || mechanisms.rotor?.parent !== mechanisms.cylinder))
     throw new Error(`Weapon asset: incompatible ${id} mechanism hierarchy`);
@@ -67,7 +71,13 @@ export function createAuthoredWeaponRig(id: AuthoredWeaponId, asset: THREE.Objec
   }
   if (id === 'knife' && (grip.parent !== root || required(root, 'blade_tip').parent !== root))
     throw new Error('Weapon asset: incompatible knife attachment hierarchy');
-  return { root, grip, support, port, magazineOut, chambers, actionTravel: ACTION_TRAVEL[id],
+  const stringTop = id === 'longbow' ? required(root, 'string_top') : undefined;
+  const stringBottom = id === 'longbow' ? required(root, 'string_bottom') : undefined;
+  if (id === 'longbow' && (grip.parent !== root || stringTop?.parent !== mechanisms.limbUpper
+    || stringBottom?.parent !== mechanisms.limbLower || mechanisms.limbUpper?.parent !== root
+    || mechanisms.limbLower?.parent !== root))
+    throw new Error('Weapon asset: incompatible longbow limb hierarchy');
+  return { root, grip, support, port, magazineOut, chambers, stringTop, stringBottom, actionTravel: ACTION_TRAVEL[id],
     muzzle: id === 'knife' ? undefined : required(root, 'Muzzle'),
     bladeTip: id === 'knife' ? required(root, 'blade_tip') : undefined, mechanisms };
 }
@@ -80,6 +90,7 @@ export async function loadWeaponAssets(base: string): Promise<WeaponAssets> {
       'Warm walnut': 0x4a331f, 'Walnut end grain': 0x302015,
       'Satin graphite slide': 0x59666e, 'Slate grip panels': 0x28343c, 'Ivory sight inserts': 0xe7d6ac,
       'Olive composite': 0x24301f, 'Brushed steel': 0xb9bdc6, Brass: 0xc6994f,
+      'Yew sapwood': 0xc99a5b, 'Yew heartwood': 0x8a4220, 'Grip leather': 0x3b2415, Horn: 0xd6ccb2,
     };
     const materials = new Map<string, THREE.MeshToonMaterial>();
     let meshes = 0;
@@ -103,10 +114,11 @@ export async function loadWeaponAssets(base: string): Promise<WeaponAssets> {
     if (!meshes) throw new Error(`Weapon asset: ${id} contains no meshes`);
     return scene;
   }
-  const [shotgun, revolver, pistol, smg, sniper, knife, ak47, sawnOff] = await Promise.all([
+  const [shotgun, revolver, pistol, smg, sniper, knife, ak47, sawnOff, longbow] = await Promise.all([
     load('shotgun'), load('revolver'), load('pistol'), load('smg'), load('sniper'), load('knife'), load('ak47'), load('sawnOff'),
+    load('longbow'),
   ]);
-  return { shotgun, revolver, pistol, smg, sniper, knife, ak47, sawnOff };
+  return { shotgun, revolver, pistol, smg, sniper, knife, ak47, sawnOff, longbow };
 }
 /** Evaluate an authored marker in body coordinates, including moving parents. */
 export function attachmentPoint(node: THREE.Object3D, body: THREE.Object3D): THREE.Vector3 {

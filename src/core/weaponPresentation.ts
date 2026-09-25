@@ -7,6 +7,7 @@ import { poseMagazine } from './magazinePresentation';
 import { poseSawnOffReload } from './sawnOffPresentation';
 import { poseShotgunReload } from './shotgunPresentation';
 import { poseRevolverReload } from './revolverPresentation';
+import { poseBow } from './bowPresentation';
 
 /**
  * Knife thrust (m) down the view axis at the swing's peak — the same jab the
@@ -53,6 +54,7 @@ export function poseWeapon(vm: WeaponViewModel, id: WeaponId, pose: WeaponPose,
     group.position.y += chambering.dip;
     group.rotation.z += chambering.roll;
   }
+  if (id === 'longbow') poseBow(vm, pose);
   if (m.magazine) poseMagazine(vm, pose);
   if (m.pump) m.pump.position.z += travel * pose.pump;
   if (m.bolt) {

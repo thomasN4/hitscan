@@ -16,7 +16,7 @@ import type { SessionState, InputState, AimState, WeaponDynamics, MotionState, S
                LoadoutState, Team,
                MapName, MatchMode, WeaponSlot, WeaponId, BotWeaponChoice, BotSecondaryChoice, LiveWeapon, PlayerState } from './core/state';
 import { initEngine, renderer, scene, camera, clock } from './core/engine';
-import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout, settings } from './core/state';
+import { session, input, aim, wpn, motion, score, keys, player, weapon, gameTime, bulletHoles, arrows, stuckArrows, WEAPONS, bots, dom, resetDom, DOM_FLAGS, loadout, setLoadout, settings } from './core/state';
 import { parseSessionConfig } from './core/sessionConfig';
 import { colliders, elevators, updateElevators } from './world';
 import { HEAD_HEIGHT } from './collision';
@@ -25,8 +25,9 @@ import { BUILDERS } from './maps';
 import { buildNav, route, transportRoute, navGrid } from './nav';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
-import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon, tryRaiseSights, cycleZoom } from './weapons';
+import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon, tryRaiseSights, cycleZoom, letDownBow } from './weapons';
 import { updateEffects } from './effects';
+import { updateArrows } from './arrows';
 import { toggleDebugView, updateDebugView } from './debugView';
 import { respawn, endMatch } from './combat';
 import { updateDomination } from './domination';
@@ -244,8 +245,12 @@ async function start(): Promise<void> {
       if (!session.locked) resetTouchInput();
     }
     // updateWeapon stops running when the loop pauses; make sure a held scope
-    // can't stay stuck on screen across pause/death.
-    if (!session.locked) setScopeOverlay(false);
+    // can't stay stuck on screen across pause/death, nor a drawn bow loose
+    // itself on the first frame back.
+    if (!session.locked) {
+      setScopeOverlay(false);
+      letDownBow();
+    }
     if (session.locked) {
       session.started = true;
       hideAllMenus();
@@ -298,6 +303,10 @@ async function start(): Promise<void> {
       updateCamera();
       updateViewmodel();
       if (!RANGE) updateBots(dt, player);
+      // Arrows in flight, after the bots have moved, so a hit is judged
+      // against where each body is this frame. A loose made in updateWeapon
+      // above starts flying on the frame it was released.
+      updateArrows(dt);
       // Domination capture + tick scoring, after every body has moved. The
       // updater also ends the match on the score limit; the clock below
       // stays the second way out.
@@ -391,6 +400,7 @@ async function start(): Promise<void> {
     get zoomScale() { return wpn.zoomScale; }, set zoomScale(v: number) { wpn.zoomScale = v; },
     get triggerLatch() { return wpn.triggerLatch; }, set triggerLatch(v: boolean) { wpn.triggerLatch = v; },
     get emptyReloadLatch() { return wpn.emptyReloadLatch; }, set emptyReloadLatch(v: boolean) { wpn.emptyReloadLatch = v; },
+    get bowDrawAt() { return wpn.bowDrawAt; }, set bowDrawAt(v: number | null) { wpn.bowDrawAt = v; },
     get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },
     get moveLerp() { return motion.moveLerp; }, set moveLerp(v: number) { motion.moveLerp = v; },
     get crouchLerp() { return motion.crouchLerp; }, set crouchLerp(v: number) { motion.crouchLerp = v; },
@@ -405,7 +415,7 @@ async function start(): Promise<void> {
     get roundTime() { return score.roundTime; }, set roundTime(v: number) { score.roundTime = v; },
   };
 
-  window.__cs = { game, weapon, player, bots, bulletHoles, colliders, elevators, gameTime, dom, settings, nav: { route, transportRoute, grid: navGrid } };
+  window.__cs = { game, weapon, player, bots, bulletHoles, arrows, stuckArrows, colliders, elevators, gameTime, dom, settings, nav: { route, transportRoute, grid: navGrid } };
 }
 
 void start().catch((error: unknown) => {
@@ -421,6 +431,9 @@ declare global {
       player: PlayerState;
       bots: typeof bots;
       bulletHoles: typeof bulletHoles;
+      /** Longbow arrows in flight, and those left standing in the scenery (arrows.ts). */
+      arrows: typeof arrows;
+      stuckArrows: typeof stuckArrows;
       colliders: typeof colliders;
       elevators: typeof elevators;
       /** The pausable gameplay clock — lets devtools/smoke tests read (never advance) match time. */

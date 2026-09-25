@@ -2167,6 +2167,139 @@ async function runShotgunCheck() {
   await page.close();
 }
 
+// Longbow: the player-only primary. Pins the picker card through the real
+// UI, then the trigger's whole contract E2E: a tap too short to reach
+// BOW_MIN_RELEASE lets the string down and spends nothing; sprinting
+// mid-draw lets it down too; a full draw released at a frozen bot looses a
+// TRAVELLING arrow — the bot is still untouched the frame after release and
+// hit a flight time later, for the speed-scaled 80 (or its head/leg share);
+// and an arrow loosed at the ground stays standing in it.
+async function runLongbowCheck() {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  try {
+    await page.goto(mapUrl('/?map=arena&tbots=1&ctbots=0&tweap=smg'), { waitUntil: 'networkidle0', timeout: 20000 });
+    await new Promise(r => setTimeout(r, 1500));
+    const result = await page.evaluate(async () => {
+      const cs = window.__cs;
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      // Game-clock waits: headless frames under-run wall time (dt clamp).
+      const gwait = async s => { const t0 = cs.gameTime.now(); while (cs.gameTime.now() - t0 < s) await wait(16); };
+      const lmb = down => window.dispatchEvent(new MouseEvent(down ? 'mousedown' : 'mouseup', { button: 0 }));
+      document.getElementById('playBtn').click();
+      const card = name => [...document.querySelectorAll('.wcard')].find(b => b.textContent.includes(name));
+      const bowCard = card('LONGBOW');
+      if (!bowCard) return { fail: 'no LONGBOW card in the picker' };
+      if (!document.getElementById('colPrimary')?.contains(bowCard)) return { fail: 'LONGBOW card is not in the primary column' };
+      bowCard.click();
+      card('PISTOL').click();
+      document.getElementById('deployBtn').click();
+      cs.game.started = true;
+      cs.game.locked = true;
+      await gwait(0.6); // the respawn arms the primary; let any deploy window pass
+      if (cs.weapon.name !== 'LONGBOW') return { fail: `deployed ${cs.weapon.name}, not the longbow` };
+      cs.player.hp = 100000; // the bot shoots back; the arrows are what matter
+      const bot = cs.bots.find(b => b.team === 'T' && b.alive);
+      if (!bot) return { fail: 'no live T bot' };
+      bot.update = () => {}; // hold the target still for the whole flight
+      const mag0 = cs.weapon.mag;
+
+      // A flick: released well short of BOW_MIN_RELEASE (0.2 x 0.9 s).
+      lmb(true); await gwait(0.04); lmb(false); await gwait(0.05);
+      const tap = { mag: cs.weapon.mag, arrows: cs.arrows.length, drawAt: cs.game.bowDrawAt };
+
+      // Sprinting mid-draw lets the string down; the release then looses nothing.
+      lmb(true); await gwait(0.5);
+      const drawing = cs.game.bowDrawAt !== null;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      await gwait(0.15);
+      const sprintDrawAt = cs.game.bowDrawAt;
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
+      lmb(false); await gwait(0.05);
+      const sprint = { drawing, drawAtWhileSprinting: sprintDrawAt, mag: cs.weapon.mag, arrows: cs.arrows.length };
+
+      // A full draw at the torso of a bot 12 m ahead, aimed from the sights.
+      // The TDM spawn is random and the arena has cover, so first stand the
+      // player where a 14 m lane toward -z is free of every collider — a
+      // crate in the lane is a stuck arrow, not a regression.
+      const laneClear = (x, z) => cs.colliders.every(b => !(b.max.y > 0.3 && b.min.y < 2.2
+        && b.max.x > x - 0.7 && b.min.x < x + 0.7 && b.max.z > z - 14 && b.min.z < z + 0.6));
+      let lane = null;
+      for (let r = 0; r <= 40 && !lane; r += 2) {
+        for (let x = -r; x <= r && !lane; x += 2) {
+          for (const z of [-r, r]) if (!lane && laneClear(x, z)) lane = { x, z };
+        }
+      }
+      if (!lane) return { fail: 'no clear 14 m lane found on the arena' };
+      cs.player.pos.set(lane.x, cs.player.pos.y, lane.z);
+      cs.player.vel.set(0, 0, 0);
+      await gwait(0.1);
+      cs.game.yaw = 0;
+      bot.mesh.position.set(cs.player.pos.x, cs.player.pos.y - cs.player.eyeHeight, cs.player.pos.z - 12);
+      bot.mesh.rotation.y = 0;
+      bot.hp = 100;
+      await gwait(0.05);
+      const torso = bot.torso.getWorldPosition(bot.torso.position.clone());
+      cs.game.pitch = Math.atan2(torso.y - cs.player.pos.y, 12) + 0.012; // hold over ~0.15 m of drop
+      window.dispatchEvent(new MouseEvent('mousedown', { button: 2 }));
+      await gwait(0.3);
+      lmb(true); await gwait(1.1); lmb(false);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const released = { mag: cs.weapon.mag, arrows: cs.arrows.length, hp: bot.hp,
+        speed: cs.arrows[0] ? +cs.arrows[0].vel.length().toFixed(1) : null };
+      const stuck0 = cs.stuckArrows.length;
+      const t0 = cs.gameTime.now();
+      while (bot.hp === 100 && cs.gameTime.now() - t0 < 1.5) await wait(16);
+      const hit = { hp: bot.hp, alive: bot.alive, flight: +(cs.gameTime.now() - t0).toFixed(3),
+        arrows: cs.arrows.length, stuck: cs.stuckArrows.length - stuck0 };
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 2 }));
+
+      // An arrow loosed at the ground in front stays standing in it.
+      bot.mesh.position.set(cs.player.pos.x + 30, 0, cs.player.pos.z + 30);
+      // Shallow enough for ~0.3 s of flight, so the trail is sampled mid-air.
+      cs.game.pitch = -0.06;
+      await gwait(0.7); // next arrow nocked
+      lmb(true); await gwait(1.0); lmb(false);
+      await gwait(0.15);
+      const trailPoints = cs.arrows[0]?.trailLine.geometry.drawRange.count ?? 0;
+      await gwait(0.6);
+      const last = cs.stuckArrows.at(-1);
+      const ground = { stuck: cs.stuckArrows.length - stuck0, arrows: cs.arrows.length, trailPoints,
+        // Parented to the solid it struck (so a moving deck carries it), not the scene.
+        parent: last?.parent?.type ?? null,
+        y: last ? +last.getWorldPosition(last.position.clone()).y.toFixed(2) : null };
+      return { mag0, tap, sprint, released, hit, ground };
+    });
+    if (result.fail) throw new Error(result.fail);
+    const { mag0, tap, sprint, released, hit, ground } = result;
+    if (tap.mag !== mag0 || tap.arrows !== 0 || tap.drawAt !== null) throw new Error(`a short tap loosed or left the string drawn: ${JSON.stringify(tap)}`);
+    if (!sprint.drawing) throw new Error('holding LMB did not start a draw');
+    if (sprint.drawAtWhileSprinting !== null) throw new Error('sprinting mid-draw did not let the string down');
+    if (sprint.mag !== mag0 || sprint.arrows !== 0) throw new Error(`a let-down draw still loosed: ${JSON.stringify(sprint)}`);
+    if (released.mag !== mag0 - 1 || released.arrows !== 1) throw new Error(`the full-draw release did not loose one arrow: ${JSON.stringify(released)}`);
+    if (released.hp !== 100) throw new Error(`the arrow hit on release — it must travel: ${JSON.stringify(released)}`);
+    if (!(released.speed > 50 && released.speed <= 58)) throw new Error(`full-draw launch speed off: ${released.speed}`);
+    if (hit.hp === 100) throw new Error(`the arrow never reached the bot 12 m out: ${JSON.stringify(hit)}`);
+    if (hit.flight < 0.1) throw new Error(`12 m took ${hit.flight} s — faster than any arrow`);
+    // Torso ~79 (alive at ~21), legs ~59, head kills: any of the three is a real hit.
+    if (hit.alive && !(100 - hit.hp >= 55 && 100 - hit.hp <= 80)) throw new Error(`arrow damage off the speed-scaled table: ${JSON.stringify(hit)}`);
+    if (hit.arrows !== 0 || hit.stuck !== 0) throw new Error(`an arrow in a body was left flying or standing: ${JSON.stringify(hit)}`);
+    if (ground.stuck !== 1 || ground.arrows !== 0) throw new Error(`the ground arrow did not stay standing: ${JSON.stringify(ground)}`);
+    if (ground.parent !== 'Mesh') throw new Error(`the stuck arrow is not parented to the surface it hit: ${JSON.stringify(ground)}`);
+    if (!(ground.trailPoints >= 3)) throw new Error(`the flight trail did not grow in flight: ${JSON.stringify(ground)}`);
+    console.log('[longbow] OK', JSON.stringify(result));
+  } catch (e) {
+    failures++;
+    console.log(`[longbow] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[longbow] ${e}`));
+  await page.close();
+}
+
 // Knife: the always-carried fallback (key 3). Pins the position-3 swap
 // through the real keybind, the hidden ammo readout while knifing, the
 // inert R/RMB paths (a blade holds no rounds and raises no sights), the
@@ -3106,6 +3239,7 @@ try {
   await runMap('range', '/?map=range', { sprintCheck: true });
   await runShotgunCheck();
   await runKnifeCheck();
+  await runLongbowCheck();
   await runMatchEndCheck();
   await runTouchCheck();
 } finally {

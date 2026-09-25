@@ -199,6 +199,27 @@ describe('melee weapons', () => {
   });
 });
 
+describe('bow pairing', () => {
+  const BOW = WEAPONS.longbow;
+
+  test('the shipped longbow carries both halves', () => {
+    expect(matching([BOW], 'drawTime')).toHaveLength(0);
+    expect(matching([BOW], 'launchSpeed')).toHaveLength(0);
+  });
+
+  test('either half alone is flagged, as is a zero or NaN one', () => {
+    expect(matching([tuned({ drawTime: undefined }, BOW)], 'LONGBOW', 'drawTime')).toHaveLength(1);
+    expect(matching([tuned({ launchSpeed: undefined }, BOW)], 'LONGBOW', 'launchSpeed')).toHaveLength(1);
+    expect(matching([tuned({ drawTime: 0 }, BOW)], 'LONGBOW', 'drawTime')).toHaveLength(1);
+    expect(matching([tuned({ launchSpeed: NaN }, BOW)], 'LONGBOW', 'launchSpeed')).toHaveLength(1);
+    expect(matching([tuned({ drawTime: 0.9 })], 'SMG', 'launchSpeed')).toHaveLength(1);
+  });
+
+  test('a bow cannot also swing or fire pellets', () => {
+    expect(matching([tuned({ pellets: 3 }, BOW)], 'LONGBOW', 'bow')).toHaveLength(1);
+  });
+});
+
 describe('a fully valid def', () => {
   test('returns []', () => {
     expect(validateWeapons([{ ...SMG }])).toEqual([]);

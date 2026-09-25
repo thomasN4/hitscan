@@ -15,7 +15,7 @@ import {
   type BotWeaponRig,
 } from './botWeaponModels';
 import type { WeaponAssets } from './weaponAssets';
-import type { WeaponId } from './state';
+import type { BotWeaponId } from './state';
 
 function marker(name: string, pos: readonly [number, number, number], parent: THREE.Object3D): THREE.Object3D {
   const node = new THREE.Object3D();
@@ -26,7 +26,7 @@ function marker(name: string, pos: readonly [number, number, number], parent: TH
 }
 
 /** Mock asset satisfying createAuthoredWeaponRig's per-weapon marker contract. */
-function mockAsset(id: WeaponId): THREE.Object3D {
+function mockAsset(id: BotWeaponId): THREE.Object3D {
   const root = new THREE.Group();
   root.name = `mock-${id}`;
   marker('grip_right', [0.1, -0.05, 0.05], root);
@@ -76,7 +76,7 @@ function mockAsset(id: WeaponId): THREE.Object3D {
   return root;
 }
 
-const IDS: readonly WeaponId[] = ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47', 'sawnOff'];
+const IDS: readonly BotWeaponId[] = ['shotgun', 'revolver', 'pistol', 'smg', 'sniper', 'knife', 'ak47', 'sawnOff'];
 
 function initMocks(): void {
   const assets = Object.fromEntries(IDS.map(id => [id, mockAsset(id)])) as WeaponAssets;

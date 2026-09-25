@@ -19,6 +19,10 @@ export interface WeaponAnimationInput {
   reloadShells?: number;
   closeAt: number;
   closeBlend: number;
+  /** Longbow: how far back the string is (sim/bow.ts). Absent means at brace. */
+  bowDraw?: number;
+  /** An arrow is left to nock (mag > 0). Absent means loaded. Longbow only. */
+  loaded?: boolean;
 }
 
 export interface WeaponPose {
@@ -38,6 +42,10 @@ export interface WeaponPose {
   holster: boolean;
   holsterDrop: number;
   swing: number;
+  /** Longbow string draw, 0 at brace. Not `draw`, which is the swap-in raise. */
+  bowDraw: number;
+  /** Longbow: no arrow on the string — just loosed, restocking, or out. False at rest. */
+  stringEmpty: boolean;
   breakOpen: number;
   extraction: number;
   shellCount: number;
@@ -108,6 +116,10 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
     holsterDrop: holster ? smooth(0, holsterEnd, swapAge) : 0,
     // Contact occurs on the successful shot frame; this is the follow-through.
     swing: id === 'knife' && firing ? 1 - smooth(0, 0.85, cycle) : 0,
+    bowDraw: id === 'longbow' ? input.bowDraw ?? 0 : 0,
+    // The loosed arrow is gone at once; the next one reaches the string
+    // halfway through the nocking interval that gates the next draw.
+    stringEmpty: id === 'longbow' && (!(input.loaded ?? true) || reloading || (firing && cycle < 0.5)),
   };
 }
 

@@ -1,7 +1,8 @@
 # First-person weapon assets
 
 Editable sources under `assets/source/`: `shotgun.blend`, `revolver.blend`,
-`pistol.blend`, `smg.blend`, `sniper.blend`, `knife.blend`, `ak47.blend`, and `sawnOff.blend`.
+`pistol.blend`, `smg.blend`, `sniper.blend`, `knife.blend`, `ak47.blend`, `sawnOff.blend`,
+and `longbow.blend`.
 Runtime exports live under `public/assets/` with the matching `.glb` names. The
 game retains procedural maps and synthesized audio — bots hold the same
 authored weapon models as the player, mounted third-person on their aim
@@ -20,7 +21,7 @@ npm run build
 edited sources, preserves them, writes GLB, validates the result, then records
 source/output/export-script SHA-256 hashes and settings in
 `assets/weapons-manifest.json`. Commit sources, GLBs and manifest together.
-`assets:check` verifies all eight committed GLBs without Blender.
+`assets:check` verifies all nine committed GLBs without Blender.
 The exporter disables audio via `ALSOFT_DRIVERS=null` for headless Linux machines.
 
 The manifest also records `gltfAddon` (e.g. `"5.2.40"`), the Khronos glTF
@@ -56,6 +57,7 @@ pivots all keep their relationships and the sight line scales with the gun:
 | ak47 | 0.935 | 0.88 m | AKM, 0.88 m |
 | sniper | — | 1.14 m | already real-sized |
 | knife | — | 0.30 m | already real-sized (issue #143) |
+| longbow | — | 1.91 m | drawn at real size: English war bow, 1.82 m nock to nock |
 
 The revolver's cylinder is additionally trimmed to 0.75 of its radius about its
 own axis, so it stays round and keeps indexing. It comes out at 50 mm with
@@ -219,7 +221,7 @@ still fails the check. Sky-background ADS captures verify the visible result.
 
 ## SMG, sniper rifle and knife
 
-All eight first-person weapons now load authored GLBs. The SMG and sniper use
+Every first-person weapon now loads an authored GLB. The SMG and sniper use
 fixed well/extraction markers for their detachable magazines, with independent
 SMG action and sniper bolt assemblies. The knife uses grip and blade-tip markers
 without firearm-only loading markers. See
@@ -239,7 +241,7 @@ CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-animation-check.mjs /tmp
 CS_SMOKE_BASE=http://127.0.0.1:5193 node scripts/weapon-assets-check.mjs
 ```
 
-The asset checks cover missing/corrupt files and one-load startup for all eight
+The asset checks cover missing/corrupt files and one-load startup for all nine
 assets. Unit checks exercise exported contracts, independent clones, magazine
 paths, action restoration and aiming visibility. Runtime palette and framing
 are reviewed in the browser; the studio renders use Workbench material colors.
@@ -337,3 +339,36 @@ against production preview as well.
 | Hip | Bead sights | Break-action reload |
 | --- | --- | --- |
 | ![Sawn-off](images/sawn-off/hip.png) | ![Bead sights](images/sawn-off/ads.png) | ![Two shells](images/sawn-off/reload.png) |
+
+## Longbow
+
+`scripts/assets/create-longbow.py` generates `longbow.blend` (it overwrites the
+source, like the other generators):
+
+```sh
+ALSOFT_DRIVERS=null blender --background --factory-startup --python-exit-code 1 --python scripts/assets/create-longbow.py
+npm run assets:export
+```
+
+A self yew English war bow at brace: 1.82 m nock to nock (1.91 m over the horn
+nocks), a 0.17 m brace height, and a D-section stave, with a pale sapwood back
+toward the target and a heartwood belly toward the archer. Unlike the guns it
+stands upright, so its length is its height and `weaponRig.test.mjs` measures
+y rather than z. The origin is the arrow pass. The stave sits 20 mm to its right,
+as it does in a right-handed archer's bow hand.
+
+The contract is its own:
+
+- `grip_right` and `Muzzle` (the arrow pass) are fixed at the root. There is
+  no `grip_left` or `reload_port`: nothing loads through a port.
+- `mechanism_limbUpper` and `mechanism_limbLower` pivot at the ends of the
+  rigid handle, so the draw can flex them. The leather wrap hides the lower
+  joint and a horn arrow plate caps the upper one.
+- `string_top` and `string_bottom` mark the nock grooves. Each is a child of
+  its limb, so the flex carries it.
+
+Only the stave is authored. The string and the nocked arrow move with the draw
+every frame (`core/bowPresentation.ts`), and loosed arrows fly as world entities
+(`arrows.ts`). All three are built in code (`core/arrowModel.ts`, the
+cartridge pattern above). The bow is player-only, so it has no bot mount.
+

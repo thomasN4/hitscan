@@ -2370,7 +2370,7 @@ async function runSwordCheck() {
         cs.weapon.lastShot = -9; // the cadence gate must not eat a fresh stroke
       };
       // Hold `buttons` for `s` game seconds, then release them; a full charge
-      // is 0.5 s. Returns the bot's hp just BEFORE the release, too.
+      // is 0.4 s. Returns the bot's hp just BEFORE the release, too.
       const stroke = async (buttons, s) => {
         for (const b of buttons) button(b, true);
         await gwait(s);
@@ -2403,12 +2403,12 @@ async function runSwordCheck() {
       await stroke([2], FULL);
       const slashCentred = bot.hp;
       // Where the cut ends: 30° left, 15° below the crosshair, 2 m out. Held
-      // without a mouseup: the wound-up cut must strike on its own at 0.8 s.
+      // without a mouseup: the wound-up cut must strike on its own at 0.7 s.
       await place(2.0, -30, 0.26);
       let adsMax = 0;
       const sampleAds = async s => { const t0 = cs.gameTime.now(); while (cs.gameTime.now() - t0 < s) { adsMax = Math.max(adsMax, cs.game.adsLerp); await wait(16); } };
       button(2, true);
-      await sampleAds(0.6);
+      await sampleAds(0.5);
       const slashHeld = bot.hp;
       await sampleAds(0.35);
       const slashLed = bot.hp;

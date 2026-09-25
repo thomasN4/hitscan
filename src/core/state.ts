@@ -813,9 +813,9 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     name: 'ARMING SWORD', class: 'secondary', // a knight's sidearm, in the sidearm column
     magSize: 0, reserveMax: 0, reloadTime: 0, // a blade: no rounds, no reload (see the knife)
     // Every stroke winds up on the press and lands on the release: whole
-    // damage from 0.5 s held, then 0.3 s of grace at full before it strikes on
+    // damage from 0.4 s held, then 0.3 s of grace at full before it strikes on
     // its own. A tap deals 40% — only the thrust may be tapped (minCharge).
-    charge: { time: 0.5, hold: 0.3, floor: 0.4 },
+    charge: { time: 0.4, hold: 0.3, floor: 0.4 },
     // LMB: the THRUST — the point driven along the view axis. Reaches past
     // the knife (arm plus a 0.76 m blade) and hits hardest, but its cone is
     // narrow, so it has to be aimed.

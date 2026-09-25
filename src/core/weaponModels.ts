@@ -64,7 +64,7 @@ const BOW_AIM_ROLL = -0.22;
  * crosshair on screen so the blade frames a target rather than covering it.
  * A little edge-cant, as a wrist holds it.
  */
-const SWORD_GRIP = { x: 0.24, y: -0.29, z: -0.44 };
+export const SWORD_GRIP = { x: 0.24, y: -0.29, z: -0.44 };
 const SWORD_CONVERGENCE = 2.5;
 const SWORD_ROLL = -0.3;
 

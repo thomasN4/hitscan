@@ -1319,11 +1319,12 @@ async function runVisionAwarenessCheck() {
       //    cone is NOT zero — it spreads ~1.4 cm at this range, which a
       //    torso hit absorbs deterministically — so the setup forces the
       //    situational spread layers to rest instead of pretending the gun
-      //    is a ray. Aim AT the torso (center ~1.18 m, pitch ~-0.084): with
-      //    matched 1.6 m eyes a level gaze meets the 0.24 m face, a thin
-      //    band recoil climbs out of within a few rounds, while the 0.66 m
-      //    torso holds the burst. The respawned T faces +z, straight at the
-      //    player, so the firing frame carries an eligible FOV/range/LOS
+      //    is a ray. Aim AT the torso's world position (never a baked pitch),
+      //    so a future body-proportion change can't silently move the burst
+      //    off the torso: with matched 1.6 m eyes a level gaze meets the
+      //    0.24 m face, a thin band recoil climbs out of within a few rounds,
+      //    while the 0.66 m torso holds the burst. The respawned T faces +z,
+      //    straight at the player, so the firing frame carries an eligible FOV/range/LOS
       //    candidate: the simultaneous ordinary visual the incoming-fire
       //    bearing must outrank for that one decision.
       bot.respawn();
@@ -1335,8 +1336,13 @@ async function runVisionAwarenessCheck() {
       bot.onGround = true;
       cs.player.pos.set(PLAYER5[0], 1.6, PLAYER5[1]);
       cs.player.vel.set(0, 0, 0);
-      cs.game.yaw = 0; // forward is -z: straight at the bot
-      cs.game.pitch = -0.084; // down at the torso center, where the burst holds
+      // Torso world position, not a baked pitch — see the comment above (issue #152).
+      bot.mesh.updateMatrixWorld(true);
+      const torsoPos = bot.torso.getWorldPosition(new cs.player.pos.constructor());
+      const aimDx = torsoPos.x - cs.player.pos.x;
+      const aimDz = torsoPos.z - cs.player.pos.z;
+      cs.game.yaw = Math.atan2(-aimDx, -aimDz);
+      cs.game.pitch = Math.atan2(torsoPos.y - cs.player.pos.y, Math.hypot(aimDx, aimDz));
       cs.weapon.mag = 30;
       cs.weapon.lastShot = -9;
       const playerHpBefore = cs.player.hp;

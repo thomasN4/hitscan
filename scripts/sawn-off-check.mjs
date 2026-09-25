@@ -102,7 +102,14 @@ try {
     const cs = window.__cs;
     const target = cs.bots.find(b => b.team === 'T');
     target.mesh.position.set(12, 0, -10); target.mesh.rotation.y = 0; target.hp = 1000;
-    cs.game.pitch = Math.atan2(1.2 - cs.player.eyeHeight, 3);
+    // Aim at the torso's actual world position, not a hard-coded height, so the
+    // next body-proportion change can't silently break this (issue #152).
+    target.mesh.updateMatrixWorld(true);
+    const torsoPos = target.torso.getWorldPosition(new cs.player.pos.constructor());
+    const aimDx = torsoPos.x - cs.player.pos.x;
+    const aimDz = torsoPos.z - cs.player.pos.z;
+    cs.game.pitch = Math.atan2(torsoPos.y - cs.player.pos.y, Math.hypot(aimDx, aimDz));
+    cs.game.yaw = Math.atan2(-aimDx, -aimDz);
     Math.random = () => .5;
   });
   await advance(.1);

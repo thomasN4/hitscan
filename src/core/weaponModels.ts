@@ -57,6 +57,16 @@ const BOW_HIP = { x: -0.14, y: -0.13, z: -0.70 };
 const BOW_HIP_ROLL = -0.25;
 const BOW_AIM = { x: 0.015, y: -0.085, z: -0.80 };
 const BOW_AIM_ROLL = -0.22;
+/**
+ * The arming sword's grip, camera space (m), in a plow guard: hilt low right
+ * where the hand is, the point driven in and up toward the crosshair,
+ * converging SWORD_CONVERGENCE out — inside thrust reach, and short of the
+ * crosshair on screen so the blade frames a target rather than covering it.
+ * A little edge-cant, as a wrist holds it.
+ */
+const SWORD_GRIP = { x: 0.24, y: -0.29, z: -0.44 };
+const SWORD_CONVERGENCE = 2.5;
+const SWORD_ROLL = -0.3;
 
 /** Model-space vertices of every mesh under `root` (unparented) with z beyond `z`. */
 function verticesBehind(root: THREE.Object3D, z: number): Vec3[] {
@@ -76,7 +86,7 @@ function verticesBehind(root: THREE.Object3D, z: number): Vec3[] {
 }
 
 function required(node: THREE.Object3D | undefined, id: WeaponId): THREE.Object3D {
-  if (!node) throw new Error(`Viewmodel: ${id} has no muzzle to hold by`);
+  if (!node) throw new Error(`Viewmodel: ${id} has no muzzle or point to hold by`);
   return node;
 }
 
@@ -111,6 +121,16 @@ export function createWeaponViewModel(id: WeaponId, weaponAssets: WeaponAssets):
       aim: { position, quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, BOW_AIM_ROLL, 'YXZ')) },
     };
     aimOffset = { x: BOW_AIM.x - pass.x - position.x, y: BOW_AIM.y - pass.y - position.y, z: BOW_AIM.z - pass.z - position.z };
+  } else if (id === 'armingSword') {
+    // Never aimed (RMB slashes), so both poses are the guard.
+    authored.root.updateMatrixWorld(true);
+    const grip = attachmentPoint(authored.grip, authored.root);
+    const tip = attachmentPoint(required(authored.bladeTip, id), authored.root);
+    const guard = hipHold(grip, tip, SWORD_GRIP, SWORD_CONVERGENCE);
+    const pose = { position: new THREE.Vector3(guard.position.x, guard.position.y, guard.position.z),
+      quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(guard.pitch, guard.yaw, SWORD_ROLL, 'YXZ')) };
+    hold = { hip: pose, aim: pose };
+    aimOffset = { x: 0, y: 0, z: 0 };
   } else if (id === 'knife') {
     // Held parallel to the view axis, the knife showed its pommel end-on and
     // read as a pencil aimed at the horizon. A forward grip instead: the handle

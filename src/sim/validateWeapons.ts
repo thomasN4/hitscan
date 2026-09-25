@@ -160,6 +160,23 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     } else if (def.range !== undefined || def.arcRad !== undefined || def.backstabMult !== undefined) {
       out.push(`${name}: range/arcRad/backstabMult without melee does nothing — only a melee weapon swings`);
     }
+    if (def.altAttack !== undefined) {
+      const alt = def.altAttack;
+      if (!def.melee) {
+        out.push(`${name}: altAttack without melee does nothing — RMB raises sights on a firearm`);
+      }
+      for (const field of ['damage', 'fireRate', 'range'] as const) {
+        if (!(alt[field] > 0)) {
+          out.push(`${name}: altAttack.${field} ${num(alt[field])} must be > 0 — the second stroke would ${field === 'damage' ? 'hurt nothing' : field === 'range' ? 'reach nothing' : 'have no recovery'}`);
+        }
+      }
+      if (!(alt.arcRad > 0 && alt.arcRad <= Math.PI)) {
+        out.push(`${name}: altAttack.arcRad ${num(alt.arcRad)} must lie in (0, π] — at/below 0 it strikes nothing, past a half-turn it strikes behind`);
+      }
+      if (!(def.sprayRecover < def.sprayKick / alt.fireRate)) {
+        out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds the altAttack's sustained input ${num(def.sprayKick / alt.fireRate)} — its strokes will not bloom`);
+      }
+    }
     if (def.drawTime !== undefined || def.launchSpeed !== undefined) {
       if (!(def.drawTime !== undefined && def.drawTime > 0)) {
         out.push(`${name}: drawTime ${num(def.drawTime ?? NaN)} must be > 0 on a bow — an instant draw makes every release a full-power shot`);

@@ -220,6 +220,28 @@ describe('bow pairing', () => {
   });
 });
 
+describe('melee altAttack', () => {
+  const SWORD = WEAPONS.armingSword;
+
+  test('the shipped sword passes', () => {
+    expect(matching([SWORD], 'altAttack')).toHaveLength(0);
+  });
+
+  test('a firearm altAttack is a dead field', () => {
+    expect(matching([tuned({ altAttack: { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4 } })], 'SMG', 'altAttack without melee')).toHaveLength(1);
+  });
+
+  test('zero, NaN or out-of-range fields are flagged', () => {
+    const alt = (over: Partial<NonNullable<WeaponDef['altAttack']>>): WeaponDef =>
+      tuned({ altAttack: { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, ...over } }, SWORD);
+    expect(matching([alt({ damage: 0 })], 'ARMING SWORD', 'altAttack.damage')).toHaveLength(1);
+    expect(matching([alt({ range: NaN })], 'ARMING SWORD', 'altAttack.range')).toHaveLength(1);
+    expect(matching([alt({ fireRate: -1 })], 'ARMING SWORD', 'altAttack.fireRate')).toHaveLength(1);
+    expect(matching([alt({ arcRad: 4 })], 'ARMING SWORD', 'altAttack.arcRad')).toHaveLength(1);
+    expect(matching([alt({ fireRate: 10 })], 'ARMING SWORD', 'bloom')).toHaveLength(1);
+  });
+});
+
 describe('a fully valid def', () => {
   test('returns []', () => {
     expect(validateWeapons([{ ...SMG }])).toEqual([]);

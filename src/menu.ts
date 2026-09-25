@@ -255,9 +255,11 @@ function buildCards(): void {
     // A bow's cycle is its full draw on top of the nock, and it holds arrows.
     const cycle = def.fireRate + (def.drawTime ?? 0);
     const unit = def.drawTime !== undefined ? 'arrows' : 'rounds';
+    // A blade holds no rounds: its reach is the number that matters.
+    const capacity = def.melee ? `${def.range ?? 0} m reach` : `${def.magSize} ${unit}`;
     el.innerHTML =
       `<span class="wname">${def.name}</span>` +
-      `<span class="wstats">${dps} dmg \u00b7 ${(1 / cycle).toFixed(1)}/s \u00b7 ${def.magSize} ${unit}</span>`;
+      `<span class="wstats">${dps} dmg \u00b7 ${(1 / cycle).toFixed(1)}/s \u00b7 ${capacity}</span>`;
     el.onclick = () => {
       sel[cls] = id as WeaponId;
       focusCol = cls;

@@ -13,13 +13,13 @@ async function asset(id) {
   const buffer=new ArrayBuffer(bytes.length); new Uint8Array(buffer).set(bytes);
   return (await new GLTFLoader().parseAsync(buffer,'')).scene;
 }
-for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff','longbow']) {
+for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sawnOff','longbow','armingSword']) {
   test(`${id} export contract rejects corrupt data and missing mechanisms`, async()=>{
     const bytes=readFileSync(new URL(`../../public/assets/${id}.glb`,import.meta.url));
     expect(validateWeaponGlb(bytes,id).vertices).toBeGreaterThan(1000);
     expect(()=>validateWeaponGlb(bytes.subarray(0,-8),id)).toThrow('Truncated');
     const source=await asset(id);
-    const marker=id==='knife'?'blade_tip':id==='longbow'?'string_top':'reload_port';
+    const marker=id==='knife'||id==='armingSword'?'blade_tip':id==='longbow'?'string_top':'reload_port';
     source.getObjectByName(marker).name='missing';
     expect(()=>createAuthoredWeaponRig(id,source)).toThrow(marker);
   });
@@ -27,8 +27,9 @@ for(const id of ['shotgun','revolver','pistol','smg','sniper','knife','ak47','sa
     const source=await asset(id);
     const a=createAuthoredWeaponRig(id,source), b=createAuthoredWeaponRig(id,source);
     const key=id==='sawnOff'?'hinge':id==='shotgun'?'pump':id==='revolver'?'cylinder':id==='longbow'?'limbUpper':'magazine';
-    const movingA=id==='knife'?a.grip:a.mechanisms[key];
-    const movingB=id==='knife'?b.grip:b.mechanisms[key];
+    const blade=id==='knife'||id==='armingSword';
+    const movingA=blade?a.grip:a.mechanisms[key];
+    const movingB=blade?b.grip:b.mechanisms[key];
     movingA.rotation.z+=1;
     expect(movingB.rotation.z).toBeCloseTo(0);
   });
@@ -223,6 +224,7 @@ const REAL_LENGTH = {
   shotgun: [.95, 1.05],  // 18-20 in pump gun
   ak47: [.85, .90],      // AKM
   sniper: [1.08, 1.24],  // M24 / AWP
+  armingSword: [.88, 1.00], // Oakeshott XII knightly sword
 };
 for (const [id, [min, max]] of Object.entries(REAL_LENGTH)) {
   test(`${id} is authored at a real ${id} length`, async () => {

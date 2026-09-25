@@ -18,10 +18,10 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
          soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
-         type WeaponDef, type WeaponSlot, type WeaponId, type Bot } from './core/state';
+         type WeaponDef, type WeaponSlot, type WeaponId, type Bot, type MeleeAttackDef } from './core/state';
 import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch, sfxZoom,
-         sfxBow, sfxBowDraw } from './audio';
+         sfxBow, sfxBowDraw, sfxSwordThrust, sfxSwordSlash, sfxSwordHit } from './audio';
 import { showHitmarker, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
@@ -157,6 +157,7 @@ const SHOT_SFX: Record<WeaponId, () => void> = {
   revolver: sfxRevolver,
   knife: sfxKnife,
   longbow: sfxBow,
+  armingSword: sfxSwordThrust, // the LMB stroke; the RMB slash plays its own
 };
 
 const raycaster = new THREE.Raycaster();
@@ -178,6 +179,7 @@ export function initWeaponViewmodels(weaponAssets: WeaponAssets): void {
     revolver: createWeaponViewModel('revolver', weaponAssets),
     knife: createWeaponViewModel('knife', weaponAssets),
     longbow: createWeaponViewModel('longbow', weaponAssets),
+    armingSword: createWeaponViewModel('armingSword', weaponAssets),
   };
   for (const model of Object.values(VIEWMODELS)) gunGroup.add(model.group);
   camera.add(gunGroup);
@@ -308,6 +310,8 @@ export function switchWeapon(slot: WeaponSlot): void {
   // reloadEnd — an instant free reload.
   cancelReload();
   wpn.bowDrawAt = null; // a drawn bow is let down, never loosed, by a swap
+  wpn.altLatch = false;
+  wpn.lastStrokeAlt = false;
   wpn.animation = freshWeaponAnimation();
   wpn.animation.switchedAt = gameTime.now();
   wpn.animation.outgoingId = equippedId(wpn.slot);
@@ -380,19 +384,38 @@ export function switchToLast(): void {
 }
 
 /**
- * One melee swing. No ammo, no cone, no muzzle flash: the strike resolves
+ * Seconds the held blade needs before its next stroke: the recovery of the
+ * LAST stroke, whichever button made it. A sword that slashed recovers at
+ * the slash's pace before it may thrust, and the other way round.
+ */
+function strokeCadence(def: WeaponDef): number {
+  return def.altAttack && wpn.lastStrokeAlt ? def.altAttack.fireRate : weapon.fireRate;
+}
+
+/** The def's own (LMB) melee attack, in the altAttack's shape. */
+function primaryStroke(def: WeaponDef): MeleeAttackDef {
+  // Documented pairing (validateWeapons): range/arcRad exist exactly when melee.
+  return { damage: def.damage, fireRate: def.fireRate, range: def.range ?? 0, arcRad: def.arcRad ?? 0 };
+}
+
+/**
+ * One melee stroke. No ammo, no cone, no muzzle flash: the strike resolves
  * through sim/melee.ts's range+arc test against every live enemy part
  * (nearest wins; allies are neither struck nor blocking — a stronger cut
  * than the bullets' "allies stop the ray", and deliberate). The kick rides
  * the normal recoil channel for a small camera nod; the successful-shot
- * timestamp separately drives the hand/blade follow-through.
+ * timestamp separately drives the hand/blade follow-through. `alt` marks the
+ * def's altAttack (the sword's RMB slash); either stroke shares the def's
+ * headshot and backstab multipliers.
  */
-function swingMelee(def: WeaponDef): void {
+function swingMelee(def: WeaponDef, attack: MeleeAttackDef, alt: boolean): void {
   weapon.lastShot = gameTime.now();
+  wpn.lastStrokeAlt = alt;
   wpn.animation.shotAt = weapon.lastShot;
   wpn.animation.previousShotAge = -1;
   wpn.animation.closeAt = -Infinity;
-  SHOT_SFX[equippedId(wpn.slot)]();
+  if (alt) sfxSwordSlash();
+  else SHOT_SFX[equippedId(wpn.slot)]();
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
   // Exact aim direction — spread 0 samples no cone; a swing has none.
@@ -404,17 +427,17 @@ function swingMelee(def: WeaponDef): void {
       candidates.push({ payload: bot, zone, at: bot[zone].getWorldPosition(new THREE.Vector3()) });
     }
   }
-  // Documented pairing (validateWeapons): range/arcRad exist exactly when melee.
-  const hit = meleeSwing(origin, dir, def.range ?? 0, def.arcRad ?? 0, candidates);
+  const hit = meleeSwing(origin, dir, attack.range, attack.arcRad, candidates);
   if (hit) {
-    sfxKnifeHit();
+    if (def.altAttack) sfxSwordHit();
+    else sfxKnifeHit();
     showHitmarker(hit.part === 'head');
     // Backstab classification runs ONLY after the range/arc winner is chosen:
     // it scales that hit's ordinary zone damage, it never steers target
     // selection. The bot group's local +Z is its world facing (Bot.update
     // maintains the invariant), and the bearing reads horizontal X/Z only.
     const victimForward = hit.payload.mesh.getWorldDirection(new THREE.Vector3());
-    let dmg = damageForPart(weapon, hit.part);
+    let dmg = damageForPart({ damage: attack.damage, headshotMult: def.headshotMult }, hit.part);
     if (isBackstab(origin, hit.payload.mesh.position, victimForward)) {
       dmg *= def.backstabMult ?? 1; // documented default: absent means no bonus
     }
@@ -534,7 +557,7 @@ export function shoot(): void {
   // nothing to flash. updateWeapon's trigger gate already paced this against
   // the swing cadence.
   if (def.melee) {
-    swingMelee(def);
+    swingMelee(def, primaryStroke(def), false);
     return;
   }
   // Per-round reloads are INTERRUPTIBLE CS-style: a trigger pull cancels the
@@ -788,9 +811,20 @@ export function updateWeapon(dt: number): void {
     wpn.emptyReloadLatch = false;
   }
   else if (!def.semiAuto || !wpn.triggerLatch) {
-    if (gameTime.now() - weapon.lastShot >= weapon.fireRate) {
+    if (gameTime.now() - weapon.lastShot >= strokeCadence(def)) {
       shoot();
       if (def.semiAuto) wpn.triggerLatch = true;
+    }
+  }
+  // A melee def with an altAttack strikes it on RMB instead of raising
+  // sights: input.aiming is the shared "secondary button held" signal (RMB,
+  // or the touch ADS toggle, both through tryRaiseSights, which already
+  // refuses it inside the deploy window). One stroke per press.
+  if (def.altAttack) {
+    if (!input.aiming) wpn.altLatch = false;
+    else if (!wpn.altLatch && !deploying && gameTime.now() - weapon.lastShot >= strokeCadence(def)) {
+      swingMelee(def, def.altAttack, true);
+      wpn.altLatch = true;
     }
   }
 
@@ -832,7 +866,7 @@ function updateWeaponPresentation(): void {
   const interval = def.perRound ? roundInterval(weapon.reloadTime, weapon.magSize) : weapon.reloadTime;
   const reloadT = weapon.reloading
     ? 1 - THREE.MathUtils.clamp(((def.perRound ? weapon.nextRoundAt : weapon.reloadEnd) - now) / interval, 0, 1) : 0;
-  const pose = weaponPose({ id, now, shotAt: animation.shotAt, fireInterval: weapon.fireRate,
+  const pose = weaponPose({ id, now, shotAt: animation.shotAt, fireInterval: strokeCadence(def), altStroke: wpn.lastStrokeAlt,
     switchedAt: animation.switchedAt, hasOutgoing: animation.outgoingId !== null, aiming: input.aiming || wpn.adsLerp > 0.01,
     reloading: weapon.reloading, reloadStartedAt: animation.reloadStartedAt, reloadT,
     roundInterval: interval, lastRound: weapon.mag + 1 >= weapon.magSize || session.map !== 'range' && weapon.reserve === 1,

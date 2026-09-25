@@ -164,6 +164,19 @@ export function sfxArrowHit(pos: THREE.Vector3): void {
   playGunshot(Math.max(0.03, 0.22 - d / 150), 260, 0.08);
 }
 
+/** Sword thrust: a short, sharp hiss of the point going in. */
+export function sfxSwordThrust(): void {
+  playSwish(0.16, 3000, 0.10);
+}
+
+/** Sword slash: a longer, lower whoosh of the whole blade crossing the air. */
+export function sfxSwordSlash(): void {
+  playSwish(0.22, 1500, 0.22);
+}
+
+/** Sword connect: heavier than the knife's thunk — more steel behind it. */
+export const sfxSwordHit = (): void => playGunshot(0.32, 260, 0.12);
+
 /** Weapon switch: short metallic click. */
 export const sfxSwitch = (): void => playGunshot(0.1, 1800, 0.04);
 

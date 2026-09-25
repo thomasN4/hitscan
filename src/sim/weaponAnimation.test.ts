@@ -18,6 +18,24 @@ describe('weapon presentation timelines', () => {
     }
   });
 
+  test('the sword thrusts on LMB and slashes on RMB, and neither leaks into the other', () => {
+    const sword = { ...idle, id: 'armingSword' as const, fireInterval: 0.7, shotAt: 10 - 0.1 };
+    const thrust = weaponPose(sword);
+    expect(thrust.swing).toBeGreaterThan(0);
+    expect(thrust.slash).toBe(0);
+    const slash = weaponPose({ ...sword, fireInterval: 0.8, altStroke: true });
+    expect(slash.swing).toBe(0);
+    expect(slash.slash).toBeGreaterThan(0.9);
+    // The cut sweeps across during the stroke and has settled by the next one.
+    expect(weaponPose({ ...sword, fireInterval: 0.8, altStroke: true, shotAt: 10 - 0.02 }).slashSweep)
+      .toBeLessThan(slash.slashSweep);
+    const done = weaponPose({ ...sword, fireInterval: 0.8, altStroke: true, shotAt: 10 - 0.8 });
+    expect(done.slash).toBe(0);
+    expect(done.slashSweep).toBe(0);
+    // The knife never slashes, even flagged.
+    expect(weaponPose({ ...sword, id: 'knife', altStroke: true }).slash).toBe(0);
+  });
+
   test('pump completes before the next permitted shot', () => {
     const at = (phase: number) => weaponPose({ ...idle, shotAt: 10, now: 10 + phase * 0.9 });
     expect(at(0).pump).toBe(0);

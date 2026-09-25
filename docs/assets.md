@@ -222,7 +222,7 @@ still fails the check. Sky-background ADS captures verify the visible result.
 
 ## SMG, sniper rifle and knife
 
-All eight first-person weapons now load authored GLBs. The SMG and sniper use
+Every first-person weapon now loads an authored GLB. The SMG and sniper use
 fixed well/extraction markers for their detachable magazines, with independent
 SMG action and sniper bolt assemblies. The knife uses grip and blade-tip markers
 without firearm-only loading markers. See

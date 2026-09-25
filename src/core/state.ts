@@ -483,8 +483,8 @@ export function playerFeet(p: PlayerState): THREE.Vector3 {
 }
 
 /**
- * Ceiling on accumulated recoil units, applied in `weapons.ts:shoot()` when a
- * shot adds its kick. Decay rate (`recoilRecover`) and scope gating
+ * Ceiling on accumulated recoil units, applied in `weapons.ts:applyKick()`
+ * when a shot, swing or loosed arrow adds its kick. Decay rate (`recoilRecover`) and scope gating
  * (`scopeGate`) are per-weapon and independent of this — the cap only bounds
  * the climb. Each weapon's `punchRad` comment quotes its max angle at this cap.
  */
@@ -627,7 +627,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
                      // comes on top, so the real cadence is ~1.5 s per arrow
     reloadTime: 2.4,
     damage: 80,      // at full launch speed: two body arrows, legs x0.75.
-    headshotMult: 3, // 240 to the head — one arrow, even a slowed one
+    headshotMult: 3, // 240 to the head at full speed: one arrow kills until drag
+                     // and a short draw bring it under 42% of launch speed
     zoomFovs: [62],  // the bow comes up to the cheek; no optic
     spreadMul: 0.08, // anchored at the cheek: ~0.0026 rad standing, ±4 cm at 30 m
     inherent: 0.03,  // loosed from the hip there is no anchor: ±1° of scatter

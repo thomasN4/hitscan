@@ -2223,6 +2223,21 @@ async function runLongbowCheck() {
       const sprint = { drawing, drawAtWhileSprinting: sprintDrawAt, mag: cs.weapon.mag, arrows: cs.arrows.length };
 
       // A full draw at the torso of a bot 12 m ahead, aimed from the sights.
+      // The TDM spawn is random and the arena has cover, so first stand the
+      // player where a 14 m lane toward -z is free of every collider — a
+      // crate in the lane is a stuck arrow, not a regression.
+      const laneClear = (x, z) => cs.colliders.every(b => !(b.max.y > 0.3 && b.min.y < 2.2
+        && b.max.x > x - 0.7 && b.min.x < x + 0.7 && b.max.z > z - 14 && b.min.z < z + 0.6));
+      let lane = null;
+      for (let r = 0; r <= 40 && !lane; r += 2) {
+        for (let x = -r; x <= r && !lane; x += 2) {
+          for (const z of [-r, r]) if (!lane && laneClear(x, z)) lane = { x, z };
+        }
+      }
+      if (!lane) return { fail: 'no clear 14 m lane found on the arena' };
+      cs.player.pos.set(lane.x, cs.player.pos.y, lane.z);
+      cs.player.vel.set(0, 0, 0);
+      await gwait(0.1);
       cs.game.yaw = 0;
       bot.mesh.position.set(cs.player.pos.x, cs.player.pos.y - cs.player.eyeHeight, cs.player.pos.z - 12);
       bot.mesh.rotation.y = 0;
@@ -2245,12 +2260,18 @@ async function runLongbowCheck() {
 
       // An arrow loosed at the ground in front stays standing in it.
       bot.mesh.position.set(cs.player.pos.x + 30, 0, cs.player.pos.z + 30);
-      cs.game.pitch = -0.35;
+      // Shallow enough for ~0.3 s of flight, so the trail is sampled mid-air.
+      cs.game.pitch = -0.06;
       await gwait(0.7); // next arrow nocked
       lmb(true); await gwait(1.0); lmb(false);
+      await gwait(0.15);
+      const trailPoints = cs.arrows[0]?.trailLine.geometry.drawRange.count ?? 0;
       await gwait(0.6);
-      const ground = { stuck: cs.stuckArrows.length - stuck0, arrows: cs.arrows.length,
-        y: cs.stuckArrows.at(-1) ? +cs.stuckArrows.at(-1).position.y.toFixed(2) : null };
+      const last = cs.stuckArrows.at(-1);
+      const ground = { stuck: cs.stuckArrows.length - stuck0, arrows: cs.arrows.length, trailPoints,
+        // Parented to the solid it struck (so a moving deck carries it), not the scene.
+        parent: last?.parent?.type ?? null,
+        y: last ? +last.getWorldPosition(last.position.clone()).y.toFixed(2) : null };
       return { mag0, tap, sprint, released, hit, ground };
     });
     if (result.fail) throw new Error(result.fail);
@@ -2268,6 +2289,8 @@ async function runLongbowCheck() {
     if (hit.alive && !(100 - hit.hp >= 55 && 100 - hit.hp <= 80)) throw new Error(`arrow damage off the speed-scaled table: ${JSON.stringify(hit)}`);
     if (hit.arrows !== 0 || hit.stuck !== 0) throw new Error(`an arrow in a body was left flying or standing: ${JSON.stringify(hit)}`);
     if (ground.stuck !== 1 || ground.arrows !== 0) throw new Error(`the ground arrow did not stay standing: ${JSON.stringify(ground)}`);
+    if (ground.parent !== 'Mesh') throw new Error(`the stuck arrow is not parented to the surface it hit: ${JSON.stringify(ground)}`);
+    if (!(ground.trailPoints >= 3)) throw new Error(`the flight trail did not grow in flight: ${JSON.stringify(ground)}`);
     console.log('[longbow] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

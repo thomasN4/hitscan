@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import * as THREE from 'three';
-import { ARROW_DRAG, ARROW_GRAVITY, ARROW_SUBSTEP, advanceArrow, stepArrow, type ArrowBody, type SegmentCast } from './arrow';
+import { ARROW_DRAG, ARROW_GRAVITY, ARROW_SUBSTEP, advanceArrow, stepArrow, trimTrail, type ArrowBody, type SegmentCast, type TrailPoint } from './arrow';
 
 function body(speed: number, dir = new THREE.Vector3(0, 0, -1)): ArrowBody {
   return { pos: new THREE.Vector3(0, 1.6, 0), vel: dir.clone().normalize().multiplyScalar(speed), age: 0 };
@@ -74,3 +74,31 @@ describe('arrow flight', () => {
     expect(b.vel.z).toBeCloseTo(0, 12);
   });
 });
+
+describe('trimTrail', () => {
+  const point = (age: number): TrailPoint => ({ at: new THREE.Vector3(0, 0, -age * 58), age });
+
+  test('holds the same span of flight however long the arrow has flown', () => {
+    // One sample per 60 Hz frame: the trail must keep ~0.3 s of samples late
+    // in a flight exactly as it did early — no shrinking to a stub.
+    const trail: TrailPoint[] = [];
+    const lengths: number[] = [];
+    for (let frame = 1; frame <= 240; frame++) {
+      trail.push(point(frame / 60));
+      trimTrail(trail, frame / 60, 0.3);
+      if (frame >= 60) lengths.push(trail.length);
+    }
+    // Float ages straddle the 0.3 s boundary, so allow one sample of jitter;
+    // the old count-based trim fell steadily toward two.
+    expect(Math.max(...lengths) - Math.min(...lengths)).toBeLessThanOrEqual(1);
+    expect(Math.min(...lengths)).toBeGreaterThanOrEqual(18);
+    expect(lengths.at(-1)).toBeGreaterThanOrEqual(18);
+  });
+
+  test('always keeps two samples to draw a line between', () => {
+    const trail = [point(0), point(5)];
+    trimTrail(trail, 5, 0.3);
+    expect(trail).toHaveLength(2);
+  });
+});
+

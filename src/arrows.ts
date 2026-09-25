@@ -16,7 +16,7 @@ import { botFor } from './bots';
 import { damageBot } from './combat';
 import { showHitmarker } from './hud';
 import { sfxArrowHit } from './audio';
-import { advanceArrow, ARROW_MAX_AGE, type SegmentHit } from './sim/arrow';
+import { advanceArrow, trimTrail, ARROW_MAX_AGE, type SegmentHit } from './sim/arrow';
 import { arrowDamage } from './sim/bow';
 import { damageForPart, partForMesh } from './sim/damage';
 
@@ -32,6 +32,11 @@ const LAUNCH_SETTLE = 0.12;
  * the archer read the arc and where it went.
  */
 const TRAIL_SECONDS = 0.3;
+/**
+ * Vertices each trail's buffer is allocated with, once: TRAIL_SECONDS of one
+ * sample per frame up to ~200 fps. The oldest are dropped past it.
+ */
+const TRAIL_CAPACITY = 64;
 /** Anything that has fallen this far below the map is gone. */
 const FLOOR_Y = -50;
 
@@ -52,7 +57,13 @@ interface Struck { bot: Bot | null; object: THREE.Object3D }
 export function spawnArrow(origin: THREE.Vector3, velocity: THREE.Vector3, drawnFrom: THREE.Vector3): void {
   const mesh = createArrowModel();
   scene.add(mesh);
-  const trailLine = new THREE.Line(new THREE.BufferGeometry(), trailMaterial);
+  // A fixed buffer updated in place: replacing the attribute every frame
+  // leaks the old one's GPU buffer, and a resize is not something three.js
+  // supports on a geometry that has already been drawn.
+  const trailGeometry = new THREE.BufferGeometry();
+  trailGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_CAPACITY * 3), 3));
+  trailGeometry.setDrawRange(0, 0);
+  const trailLine = new THREE.Line(trailGeometry, trailMaterial);
   trailLine.frustumCulled = false;
   scene.add(trailLine);
   const arrow: Arrow = {
@@ -73,11 +84,14 @@ function placeMesh(arrow: Arrow): void {
 }
 
 function updateTrail(arrow: Arrow): void {
-  arrow.trail.push(arrow.mesh.position.clone());
-  // One point per frame; keep enough for TRAIL_SECONDS at the frame rate seen.
-  const keep = Math.max(2, Math.round(TRAIL_SECONDS / Math.max(1e-3, arrow.age / arrow.trail.length)));
-  while (arrow.trail.length > keep) arrow.trail.shift();
-  arrow.trailLine.geometry.setFromPoints(arrow.trail);
+  arrow.trail.push({ at: arrow.mesh.position.clone(), age: arrow.age });
+  trimTrail(arrow.trail, arrow.age, TRAIL_SECONDS);
+  while (arrow.trail.length > TRAIL_CAPACITY) arrow.trail.shift();
+  const geometry = arrow.trailLine.geometry;
+  const position = geometry.getAttribute('position');
+  arrow.trail.forEach((point, i) => position.setXYZ(i, point.at.x, point.at.y, point.at.z));
+  position.needsUpdate = true;
+  geometry.setDrawRange(0, arrow.trail.length);
 }
 
 function retire(arrow: Arrow): void {
@@ -87,16 +101,19 @@ function retire(arrow: Arrow): void {
   if (i >= 0) arrows.splice(i, 1);
 }
 
-/** Leave the arrow standing where it struck scenery, point buried. */
-function stick(arrow: Arrow): void {
+/**
+ * Leave the arrow standing where it struck scenery, point buried, parented
+ * to the solid it hit as bullet holes are (effects.ts): an arrow in an
+ * elevator deck rides the deck instead of hanging where the deck used to be.
+ * attach() keeps the world transform; solids are never scaled.
+ */
+function stick(arrow: Arrow, surface: THREE.Object3D): void {
   arrow.launchOffset.set(0, 0, 0);
   placeMesh(arrow);
   arrow.mesh.position.addScaledVector(direction, PENETRATION);
+  surface.attach(arrow.mesh);
   stuckArrows.push(arrow.mesh);
-  if (stuckArrows.length > MAX_STUCK) {
-    const oldest = stuckArrows.shift();
-    if (oldest) scene.remove(oldest);
-  }
+  if (stuckArrows.length > MAX_STUCK) stuckArrows.shift()?.removeFromParent();
 }
 
 /**
@@ -131,7 +148,7 @@ export function updateArrows(dt: number): void {
       sfxArrowHit(hit.point);
       const { bot } = hit.payload;
       if (!bot) {
-        stick(arrow);
+        stick(arrow, hit.payload.object);
       } else {
         // An arrow in a body is not left in it: the bot's parts are reused on
         // respawn, and an arrow riding them into the next life would lie.

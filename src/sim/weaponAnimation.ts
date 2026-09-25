@@ -1,5 +1,6 @@
 import type { WeaponId } from '../core/state';
 import { SWAP_DELAY } from './weaponSwap';
+import type { StrokeKind } from './swordStroke';
 
 export interface WeaponAnimationInput {
   id: WeaponId;
@@ -23,8 +24,12 @@ export interface WeaponAnimationInput {
   bowDraw?: number;
   /** An arrow is left to nock (mag > 0). Absent means loaded. Longbow only. */
   loaded?: boolean;
-  /** The stroke in progress is the def's altAttack (the sword's RMB slash). Absent means the LMB stroke. */
-  altStroke?: boolean;
+  /** Which of the blade's strokes the last one was (sim/swordStroke.ts). Absent means the LMB stroke. */
+  stroke?: StrokeKind;
+  /** Charge (0–1) the last stroke was released at; its follow-through eases on from there. Absent means full. */
+  strokeFrom?: number;
+  /** A sword stroke being wound up, and how far. Absent or null means at guard. */
+  windUp?: { kind: StrokeKind; fraction: number } | null;
 }
 
 export interface WeaponPose {
@@ -48,6 +53,12 @@ export interface WeaponPose {
   slash: number;
   /** Sword slash progress across the body: 0 wound up high right, 1 finished low left. */
   slashSweep: number;
+  /** Sword thrust wind-up: 0 at guard, 1 with the point drawn fully back. */
+  cock: number;
+  /** Sword overhead-cut envelope: 0 at guard, 1 through the cut. */
+  overhead: number;
+  /** Sword overhead progress: 0 raised above the head, 1 finished low. */
+  overheadSweep: number;
   /** Longbow string draw, 0 at brace. Not `draw`, which is the swap-in raise. */
   bowDraw: number;
   /** Longbow: no arrow on the string — just loosed, restocking, or out. False at rest. */
@@ -98,6 +109,14 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
   // from the shared constant keeps art and gate from drifting apart.
   const holsterEnd = SWAP_DELAY * 0.3;
   const holster = swapping && input.hasOutgoing && swapAge >= 0 && swapAge < holsterEnd;
+  const sword = id === 'armingSword';
+  const windUp = sword ? input.windUp ?? null : null;
+  const winding = (kind: StrokeKind): number => windUp?.kind === kind ? windUp.fraction : 0;
+  const struck = (kind: StrokeKind): boolean => sword && firing && (input.stroke ?? 'primary') === kind;
+  // A cut carries on from wherever its wind-up was let go: from that raise
+  // up to the full cut in the first tenth, then through and back to guard.
+  const from = input.strokeFrom ?? 1;
+  const cut = from + (1 - from) * smooth(0, 0.08, cycle);
   return {
     reload,
     breakOpen: id === 'sawnOff' ? (reloading ? hold(t, 0, .18, .80, 1) : closing) : 0,
@@ -122,11 +141,15 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
     holsterDrop: holster ? smooth(0, holsterEnd, swapAge) : 0,
     // Contact occurs on the successful shot frame; this is the follow-through.
     // The sword's LMB thrust is the same jab, driven further (weaponPresentation.ts).
-    swing: (id === 'knife' || id === 'armingSword' && !input.altStroke) && firing ? 1 - smooth(0, 0.85, cycle) : 0,
-    // Contact lands on the stroke frame, as for the jab: the wind-up is
-    // compressed into the first tenth, and the rest is the cut carrying through.
-    slash: id === 'armingSword' && input.altStroke === true && firing ? hold(cycle, 0, 0.08, 0.45, 1) : 0,
-    slashSweep: id === 'armingSword' && input.altStroke === true && firing ? smooth(0.04, 0.34, cycle) : 0,
+    swing: (id === 'knife' && firing) || struck('primary') ? 1 - smooth(0, 0.85, cycle) : 0,
+    // Winding a thrust draws the point back; the release snaps it forward.
+    cock: winding('primary'),
+    // Contact lands on the stroke frame, as for the jab. Winding a cut raises
+    // the blade to the cut's start (sweep 0); the release carries it through.
+    slash: struck('alt') ? cut * (1 - smooth(0.45, 1, cycle)) : winding('alt'),
+    slashSweep: struck('alt') ? smooth(0.04, 0.34, cycle) : 0,
+    overhead: struck('combo') ? cut * (1 - smooth(0.5, 1, cycle)) : winding('combo'),
+    overheadSweep: struck('combo') ? smooth(0.02, 0.28, cycle) : 0,
     bowDraw: id === 'longbow' ? input.bowDraw ?? 0 : 0,
     // The loosed arrow is gone at once; the next one reaches the string
     // halfway through the nocking interval that gates the next draw.

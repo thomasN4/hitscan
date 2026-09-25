@@ -25,7 +25,7 @@ import { BUILDERS } from './maps';
 import { buildNav, route, transportRoute, navGrid } from './nav';
 import { updateMovement, updateCamera, updateViewmodel } from './player';
 import { spawnBots, updateBots } from './bots';
-import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon, tryRaiseSights, cycleZoom, letDownBow } from './weapons';
+import { tryReload, switchWeapon, switchToLast, initWeaponViewmodels, updateWeapon, tryRaiseSights, cycleZoom, lowerHeldStrokes } from './weapons';
 import { updateEffects } from './effects';
 import { updateArrows } from './arrows';
 import { toggleDebugView, updateDebugView } from './debugView';
@@ -40,6 +40,7 @@ import { detectTouchMode, initPlayControl, enterPlay } from './playControl';
 import { initTouchControls, updateTouchControls, resetTouchInput, setTouchControlsShown } from './touchControls';
 import { initSettingsMenu, loadStoredSettings } from './settingsMenu';
 import { validateWeapons } from './sim/validateWeapons';
+import type { StrokeKind, WindUp } from './sim/swordStroke';
 import { loadWeaponAssets } from './core/weaponAssets';
 import { initBotWeaponModels } from './core/botWeaponModels';
 import { initLigneClaire } from './core/ligneClaire';
@@ -245,11 +246,11 @@ async function start(): Promise<void> {
       if (!session.locked) resetTouchInput();
     }
     // updateWeapon stops running when the loop pauses; make sure a held scope
-    // can't stay stuck on screen across pause/death, nor a drawn bow loose
-    // itself on the first frame back.
+    // can't stay stuck on screen across pause/death, nor a drawn bow or a
+    // wound-up blade strike itself on the first frame back.
     if (!session.locked) {
       setScopeOverlay(false);
-      letDownBow();
+      lowerHeldStrokes();
     }
     if (session.locked) {
       session.started = true;
@@ -401,7 +402,9 @@ async function start(): Promise<void> {
     get triggerLatch() { return wpn.triggerLatch; }, set triggerLatch(v: boolean) { wpn.triggerLatch = v; },
     get emptyReloadLatch() { return wpn.emptyReloadLatch; }, set emptyReloadLatch(v: boolean) { wpn.emptyReloadLatch = v; },
     get bowDrawAt() { return wpn.bowDrawAt; }, set bowDrawAt(v: number | null) { wpn.bowDrawAt = v; },
-    get lastStrokeAlt() { return wpn.lastStrokeAlt; }, set lastStrokeAlt(v: boolean) { wpn.lastStrokeAlt = v; },
+    get lastStroke() { return wpn.lastStroke; }, set lastStroke(v: StrokeKind) { wpn.lastStroke = v; },
+    get swordWindUp() { return wpn.swordWindUp; }, set swordWindUp(v: WindUp | null) { wpn.swordWindUp = v; },
+    get strokeCharge() { return wpn.strokeCharge; }, set strokeCharge(v: number) { wpn.strokeCharge = v; },
     get runLerp() { return motion.runLerp; }, set runLerp(v: number) { motion.runLerp = v; },
     get moveLerp() { return motion.moveLerp; }, set moveLerp(v: number) { motion.moveLerp = v; },
     get crouchLerp() { return motion.crouchLerp; }, set crouchLerp(v: number) { motion.crouchLerp = v; },

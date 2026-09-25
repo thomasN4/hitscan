@@ -2309,14 +2309,16 @@ async function runLongbowCheck() {
   await page.close();
 }
 
-// Arming sword: the player-only melee SECONDARY with two strokes. Pins the
-// picker card in the sidearm column, key 2 arming a blade (ammo readout
-// hidden, R inert, RMB never blending into ADS), and both strokes' cones and
-// sweet spots E2E against a frozen bot: the LMB thrust lands its full 75 at
-// full extension, less up close, and misses a bot 35° off-axis; the wide RMB
-// slash deals ~60 led onto a bot where the cut ends (low left) but clearly
-// less centred on the crosshair; a held RMB slashes once, and only a fresh
-// press slashes again.
+// Arming sword: the player-only melee SECONDARY, striking on RELEASE with
+// three strokes. Pins the picker card in the sidearm column, key 2 arming a
+// blade (ammo readout hidden, R inert, RMB never blending into ADS), and every
+// stroke's cone, sweet spot and charge E2E against a frozen bot: the LMB
+// thrust lands its full 75 at full extension once fully wound, less up close,
+// ~40% on a tap, and misses a bot 35° off-axis; nothing lands while a button
+// is still held; a tapped RMB lowers the blade; the wide RMB slash deals ~60
+// led onto a bot where the cut ends (low left) but clearly less centred, and
+// strikes on its own once held past its charge — once, until re-pressed; and
+// LMB+RMB together cut overhead for 100.
 async function runSwordCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -2354,85 +2356,120 @@ async function runSwordCheck() {
       bot.update = () => {};
       cs.game.yaw = 0;
       const feetY = cs.player.pos.y - cs.player.eyeHeight;
-      // Place the bot `dist` m out at `deg` off the view axis, facing the
-      // player (no backstab), and aim the pitch at its torso.
       // Place the bot `dist` m out at `deg` off the view axis (negative is
-      // left), facing the player (no backstab), and aim at its torso — or
-      // `above` rad over it, which drops the torso that far below the crosshair.
-      const place = async (dist, deg, above = 0) => {
+      // left), facing the player (no backstab), and aim at its `part` — or
+      // `above` rad over it, which drops the part that far below the crosshair.
+      const place = async (dist, deg, above = 0, part = 'torso') => {
         const a = deg * Math.PI / 180;
         bot.mesh.position.set(cs.player.pos.x + dist * Math.sin(a), feetY, cs.player.pos.z - dist * Math.cos(a));
         bot.mesh.rotation.y = a;
         bot.hp = 100;
         await gwait(0.05);
-        const torso = bot.torso.getWorldPosition(bot.torso.position.clone());
-        cs.game.pitch = Math.atan2(torso.y - cs.player.pos.y, dist) + above;
+        const at = bot[part].getWorldPosition(bot[part].position.clone());
+        cs.game.pitch = Math.atan2(at.y - cs.player.pos.y, dist) + above;
         cs.weapon.lastShot = -9; // the cadence gate must not eat a fresh stroke
       };
-      const stroke = async b => { button(b, true); await gwait(0.1); button(b, false); await gwait(0.1); };
+      // Hold `buttons` for `s` game seconds, then release them; a full charge
+      // is 0.5 s. Returns the bot's hp just BEFORE the release, too.
+      const stroke = async (buttons, s) => {
+        for (const b of buttons) button(b, true);
+        await gwait(s);
+        const heldHp = bot.hp;
+        for (const b of buttons) button(b, false);
+        await gwait(0.1);
+        return heldHp;
+      };
+      const FULL = 0.6;
 
       const popupTexts = () => [...document.querySelectorAll('#damageNumbers .dmgnum')].filter(e => e.style.display === 'block').map(e => e.textContent);
       await place(2.2, 0);
-      await stroke(0);
+      const thrustWhileHeld = await stroke([0], FULL);
       const thrustAhead = bot.hp;
       const thrustPopups = popupTexts();
+      await place(2.2, 0);
+      await stroke([0], 0.02);
+      const thrustTapped = bot.hp;
       await place(0.9, 0);
-      await stroke(0);
+      await stroke([0], FULL);
       const thrustClose = bot.hp;
       await place(2.0, 35);
-      await stroke(0);
+      await stroke([0], FULL);
       const thrustOffAxis = bot.hp;
       await place(2.0, 0);
-      await stroke(2);
+      await stroke([2], 0.05);
+      const slashTapped = bot.hp;
+      const lastShotAfterTap = cs.weapon.lastShot;
+      await place(2.0, 0);
+      await stroke([2], FULL);
       const slashCentred = bot.hp;
-      // Where the cut ends: 30° left, 15° below the crosshair, 2 m out.
+      // Where the cut ends: 30° left, 15° below the crosshair, 2 m out. Held
+      // without a mouseup: the wound-up cut must strike on its own at 0.8 s.
       await place(2.0, -30, 0.26);
       let adsMax = 0;
+      const sampleAds = async s => { const t0 = cs.gameTime.now(); while (cs.gameTime.now() - t0 < s) { adsMax = Math.max(adsMax, cs.game.adsLerp); await wait(16); } };
       button(2, true);
-      await gwait(0.1);
+      await sampleAds(0.6);
+      const slashHeld = bot.hp;
+      await sampleAds(0.35);
       const slashLed = bot.hp;
       const slashPopups = popupTexts();
-      // Still held: recovered, but the latch must refuse a second slash.
+      // Still held: recovered, but the latch must refuse a second wind-up.
       bot.hp = 100;
       cs.weapon.lastShot = -9;
-      for (let i = 0; i < 10; i++) { adsMax = Math.max(adsMax, cs.game.adsLerp); await gwait(0.03); }
+      await sampleAds(1.0);
       const heldHp = bot.hp;
       button(2, false);
       await gwait(0.05);
       cs.weapon.lastShot = -9;
-      button(2, true); await gwait(0.1); button(2, false);
+      await stroke([2], FULL);
       const repressHp = bot.hp;
-      // Review of #156: RMB held after a slash must not leave the player at
-      // ADS walking speed with sprint refused — the sword never raises sights.
+      // Both buttons together: the overhead cut, its sweet spot on the
+      // crosshair 2.1 m out.
+      await place(2.1, 0, 0, 'head');
+      await stroke([0, 2], FULL);
+      const overhead = bot.hp;
+      const lastStroke = cs.game.lastStroke;
+      // Review of #156: RMB held on the sword must not leave the player at ADS
+      // walking speed with sprint refused — the sword never raises sights —
+      // neither while it winds up nor once it has struck and RMB is latched.
       // Last, because sprinting moves the player off the fixture.
       cs.weapon.lastShot = -9;
       button(2, true);
-      await gwait(0.1);
-      const aimingAfterSlash = cs.game.aiming;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft' }));
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
       await gwait(0.4);
+      const runLerpWinding = +cs.game.runLerp.toFixed(2);
+      await gwait(0.5);
+      const aimingAfterSlash = cs.game.aiming;
       const runLerpWhileHeld = +cs.game.runLerp.toFixed(2);
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
       button(2, false);
-      return { armed, thrustAhead, thrustPopups, thrustClose, thrustOffAxis, slashCentred, slashLed, slashPopups, heldHp, repressHp, aimingAfterSlash, runLerpWhileHeld, adsMax: +adsMax.toFixed(3) };
+      return { armed, thrustWhileHeld, thrustAhead, thrustPopups, thrustTapped, thrustClose, thrustOffAxis, slashTapped, lastShotAfterTap,
+        slashCentred, slashHeld, slashLed, slashPopups, heldHp, repressHp, overhead, lastStroke, runLerpWinding, aimingAfterSlash,
+        runLerpWhileHeld, adsMax: +adsMax.toFixed(3) };
     });
     if (result.fail) throw new Error(result.fail);
     const r = result;
     if (r.armed.name !== 'ARMING SWORD' || !r.armed.ammoHidden || r.armed.reloading) throw new Error(`key 2 did not arm a blade: ${JSON.stringify(r.armed)}`);
     const took = hp => 100 - hp;
-    if (r.thrustAhead !== 25) throw new Error(`the thrust at full extension must take exactly 75 (hp 25), got ${r.thrustAhead}`);
+    if (r.thrustWhileHeld !== 100) throw new Error(`the thrust landed before LMB was released: hp ${r.thrustWhileHeld}`);
+    if (r.thrustAhead !== 25) throw new Error(`a fully wound thrust at full extension must take exactly 75 (hp 25), got ${r.thrustAhead}`);
+    if (!(took(r.thrustTapped) >= 30 && took(r.thrustTapped) <= 40)) throw new Error(`a tapped thrust must land near its 40% floor (30-40): took ${took(r.thrustTapped)}`);
     if (!(took(r.thrustClose) >= 37 && took(r.thrustClose) < 75)) throw new Error(`a thrust at 0.9 m must land short of 75 but at least half: took ${took(r.thrustClose)}`);
     if (r.thrustOffAxis !== 100) throw new Error(`the narrow thrust hit a bot 35° off-axis: hp ${r.thrustOffAxis}`);
-    if (!(took(r.slashLed) >= 55 && took(r.slashLed) <= 60)) throw new Error(`a slash led to where the cut ends must take ~60: took ${took(r.slashLed)}`);
+    if (r.slashTapped !== 100 || r.lastShotAfterTap !== -9) throw new Error(`a tapped RMB must lower the blade, not cut or spend recovery: hp ${r.slashTapped}, lastShot ${r.lastShotAfterTap}`);
+    if (r.slashHeld !== 100) throw new Error(`the slash landed while RMB was still winding it up: hp ${r.slashHeld}`);
+    if (!(took(r.slashLed) >= 55 && took(r.slashLed) <= 60)) throw new Error(`a held slash led to where the cut ends must strike on its own for ~60: took ${took(r.slashLed)}`);
     if (!(took(r.slashCentred) > 0 && took(r.slashCentred) <= 45)) throw new Error(`a slash centred on the crosshair must land clearly short of 60: took ${took(r.slashCentred)}`);
     if (!r.thrustPopups.includes('75')) throw new Error(`no 75 popped up for the thrust: ${JSON.stringify(r.thrustPopups)}`);
     if (!r.slashPopups.includes(String(took(r.slashLed)))) throw new Error(`the slash's popup does not match its damage ${took(r.slashLed)}: ${JSON.stringify(r.slashPopups)}`);
     if (r.heldHp !== 100) throw new Error(`a held RMB slashed twice: hp ${r.heldHp}`);
     if (!(took(r.repressHp) >= 55)) throw new Error(`a fresh RMB press did not slash again: hp ${r.repressHp}`);
+    if (r.lastStroke !== 'combo' || took(r.overhead) !== 100) throw new Error(`LMB+RMB must cut overhead for 100: ${r.lastStroke}, took ${took(r.overhead)}`);
     if (r.adsMax > 0.01) throw new Error(`RMB blended into ADS on the sword: ${r.adsMax}`);
-    if (r.aimingAfterSlash !== false) throw new Error('a slash left input.aiming set: the sword would walk at ADS speed while RMB stays held');
+    if (r.aimingAfterSlash !== false) throw new Error('a stroke left input.aiming set: a held RMB would wind up again without a fresh press');
+    if (!(r.runLerpWinding > 0.5)) throw new Error(`sprint was refused while RMB wound a slash up: runLerp ${r.runLerpWinding}`);
     if (!(r.runLerpWhileHeld > 0.5)) throw new Error(`sprint was refused with RMB held after a slash: runLerp ${r.runLerpWhileHeld}`);
     console.log('[sword] OK', JSON.stringify(result));
   } catch (e) {

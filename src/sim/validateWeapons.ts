@@ -161,21 +161,48 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     } else if (def.range !== undefined || def.arcRad !== undefined || def.backstabMult !== undefined) {
       out.push(`${name}: range/arcRad/backstabMult without melee does nothing — only a melee weapon swings`);
     }
-    if (def.altAttack !== undefined) {
-      const alt = def.altAttack;
+    // Extra strokes: the altAttack (RMB) and comboAttack (LMB+RMB) are read
+    // only by the charged trigger, so each wants a charged melee def, and a
+    // charged def carries both — its trigger can wind up every one of them.
+    const strokes = [['altAttack', def.altAttack], ['comboAttack', def.comboAttack]] as const;
+    for (const [label, stroke] of strokes) {
+      if (stroke === undefined) continue;
       if (!def.melee) {
-        out.push(`${name}: altAttack without melee does nothing — RMB raises sights on a firearm`);
+        out.push(`${name}: ${label} without melee does nothing — RMB raises sights on a firearm`);
+      } else if (def.charge === undefined) {
+        out.push(`${name}: ${label} without charge does nothing — only a charged blade's trigger reads a second button`);
       }
       for (const field of ['damage', 'fireRate', 'range'] as const) {
-        if (!(alt[field] > 0)) {
-          out.push(`${name}: altAttack.${field} ${num(alt[field])} must be > 0 — the second stroke would ${field === 'damage' ? 'hurt nothing' : field === 'range' ? 'reach nothing' : 'have no recovery'}`);
+        if (!(stroke[field] > 0)) {
+          out.push(`${name}: ${label}.${field} ${num(stroke[field])} must be > 0 — the stroke would ${field === 'damage' ? 'hurt nothing' : field === 'range' ? 'reach nothing' : 'have no recovery'}`);
         }
       }
-      if (!(alt.arcRad > 0 && alt.arcRad <= Math.PI)) {
-        out.push(`${name}: altAttack.arcRad ${num(alt.arcRad)} must lie in (0, π] — at/below 0 it strikes nothing, past a half-turn it strikes behind`);
+      if (!(stroke.arcRad > 0 && stroke.arcRad <= Math.PI)) {
+        out.push(`${name}: ${label}.arcRad ${num(stroke.arcRad)} must lie in (0, π] — at/below 0 it strikes nothing, past a half-turn it strikes behind`);
       }
-      if (!(def.sprayRecover < def.sprayKick / alt.fireRate)) {
-        out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds the altAttack's sustained input ${num(def.sprayKick / alt.fireRate)} — its strokes will not bloom`);
+      if (!(def.sprayRecover < def.sprayKick / stroke.fireRate)) {
+        out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds the ${label}'s sustained input ${num(def.sprayKick / stroke.fireRate)} — its strokes will not bloom`);
+      }
+      if (stroke.minCharge !== undefined && !(stroke.minCharge >= 0 && stroke.minCharge <= 1)) {
+        out.push(`${name}: ${label}.minCharge ${num(stroke.minCharge)} must lie in [0, 1] — past a full charge the stroke could never land`);
+      }
+    }
+    if (def.charge !== undefined) {
+      const { time, hold, floor } = def.charge;
+      if (!def.melee) {
+        out.push(`${name}: charge without melee does nothing — only a blade winds up a stroke`);
+      }
+      if (def.altAttack === undefined || def.comboAttack === undefined) {
+        out.push(`${name}: charge needs both altAttack and comboAttack — its trigger winds up a stroke on either button and on both`);
+      }
+      if (!(time > 0)) {
+        out.push(`${name}: charge.time ${num(time)} must be > 0 — an instant charge makes every tap a full stroke`);
+      }
+      if (!(Number.isFinite(hold) && hold >= 0)) {
+        out.push(`${name}: charge.hold ${num(hold)} must be finite and >= 0 — a wound-up stroke must strike on its own`);
+      }
+      if (!(floor > 0 && floor <= 1)) {
+        out.push(`${name}: charge.floor ${num(floor)} must lie in (0, 1] — a tapped stroke always hurts, and never more than a full one`);
       }
     }
     // A sweet spot must be reachable at full damage: inside its stroke's reach
@@ -183,6 +210,7 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     const spots: [string, StrokeSweetSpot | undefined, number | undefined, number | undefined][] = [
       ['sweetSpot', def.sweetSpot, def.range, def.arcRad],
       ['altAttack.sweetSpot', def.altAttack?.sweetSpot, def.altAttack?.range, def.altAttack?.arcRad],
+      ['comboAttack.sweetSpot', def.comboAttack?.sweetSpot, def.comboAttack?.range, def.comboAttack?.arcRad],
     ];
     for (const [label, spot, range, arcRad] of spots) {
       if (spot === undefined) continue;

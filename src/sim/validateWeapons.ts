@@ -51,8 +51,10 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     // apply only while the weapon actually sustains fire: a semiAuto weapon
     // fires once per press, and the sniper's full settle inside the bolt
     // cycle is deliberate (see header). A charged blade's cycle is its
-    // recovery PLUS the wind-up to full charge — decay runs through both.
-    const windUp = def.charge?.time ?? 0;
+    // recovery PLUS the wind-up, taken at its longest: a stroke held until it
+    // strikes on its own spends the charge time and the hold at full, and
+    // decay runs through all of it (review of #164).
+    const windUp = def.charge ? def.charge.time + def.charge.hold : 0;
     if (!def.semiAuto && !(def.recoilRecover < def.recoilKick / def.fireRate)) {
       out.push(`${name}: recoilRecover ${num(def.recoilRecover)} exceeds sustained-fire input ${num(def.recoilKick / def.fireRate)} (kick ${num(def.recoilKick)} per ${def.fireRate}s) — recoil never climbs, it just vibrates`);
     }

@@ -851,8 +851,9 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     zoomFovs: [70],  // placeholder for the non-empty-zoomFovs invariant; no sights
     spreadMul: 1, inherent: 0.002, // no cone to sample; feeds the crosshair gap only
     sprayKick: 0.06, sprayCap: 1.5,
-    sprayRecover: 0.04, // input = 0.06/(0.8 + 0.4) = 0.05/s over a full overhead's recovery plus
-                        // wind-up — clears the bound, which counts the charge (validateWeapons)
+    sprayRecover: 0.03, // input = 0.06/(0.8 + 0.4 + 0.3) = 0.04/s over an overhead left to strike
+                        // on its own: recovery, charge and hold — clears the bound, which counts
+                        // the whole wind-up (validateWeapons)
     recoilKick: 0.6, recoilRecover: 8,
     punchRad: 0.008, // a small camera nod per stroke; the prop carries the motion
     yawKick: 0.3, yawRecover: 8,

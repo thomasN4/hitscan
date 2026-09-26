@@ -246,9 +246,10 @@ describe('melee altAttack and comboAttack', () => {
       expect(matching([stroke({ fireRate: -1 })], 'ARMING SWORD', `${label}.fireRate`)).toHaveLength(1);
       expect(matching([stroke({ arcRad: 4 })], 'ARMING SWORD', `${label}.arcRad`)).toHaveLength(1);
       expect(matching([stroke({ fireRate: 10 })], 'ARMING SWORD', label, 'bloom')).toHaveLength(1);
-      // The wind-up is part of the cycle: 0.06 per (0.5 + 0.4) s is 0.067/s,
-      // under a 0.07 recovery, though the recovery alone would clear it.
-      expect(matching([tuned({ sprayRecover: 0.07, [label]: { ...STROKE, fireRate: 0.5 } }, SWORD)], 'ARMING SWORD', label, 'bloom')).toHaveLength(1);
+      // The whole wind-up is part of the cycle: 0.06 per (0.5 + 0.4 + 0.3) s
+      // is 0.05/s, under a 0.06 recovery — which the recovery plus the charge
+      // alone (0.067/s) would still clear.
+      expect(matching([tuned({ sprayRecover: 0.06, [label]: { ...STROKE, fireRate: 0.5 } }, SWORD)], 'ARMING SWORD', label, 'bloom')).toHaveLength(1);
       expect(matching([stroke({ minCharge: 1.1 })], 'ARMING SWORD', `${label}.minCharge`)).toHaveLength(1);
       expect(matching([stroke({ minCharge: -0.1 })], 'ARMING SWORD', `${label}.minCharge`)).toHaveLength(1);
     }
@@ -272,9 +273,10 @@ describe('melee charge', () => {
     expect(matching([tuned({ comboAttack: undefined }, SWORD)], 'ARMING SWORD', 'charge needs both')).toHaveLength(1);
   });
 
-  test('the def\'s own stroke counts its wind-up toward the bloom bound too', () => {
-    // 0.06 per (0.45 + 0.4) s is 0.071/s; the recovery alone would allow 0.13.
-    expect(matching([tuned({ sprayRecover: 0.075 }, SWORD)], 'ARMING SWORD', 'sustained-fire input')).toHaveLength(1);
+  test('the def\'s own stroke counts its whole wind-up toward the bloom bound too', () => {
+    // 0.06 per (0.45 + 0.4 + 0.3) s is 0.052/s; without the hold it would be
+    // 0.071/s, and the recovery alone would allow 0.13.
+    expect(matching([tuned({ sprayRecover: 0.06 }, SWORD)], 'ARMING SWORD', 'sustained-fire input')).toHaveLength(1);
   });
 
   test('a broken wind-up is flagged', () => {

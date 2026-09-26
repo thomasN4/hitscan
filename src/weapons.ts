@@ -321,8 +321,10 @@ export function switchWeapon(slot: WeaponSlot): void {
   // that completion check against the INCOMING weapon's stats with the stale
   // reloadEnd — an instant free reload.
   cancelReload();
-  wpn.bowDrawAt = null; // a drawn bow is let down, never loosed, by a swap
-  wpn.swordWindUp = null; // and a wound-up blade lowered, never struck
+  // A drawn bow is let down, never loosed, by a swap, and a wound-up blade
+  // lowered, never struck — with the held button latched, so the incoming
+  // weapon waits for a fresh press instead of firing the moment it deploys.
+  lowerHeldStrokes();
   wpn.lastStroke = 'primary';
   wpn.animation = freshWeaponAnimation();
   wpn.animation.switchedAt = gameTime.now();
@@ -606,21 +608,22 @@ function updateSwordTrigger(def: WeaponDef, charge: StrokeCharge, deploying: boo
 
 /**
  * Let a drawn bow down without loosing, and lower a wound-up blade without
- * striking. Pausing, dying and the end screen all release capture, and
- * whatever clears the buttons meanwhile (a mouseup in the menu, the blur
- * reset) would otherwise read as a release on the first frame back: a paused
- * draw or wind-up must never fire itself on resume. A charged blade also
- * latches both buttons, exactly as its own lowering does: a button still held
- * — or the touch ADS toggle, which resetTouchInput deliberately keeps — must
- * not wind a fresh stroke up on resume and strike it without a new press.
+ * striking — on a swap (switchWeapon), and whenever capture is released.
+ * Pausing, dying and the end screen all release capture, and whatever clears
+ * the buttons meanwhile (a mouseup in the menu, the blur reset) would
+ * otherwise read as a release on the first frame back: a paused draw or
+ * wind-up must never fire itself on resume. The held buttons are latched as
+ * the bow's and the blade's own lowering latches them: LMB always — a button
+ * still held must not start a fresh draw or wind-up, nor fire the weapon
+ * swapped in, without a new press — and on a charged blade RMB too, whose
+ * touch ADS toggle resetTouchInput deliberately keeps.
  */
 export function lowerHeldStrokes(): void {
+  const def = currentDef();
   wpn.bowDrawAt = null;
   wpn.swordWindUp = null;
-  if (currentDef().charge !== undefined) {
-    wpn.triggerLatch = true;
-    input.aiming = false;
-  }
+  if (def.charge !== undefined || def.drawTime !== undefined) wpn.triggerLatch = true;
+  if (def.charge !== undefined) input.aiming = false;
 }
 
 /**

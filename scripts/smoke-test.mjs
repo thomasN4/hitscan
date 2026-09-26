@@ -2337,7 +2337,7 @@ async function runSwordCheck() {
       const swordCard = card('ARMING SWORD');
       if (!swordCard) return { fail: 'no ARMING SWORD card in the picker' };
       if (!document.getElementById('colSecondary')?.contains(swordCard)) return { fail: 'ARMING SWORD card is not in the secondary column' };
-      card('SMG').click();
+      card('SNIPER').click(); // a semi-auto primary: the swap step below needs one
       swordCard.click();
       document.getElementById('deployBtn').click();
       cs.game.started = true;
@@ -2445,7 +2445,23 @@ async function runSwordCheck() {
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft' }));
       button(2, false);
-      return { armed, thrustWhileHeld, thrustAhead, thrustPopups, thrustTapped, thrustClose, thrustOffAxis, slashTapped, lastShotAfterTap,
+      // Review of #164: swapping away mid wind-up must latch LMB, or the
+      // semi-auto primary swapped in fires on its own. The window is real only
+      // after a RECENT stroke: the sniper's 1.1 s cycle, counted from it, is
+      // still running when the 0.4 s deploy ends, so no dropped in-deploy pull
+      // latches LMB for us. So: strike, recover, wind up again, swap.
+      await gwait(0.1);
+      cs.weapon.lastShot = -9;
+      await stroke([0], 0.02);
+      await gwait(0.4); // past the thrust's 0.45 s recovery, counted from the strike
+      button(0, true);
+      await gwait(0.15);
+      const windingBeforeSwap = cs.game.swordWindUp?.kind ?? null;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+      await gwait(1.0); // past the deploy AND the sniper's cycle, LMB still held
+      const swapped = { name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize, windUp: cs.game.swordWindUp };
+      button(0, false);
+      return { windingBeforeSwap, swapped, armed, thrustWhileHeld, thrustAhead, thrustPopups, thrustTapped, thrustClose, thrustOffAxis, slashTapped, lastShotAfterTap,
         slashCentred, slashHeld, slashLed, slashPopups, heldHp, repressHp, overhead, lastStroke, runLerpWinding, aimingAfterSlash,
         runLerpWhileHeld, adsMax: +adsMax.toFixed(3) };
     });
@@ -2471,6 +2487,10 @@ async function runSwordCheck() {
     if (r.aimingAfterSlash !== false) throw new Error('a stroke left input.aiming set: a held RMB would wind up again without a fresh press');
     if (!(r.runLerpWinding > 0.5)) throw new Error(`sprint was refused while RMB wound a slash up: runLerp ${r.runLerpWinding}`);
     if (!(r.runLerpWhileHeld > 0.5)) throw new Error(`sprint was refused with RMB held after a slash: runLerp ${r.runLerpWhileHeld}`);
+    if (r.windingBeforeSwap !== 'primary') throw new Error(`LMB did not wind up a thrust before the swap: ${r.windingBeforeSwap}`);
+    if (r.swapped.name !== 'SNIPER' || r.swapped.windUp !== null || r.swapped.mag !== r.swapped.magSize) {
+      throw new Error(`the LMB held through a swap from a wind-up fired the incoming weapon: ${JSON.stringify(r.swapped)}`);
+    }
     console.log('[sword] OK', JSON.stringify(result));
   } catch (e) {
     failures++;

@@ -9,6 +9,7 @@
 import type { WeaponDef } from '../core/state';
 import { ZONE_MULTIPLIERS } from './damage';
 import { BOW_MIN_RELEASE } from './bow';
+import { chargeDamageFactor } from './swordStroke';
 
 /** Seconds a damage number stays on screen. */
 export const DAMAGE_NUMBER_LIFE = 0.9;
@@ -49,12 +50,18 @@ export interface DamageSpan {
  * The range a weapon's damage numbers are coloured across. One popup is one
  * trigger pull's total on one victim (weapons.ts sums a blast's pellets), so
  * `min` is the weakest connecting hit — a leg, at the bow's least loosing draw
- * or a stroke's sweet-spot floor — and `max` the best trigger pull there is:
- * every pellet in the head, from behind. Melee weapons take both strokes.
+ * or a stroke's sweet-spot floor, released at its least charge — and `max`
+ * the best trigger pull there is: every pellet in the head, from behind.
+ * Melee weapons take every stroke.
  */
 export function damageSpan(def: WeaponDef): DamageSpan {
-  const strokes = [{ damage: def.damage, floor: def.sweetSpot?.floor ?? 1 }];
-  if (def.altAttack) strokes.push({ damage: def.altAttack.damage, floor: def.altAttack.sweetSpot?.floor ?? 1 });
+  // A charged stroke's weakest release is at its minCharge (the primary has
+  // none: a tap), paying chargeDamageFactor of its damage.
+  const charged = (minCharge = 0): number => def.charge ? chargeDamageFactor(minCharge, def.charge.floor) : 1;
+  const strokes = [{ damage: def.damage, floor: (def.sweetSpot?.floor ?? 1) * charged() }];
+  for (const stroke of [def.altAttack, def.comboAttack]) {
+    if (stroke) strokes.push({ damage: stroke.damage, floor: (stroke.sweetSpot?.floor ?? 1) * charged(stroke.minCharge) });
+  }
   // A bow's weakest arrow is the least draw that still looses one (drag can
   // take a long shot lower still; damageHeat clamps it).
   const weakest = def.drawTime !== undefined ? BOW_MIN_RELEASE : 1;

@@ -18,10 +18,10 @@ import { bots, weapon, session, input, aim, wpn, motion, player, keyHeld, gameTi
          soundEvents, playerFeet, WEAPONS, ammoStore,
          RECOIL_CAP, RECOIL_YAW_CAP, BASE_FOV,
          equippedId, cancelPendingReloadSfx, effectiveCrouching, freshWeaponAnimation,
-         type WeaponDef, type WeaponSlot, type WeaponId, type Bot, type MeleeAttackDef } from './core/state';
+         type WeaponDef, type WeaponSlot, type WeaponId, type Bot, type MeleeAttackDef, type StrokeCharge } from './core/state';
 import { sfxAk47, sfxShoot, sfxSniper, sfxShotgun, sfxPistol, sfxRevolver, sfxKnife, sfxKnifeHit,
          sfxReload, sfxBreakReload, sfxSawnOff, sfxShell, sfxMechanism, sfxSwitch, sfxZoom,
-         sfxBow, sfxBowDraw, sfxSwordThrust, sfxSwordSlash, sfxSwordHit } from './audio';
+         sfxBow, sfxBowDraw, sfxSwordThrust, sfxSwordSlash, sfxSwordOverhead, sfxSwordHit } from './audio';
 import { showHitmarker, showDamageNumber, setCrosshairGap, setScopeOverlay } from './hud';
 import { damageBot } from './combat';
 import { spawnImpact, spawnBulletHole } from './effects';
@@ -46,6 +46,7 @@ import { isBackstab, meleeSwing, sweetSpotFactor, sweetSpotPoint, type MeleeCand
 import { isSprintActive } from './sim/movement';
 import { isDeploying } from './sim/weaponSwap';
 import { launchSpeed, planBowTrigger, bowDrawFraction } from './sim/bow';
+import { chargeDamageFactor, chargeFraction, planStrokeTrigger, type StrokeKind } from './sim/swordStroke';
 import { approach } from './sim/smoothing';
 
 // The live weapon def. WEAPONS is a Record over the WeaponId union and
@@ -168,7 +169,7 @@ const SHOT_SFX: Record<WeaponId, () => void> = {
   revolver: sfxRevolver,
   knife: sfxKnife,
   longbow: sfxBow,
-  armingSword: sfxSwordThrust, // the LMB stroke; the RMB slash plays its own
+  armingSword: sfxSwordThrust, // the LMB stroke; the slash and overhead cut play their own
 };
 
 const raycaster = new THREE.Raycaster();
@@ -320,8 +321,11 @@ export function switchWeapon(slot: WeaponSlot): void {
   // that completion check against the INCOMING weapon's stats with the stale
   // reloadEnd — an instant free reload.
   cancelReload();
-  wpn.bowDrawAt = null; // a drawn bow is let down, never loosed, by a swap
-  wpn.lastStrokeAlt = false;
+  // A drawn bow is let down, never loosed, by a swap, and a wound-up blade
+  // lowered, never struck — with the held button latched, so the incoming
+  // weapon waits for a fresh press instead of firing the moment it deploys.
+  lowerHeldStrokes();
+  wpn.lastStroke = 'primary';
   wpn.animation = freshWeaponAnimation();
   wpn.animation.switchedAt = gameTime.now();
   wpn.animation.outgoingId = equippedId(wpn.slot);
@@ -394,12 +398,13 @@ export function switchToLast(): void {
 }
 
 /**
- * Seconds the held blade needs before its next stroke: the recovery of the
- * LAST stroke, whichever button made it. A sword that slashed recovers at
- * the slash's pace before it may thrust, and the other way round.
+ * Seconds the held weapon needs before its next stroke or shot: for a blade,
+ * the recovery of the LAST stroke, whichever buttons made it. A sword that
+ * slashed recovers at the slash's pace before it may thrust, and the other
+ * way round. Anything else only ever makes the def's own stroke.
  */
 function strokeCadence(def: WeaponDef): number {
-  return def.altAttack && wpn.lastStrokeAlt ? def.altAttack.fireRate : weapon.fireRate;
+  return wpn.lastStroke === 'primary' ? weapon.fireRate : strokeAttack(def, wpn.lastStroke).fireRate;
 }
 
 /** The def's own (LMB) melee attack, in the altAttack's shape. */
@@ -408,24 +413,39 @@ function primaryStroke(def: WeaponDef): MeleeAttackDef {
   return { damage: def.damage, fireRate: def.fireRate, range: def.range ?? 0, arcRad: def.arcRad ?? 0, sweetSpot: def.sweetSpot };
 }
 
+/** The attack a stroke kind makes with this blade. */
+function strokeAttack(def: WeaponDef, kind: StrokeKind): MeleeAttackDef {
+  const attack = kind === 'primary' ? primaryStroke(def) : kind === 'alt' ? def.altAttack : def.comboAttack;
+  // Documented pairing (validateWeapons): a charged def carries all three
+  // strokes, and only a charged def ever makes anything but the primary.
+  if (attack === undefined) throw new Error(`${def.name} has no ${kind} stroke`);
+  return attack;
+}
+
+const STROKE_SFX: Record<Exclude<StrokeKind, 'primary'>, () => void> = {
+  alt: sfxSwordSlash,
+  combo: sfxSwordOverhead,
+};
+
 /**
  * One melee stroke. No ammo, no cone, no muzzle flash: the strike resolves
  * through sim/melee.ts's range+arc test against every live enemy part
  * (nearest wins; allies are neither struck nor blocking — a stronger cut
  * than the bullets' "allies stop the ray", and deliberate). The kick rides
  * the normal recoil channel for a small camera nod; the successful-shot
- * timestamp separately drives the hand/blade follow-through. `alt` marks the
- * def's altAttack (the sword's RMB slash); either stroke shares the def's
- * headshot and backstab multipliers.
+ * timestamp separately drives the hand/blade follow-through. `kind` names
+ * which of the def's strokes `attack` is; every stroke shares the def's
+ * headshot and backstab multipliers. `chargeFactor` is the wind-up's share
+ * of the damage (sim/swordStroke.ts) — 1 on a blade that strikes on press.
  */
-function swingMelee(def: WeaponDef, attack: MeleeAttackDef, alt: boolean): void {
+function swingMelee(def: WeaponDef, attack: MeleeAttackDef, kind: StrokeKind, chargeFactor: number): void {
   weapon.lastShot = gameTime.now();
-  wpn.lastStrokeAlt = alt;
+  wpn.lastStroke = kind;
   wpn.animation.shotAt = weapon.lastShot;
   wpn.animation.previousShotAge = -1;
   wpn.animation.closeAt = -Infinity;
-  if (alt) sfxSwordSlash();
-  else SHOT_SFX[equippedId(wpn.slot)]();
+  if (kind === 'primary') SHOT_SFX[equippedId(wpn.slot)]();
+  else STROKE_SFX[kind]();
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
   // Exact aim direction — spread 0 samples no cone; a swing has none.
@@ -453,7 +473,7 @@ function swingMelee(def: WeaponDef, attack: MeleeAttackDef, alt: boolean): void 
     // sweet spot sits in view space, placed with this stroke's own aim.
     const factor = attack.sweetSpot
       ? sweetSpotFactor(hit.at, sweetSpotPoint(origin, pitch, yaw, attack.sweetSpot), attack.sweetSpot) : 1;
-    let dmg = damageForPart({ damage: Math.round(attack.damage * factor), headshotMult: def.headshotMult }, hit.part);
+    let dmg = damageForPart({ damage: Math.round(attack.damage * factor * chargeFactor), headshotMult: def.headshotMult }, hit.part);
     if (isBackstab(origin, hit.payload.mesh.position, victimForward)) {
       dmg *= def.backstabMult ?? 1; // documented default: absent means no bonus
     }
@@ -548,13 +568,62 @@ function updateBowTrigger(def: WeaponDef, deploying: boolean): void {
 }
 
 /**
- * Let a drawn bow down without loosing. Pausing, dying and the end screen
- * all release capture, and whatever clears LMB meanwhile (a mouseup in the
- * menu, the blur reset) would otherwise read as a release on the first
- * frame back: a paused draw must never fire itself on resume.
+ * A charged blade's trigger, in place of the fire-on-press gate: either
+ * button winds a stroke up, both together the combo, and the release (or the
+ * charge's own timeout) strikes — sim/swordStroke.ts:planStrokeTrigger
+ * decides. A new wind-up waits out the last stroke's recovery and the deploy
+ * window. Striking or lowering latches BOTH buttons: LMB through
+ * triggerLatch, RMB by clearing input.aiming as unscopeOnShot does, so a
+ * button still held after an auto-strike needs a fresh press, and the touch
+ * ADS toggle pops back off. Lowering costs no recovery.
  */
-export function letDownBow(): void {
+function updateSwordTrigger(def: WeaponDef, charge: StrokeCharge, deploying: boolean): void {
+  const now = gameTime.now();
+  if (!input.shooting) wpn.triggerLatch = false;
+  const action = planStrokeTrigger({
+    now,
+    windUp: wpn.swordWindUp,
+    lmb: input.shooting && !wpn.triggerLatch,
+    rmb: input.aiming,
+    ready: !deploying && now - weapon.lastShot >= strokeCadence(def),
+    time: charge.time,
+    hold: charge.hold,
+    // Documented default: absent minCharge means a tap strikes.
+    minCharge: { primary: 0, alt: def.altAttack?.minCharge ?? 0, combo: def.comboAttack?.minCharge ?? 0 },
+  });
+  if (action.kind === 'start') {
+    wpn.swordWindUp = { startedAt: now, kind: action.stroke };
+  } else if (action.kind === 'hold') {
+    if (wpn.swordWindUp) wpn.swordWindUp.kind = action.stroke;
+  } else if (action.kind === 'strike' || action.kind === 'cancel') {
+    wpn.swordWindUp = null;
+    if (action.kind === 'strike') {
+      wpn.strokeCharge = action.fraction;
+      swingMelee(def, strokeAttack(def, action.stroke), action.stroke, chargeDamageFactor(action.fraction, charge.floor));
+    }
+    wpn.triggerLatch = input.shooting;
+    input.aiming = false;
+  }
+}
+
+/**
+ * Let a drawn bow down without loosing, and lower a wound-up blade without
+ * striking — on a swap (switchWeapon), and whenever capture is released.
+ * Pausing, dying and the end screen all release capture, and whatever clears
+ * the buttons meanwhile (a mouseup in the menu, the blur reset) would
+ * otherwise read as a release on the first frame back: a paused draw or
+ * wind-up must never fire itself on resume. The held buttons are latched as
+ * the bow's and the blade's own lowering latches them: LMB always — a button
+ * still held must not start a fresh draw or wind-up, nor fire the weapon
+ * swapped in, without a new press — and on a charged blade RMB too, whose
+ * touch ADS toggle resetTouchInput deliberately keeps.
+ */
+export function lowerHeldStrokes(): void {
+  const def = currentDef();
   wpn.bowDrawAt = null;
+  wpn.swordWindUp = null;
+  if (def.charge !== undefined || def.drawTime !== undefined) wpn.triggerLatch = true;
+  if (def.charge !== undefined) input.aiming = false;
 }
 
 /**
@@ -574,7 +643,7 @@ export function shoot(): void {
   // nothing to flash. updateWeapon's trigger gate already paced this against
   // the swing cadence.
   if (def.melee) {
-    swingMelee(def, primaryStroke(def), false);
+    swingMelee(def, primaryStroke(def), 'primary', 1);
     return;
   }
   // Per-round reloads are INTERRUPTIBLE CS-style: a trigger pull cancels the
@@ -832,31 +901,24 @@ export function updateWeapon(dt: number): void {
 
   // Trigger: the smg is full-auto while LMB held; single-press weapons fire
   // once per press — the latch blocks repeats until the button is released.
-  // A bow draws on the press and looses on the release instead.
+  // Full-auto honours the same latch so a swap off a wound-up blade or a
+  // drawn bow cannot dump the mag on the still-held press. A bow draws on
+  // the press and looses on the release instead, and a charged blade winds
+  // up on the press and strikes on the release.
   if (def.drawTime !== undefined) {
     updateBowTrigger(def, deploying);
+  } else if (def.charge !== undefined) {
+    updateSwordTrigger(def, def.charge, deploying);
   } else if (!input.shooting) {
     wpn.triggerLatch = false;
     wpn.emptyReloadLatch = false;
   }
-  else if (!def.semiAuto || !wpn.triggerLatch) {
+  else if (!wpn.triggerLatch) {
     if (gameTime.now() - weapon.lastShot >= strokeCadence(def)) {
       shoot();
       if (def.semiAuto) wpn.triggerLatch = true;
     }
   }
-  // A melee def with an altAttack strikes it on RMB instead of raising
-  // sights: input.aiming is the shared "secondary button pressed" signal (RMB,
-  // or the touch ADS toggle, both through tryRaiseSights, which already
-  // refuses it inside the deploy window). The stroke CLEARS it, as
-  // unscopeOnShot does: one stroke per press, a held RMB does nothing more
-  // until re-pressed (mouseup re-clears harmlessly), and the touch toggle pops
-  // back off so each tap is one slash. A press during recovery waits for it.
-  if (def.altAttack && input.aiming && !deploying && gameTime.now() - weapon.lastShot >= strokeCadence(def)) {
-    swingMelee(def, def.altAttack, true);
-    input.aiming = false;
-  }
-
   updateWeaponPresentation();
 
   // ---- Accuracy model -------------------------------------------------
@@ -895,8 +957,14 @@ function updateWeaponPresentation(): void {
   const interval = def.perRound ? roundInterval(weapon.reloadTime, weapon.magSize) : weapon.reloadTime;
   const reloadT = weapon.reloading
     ? 1 - THREE.MathUtils.clamp(((def.perRound ? weapon.nextRoundAt : weapon.reloadEnd) - now) / interval, 0, 1) : 0;
-  const pose = weaponPose({ id, now, shotAt: animation.shotAt, fireInterval: strokeCadence(def), altStroke: wpn.lastStrokeAlt,
-    switchedAt: animation.switchedAt, hasOutgoing: animation.outgoingId !== null, aiming: input.aiming || wpn.adsLerp > 0.01,
+  const windUp = wpn.swordWindUp;
+  const pose = weaponPose({ id, now, shotAt: animation.shotAt, fireInterval: strokeCadence(def), stroke: wpn.lastStroke,
+    strokeFrom: wpn.strokeCharge,
+    // Documented pairing: a wind-up only exists on a charged def.
+    windUp: windUp && { kind: windUp.kind, fraction: chargeFraction(now - windUp.startedAt, def.charge?.time ?? 1) },
+    // Sights, not the raw button: a blade's RMB is a stroke, and must not
+    // read as aiming and swallow the draw pose.
+    switchedAt: animation.switchedAt, hasOutgoing: animation.outgoingId !== null, aiming: aimingSights() || wpn.adsLerp > 0.01,
     reloading: weapon.reloading, reloadStartedAt: animation.reloadStartedAt, reloadT,
     roundInterval: interval, lastRound: weapon.mag + 1 >= weapon.magSize || session.map !== 'range' && weapon.reserve === 1,
     emptyReload: animation.emptyReload, reloadSpent: animation.reloadSpent, reloadShells: animation.reloadShells, closeAt: animation.closeAt, closeBlend: animation.closeBlend,

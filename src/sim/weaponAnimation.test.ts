@@ -18,22 +18,69 @@ describe('weapon presentation timelines', () => {
     }
   });
 
-  test('the sword thrusts on LMB and slashes on RMB, and neither leaks into the other', () => {
+  test('the sword thrusts on LMB, slashes on RMB, cuts overhead on both, and none leaks into another', () => {
     const sword = { ...idle, id: 'armingSword' as const, fireInterval: 0.7, shotAt: 10 - 0.1 };
     const thrust = weaponPose(sword);
     expect(thrust.swing).toBeGreaterThan(0);
     expect(thrust.slash).toBe(0);
-    const slash = weaponPose({ ...sword, fireInterval: 0.8, altStroke: true });
+    expect(thrust.overhead).toBe(0);
+    const slash = weaponPose({ ...sword, fireInterval: 0.8, stroke: 'alt' });
     expect(slash.swing).toBe(0);
+    expect(slash.overhead).toBe(0);
     expect(slash.slash).toBeGreaterThan(0.9);
     // The cut sweeps across during the stroke and has settled by the next one.
-    expect(weaponPose({ ...sword, fireInterval: 0.8, altStroke: true, shotAt: 10 - 0.02 }).slashSweep)
+    expect(weaponPose({ ...sword, fireInterval: 0.8, stroke: 'alt', shotAt: 10 - 0.02 }).slashSweep)
       .toBeLessThan(slash.slashSweep);
-    const done = weaponPose({ ...sword, fireInterval: 0.8, altStroke: true, shotAt: 10 - 0.8 });
+    const done = weaponPose({ ...sword, fireInterval: 0.8, stroke: 'alt', shotAt: 10 - 0.8 });
     expect(done.slash).toBe(0);
     expect(done.slashSweep).toBe(0);
-    // The knife never slashes, even flagged.
-    expect(weaponPose({ ...sword, id: 'knife', altStroke: true }).slash).toBe(0);
+    const overhead = weaponPose({ ...sword, fireInterval: 0.8, stroke: 'combo' });
+    expect(overhead.swing).toBe(0);
+    expect(overhead.slash).toBe(0);
+    expect(overhead.overhead).toBeGreaterThan(0.9);
+    expect(overhead.overheadSweep).toBeGreaterThan(0);
+    expect(weaponPose({ ...sword, fireInterval: 0.8, stroke: 'combo', shotAt: 10 - 0.8 }).overhead).toBe(0);
+    // The knife never slashes or cuts overhead, even flagged.
+    expect(weaponPose({ ...sword, id: 'knife', stroke: 'alt' }).slash).toBe(0);
+    expect(weaponPose({ ...sword, id: 'knife', stroke: 'combo' }).overhead).toBe(0);
+  });
+
+  test('winding a sword stroke raises it to where the stroke begins, by the charge', () => {
+    const guard = { ...idle, id: 'armingSword' as const, fireInterval: 0.45 };
+    const cocked = weaponPose({ ...guard, windUp: { kind: 'primary', fraction: 0.6 } });
+    expect(cocked.cock).toBeCloseTo(0.6, 12);
+    expect(cocked.swing).toBe(0);
+    const raisedCut = weaponPose({ ...guard, windUp: { kind: 'alt', fraction: 0.5 } });
+    expect(raisedCut.slash).toBeCloseTo(0.5, 12);
+    expect(raisedCut.slashSweep).toBe(0); // wound up high right: the cut's start
+    const raised = weaponPose({ ...guard, windUp: { kind: 'combo', fraction: 1 } });
+    expect(raised.overhead).toBe(1);
+    expect(raised.overheadSweep).toBe(0);
+    expect(raised.cock).toBe(0);
+    expect(raised.slash).toBe(0);
+    // Only the sword winds up.
+    expect(weaponPose({ ...guard, id: 'knife', windUp: { kind: 'primary', fraction: 1 } }).cock).toBe(0);
+  });
+
+  test('a released cut holds its wind-up and never winds further back', () => {
+    const released = { ...idle, id: 'armingSword' as const, fireInterval: 0.5, stroke: 'alt' as const, strokeFrom: 0.4 };
+    // No snap to full on the release frame, and no rise toward full after
+    // it: the envelope holds the release charge until the fade to guard.
+    const slashAt = (phase: number) => weaponPose({ ...released, shotAt: 10 - 0.5 * phase }).slash;
+    expect(slashAt(0)).toBeCloseTo(0.4, 12);
+    expect(slashAt(0.1)).toBeCloseTo(0.4, 12);
+    expect(slashAt(0.5)).toBeLessThan(0.4);
+    expect(slashAt(1)).toBe(0);
+    // ... while the sweep carries the blade forward through the cut.
+    const sweepAt = (phase: number) => weaponPose({ ...released, shotAt: 10 - 0.5 * phase }).slashSweep;
+    expect(sweepAt(0)).toBe(0);
+    expect(sweepAt(0.2)).toBeGreaterThan(0);
+    // The overhead cut holds its release charge the same way.
+    const over = { ...released, stroke: 'combo' as const };
+    const overheadAt = (phase: number) => weaponPose({ ...over, shotAt: 10 - 0.5 * phase }).overhead;
+    expect(overheadAt(0)).toBeCloseTo(0.4, 12);
+    expect(overheadAt(0.1)).toBeCloseTo(0.4, 12);
+    expect(overheadAt(1)).toBe(0);
   });
 
   test('pump completes before the next permitted shot', () => {

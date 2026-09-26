@@ -219,7 +219,9 @@ export function initTouchControls(): void {
   }
 
   // ADS is a tap toggle. Every writer that drops input.aiming (unscope on
-  // shot, reload start, swap) drops the toggle with it, no special case.
+  // shot, reload start, swap, a sword stroke) drops the toggle with it, no
+  // special case. On the sword it is RMB: one tap winds a slash up, a second
+  // tap releases it, and left alone the wind-up strikes and pops it off.
   adsBtn = tapButton('tcAds', () => {
     if (input.aiming) input.aiming = false;
     else tryRaiseSights();

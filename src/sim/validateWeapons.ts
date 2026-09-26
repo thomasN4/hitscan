@@ -50,15 +50,19 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     // input or the accumulator never leaves rest. The vertical and yaw rules
     // apply only while the weapon actually sustains fire: a semiAuto weapon
     // fires once per press, and the sniper's full settle inside the bolt
-    // cycle is deliberate (see header).
+    // cycle is deliberate (see header). A charged blade's cycle is its
+    // recovery PLUS the wind-up, taken at its longest: a stroke held until it
+    // strikes on its own spends the charge time and the hold at full, and
+    // decay runs through all of it (review of #164).
+    const windUp = def.charge ? def.charge.time + def.charge.hold : 0;
     if (!def.semiAuto && !(def.recoilRecover < def.recoilKick / def.fireRate)) {
       out.push(`${name}: recoilRecover ${num(def.recoilRecover)} exceeds sustained-fire input ${num(def.recoilKick / def.fireRate)} (kick ${num(def.recoilKick)} per ${def.fireRate}s) — recoil never climbs, it just vibrates`);
     }
     if (!def.semiAuto && !(def.yawRecover * def.fireRate < def.yawKick / 2)) {
       out.push(`${name}: yawRecover ${num(def.yawRecover)} drains more per shot interval than the MEAN kick (${num(def.yawKick / 2)}) — the walk returns to 0 before every shot and no bullet is displaced`);
     }
-    if (!(def.sprayRecover < def.sprayKick / def.fireRate)) {
-      out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds sustained-fire input ${num(def.sprayKick / def.fireRate)} — sprays will not bloom`);
+    if (!(def.sprayRecover < def.sprayKick / (def.fireRate + windUp))) {
+      out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds sustained-fire input ${num(def.sprayKick / (def.fireRate + windUp))} — sprays will not bloom`);
     }
 
     // ---------- Static sanity ----------
@@ -161,21 +165,48 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     } else if (def.range !== undefined || def.arcRad !== undefined || def.backstabMult !== undefined) {
       out.push(`${name}: range/arcRad/backstabMult without melee does nothing — only a melee weapon swings`);
     }
-    if (def.altAttack !== undefined) {
-      const alt = def.altAttack;
+    // Extra strokes: the altAttack (RMB) and comboAttack (LMB+RMB) are read
+    // only by the charged trigger, so each wants a charged melee def, and a
+    // charged def carries both — its trigger can wind up every one of them.
+    const strokes = [['altAttack', def.altAttack], ['comboAttack', def.comboAttack]] as const;
+    for (const [label, stroke] of strokes) {
+      if (stroke === undefined) continue;
       if (!def.melee) {
-        out.push(`${name}: altAttack without melee does nothing — RMB raises sights on a firearm`);
+        out.push(`${name}: ${label} without melee does nothing — RMB raises sights on a firearm`);
+      } else if (def.charge === undefined) {
+        out.push(`${name}: ${label} without charge does nothing — only a charged blade's trigger reads a second button`);
       }
       for (const field of ['damage', 'fireRate', 'range'] as const) {
-        if (!(alt[field] > 0)) {
-          out.push(`${name}: altAttack.${field} ${num(alt[field])} must be > 0 — the second stroke would ${field === 'damage' ? 'hurt nothing' : field === 'range' ? 'reach nothing' : 'have no recovery'}`);
+        if (!(stroke[field] > 0)) {
+          out.push(`${name}: ${label}.${field} ${num(stroke[field])} must be > 0 — the stroke would ${field === 'damage' ? 'hurt nothing' : field === 'range' ? 'reach nothing' : 'have no recovery'}`);
         }
       }
-      if (!(alt.arcRad > 0 && alt.arcRad <= Math.PI)) {
-        out.push(`${name}: altAttack.arcRad ${num(alt.arcRad)} must lie in (0, π] — at/below 0 it strikes nothing, past a half-turn it strikes behind`);
+      if (!(stroke.arcRad > 0 && stroke.arcRad <= Math.PI)) {
+        out.push(`${name}: ${label}.arcRad ${num(stroke.arcRad)} must lie in (0, π] — at/below 0 it strikes nothing, past a half-turn it strikes behind`);
       }
-      if (!(def.sprayRecover < def.sprayKick / alt.fireRate)) {
-        out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds the altAttack's sustained input ${num(def.sprayKick / alt.fireRate)} — its strokes will not bloom`);
+      if (!(def.sprayRecover < def.sprayKick / (stroke.fireRate + windUp))) {
+        out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds the ${label}'s sustained input ${num(def.sprayKick / (stroke.fireRate + windUp))} — its strokes will not bloom`);
+      }
+      if (stroke.minCharge !== undefined && !(stroke.minCharge >= 0 && stroke.minCharge <= 1)) {
+        out.push(`${name}: ${label}.minCharge ${num(stroke.minCharge)} must lie in [0, 1] — past a full charge the stroke could never land`);
+      }
+    }
+    if (def.charge !== undefined) {
+      const { time, hold, floor } = def.charge;
+      if (!def.melee) {
+        out.push(`${name}: charge without melee does nothing — only a blade winds up a stroke`);
+      }
+      if (def.altAttack === undefined || def.comboAttack === undefined) {
+        out.push(`${name}: charge needs both altAttack and comboAttack — its trigger winds up a stroke on either button and on both`);
+      }
+      if (!(time > 0)) {
+        out.push(`${name}: charge.time ${num(time)} must be > 0 — an instant charge makes every tap a full stroke`);
+      }
+      if (!(Number.isFinite(hold) && hold >= 0)) {
+        out.push(`${name}: charge.hold ${num(hold)} must be finite and >= 0 — a wound-up stroke must strike on its own`);
+      }
+      if (!(floor > 0 && floor <= 1)) {
+        out.push(`${name}: charge.floor ${num(floor)} must lie in (0, 1] — a tapped stroke always hurts, and never more than a full one`);
       }
     }
     // A sweet spot must be reachable at full damage: inside its stroke's reach
@@ -183,6 +214,7 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     const spots: [string, StrokeSweetSpot | undefined, number | undefined, number | undefined][] = [
       ['sweetSpot', def.sweetSpot, def.range, def.arcRad],
       ['altAttack.sweetSpot', def.altAttack?.sweetSpot, def.altAttack?.range, def.altAttack?.arcRad],
+      ['comboAttack.sweetSpot', def.comboAttack?.sweetSpot, def.comboAttack?.range, def.comboAttack?.arcRad],
     ];
     for (const [label, spot, range, arcRad] of spots) {
       if (spot === undefined) continue;

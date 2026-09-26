@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { validateWeapons } from './validateWeapons';
-import { WEAPONS, RECOIL_CAP, type WeaponDef } from '../core/state';
+import { WEAPONS, RECOIL_CAP, type WeaponDef, type MeleeAttackDef } from '../core/state';
 
 const SMG = WEAPONS.smg;
 const SNIPER = WEAPONS.sniper;
@@ -220,25 +220,71 @@ describe('bow pairing', () => {
   });
 });
 
-describe('melee altAttack', () => {
+describe('melee altAttack and comboAttack', () => {
   const SWORD = WEAPONS.armingSword;
+  const KNIFE = WEAPONS.knife;
+  const STROKE = { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4 };
 
   test('the shipped sword passes', () => {
-    expect(matching([SWORD], 'altAttack')).toHaveLength(0);
+    expect(matching([SWORD], 'Attack')).toHaveLength(0);
   });
 
   test('a firearm altAttack is a dead field', () => {
-    expect(matching([tuned({ altAttack: { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4 } })], 'SMG', 'altAttack without melee')).toHaveLength(1);
+    expect(matching([tuned({ altAttack: STROKE })], 'SMG', 'altAttack without melee')).toHaveLength(1);
   });
 
-  test('zero, NaN or out-of-range fields are flagged', () => {
-    const alt = (over: Partial<NonNullable<WeaponDef['altAttack']>>): WeaponDef =>
-      tuned({ altAttack: { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, ...over } }, SWORD);
-    expect(matching([alt({ damage: 0 })], 'ARMING SWORD', 'altAttack.damage')).toHaveLength(1);
-    expect(matching([alt({ range: NaN })], 'ARMING SWORD', 'altAttack.range')).toHaveLength(1);
-    expect(matching([alt({ fireRate: -1 })], 'ARMING SWORD', 'altAttack.fireRate')).toHaveLength(1);
-    expect(matching([alt({ arcRad: 4 })], 'ARMING SWORD', 'altAttack.arcRad')).toHaveLength(1);
-    expect(matching([alt({ fireRate: 10 })], 'ARMING SWORD', 'bloom')).toHaveLength(1);
+  test('an uncharged blade cannot carry a second or third stroke', () => {
+    expect(matching([tuned({ altAttack: STROKE }, KNIFE)], 'KNIFE', 'altAttack without charge')).toHaveLength(1);
+    expect(matching([tuned({ comboAttack: STROKE }, KNIFE)], 'KNIFE', 'comboAttack without charge')).toHaveLength(1);
+  });
+
+  test('zero, NaN or out-of-range fields are flagged, on either stroke', () => {
+    for (const label of ['altAttack', 'comboAttack'] as const) {
+      const stroke = (over: Partial<MeleeAttackDef>): WeaponDef => tuned({ [label]: { ...STROKE, ...over } }, SWORD);
+      expect(matching([stroke({ damage: 0 })], 'ARMING SWORD', `${label}.damage`)).toHaveLength(1);
+      expect(matching([stroke({ range: NaN })], 'ARMING SWORD', `${label}.range`)).toHaveLength(1);
+      expect(matching([stroke({ fireRate: -1 })], 'ARMING SWORD', `${label}.fireRate`)).toHaveLength(1);
+      expect(matching([stroke({ arcRad: 4 })], 'ARMING SWORD', `${label}.arcRad`)).toHaveLength(1);
+      expect(matching([stroke({ fireRate: 10 })], 'ARMING SWORD', label, 'bloom')).toHaveLength(1);
+      // The whole wind-up is part of the cycle: 0.06 per (0.5 + 0.4 + 0.3) s
+      // is 0.05/s, under a 0.06 recovery — which the recovery plus the charge
+      // alone (0.067/s) would still clear.
+      expect(matching([tuned({ sprayRecover: 0.06, [label]: { ...STROKE, fireRate: 0.5 } }, SWORD)], 'ARMING SWORD', label, 'bloom')).toHaveLength(1);
+      expect(matching([stroke({ minCharge: 1.1 })], 'ARMING SWORD', `${label}.minCharge`)).toHaveLength(1);
+      expect(matching([stroke({ minCharge: -0.1 })], 'ARMING SWORD', `${label}.minCharge`)).toHaveLength(1);
+    }
+  });
+});
+
+describe('melee charge', () => {
+  const SWORD = WEAPONS.armingSword;
+  const CHARGE = { time: 0.5, hold: 0.3, floor: 0.4 };
+
+  test('the shipped sword passes', () => {
+    expect(matching([SWORD], 'charge')).toHaveLength(0);
+  });
+
+  test('a firearm charge is a dead field', () => {
+    expect(matching([tuned({ charge: CHARGE })], 'SMG', 'charge without melee')).toHaveLength(1);
+  });
+
+  test('a charged blade must carry all three strokes', () => {
+    expect(matching([tuned({ charge: CHARGE }, WEAPONS.knife)], 'KNIFE', 'charge needs both')).toHaveLength(1);
+    expect(matching([tuned({ comboAttack: undefined }, SWORD)], 'ARMING SWORD', 'charge needs both')).toHaveLength(1);
+  });
+
+  test('the def\'s own stroke counts its whole wind-up toward the bloom bound too', () => {
+    // 0.06 per (0.45 + 0.4 + 0.3) s is 0.052/s; without the hold it would be
+    // 0.071/s, and the recovery alone would allow 0.13.
+    expect(matching([tuned({ sprayRecover: 0.06 }, SWORD)], 'ARMING SWORD', 'sustained-fire input')).toHaveLength(1);
+  });
+
+  test('a broken wind-up is flagged', () => {
+    expect(matching([tuned({ charge: { ...CHARGE, time: 0 } }, SWORD)], 'ARMING SWORD', 'charge.time')).toHaveLength(1);
+    expect(matching([tuned({ charge: { ...CHARGE, hold: Infinity } }, SWORD)], 'ARMING SWORD', 'charge.hold')).toHaveLength(1);
+    expect(matching([tuned({ charge: { ...CHARGE, hold: -0.1 } }, SWORD)], 'ARMING SWORD', 'charge.hold')).toHaveLength(1);
+    expect(matching([tuned({ charge: { ...CHARGE, floor: 0 } }, SWORD)], 'ARMING SWORD', 'charge.floor')).toHaveLength(1);
+    expect(matching([tuned({ charge: { ...CHARGE, floor: 1.5 } }, SWORD)], 'ARMING SWORD', 'charge.floor')).toHaveLength(1);
   });
 });
 
@@ -246,7 +292,7 @@ describe('stroke sweet spots', () => {
   const SWORD = WEAPONS.armingSword;
   const SPOT = { distance: 2, left: 0, down: 0, full: 0.3, fade: 1, floor: 0.5 };
 
-  test('the shipped sword passes, both strokes', () => {
+  test('the shipped sword passes, every stroke', () => {
     expect(matching([SWORD], 'sweetSpot')).toHaveLength(0);
   });
 
@@ -258,6 +304,7 @@ describe('stroke sweet spots', () => {
     expect(matching([tuned({ sweetSpot: { ...SPOT, floor: 1.2 } }, SWORD)], 'ARMING SWORD', 'sweetSpot.floor')).toHaveLength(1);
     const alt = { damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, sweetSpot: { ...SPOT, left: 0.9 } };
     expect(matching([tuned({ altAttack: alt }, SWORD)], 'ARMING SWORD', 'altAttack.sweetSpot', 'outside its cone')).toHaveLength(1);
+    expect(matching([tuned({ comboAttack: alt }, SWORD)], 'ARMING SWORD', 'comboAttack.sweetSpot', 'outside its cone')).toHaveLength(1);
   });
 
   test('a firearm sweet spot is a dead field', () => {

@@ -174,6 +174,11 @@ export function sfxSwordSlash(): void {
   playSwish(0.22, 1500, 0.22);
 }
 
+/** Sword overhead cut: the heaviest, lowest whoosh — the whole blade brought down. */
+export function sfxSwordOverhead(): void {
+  playSwish(0.26, 1100, 0.26);
+}
+
 /** Sword connect: heavier than the knife's thunk — more steel behind it. */
 export const sfxSwordHit = (): void => playGunshot(0.32, 260, 0.12);
 

@@ -393,7 +393,11 @@ are fixed at the root, and there are no mechanisms. `weaponAssets.ts` and
 In first person it is held in a plow guard (`weaponModels.ts`). The hilt sits
 low right and the point is aimed at the crosshair 2.5 m out, so the blade
 frames a target without covering it. The LMB thrust reuses the knife's jab,
-driven 0.30 m. The RMB slash rotates the blade about the grip
-(`core/swordPresentation.ts`), from high right to low left across the frame.
+driven 0.30 m. The RMB slash
+(`core/swordPresentation.ts`) cuts with the edge: the wind-up rolls the flat
+across the cut plane and lifts the hand, then the arm (from the shoulder) and
+the wrist turn only about the flat's normal, from high right to low left. The
+LMB+RMB overhead cut raises the blade over the head and brings it straight
+down.
 It is player-only, so it has no bot mount.
 

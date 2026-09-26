@@ -15,6 +15,7 @@ import { GameClock, type ScheduledHandle } from '../sim/gameClock';
 import { SoundRing } from '../sim/soundEvents';
 import type { ArrowBody, TrailPoint } from '../sim/arrow';
 import type { BrainMode } from '../sim/botBrains';
+import type { StrokeKind, WindUp } from '../sim/swordStroke';
 // A value import, like GameClock and SoundRing above: sim/domination.ts takes
 // only `type Team` back, so nothing is circular at runtime.
 import { DOM_SCORE_LIMIT } from '../sim/domination';
@@ -190,11 +191,26 @@ export interface WeaponDef {
   backstabMult?: number;
   /**
    * A melee weapon's SECOND attack, on RMB (the fields above are the LMB
-   * one). Only a melee def may carry it — RMB raises sights on anything else —
-   * and it shares the def's headshotMult and backstabMult: one blade, two
-   * ways to use it. The sword thrusts on LMB and slashes on RMB.
+   * one). Only a charged melee def may carry it — RMB raises sights on
+   * anything else, and only the charged trigger reads it — and it shares the
+   * def's headshotMult and backstabMult: one blade, several ways to use it.
+   * The sword thrusts on LMB and slashes on RMB.
    */
   altAttack?: MeleeAttackDef;
+  /**
+   * A charged melee def's THIRD attack, wound up with LMB and RMB held
+   * together (sim/swordStroke.ts). Requires `altAttack`: the chord is made of
+   * both buttons. The sword's overhead cut.
+   */
+  comboAttack?: MeleeAttackDef;
+  /**
+   * Melee: strike on RELEASE, scaled by how long the button was held
+   * (sim/swordStroke.ts). The charge fills over `time` seconds, holds at full
+   * for `hold` more and then strikes on its own; a stroke deals `floor` of its
+   * damage on a tap, rising linearly to whole at full charge. Absent means the
+   * blade strikes on the press, at flat damage — the knife's contract.
+   */
+  charge?: StrokeCharge;
   /**
    * Where the def's own (LMB) melee stroke lands hardest; see
    * StrokeSweetSpot. Absent means flat damage — the knife's contract.
@@ -233,6 +249,13 @@ export interface StrokeSweetSpot {
   floor: number;
 }
 
+/** A charged blade's wind-up; see WeaponDef.charge. */
+export interface StrokeCharge {
+  time: number;
+  hold: number;
+  floor: number;
+}
+
 /** One melee attack's reach, cone, damage and recovery; see WeaponDef.altAttack. */
 export interface MeleeAttackDef {
   /** Zone damage before multipliers, as WeaponDef.damage. */
@@ -245,6 +268,12 @@ export interface MeleeAttackDef {
   arcRad: number;
   /** Where the stroke lands hardest; absent means flat damage across the cone. */
   sweetSpot?: StrokeSweetSpot;
+  /**
+   * Least charge (fraction, 0–1) a release strikes at on a charged def; below
+   * it the blade is lowered and nothing is spent. Absent means 0: a tap
+   * strikes. The def's own (LMB) stroke has no minimum — it always taps.
+   */
+  minCharge?: number;
 }
 
 /** Hit zones, resolved by sim/damage.ts from which bot mesh a ray hit. */
@@ -783,11 +812,15 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   armingSword: {
     name: 'ARMING SWORD', class: 'secondary', // a knight's sidearm, in the sidearm column
     magSize: 0, reserveMax: 0, reloadTime: 0, // a blade: no rounds, no reload (see the knife)
+    // Every stroke winds up on the press and lands on the release: whole
+    // damage from 0.4 s held, then 0.3 s of grace at full before it strikes on
+    // its own. A tap deals 40% — only the thrust may be tapped (minCharge).
+    charge: { time: 0.4, hold: 0.3, floor: 0.4 },
     // LMB: the THRUST — the point driven along the view axis. Reaches past
     // the knife (arm plus a 0.76 m blade) and hits hardest, but its cone is
     // narrow, so it has to be aimed.
-    fireRate: 0.7,
-    damage: 75,      // two thrusts kill; legs x0.75
+    fireRate: 0.45,  // recovery after the strike; the wind-up carries the rest of the cycle
+    damage: 75,      // two full thrusts kill; a tapped one 30; legs x0.75
     headshotMult: 1, // no head premium, for the knife's reason: the cone
                      // strikes the NEAREST part, and up close that is the head
     range: 2.6,
@@ -802,18 +835,30 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     // crosshair ~34, the cone's far edge ~21. Playtesting found the flat 60
     // anywhere in an ~80° cone far easier to land than the thrust.
     altAttack: {
-      damage: 60, fireRate: 0.8, range: 2.3, arcRad: 1.4, // ~80° sweep
+      damage: 60, fireRate: 0.5, range: 2.3, arcRad: 1.4, // ~80° sweep
       sweetSpot: { distance: 2.0, left: 0.52, down: 0.26, full: 0.35, fade: 1.2, floor: 0.35 }, // 30° left, 15° low
+      minCharge: 0.3, // a cut needs a swing behind it: a flicked RMB lowers the blade
+    },
+    // LMB+RMB: the OVERHEAD CUT — the blade raised and brought straight down.
+    // The heaviest stroke and the slowest to recover: fully charged on its
+    // sweet spot (on the crosshair, 2.1 m out) it kills outright, paid for
+    // with both hands and a wind-up the target can see coming.
+    comboAttack: {
+      damage: 100, fireRate: 0.8, range: 2.4, arcRad: 0.5, // ~29°
+      sweetSpot: { distance: 2.1, left: 0, down: 0, full: 0.3, fade: 1.2, floor: 0.5 },
+      minCharge: 0.5, // at least half raised before it can come down
     },
     zoomFovs: [70],  // placeholder for the non-empty-zoomFovs invariant; no sights
     spreadMul: 1, inherent: 0.002, // no cone to sample; feeds the crosshair gap only
     sprayKick: 0.06, sprayCap: 1.5,
-    sprayRecover: 0.07, // input = 0.06/0.8 = 0.075/s at the slower attack — clears the bound
+    sprayRecover: 0.03, // input = 0.06/(0.8 + 0.4 + 0.3) = 0.04/s over an overhead left to strike
+                        // on its own: recovery, charge and hold — clears the bound, which counts
+                        // the whole wind-up (validateWeapons)
     recoilKick: 0.6, recoilRecover: 8,
     punchRad: 0.008, // a small camera nod per stroke; the prop carries the motion
     yawKick: 0.3, yawRecover: 8,
     scopedOverlay: false,
-    semiAuto: true,  // one stroke per press
+    semiAuto: true,  // one stroke per press (the charged trigger latches both buttons)
     melee: true,
   },
   knife: {
@@ -950,7 +995,9 @@ export const weapon: LiveWeapon = {
 export function armLoadout(): void {
   wpn.animation = freshWeaponAnimation();
   wpn.bowDrawAt = null;
-  wpn.lastStrokeAlt = false;
+  wpn.swordWindUp = null;
+  wpn.lastStroke = 'primary';
+  wpn.strokeCharge = 0;
   SLOTS.forEach(i => {
     const def = WEAPONS[equippedId(i)];
     ammoStore[i].mag = def.magSize;
@@ -1380,8 +1427,9 @@ export const session: SessionState = {
  * handlers and, in touch mode, by touchControls.ts's on-screen controls (the
  * sprint flag from the stick's rim, aiming as a tap toggle) — plus the
  * weapons.ts writes (`shoot()` clears `aiming` on
- * unscopeOnShot, and `tryReload()` clears it when a reload starts while the
- * sights are up: one motion at a time) — and read by player/weapons/hud.
+ * unscopeOnShot, a charged blade's stroke clears it as its RMB latch, and
+ * `tryReload()` clears it when a reload starts while the sights are up: one
+ * motion at a time) — and read by player/weapons/hud.
  * Tracked as state rather than one-shot events because firing is continuous
  * in updateWeapon.
  */
@@ -1487,7 +1535,12 @@ export interface WeaponDynamics {
   /** Scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
-  /** Semi-auto edge detector: armed by a shot, released with LMB. */
+  /**
+   * A held LMB that already counted — a shot, a let-down, a lowered
+   * wind-up — waits for a fresh press. Semi-auto arms it after each shot;
+   * full-auto only after a swap or let-down that latched the still-held
+   * button, so the incoming mag does not dump itself.
+   */
   triggerLatch: boolean;
   /** A sprint-refused dry fire requires a fresh LMB press before retrying. */
   emptyReloadLatch: boolean;
@@ -1499,10 +1552,17 @@ export interface WeaponDynamics {
    */
   bowDrawAt: number | null;
   /**
-   * The last stroke was the def's altAttack. Its fireRate, not the def's,
+   * A charged blade's stroke being wound up, or null with the blade at guard.
+   * Every strike, lowering, swap, let-down and re-arm returns it to null.
+   */
+  swordWindUp: WindUp | null;
+  /**
+   * Which stroke the blade made last. Its fireRate, not necessarily the def's,
    * then gates the next stroke either way — one blade, one recovery.
    */
-  lastStrokeAlt: boolean;
+  lastStroke: StrokeKind;
+  /** Charge (0–1) the last stroke was released at; presentation only. */
+  strokeCharge: number;
   /** Cosmetic event clocks; negative infinity means no event in this life. */
   animation: WeaponAnimationState;
 }
@@ -1578,7 +1638,9 @@ export const wpn: WeaponDynamics = {
   emptyReloadLatch: false,
   reloadSfxHandle: undefined,
   bowDrawAt: null,
-  lastStrokeAlt: false,
+  swordWindUp: null,
+  lastStroke: 'primary',
+  strokeCharge: 0,
   animation: freshWeaponAnimation(),
 };
 

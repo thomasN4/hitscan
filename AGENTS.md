@@ -124,7 +124,22 @@ through the user's own key, where nothing but the rule stops it.
 Default loop for every non-trivial change: **plan → worktree → implement → open draft PR**.
 
 1. **Plan** — agree scope and approach with the user before touching code.
-2. **Worktree** — every branch is developed in its own git worktree, never directly in the shared primary checkout (which stays on `main`). One session per worktree; never run two sessions against one working copy:
+2. **Worktree** — every branch is developed in its own git worktree, never directly in the shared primary checkout (which stays on `main`). One session per worktree; never run two sessions against one working copy.
+
+   If this session is already a linked worktree (`git rev-parse --absolute-git-dir`
+   differs from `git rev-parse --path-format=absolute --git-common-dir`) whose
+   `HEAD` matches `origin/main` and whose working tree is clean, stay here and
+   create the feature branch in place:
+
+   ```sh
+   git checkout -b feat/<short-slug>
+   ```
+
+   The isolation the rule wants is this working copy; hosts that spawn a
+   per-session linked worktree off `origin/main` arrive already in it. A Plan
+   Relay wave still needs one worktree per executor. From the primary checkout,
+   or from a linked worktree that already has unique commits or a dirty tree,
+   cut a new one:
 
    ```sh
    git worktree add ../acsc-<slug> -b feat/<short-slug>

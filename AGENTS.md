@@ -63,6 +63,14 @@ a deliberate choice, not a default:
   is the identity the planner acts under in **Review Loop** below: its pushes,
   its PR, its `WIP: ` toggles and its comments. Reach it with
   `--login code-bot`; nothing selects it implicitly.
+- **`code-bot` comments need no per-PR grant.** An agent may post PR comments
+  as `code-bot`
+  (`tea comments add <index> --login code-bot --repo thomasN4/another-cs-clone`)
+  without asking, on any PR, inside or outside Review Loop. Each such comment
+  ends with the step-4 AI-credit footer as `Authored-by: <model>`. Posting as
+  the user (`gitea-lan`, the unflagged default) still needs explicit say-so —
+  the bot identity is what keeps agent comments distinguishable in the
+  timeline. This grants commenting only.
 
 **`code-bot` is a collaborator, and one thing Review Loop needs is gated on
 being the repo's owner instead.** `tea actions variables list`, which step 5
@@ -146,10 +154,12 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
    - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a footer crediting the AI(s) involved in that text — every one that contributed, not only the one that posted it, so a Plan Relay PR credits its executor as well as its planner. The footer's form is open: a `Name <email>` trailer chosen by the same rule as commit messages (`Co-authored-by: <model>` when the user posts it, `Authored-by: <model>` when `code-bot` does), a tool's own credit line such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`, or both. The one thing it may not be is absent. Commit messages keep the stricter trailer rule above, because a trailer is what Git and Gitea can parse there.
-5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge.
+5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge. Commenting is excepted from that ban under the standing `code-bot` rule in Project above.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
-     diff and posts a comment-review as `review-bot`, once per head commit.
+     diff plus the PR discussion (description, comments, and inline code
+     comments; prior AI reviews excluded; untrusted data) and posts a
+     comment-review as `review-bot`, once per head commit.
      Codex is the default; the repo Actions variable `AI_REVIEWER=claude` or
      `AI_REVIEWER=opencode` selects Claude or OpenCode manually. AI review is
      enabled by default; setting the repo Actions variable
@@ -289,11 +299,13 @@ green, and every review finding either fixed or answered in writing. The planner
 is whichever agent the user is working in, as in Plan Relay above.
 
 Choosing Review Loop for a PR **is** the explicit instruction step 5 of the
-workflow above requires. For that one named PR it grants the planner four
-things and no others: pushing the branch, opening its draft PR, toggling its
-`WIP: ` prefix, and answering findings in the PR thread — the fourth because the
-loop's own stopping rule below tells it to answer some findings in writing, and
-a grant that omitted that would stall the cycle it exists to allow.
+workflow above requires for the other three. For that one named PR it grants
+the planner pushing the branch, opening its draft PR, and toggling its
+`WIP: ` prefix — plus answering findings in the PR thread under the standing
+`code-bot` comment rule above (named here because the loop's own stopping rule
+below tells it to answer some findings in writing, and a grant that omitted
+that would stall the cycle it exists to allow, not because commenting is
+otherwise banned).
 `tea pr merge` stays banned, the user still merges by hand in
 the Gitea UI, and the grant does not carry to the next PR.
 

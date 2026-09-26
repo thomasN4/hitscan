@@ -2480,6 +2480,73 @@ async function runSwordCheck() {
   await page.close();
 }
 
+// Review of #164: pausing mid wind-up must not let the stroke re-arm itself.
+// On a phone the ADS toggle IS the sword's RMB, and resetTouchInput keeps a
+// toggle across a pause on purpose — so a slash wound up by one ADS tap, then
+// paused through the real touch pause button, must come back at guard, with
+// the toggle off, and never wind up or strike on its own after Resume.
+async function runSwordPauseCheck() {
+  const page = await browser.newPage();
+  await page.emulate({
+    userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36',
+    viewport: { width: 844, height: 390, deviceScaleFactor: 2, isMobile: true, hasTouch: true, isLandscape: true },
+  });
+  const mapErrors = [];
+  page.on('pageerror', e => mapErrors.push('PAGEERROR: ' + e.message));
+  const gwait = s => page.evaluate(async s => {
+    const cs = window.__cs;
+    const t0 = cs.gameTime.now();
+    while (cs.gameTime.now() - t0 < s) await new Promise(r => setTimeout(r, 16));
+  }, s);
+  try {
+    await page.goto(mapUrl('/?map=range&touch=1'), { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.waitForFunction(() => !document.getElementById('playBtn').disabled, { timeout: 20000 });
+    await page.tap('#playBtn');
+    await page.waitForFunction(() => document.getElementById('loadoutScreen').style.display === 'flex', { timeout: 5000 });
+    const picked = await page.evaluate(() => {
+      const card = name => [...document.querySelectorAll('.wcard')].find(b => b.textContent.includes(name));
+      const sword = card('ARMING SWORD');
+      if (!sword) return false;
+      card('SMG').click();
+      sword.click();
+      return true;
+    });
+    if (!picked) throw new Error('no ARMING SWORD card in the picker');
+    await page.tap('#deployBtn');
+    await gwait(0.2);
+    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' })));
+    await gwait(0.6); // past the deploy window
+    await page.tap('#tcAds');
+    await gwait(0.15);
+    const winding = await page.evaluate(() => ({
+      name: window.__cs.weapon.name, windUp: window.__cs.game.swordWindUp, aiming: window.__cs.game.aiming,
+    }));
+    await page.tap('#tcPause');
+    await gwait(0);
+    const paused = await page.evaluate(() => ({
+      locked: window.__cs.game.locked, windUp: window.__cs.game.swordWindUp, aiming: window.__cs.game.aiming,
+      lastShot: window.__cs.weapon.lastShot,
+    }));
+    await page.tap('#resumeBtn');
+    await gwait(1.0); // past a full charge and its hold: a re-armed wind-up would have struck
+    const resumed = await page.evaluate(() => ({
+      locked: window.__cs.game.locked, windUp: window.__cs.game.swordWindUp, aiming: window.__cs.game.aiming,
+      lastShot: window.__cs.weapon.lastShot,
+    }));
+    if (winding.name !== 'ARMING SWORD' || winding.windUp?.kind !== 'alt' || !winding.aiming) throw new Error(`the ADS tap did not wind up a slash: ${JSON.stringify(winding)}`);
+    if (paused.locked || paused.windUp !== null || paused.aiming) throw new Error(`pausing left the wind-up or the ADS toggle armed: ${JSON.stringify(paused)}`);
+    if (!resumed.locked || resumed.windUp !== null || resumed.aiming || resumed.lastShot !== paused.lastShot) {
+      throw new Error(`the sword wound up or struck on its own after Resume: ${JSON.stringify({ paused, resumed })}`);
+    }
+    console.log('[sword-pause] OK', JSON.stringify({ winding, paused, resumed }));
+  } catch (e) {
+    failures++;
+    console.log(`[sword-pause] FAIL: ${e.message}`);
+  }
+  errors.push(...mapErrors.map(e => `[sword-pause] ${e}`));
+  await page.close();
+}
+
 // Damage numbers: one popup per bot per trigger pull at the point of impact,
 // reading what the hit dealt — pinned on a shotgun blast, whose eight pellets
 // must sum into ONE number, coloured partway along the shotgun's yellow-to-red
@@ -3513,6 +3580,7 @@ try {
   await runKnifeCheck();
   await runLongbowCheck();
   await runSwordCheck();
+  await runSwordPauseCheck();
   await runDamageNumbersCheck();
   await runMatchEndCheck();
   await runTouchCheck();

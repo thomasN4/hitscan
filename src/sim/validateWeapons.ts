@@ -50,15 +50,17 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
     // input or the accumulator never leaves rest. The vertical and yaw rules
     // apply only while the weapon actually sustains fire: a semiAuto weapon
     // fires once per press, and the sniper's full settle inside the bolt
-    // cycle is deliberate (see header).
+    // cycle is deliberate (see header). A charged blade's cycle is its
+    // recovery PLUS the wind-up to full charge — decay runs through both.
+    const windUp = def.charge?.time ?? 0;
     if (!def.semiAuto && !(def.recoilRecover < def.recoilKick / def.fireRate)) {
       out.push(`${name}: recoilRecover ${num(def.recoilRecover)} exceeds sustained-fire input ${num(def.recoilKick / def.fireRate)} (kick ${num(def.recoilKick)} per ${def.fireRate}s) — recoil never climbs, it just vibrates`);
     }
     if (!def.semiAuto && !(def.yawRecover * def.fireRate < def.yawKick / 2)) {
       out.push(`${name}: yawRecover ${num(def.yawRecover)} drains more per shot interval than the MEAN kick (${num(def.yawKick / 2)}) — the walk returns to 0 before every shot and no bullet is displaced`);
     }
-    if (!(def.sprayRecover < def.sprayKick / def.fireRate)) {
-      out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds sustained-fire input ${num(def.sprayKick / def.fireRate)} — sprays will not bloom`);
+    if (!(def.sprayRecover < def.sprayKick / (def.fireRate + windUp))) {
+      out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds sustained-fire input ${num(def.sprayKick / (def.fireRate + windUp))} — sprays will not bloom`);
     }
 
     // ---------- Static sanity ----------
@@ -180,8 +182,8 @@ export function validateWeapons(defs: readonly WeaponDef[]): string[] {
       if (!(stroke.arcRad > 0 && stroke.arcRad <= Math.PI)) {
         out.push(`${name}: ${label}.arcRad ${num(stroke.arcRad)} must lie in (0, π] — at/below 0 it strikes nothing, past a half-turn it strikes behind`);
       }
-      if (!(def.sprayRecover < def.sprayKick / stroke.fireRate)) {
-        out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds the ${label}'s sustained input ${num(def.sprayKick / stroke.fireRate)} — its strokes will not bloom`);
+      if (!(def.sprayRecover < def.sprayKick / (stroke.fireRate + windUp))) {
+        out.push(`${name}: sprayRecover ${num(def.sprayRecover)} exceeds the ${label}'s sustained input ${num(def.sprayKick / (stroke.fireRate + windUp))} — its strokes will not bloom`);
       }
       if (stroke.minCharge !== undefined && !(stroke.minCharge >= 0 && stroke.minCharge <= 1)) {
         out.push(`${name}: ${label}.minCharge ${num(stroke.minCharge)} must lie in [0, 1] — past a full charge the stroke could never land`);

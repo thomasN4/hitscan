@@ -45,11 +45,13 @@ describe('damageSpan', () => {
     expect(span.max).toBe(240);
   });
 
-  test('blades reach their backstab; the sword spans both strokes and their sweet-spot floors', () => {
+  test('blades reach their backstab; the sword spans every stroke, its sweet-spot floors and its least charge', () => {
     expect(damageSpan(WEAPONS.knife)).toEqual({ min: 41.25, max: 165 });
     const sword = damageSpan(WEAPONS.armingSword);
-    expect(sword.min).toBeCloseTo(60 * 0.35 * 0.75); // RMB slash at its floor, in a leg
-    expect(sword.max).toBe(150); // LMB thrust from behind
+    // RMB slash at its sweet-spot floor, released at its 0.3 minimum charge
+    // (0.4 + 0.6 x 0.3 of its damage), in a leg — below even a tapped thrust.
+    expect(sword.min).toBeCloseTo(60 * 0.35 * 0.58 * 0.75);
+    expect(sword.max).toBe(200); // the full overhead cut from behind
   });
 
   test('every weapon has a non-empty span', () => {

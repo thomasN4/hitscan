@@ -609,11 +609,18 @@ function updateSwordTrigger(def: WeaponDef, charge: StrokeCharge, deploying: boo
  * striking. Pausing, dying and the end screen all release capture, and
  * whatever clears the buttons meanwhile (a mouseup in the menu, the blur
  * reset) would otherwise read as a release on the first frame back: a paused
- * draw or wind-up must never fire itself on resume.
+ * draw or wind-up must never fire itself on resume. A charged blade also
+ * latches both buttons, exactly as its own lowering does: a button still held
+ * — or the touch ADS toggle, which resetTouchInput deliberately keeps — must
+ * not wind a fresh stroke up on resume and strike it without a new press.
  */
 export function lowerHeldStrokes(): void {
   wpn.bowDrawAt = null;
   wpn.swordWindUp = null;
+  if (currentDef().charge !== undefined) {
+    wpn.triggerLatch = true;
+    input.aiming = false;
+  }
 }
 
 /**

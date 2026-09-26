@@ -166,11 +166,18 @@ async function fetchListOnce(url, what) {
 
 /**
  * Source label for an inline code comment: `code comment on path:line`, so
- * the reviewer can find the line without the diff hunk. Pure for testing.
+ * the reviewer can find the line without the diff hunk. Gitea reports the
+ * new-file line as `position` and the old-file line as `original_position`,
+ * with zero meaning "not on that side" — a comment on a deleted line arrives
+ * as `{ position: 0, original_position: 680 }`, so a `??` chain would label
+ * it `path:0`. Prefer whichever side is nonzero and say which file it is.
+ * Pure for testing.
  */
 export function codeCommentSource(comment) {
-  const line = comment.position ?? comment.original_position ?? '?';
-  return comment.path ? `code comment on ${comment.path}:${line}` : 'code comment';
+  if (!comment.path) return 'code comment';
+  if (comment.position) return `code comment on ${comment.path}:${comment.position}`;
+  if (comment.original_position) return `code comment on ${comment.path}:${comment.original_position} (old file)`;
+  return `code comment on ${comment.path}:?`;
 }
 
 /**

@@ -66,9 +66,19 @@ describe('PR thread', () => {
       'code comment on src/weapons.ts:42',
     );
     expect(codeCommentSource({ path: 'src/weapons.ts', original_position: 7 })).toBe(
-      'code comment on src/weapons.ts:7',
+      'code comment on src/weapons.ts:7 (old file)',
     );
     expect(codeCommentSource({})).toBe('code comment');
+  });
+
+  test('prefers the nonzero side when a comment is on a deleted line', () => {
+    // Gitea reports position 0 for the new-file side of a deleted line.
+    expect(codeCommentSource({ path: 'src/weapons.ts', position: 0, original_position: 680 })).toBe(
+      'code comment on src/weapons.ts:680 (old file)',
+    );
+    expect(codeCommentSource({ path: 'src/weapons.ts', position: 0, original_position: 0 })).toBe(
+      'code comment on src/weapons.ts:?',
+    );
   });
 
   test('renders a code comment entry under its location header', () => {

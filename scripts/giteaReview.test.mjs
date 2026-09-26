@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { composeBody, formatThread, hasReviewMarker, isBotReviewBody, marker } from './gitea-review.mjs';
+import { codeCommentSource, composeBody, formatThread, hasReviewMarker, isBotReviewBody, marker } from './gitea-review.mjs';
 
 const SHA = 'abc123';
 
@@ -59,5 +59,31 @@ describe('PR thread', () => {
       comments: [{ author: 'thomasN4', createdAt: 'then', source: 'issue comment', body: '  ' }],
     });
     expect(md).toContain('No PR discussion beyond the title.');
+  });
+
+  test('labels inline code comments with their file and line', () => {
+    expect(codeCommentSource({ path: 'src/weapons.ts', position: 42 })).toBe(
+      'code comment on src/weapons.ts:42',
+    );
+    expect(codeCommentSource({ path: 'src/weapons.ts', original_position: 7 })).toBe(
+      'code comment on src/weapons.ts:7',
+    );
+    expect(codeCommentSource({})).toBe('code comment');
+  });
+
+  test('renders a code comment entry under its location header', () => {
+    const md = formatThread({
+      description: { author: 'thomasN4', createdAt: '2026-09-25T17:48:04-04:00', body: 'What changed.' },
+      comments: [
+        {
+          author: 'thomasN4',
+          createdAt: '2026-09-25T18:00:00-04:00',
+          source: codeCommentSource({ path: 'src/weapons.ts', position: 680 }),
+          body: 'Is this damage stale?',
+        },
+      ],
+    });
+    expect(md).toContain('### @thomasN4 (2026-09-25T18:00:00-04:00, code comment on src/weapons.ts:680)');
+    expect(md).toContain('Is this damage stale?');
   });
 });

@@ -11,7 +11,8 @@
 //
 // `already-reviewed` and `fetch-thread` are plain GETs, so they are the safe
 // half to try by hand. `fetch-thread` writes the PR description plus the
-// issue comments and non-bot reviews to a markdown file for the reviewer:
+// issue comments, non-bot reviews, and their inline code comments to a
+// markdown file for the reviewer:
 //
 //   GITEA_API=http://192.168.2.161:3000 GITEA_TOKEN="$(cat ../.gitea-access-token)" \
 //   GITEA_REPO=thomasN4/another-cs-clone PR_INDEX=52 \
@@ -75,6 +76,19 @@ function issueCommentsUrl() {
   const repo = requireEnv('GITEA_REPO');
   const index = requireEnv('PR_INDEX');
   return `${api}/api/v1/repos/${repo}/issues/${index}/comments`;
+}
+
+/** `${server}/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${id}/comments` — one review's inline code comments. */
+function reviewCommentsUrl(reviewId) {
+  const api = requireEnv('GITEA_API').replace(/\/+$/, '');
+  const repo = requireEnv('GITEA_REPO');
+  const index = requireEnv('PR_INDEX');
+  return `${api}/api/v1/repos/${repo}/pulls/${index}/reviews/${reviewId}/comments`;
+}
+
+/** Display name for an API user object, which carries `username` (and `login` per the docs). */
+function authorName(user) {
+  return (user && (user.username || user.login)) || 'unknown';
 }
 
 function authHeaders() {
@@ -145,7 +159,18 @@ async function fetchListOnce(url, what) {
   if (!res.ok) {
     throw new Error(`Listing ${what} failed: ${res.status} ${res.statusText}\n${await res.text()}`);
   }
-  return res.json();
+  const items = await res.json();
+  if (!Array.isArray(items)) throw new Error(`Listing ${what} returned a non-array`);
+  return items;
+}
+
+/**
+ * Source label for an inline code comment: `code comment on path:line`, so
+ * the reviewer can find the line without the diff hunk. Pure for testing.
+ */
+export function codeCommentSource(comment) {
+  const line = comment.position ?? comment.original_position ?? '?';
+  return comment.path ? `code comment on ${comment.path}:${line}` : 'code comment';
 }
 
 /**
@@ -174,10 +199,12 @@ export function formatThread({ description, comments }) {
 }
 
 /**
- * Fetches the PR description plus the issue comments and non-bot reviews and
- * writes them verbatim to `outFile` for the reviewer. Fail-closed like the
- * other commands: a partial thread silently missing context is worse than a
- * red step, so any API failure throws rather than writing what arrived.
+ * Fetches the PR description plus the issue comments, non-bot reviews, and
+ * their inline code comments, and writes them verbatim to `outFile` for the
+ * reviewer. A review with an empty body can still carry findings on changed
+ * lines, so each non-bot review's code comments are fetched too. Fail-closed
+ * like the other commands: a partial thread silently missing context is worse
+ * than a red step, so any API failure throws rather than writing what arrived.
  */
 async function fetchThread(outFile) {
   const pullRes = await fetch(pullUrl(), { headers: authHeaders() });
@@ -189,27 +216,39 @@ async function fetchThread(outFile) {
     fetchListOnce(issueCommentsUrl(), 'issue comments'),
     fetchAllPages(reviewsUrl(), 'reviews'),
   ]);
+  const humanReviews = reviews.filter((review) => !isBotReviewBody(review.body));
+  // One small GET per review; fetchListOnce rather than fetchAllPages because
+  // a per-review list is bounded by human effort, not pagination.
+  const codeCommentsByReview = await Promise.all(
+    humanReviews.map((review) => fetchListOnce(reviewCommentsUrl(review.id), `review ${review.id} comments`)),
+  );
   const comments = [
     ...issueComments.map((comment) => ({
-      author: (comment.user && comment.user.username) || 'unknown',
+      author: authorName(comment.user),
       createdAt: comment.created_at || 'unknown',
       source: 'issue comment',
       body: comment.body || '',
     })),
-    ...reviews
-      .filter((review) => !isBotReviewBody(review.body))
-      .map((review) => ({
-        author: (review.user && review.user.username) || 'unknown',
-        createdAt: review.submitted_at || review.updated_at || 'unknown',
-        source: 'review',
-        body: review.body || '',
+    ...humanReviews.map((review) => ({
+      author: authorName(review.user),
+      createdAt: review.submitted_at || review.updated_at || 'unknown',
+      source: 'review',
+      body: review.body || '',
+    })),
+    ...codeCommentsByReview.flatMap((codeComments) =>
+      codeComments.map((comment) => ({
+        author: authorName(comment.user),
+        createdAt: comment.created_at || comment.updated_at || 'unknown',
+        source: codeCommentSource(comment),
+        body: comment.body || '',
       })),
+    ),
   ];
   writeFileSync(
     outFile,
     formatThread({
       description: {
-        author: (pull.user && pull.user.username) || 'unknown',
+        author: authorName(pull.user),
         createdAt: pull.created_at || 'unknown',
         body: pull.body || '',
       },

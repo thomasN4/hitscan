@@ -2318,7 +2318,8 @@ async function runLongbowCheck() {
 // is still held; a tapped RMB lowers the blade; the wide RMB slash deals ~60
 // led onto a bot where the cut ends (low left) but clearly less centred, and
 // strikes on its own once held past its charge — once, until re-pressed; and
-// LMB+RMB together cut overhead for 100.
+// LMB+RMB together cut overhead for 100. Swapping off a wind-up latches
+// LMB for both a semi-auto primary and a full-auto SMG.
 async function runSwordCheck() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
@@ -2461,7 +2462,25 @@ async function runSwordCheck() {
       await gwait(1.0); // past the deploy AND the sniper's cycle, LMB still held
       const swapped = { name: cs.weapon.name, mag: cs.weapon.mag, magSize: cs.weapon.magSize, windUp: cs.game.swordWindUp };
       button(0, false);
-      return { windingBeforeSwap, swapped, armed, thrustWhileHeld, thrustAhead, thrustPopups, thrustTapped, thrustClose, thrustOffAxis, slashTapped, lastShotAfterTap,
+      // Review of #164 (later): full-auto ignores triggerLatch. Back on the
+      // blade, retarget the primary at the SMG, wind up, swap, hold through
+      // deploy — the mag must not move. Snapshot it during the window, before
+      // a burst could land, because this slot still holds the sniper's ammo.
+      await gwait(0.05);
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+      await gwait(0.6);
+      cs.game.primary = 'smg';
+      cs.weapon.lastShot = -9;
+      button(0, true);
+      await gwait(0.15);
+      const windingBeforeSmgSwap = cs.game.swordWindUp?.kind ?? null;
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+      await gwait(0.05);
+      const smgMagDuringDeploy = cs.weapon.mag;
+      await gwait(1.0);
+      const smgSwapped = { name: cs.weapon.name, mag: cs.weapon.mag, magDuringDeploy: smgMagDuringDeploy, windUp: cs.game.swordWindUp };
+      button(0, false);
+      return { windingBeforeSwap, swapped, windingBeforeSmgSwap, smgSwapped, armed, thrustWhileHeld, thrustAhead, thrustPopups, thrustTapped, thrustClose, thrustOffAxis, slashTapped, lastShotAfterTap,
         slashCentred, slashHeld, slashLed, slashPopups, heldHp, repressHp, overhead, lastStroke, runLerpWinding, aimingAfterSlash,
         runLerpWhileHeld, adsMax: +adsMax.toFixed(3) };
     });
@@ -2490,6 +2509,10 @@ async function runSwordCheck() {
     if (r.windingBeforeSwap !== 'primary') throw new Error(`LMB did not wind up a thrust before the swap: ${r.windingBeforeSwap}`);
     if (r.swapped.name !== 'SNIPER' || r.swapped.windUp !== null || r.swapped.mag !== r.swapped.magSize) {
       throw new Error(`the LMB held through a swap from a wind-up fired the incoming weapon: ${JSON.stringify(r.swapped)}`);
+    }
+    if (r.windingBeforeSmgSwap !== 'primary') throw new Error(`LMB did not wind up a thrust before the SMG swap: ${r.windingBeforeSmgSwap}`);
+    if (r.smgSwapped.name !== 'SMG' || r.smgSwapped.windUp !== null || r.smgSwapped.mag !== r.smgSwapped.magDuringDeploy) {
+      throw new Error(`the LMB held through a swap from a wind-up fired the incoming SMG: ${JSON.stringify(r.smgSwapped)}`);
     }
     console.log('[sword] OK', JSON.stringify(result));
   } catch (e) {

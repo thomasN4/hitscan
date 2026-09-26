@@ -1535,7 +1535,12 @@ export interface WeaponDynamics {
   /** Scoped zoom step: index into WEAPONS[equippedId(slot)].zoomFovs. */
   zoomLevel: number;
   zoomScale: number;
-  /** Semi-auto edge detector: armed by a shot, released with LMB. */
+  /**
+   * A held LMB that already counted — a shot, a let-down, a lowered
+   * wind-up — waits for a fresh press. Semi-auto arms it after each shot;
+   * full-auto only after a swap or let-down that latched the still-held
+   * button, so the incoming mag does not dump itself.
+   */
   triggerLatch: boolean;
   /** A sprint-refused dry fire requires a fresh LMB press before retrying. */
   emptyReloadLatch: boolean;

@@ -901,8 +901,10 @@ export function updateWeapon(dt: number): void {
 
   // Trigger: the smg is full-auto while LMB held; single-press weapons fire
   // once per press — the latch blocks repeats until the button is released.
-  // A bow draws on the press and looses on the release instead, and a
-  // charged blade winds up on the press and strikes on the release.
+  // Full-auto honours the same latch so a swap off a wound-up blade or a
+  // drawn bow cannot dump the mag on the still-held press. A bow draws on
+  // the press and looses on the release instead, and a charged blade winds
+  // up on the press and strikes on the release.
   if (def.drawTime !== undefined) {
     updateBowTrigger(def, deploying);
   } else if (def.charge !== undefined) {
@@ -911,7 +913,7 @@ export function updateWeapon(dt: number): void {
     wpn.triggerLatch = false;
     wpn.emptyReloadLatch = false;
   }
-  else if (!def.semiAuto || !wpn.triggerLatch) {
+  else if (!wpn.triggerLatch) {
     if (gameTime.now() - weapon.lastShot >= strokeCadence(def)) {
       shoot();
       if (def.semiAuto) wpn.triggerLatch = true;

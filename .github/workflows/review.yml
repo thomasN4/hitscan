@@ -21,7 +21,11 @@ name: AI review
 #                            added as a collaborator. Not the auto-injected
 #                            GITEA_TOKEN: that acts as the triggering user, and
 #                            Gitea restricts reviewing a PR you authored — which
-#                            here is every PR.
+#                            here is every PR. Scopes: `write:repository`
+#                            (read and post PR reviews) and `read:issue` (the
+#                            PR conversation comments the thread fetch reads,
+#                            which live under /issues/). Missing `read:issue`
+#                            fails `Fetch PR thread` with a 403 on every PR.
 # Claude and OpenCode are opt-in overrides. Set the repo Actions variable
 # AI_REVIEWER to `claude`, then also set CLAUDE_CODE_OAUTH_TOKEN from
 # `claude setup-token`; or set it to `opencode` and set OPENCODE_API_KEY to an

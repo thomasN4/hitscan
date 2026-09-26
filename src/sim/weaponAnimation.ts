@@ -113,10 +113,13 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
   const windUp = sword ? input.windUp ?? null : null;
   const winding = (kind: StrokeKind): number => windUp?.kind === kind ? windUp.fraction : 0;
   const struck = (kind: StrokeKind): boolean => sword && firing && (input.stroke ?? 'primary') === kind;
-  // A cut carries on from wherever its wind-up was let go: from that raise
-  // up to the full cut in the first tenth, then through and back to guard.
+  // A cut starts from wherever its wind-up was let go and sweeps forward
+  // from there: growing the envelope toward full after the stroke has
+  // already landed would wind the blade further back before it cuts
+  // (poseSlash turns about the wound raise while slashSweep is still near
+  // zero), so the envelope holds the release charge and fades back to
+  // guard instead of rising through it.
   const from = input.strokeFrom ?? 1;
-  const cut = from + (1 - from) * smooth(0, 0.08, cycle);
   return {
     reload,
     breakOpen: id === 'sawnOff' ? (reloading ? hold(t, 0, .18, .80, 1) : closing) : 0,
@@ -146,9 +149,9 @@ export function weaponPose(input: WeaponAnimationInput): WeaponPose {
     cock: winding('primary'),
     // Contact lands on the stroke frame, as for the jab. Winding a cut raises
     // the blade to the cut's start (sweep 0); the release carries it through.
-    slash: struck('alt') ? cut * (1 - smooth(0.45, 1, cycle)) : winding('alt'),
+    slash: struck('alt') ? from * (1 - smooth(0.45, 1, cycle)) : winding('alt'),
     slashSweep: struck('alt') ? smooth(0.04, 0.34, cycle) : 0,
-    overhead: struck('combo') ? cut * (1 - smooth(0.5, 1, cycle)) : winding('combo'),
+    overhead: struck('combo') ? from * (1 - smooth(0.5, 1, cycle)) : winding('combo'),
     overheadSweep: struck('combo') ? smooth(0.02, 0.28, cycle) : 0,
     bowDraw: id === 'longbow' ? input.bowDraw ?? 0 : 0,
     // The loosed arrow is gone at once; the next one reaches the string

@@ -62,11 +62,25 @@ describe('weapon presentation timelines', () => {
     expect(weaponPose({ ...guard, id: 'knife', windUp: { kind: 'primary', fraction: 1 } }).cock).toBe(0);
   });
 
-  test('a released cut carries on from its wind-up rather than snapping to full', () => {
+  test('a released cut holds its wind-up and never winds further back', () => {
     const released = { ...idle, id: 'armingSword' as const, fireInterval: 0.5, stroke: 'alt' as const, strokeFrom: 0.4 };
-    expect(weaponPose({ ...released, shotAt: 10 }).slash).toBeCloseTo(0.4, 12);
-    expect(weaponPose({ ...released, shotAt: 10 - 0.5 * 0.04 }).slash).toBeGreaterThan(0.4);
-    expect(weaponPose({ ...released, shotAt: 10 - 0.5 * 0.1 }).slash).toBeCloseTo(1, 12);
+    // No snap to full on the release frame, and no rise toward full after
+    // it: the envelope holds the release charge until the fade to guard.
+    const slashAt = (phase: number) => weaponPose({ ...released, shotAt: 10 - 0.5 * phase }).slash;
+    expect(slashAt(0)).toBeCloseTo(0.4, 12);
+    expect(slashAt(0.1)).toBeCloseTo(0.4, 12);
+    expect(slashAt(0.5)).toBeLessThan(0.4);
+    expect(slashAt(1)).toBe(0);
+    // ... while the sweep carries the blade forward through the cut.
+    const sweepAt = (phase: number) => weaponPose({ ...released, shotAt: 10 - 0.5 * phase }).slashSweep;
+    expect(sweepAt(0)).toBe(0);
+    expect(sweepAt(0.2)).toBeGreaterThan(0);
+    // The overhead cut holds its release charge the same way.
+    const over = { ...released, stroke: 'combo' as const };
+    const overheadAt = (phase: number) => weaponPose({ ...over, shotAt: 10 - 0.5 * phase }).overhead;
+    expect(overheadAt(0)).toBeCloseTo(0.4, 12);
+    expect(overheadAt(0.1)).toBeCloseTo(0.4, 12);
+    expect(overheadAt(1)).toBe(0);
   });
 
   test('pump completes before the next permitted shot', () => {

@@ -149,7 +149,9 @@ Default loop for every non-trivial change: **plan → worktree → implement →
 5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
-     diff and posts a comment-review as `review-bot`, once per head commit.
+     diff plus the PR discussion (description and comments, prior AI reviews
+     excluded, as untrusted data) and posts a comment-review as `review-bot`,
+     once per head commit.
      Codex is the default; the repo Actions variable `AI_REVIEWER=claude` or
      `AI_REVIEWER=opencode` selects Claude or OpenCode manually. AI review is
      enabled by default; setting the repo Actions variable

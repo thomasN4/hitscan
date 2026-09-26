@@ -56,21 +56,26 @@ no `edited` event, and leaves step 6 waiting on a run that was never created.
 There are **two** configured `tea` logins, and which one a command runs under is
 a deliberate choice, not a default:
 
-- **`gitea-lan`** — the user (`thomasN4`), who owns the repo. Everything that
-  reads, and everything the user does by hand. It is the fallback login, so an
-  unflagged `tea` command runs as the user.
+- **`gitea-lan`** — the user (`thomasN4`), who owns the repo. Everything the
+  user does by hand, and the owner-gated `tea actions variables list` lookup
+  Review Loop step 5 depends on. It is the fallback login, so an unflagged
+  `tea` command runs as the user. An agent does not write as this login.
 - **`code-bot`** — a dedicated collaborator account with write permission. This
-  is the identity the planner acts under in **Review Loop** below: its pushes,
-  its PR, its `WIP: ` toggles and its comments. Reach it with
-  `--login code-bot`; nothing selects it implicitly.
-- **`code-bot` comments need no per-PR grant.** An agent may post PR comments
-  as `code-bot`
-  (`tea comments add <index> --login code-bot --repo thomasN4/another-cs-clone`)
-  without asking, on any PR, inside or outside Review Loop. Each such comment
-  ends with the step-4 AI-credit footer as `Authored-by: <model>`. Posting as
-  the user (`gitea-lan`, the unflagged default) still needs explicit say-so —
-  the bot identity is what keeps agent comments distinguishable in the
-  timeline. This grants commenting only.
+  is the agent's identity for **every** commit, push, PR, comment and issue,
+  in every workflow. Reach it with `--login code-bot` on every `tea` write
+  (`tea comments add <index> --login code-bot --repo thomasN4/another-cs-clone`,
+  `tea pr create --login code-bot --repo thomasN4/another-cs-clone`,
+  `tea issues create --login code-bot --repo thomasN4/another-cs-clone`) and
+  with the `code-bot` git remote on every push; nothing selects it implicitly.
+  Each agent comment, PR body and issue body ends with the step-4 AI-credit
+  footer as `Authored-by: <model>`. Posting, committing, pushing or filing as
+  the user (`gitea-lan`, the unflagged default) is not an agent option — the
+  bot identity is what keeps agent work distinguishable in the timeline.
+
+The one exception is a **direct push to `main`** the user asked for (hotfixes,
+workflow/docs meta-changes). `main`'s protection whitelists `thomasN4` alone,
+so those commits go out under the user's identity and key. Route ordinary
+work through a PR instead.
 
 **`code-bot` is a collaborator, and one thing Review Loop needs is gated on
 being the repo's owner instead.** `tea actions variables list`, which step 5
@@ -109,15 +114,16 @@ Host gitea-code-bot
 EOF
 
 # Repo-wide, once — both of these live in the shared .git/config, so every
-# linked worktree gets them and a second Review Loop must not repeat them.
+# linked worktree gets them and a second session must not repeat them.
 git remote add code-bot ssh://gitea-code-bot/thomasN4/another-cs-clone.git
 git config extensions.worktreeConfig true
 ```
 
 `main` is protected: push and merge are whitelisted to `thomasN4`, so `code-bot`
 is mechanically unable to merge a PR or push to `main`. That backs the standing
-rule below rather than replacing it — outside Review Loop the agent still acts
-through the user's own key, where nothing but the rule stops it.
+rule above rather than replacing it — the direct-to-`main` exception is the
+only agent path that still uses the user's key, and `tea pr merge` stays banned
+for both identities.
 
 ## Workflow
 
@@ -133,6 +139,8 @@ Default loop for every non-trivial change: **plan → worktree → implement →
 
    ```sh
    git checkout -b feat/<short-slug>
+   git config --worktree user.name code-bot
+   git config --worktree user.email code-bot@example.com
    ```
 
    The isolation the rule wants is this working copy; hosts that spawn a
@@ -143,7 +151,20 @@ Default loop for every non-trivial change: **plan → worktree → implement →
 
    ```sh
    git worktree add ../acsc-<slug> -b feat/<short-slug>
+   git -C ../acsc-<slug> config --worktree user.name code-bot
+   git -C ../acsc-<slug> config --worktree user.email code-bot@example.com
    ```
+
+   The bot identity is set **per worktree, with `--worktree`**, and that flag is
+   the whole point rather than a flourish. A plain `git config user.name` inside
+   a linked worktree does not scope to that worktree — it writes the repository's
+   shared `.git/config`, which every worktree reads. Set it that way and the
+   primary checkout on `main`, and every other feature worktree, silently starts
+   authoring its commits as `code-bot` too; you find out when a commit you made
+   somewhere else carries the bot's name. `--worktree` needs
+   `extensions.worktreeConfig`, which is part of the one-time repo setup above,
+   alongside the `code-bot` remote — that remote is shared for the same reason,
+   so add it once for the repository and never per worktree.
 
 3. **Implement** — on a feature branch cut from `main` (inside its worktree):
    - Branch prefix, `<prefix>/<short-slug>` — the set is these four, no others:
@@ -156,20 +177,21 @@ Default loop for every non-trivial change: **plan → worktree → implement →
    ```
    Fix missing player import breaking reload; add smoke test and debug hook
 
-   Co-authored-by: <model> <noreply@acsc>
+   Authored-by: <model> <noreply@acsc>
    ```
 
    Every commit message MUST end with a trailer naming the model that produced it, in the full `Name <email>` form where possible. **Which trailer depends on who authored the commit:**
 
-   - Authored by the user (`Thomas Nguyen <…>`) — `Co-authored-by: <model>`. The model worked alongside a human author, which is what the trailer says.
-   - Authored by `code-bot`, as every Review Loop commit is — `Authored-by: <model>`. There is no human author for the model to be "co-" with; the model wrote it and the bot account committed it. Note the cost of being accurate here: `Co-authored-by` is a trailer Gitea parses and renders as an additional author, and `Authored-by` is not, so on those commits the model appears as plain trailer text only.
+   - Authored by `code-bot` — every agent commit — `Authored-by: <model>`. There is no human author for the model to be "co-" with; the model wrote it and the bot account committed it. Note the cost of being accurate here: `Co-authored-by` is a trailer Gitea parses and renders as an additional author, and `Authored-by` is not, so on those commits the model appears as plain trailer text only.
+   - Authored by the user (`Thomas Nguyen <…>`) — `Co-authored-by: <model>`. The model worked alongside a human author, which is what the trailer says. The one agent case that uses this is a direct push to `main` the user asked for, which `code-bot` cannot cover.
 4. **Draft PR** — once implementation AND verification (build + smoke test) pass, push the branch and open a draft PR against `main`:
-   - `tea pr create --draft --repo thomasN4/another-cs-clone --title "<imperative summary>" --description "..."`
+   - `git push code-bot HEAD`
+   - `tea pr create --draft --login code-bot --repo thomasN4/another-cs-clone --title "<imperative summary>" --description "..."`
    - Gitea has no draft flag on the pull request itself. `--draft` prepends
      `WIP: ` to the title and Gitea refuses to merge while that prefix is
      present — removing the prefix is what marks a PR ready for review.
-   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a footer crediting the AI(s) involved in that text — every one that contributed, not only the one that posted it, so a Plan Relay PR credits its executor as well as its planner. The footer's form is open: a `Name <email>` trailer chosen by the same rule as commit messages (`Co-authored-by: <model>` when the user posts it, `Authored-by: <model>` when `code-bot` does), a tool's own credit line such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`, or both. The one thing it may not be is absent. Commit messages keep the stricter trailer rule above, because a trailer is what Git and Gitea can parse there.
-5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix, the push and the draft PR for one named PR, and never the merge. Commenting is excepted from that ban under the standing `code-bot` rule in Project above.
+   - PR body: what changed, why, and verification results. The PR body/description and every subsequent PR comment MUST also end with a footer crediting the AI(s) involved in that text — every one that contributed, not only the one that posted it, so a Plan Relay PR credits its executor as well as its planner. The footer's form is open: a `Name <email>` trailer chosen by the same rule as commit messages (`Authored-by: <model>` on agent text, `Co-authored-by: <model>` when the user posts it), a tool's own credit line such as `🤖 Generated with [Claude Code](https://claude.com/claude-code)`, or both. The one thing it may not be is absent. Commit messages keep the stricter trailer rule above, because a trailer is what Git and Gitea can parse there.
+5. **Review** — the user merges personally in the Gitea UI. Do NOT run `tea pr merge`, and do not strip a PR's `WIP: ` prefix, unless explicitly instructed for that specific PR. **Review Loop** below is the standing form of that instruction: it grants the prefix toggle for one named PR, and never the merge. Comments, pushes and draft PRs already go out as `code-bot` under the standing identity rule in Project above.
    - Dropping the `WIP: ` prefix is also what triggers the automated reviewer
      (`.github/workflows/review.yml`): the selected headless reviewer reads the
      diff plus the PR discussion (description, comments, and inline code
@@ -183,7 +205,7 @@ Default loop for every non-trivial change: **plan → worktree → implement →
      `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` in
      `ci.yml` remain the only checks that can fail a PR.
 
-Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes).
+Direct pushes to `main` are the exception, only when the user asks (e.g., hotfixes, workflow/docs meta-changes). Those go out under the user's identity and key, as the Project section above says; they are the one agent path `code-bot` cannot cover.
 
 ### Plan Relay (planning agent → OpenCode executor)
 
@@ -314,39 +336,19 @@ green, and every review finding either fixed or answered in writing. The planner
 is whichever agent the user is working in, as in Plan Relay above.
 
 Choosing Review Loop for a PR **is** the explicit instruction step 5 of the
-workflow above requires for the other three. For that one named PR it grants
-the planner pushing the branch, opening its draft PR, and toggling its
-`WIP: ` prefix — plus answering findings in the PR thread under the standing
-`code-bot` comment rule above (named here because the loop's own stopping rule
-below tells it to answer some findings in writing, and a grant that omitted
-that would stall the cycle it exists to allow, not because commenting is
-otherwise banned).
-`tea pr merge` stays banned, the user still merges by hand in
+workflow above requires for the prefix toggle. For that one named PR it grants
+the planner toggling the `WIP: ` prefix — plus answering findings in the PR
+thread under the standing `code-bot` identity rule above (named here because
+the loop's own stopping rule below tells it to answer some findings in writing,
+and a grant that omitted that would stall the cycle it exists to allow).
+Pushing the branch and opening the draft PR are the ordinary step-4 path, also
+as `code-bot`. `tea pr merge` stays banned, the user still merges by hand in
 the Gitea UI, and the grant does not carry to the next PR.
 
-**All four are exercised as `code-bot`, never as the user.** Commit as
+Identity follows the standing rule in Project and Workflow step 2: commit as
 `code-bot <code-bot@example.com>`, push to the `code-bot` remote, and pass
-`--login code-bot` to every `tea` write. The point is legibility: with one
-account doing both, a reader of the PR timeline cannot tell which prefix toggle
-or which comment was the agent's, and that distinction is the whole basis on
-which the user reviews what the loop did.
-
-The bot identity is set **per worktree, with `--worktree`**, and that flag is the
-whole point rather than a flourish:
-
-```sh
-git config --worktree user.name code-bot
-git config --worktree user.email code-bot@example.com
-```
-
-A plain `git config user.name` inside a linked worktree does not scope to that
-worktree — it writes the repository's shared `.git/config`, which every worktree
-reads. Set it that way and the primary checkout on `main`, and every other
-feature worktree, silently starts authoring its commits as `code-bot` too; you
-find out when a commit you made somewhere else carries the bot's name. `--worktree`
-needs `extensions.worktreeConfig`, which is part of the one-time repo setup
-above, alongside the `code-bot` remote — that remote is shared for the same
-reason, so add it once for the repository and never per worktree.
+`--login code-bot` to every `tea` write. The per-worktree `user.name` /
+`user.email` setup lives in step 2.
 
 `main`'s branch protection whitelists `thomasN4` for push and merge, so the ban
 on `tea pr merge` is now enforced by the server for this account and not only by
@@ -354,7 +356,7 @@ this document — and only for as long as `code-bot` stays a non-admin
 collaborator, because the rule leaves `block_admin_merge_override` off. Do not
 read any of it as the ban having become someone else's problem: it holds for
 `code-bot` alone, and every rule here is still written for an agent that also
-holds the user's key.
+holds the user's key (the direct-to-`main` exception).
 
 1. **The planner and the user agree the PR** — its scope, the commits it should
    arrive in, and whether implementation runs under Plan Relay.
